@@ -1,0 +1,4 @@
+from hftrainer.datasets.classification.base_classification_dataset import BaseClassificationDataset
+from hftrainer.datasets.classification.hf_image_classification_dataset import HFImageClassificationDataset
+from hftrainer.datasets.classification.imagefolder_dataset import ImageFolderDataset
+__all__ = ['BaseClassificationDataset', 'HFImageClassificationDataset', 'ImageFolderDataset']
