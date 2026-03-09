@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hftrainer"
+version = "0.1.0"
+description = "A unified training framework built on HuggingFace ecosystem"
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0",
+    "accelerate>=0.20",
+    "transformers>=4.30",
+    "diffusers>=0.20",
+    "peft>=0.5",
+    "mmengine>=0.7",
+    "safetensors>=0.3",
+    "datasets>=2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hftrainer*"]

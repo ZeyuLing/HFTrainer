@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+work_dirs/
+data/
+checkpoints/
+*.pt
+*.bin
+*.safetensors
+.cache/
