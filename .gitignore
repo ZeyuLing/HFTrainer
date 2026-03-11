@@ -10,3 +10,4 @@ checkpoints/
 *.bin
 *.safetensors
 .cache/
+CLAUDE.md

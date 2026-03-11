@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- Replace this title block with the official logo asset once the logo is generated. -->
+<img src="assets/hftrainer_logo.png" alt="HFTrainer logo" width="420" />
 
 # HF-Trainer
 
