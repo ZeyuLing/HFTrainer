@@ -11,7 +11,11 @@ logger = get_logger()
 class EMAHook:
     """
     Maintains an EMA copy of the trainable modules.
-    The EMA weights can be used for validation/inference.
+
+    Note:
+      - This hook only updates ``ema_bundle`` state.
+      - The runner does not automatically swap EMA weights into validation or
+        inference yet.
     """
 
     priority = 15

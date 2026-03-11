@@ -11,7 +11,6 @@ model = dict(
     type='WanBundle',
     tokenizer_path=CKPT_PATH + '/tokenizer',
     max_token_length=128,
-    gradient_checkpointing=True,  # save activation memory during backward
     text_encoder=dict(
         type='UMT5EncoderModel',
         from_pretrained=dict(
@@ -36,6 +35,7 @@ model = dict(
             pretrained_model_name_or_path=CKPT_PATH + '/transformer',
             torch_dtype='bf16',
         ),
+        gradient_checkpointing=True,  # save activation memory during backward
         trainable=True,
         save_ckpt=True,
     ),
@@ -85,7 +85,6 @@ train_cfg = dict(
     by_epoch=False,
     max_iters=5,    # smoke test: 5 steps
     val_interval=5,
-    save_interval=5,
 )
 
 # ── Runtime ──

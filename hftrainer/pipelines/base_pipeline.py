@@ -1,7 +1,7 @@
 """Base pipeline class."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 import torch
 
@@ -21,6 +21,29 @@ class BasePipeline(ABC):
         self.bundle.eval()
 
     @classmethod
+    def from_config(cls, bundle_cls, bundle_cfg: dict, **kwargs):
+        """Build a pipeline from a bundle config dict."""
+        bundle = bundle_cls.from_config(bundle_cfg)
+        bundle.eval()
+        return cls(bundle=bundle, **kwargs)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        bundle_cls,
+        pretrained_model_name_or_path: str,
+        bundle_kwargs: Optional[dict] = None,
+        **kwargs,
+    ):
+        """Build a pipeline from a HuggingFace/diffusers-style pretrained artifact."""
+        bundle = bundle_cls.from_pretrained(
+            pretrained_model_name_or_path,
+            **(bundle_kwargs or {}),
+        )
+        bundle.eval()
+        return cls(bundle=bundle, **kwargs)
+
+    @classmethod
     def from_checkpoint(cls, bundle_cls, bundle_cfg: dict, ckpt_path: str, **kwargs):
         """
         Build pipeline by loading a checkpoint into a ModelBundle.
@@ -31,9 +54,13 @@ class BasePipeline(ABC):
             ckpt_path: path to checkpoint file or directory
             **kwargs: additional args passed to cls.__init__
         """
-        import torch
-        bundle = bundle_cls(bundle_cfg)
-        state_dict = torch.load(ckpt_path, map_location='cpu')
+        from hftrainer.utils.checkpoint_utils import load_checkpoint
+
+        if hasattr(bundle_cfg, 'to_dict'):
+            bundle_cfg = bundle_cfg.to_dict()
+
+        bundle = bundle_cls.from_config(bundle_cfg)
+        state_dict = load_checkpoint(ckpt_path, map_location='cpu')
         bundle.load_state_dict_selective(state_dict)
         bundle.eval()
         return cls(bundle=bundle, **kwargs)

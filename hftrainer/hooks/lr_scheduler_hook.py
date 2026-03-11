@@ -7,8 +7,9 @@ from hftrainer.registry import HOOKS
 class LRSchedulerHook:
     """
     Placeholder hook for LR scheduler stepping.
-    AccelerateRunner steps schedulers directly after each optimizer step,
-    so this hook is mostly a no-op but kept for compatibility.
+
+    AccelerateRunner already steps schedulers directly after optimizer steps,
+    so this hook is effectively a no-op and kept for config compatibility.
     """
 
     priority = 20

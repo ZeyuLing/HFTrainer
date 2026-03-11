@@ -9,6 +9,7 @@ from PIL import Image
 
 from hftrainer.datasets.text2image.base_text2image_dataset import BaseText2ImageDataset
 from hftrainer.registry import DATASETS
+from hftrainer.utils.image import pil_to_tensor, resize_image
 
 
 @DATASETS.register_module()
@@ -109,9 +110,8 @@ class HFImageFolderDataset(BaseText2ImageDataset):
         if self.transform is not None:
             pixel_values = self.transform(image)
         else:
-            import torchvision.transforms.functional as TF
-            image = TF.resize(image, [self.image_size, self.image_size])
-            pixel_values = TF.to_tensor(image)
+            image = resize_image(image, (self.image_size, self.image_size))
+            pixel_values = pil_to_tensor(image)
             pixel_values = (pixel_values - 0.5) / 0.5  # [-1, 1]
 
         return {'pixel_values': pixel_values, 'text': caption}

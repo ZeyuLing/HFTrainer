@@ -6,6 +6,8 @@ from typing import Dict, Any, Optional, List
 import torch
 from torch.utils.data import Dataset
 
+from hftrainer.utils.image import pil_to_tensor, resize_image
+
 
 class BaseText2ImageDataset(Dataset, ABC):
     """
@@ -31,10 +33,14 @@ class BaseText2ImageDataset(Dataset, ABC):
                     transforms.Resize((self.image_size, self.image_size)),
                     transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
-                    transforms.Normalize([0.5], [0.5]),  # [-1, 1]
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),  # [-1, 1]
                 ])
             except ImportError:
-                self.transform = None
+                def _fallback_transform(image):
+                    image = resize_image(image, (self.image_size, self.image_size))
+                    tensor = pil_to_tensor(image)
+                    return (tensor - 0.5) / 0.5
+                self.transform = _fallback_transform
 
     @abstractmethod
     def __len__(self) -> int:

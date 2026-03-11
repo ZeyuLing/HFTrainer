@@ -23,20 +23,28 @@ def _format_eta(seconds: float) -> str:
 
 @HOOKS.register_module()
 class LoggerHook:
-    """Logs loss and other metrics to console every N iterations.
+    """Logs loss and other metrics to console.
 
-    Log format (iter-based):
+    The ``by_epoch`` flag controls how ``interval`` is interpreted:
+
+      - ``by_epoch=False``: log every ``interval`` iterations.
+      - ``by_epoch=True``: log an epoch summary every ``interval`` epochs.
+      - ``by_epoch=None`` (default): auto-inherit from ``train_cfg.by_epoch``.
+
+    Log format (iter-based)::
+
         step [5/10]  lr=2.00e-05  loss=1.45  data_time=0.01s  train_time=0.12s  eta=0:00:01
 
-    Log format (epoch-based):
-        epoch [1/100] step [5/200]  lr=2.00e-05  loss=1.45  data_time=0.01s  train_time=0.12s  eta=2:30:00
+    Log format (epoch-based, epoch summary)::
+
+        epoch [1/100]  lr=2.00e-05  loss=1.45 (avg)  data_time=0.01s  train_time=0.12s  eta=2:30:00
     """
 
     priority = 10  # runs early
 
-    def __init__(self, interval: int = 10, by_epoch: bool = False):
+    def __init__(self, interval: int = 10, by_epoch=None):
         self.interval = interval
-        self.by_epoch = by_epoch
+        self.by_epoch = by_epoch  # None = auto-inherit from train_cfg
         self.runner = None
         self._start_time = None
 
@@ -45,9 +53,19 @@ class LoggerHook:
         self._data_end_time = None
         self._iter_times = deque(maxlen=100)  # rolling window for ETA
 
+        # Epoch-based accumulators
+        self._epoch_losses = {}     # key -> list of values
+        self._epoch_iter_count = 0
+        self._epoch_start_time = None
+
     def before_run(self):
         self._start_time = time.time()
         self._prev_after_iter_time = time.time()
+
+    def before_train_epoch(self, epoch: int):
+        self._epoch_losses = {}
+        self._epoch_iter_count = 0
+        self._epoch_start_time = time.time()
 
     def before_train_iter(self, global_step: int):
         """Called just before train_step. Data loading happened between
@@ -73,11 +91,99 @@ class LoggerHook:
 
         if output is None:
             return
-        if not self.by_epoch and (global_step + 1) % self.interval == 0:
-            self._log(global_step, output, data_time=data_time, train_time=train_time)
+
+        if self.by_epoch:
+            # Accumulate metrics for epoch summary
+            for k, v in output.items():
+                try:
+                    if hasattr(v, 'item'):
+                        self._epoch_losses.setdefault(k, []).append(v.item())
+                    elif isinstance(v, (int, float)):
+                        self._epoch_losses.setdefault(k, []).append(float(v))
+                except Exception:
+                    pass
+            self._epoch_iter_count += 1
+        else:
+            # Iter-based: log every N iters
+            if (global_step + 1) % self.interval == 0:
+                self._log(global_step, output, data_time=data_time, train_time=train_time)
 
     def after_train_epoch(self, epoch: int):
-        pass
+        if not self.by_epoch:
+            return
+        if (epoch + 1) % self.interval == 0:
+            self._log_epoch_summary(epoch)
+        # Reset epoch accumulators
+        self._epoch_losses = {}
+        self._epoch_iter_count = 0
+        self._epoch_start_time = None
+
+    def _log_epoch_summary(self, epoch: int):
+        """Print epoch-level summary with averaged metrics."""
+        if self.runner is not None and not self.runner.accelerator.is_main_process:
+            return
+
+        parts = []
+        scalar_metrics = {}
+
+        # Epoch info
+        if self.runner is not None:
+            train_cfg = self.runner.train_cfg
+            max_epochs = train_cfg.get('max_epochs', '?')
+            parts.append(f"epoch [{epoch + 1}/{max_epochs}]")
+        else:
+            parts.append(f"epoch [{epoch + 1}]")
+
+        # LR
+        if self.runner is not None:
+            for key, sched in self.runner.lr_schedulers.items():
+                try:
+                    lr = sched.get_last_lr()[0]
+                    lr_label = 'lr' if key == 'default' else f'lr_{key}'
+                    parts.append(f"{lr_label}={lr:.2e}")
+                    scalar_metrics[lr_label] = lr
+                except Exception:
+                    pass
+
+        # Averaged losses
+        for k, vals in self._epoch_losses.items():
+            if vals:
+                avg = sum(vals) / len(vals)
+                parts.append(f"{k}={avg:.4f}")
+                scalar_metrics[k] = avg
+
+        # Epoch timing
+        if self._epoch_start_time is not None:
+            epoch_time = time.time() - self._epoch_start_time
+            parts.append(f"epoch_time={epoch_time:.1f}s")
+
+        # Average data_time and train_time from iter_times
+        if self._iter_times:
+            avg_iter = sum(self._iter_times) / len(self._iter_times)
+            parts.append(f"avg_iter_time={avg_iter:.2f}s")
+
+        # ETA
+        if self._iter_times and self.runner is not None:
+            avg_iter = sum(self._iter_times) / len(self._iter_times)
+            train_cfg = self.runner.train_cfg
+            max_epochs = train_cfg.get('max_epochs', 0)
+            try:
+                steps_per_epoch = len(self.runner.train_dataloader)
+                total_iters = max_epochs * steps_per_epoch
+            except (TypeError, AttributeError):
+                total_iters = self.runner.global_step
+            remaining = max(0, total_iters - self.runner.global_step)
+            eta_seconds = remaining * avg_iter
+            parts.append(f"eta={_format_eta(eta_seconds)}")
+
+        logger.info("  ".join(parts))
+
+        # Log scalars to tensorboard via accelerator
+        if self.runner is not None and scalar_metrics:
+            try:
+                self.runner.accelerator.log(scalar_metrics, step=self.runner.global_step)
+            except Exception:
+                pass
 
     def _log(self, step: int, output: dict, data_time=None, train_time=None):
         if self.runner is not None and not self.runner.accelerator.is_main_process:
@@ -113,8 +219,9 @@ class LoggerHook:
             for key, sched in self.runner.lr_schedulers.items():
                 try:
                     lr = sched.get_last_lr()[0]
-                    parts.append(f"lr={lr:.2e}")
-                    scalar_metrics['lr'] = lr
+                    lr_label = 'lr' if key == 'default' else f'lr_{key}'
+                    parts.append(f"{lr_label}={lr:.2e}")
+                    scalar_metrics[lr_label] = lr
                 except Exception:
                     pass
 

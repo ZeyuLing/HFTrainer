@@ -39,36 +39,93 @@ HuggingFace Accelerate 生态上，并通过 `ModelBundle` 机制彻底解决 Tr
 5. **ModelBundle = Shared Core**: Trainer 和 Pipeline 共享同一个 `ModelBundle`，
    所有前向计算逻辑只写一次，训练和推理都调用它
 
+## Current Public API Contract
+
+当前代码实现上的约定，和上面的设计目标一样重要：
+
+1. **`ModelBundle.from_config(...)` 是统一父类入口**
+   - 所有 bundle 都应该支持
+   - 自研模型默认走这条路径
+
+2. **`ModelBundle.from_pretrained(...)` 也是统一父类入口**
+   - 但 HF-native bundle 需要实现 `_bundle_config_from_pretrained(...)`
+   - 子类负责定义“一个 HuggingFace / diffusers artifact 如何映射成 bundle 的多个子模块”
+   - 不要把 `from_pretrained(...)` 直接做成完全独立、互不兼容的子类 API
+
+3. **`save_pretrained(...)` 是任务相关导出能力**
+   - 只有当 bundle 能导出官方 `transformers` / `diffusers` 能直接读取的 artifact 时才实现
+   - 例如 `CausalLMBundle`、`ViTBundle`、`SD15Bundle`、`WanBundle`
+   - 对自研任务，如果没有稳定导出格式，可以只提供 `from_config(...)` + checkpoint save/load
+
+4. **文档必须明确区分两类接入路径**
+   - 已有 `transformers` / `diffusers` 模型：保留官方模型类和 `from_pretrained(...)` 语义，只补 bundle / trainer / export
+   - 自研模型：实现 `nn.Module` + bundle，默认走 `from_config(...)`
+
+5. **不要为了统一而发明新的推理语义**
+   - 推理侧尽量贴近官方 `transformers` / `diffusers`
+   - 如果某个 bundle 实现了 `save_pretrained(...)`，README 和 docs 里必须写清楚对应的官方加载方式
+
+6. **显存与精度控制也必须是配置驱动的**
+   - 全局 runtime 通过 `accelerator.mixed_precision` 和 `accelerator.gradient_accumulation_steps`
+   - 子模块级控制通过 `from_pretrained.torch_dtype` / `dtype`、`module_dtype`、`gradient_checkpointing`
+   - 如果文档宣传“可以把某些模块保持在 fp32”，必须同时写清楚全局 AMP 对实际计算 dtype 的影响
+
+## Smoke Test Policy
+
+仓库里现在有一套真实走 CLI 的 startup smoke：
+
+- 入口：`python3 -m pytest -m smoke tests/smoke/test_task_startup.py`
+- 覆盖：`classification`、`gan`、`llm_sft`、`llm_lora`、`sd15`、`dmd`，以及带硬件门槛的 `wan`
+- 语义：每个 case 都会生成临时 config，走 `tools/train.py` 训练 1 step，再走 `tools/infer.py`
+- 目标：验证 config 解析、registry、runner、checkpoint、推理入口都能正常启动
+
+约定：
+
+1. 新增任务栈时，必须补一个对应的 startup smoke case。
+2. smoke 可以收紧 batch size / image size / max length / optimizer，只要主链路仍然是真实训练和真实推理。
+3. 如果某个任务对硬件有明确门槛，应该在测试里显式 skip，而不是让它在不满足条件的机器上随机 OOM。
+
 ---
 
 ## Design Detail: Six Key Issues
 
-### Issue 1: Per-Module Trainable & Checkpoint Control
+### Issue 1: Per-Module Trainable, Memory, and Checkpoint Control
 
 每个子模块在 config 中独立声明：
 - **加载方式**：`from_pretrained` / `from_config` / `from_single_file`（通过 `HF_MODELS` registry）
+- **模块精度**：`from_pretrained.torch_dtype` / `dtype`，以及 HF-Trainer 的 `module_dtype`
+- **activation 显存**：`gradient_checkpointing=True` 或 kwargs dict
 - **是否参与训练**：`trainable=True/False` 或 `trainable='lora'`（自动调用 peft）
 - **是否参与 checkpoint save/resume**：`save_ckpt=True/False`
+- **checkpoint 保存格式**：`checkpoint_format='full'|'lora'`（LoRA 模块默认 `lora`，即 adapter-only）
 
 ```python
 # configs/text2video/wan_finetune.py
 model = dict(
-    type='WanModelBundle',
+    type='WanBundle',
     text_encoder=dict(
         type='UMT5EncoderModel',
-        from_pretrained=dict(pretrained_model_name_or_path='Wan-AI/Wan2.1-T2V-14B'),
+        from_pretrained=dict(
+            pretrained_model_name_or_path='Wan-AI/Wan2.1-T2V-14B',
+            torch_dtype='bf16',
+        ),
         trainable=False,      # 冻结，不计算梯度
         save_ckpt=False,      # resume/save 时完全跳过，节省 IO
     ),
     vae=dict(
         type='AutoencoderKLWan',
         from_pretrained=dict(pretrained_model_name_or_path='Wan-AI/Wan2.1-T2V-14B'),
+        module_dtype='fp32',  # 强制 VAE 保持 fp32 参数
         trainable=False,
         save_ckpt=False,
     ),
     transformer=dict(
         type='WanTransformer3DModel',
-        from_pretrained=dict(pretrained_model_name_or_path='Wan-AI/Wan2.1-T2V-14B'),
+        from_pretrained=dict(
+            pretrained_model_name_or_path='Wan-AI/Wan2.1-T2V-14B',
+            torch_dtype='bf16',
+        ),
+        gradient_checkpointing=True,
         trainable=True,       # 只有这个参与训练
         save_ckpt=True,       # 只保存/恢复这个模块的权重
     ),
@@ -100,6 +157,10 @@ class ModelBundle(nn.Module):
             sub_cfg = copy.deepcopy(sub_cfg)
             trainable = sub_cfg.pop('trainable', True)
             save_ckpt = sub_cfg.pop('save_ckpt', True if trainable else False)
+            checkpoint_format = sub_cfg.pop(
+                'checkpoint_format',
+                'lora' if trainable == 'lora' else 'full',
+            )
             # 实例化（via HF_MODELS registry，支持 from_pretrained 等）
             module = HF_MODELS.build(sub_cfg)
             if trainable == 'lora':
@@ -112,6 +173,7 @@ class ModelBundle(nn.Module):
                 self._save_ckpt_modules.append(name)
             if trainable:
                 self._trainable_modules.append(name)
+            self._module_checkpoint_formats[name] = checkpoint_format
 
     def trainable_parameters(self):
         """只返回 trainable 模块的参数，供 Runner 构建 optimizer。"""
@@ -121,10 +183,13 @@ class ModelBundle(nn.Module):
         return params
 
     def state_dict_to_save(self) -> dict:
-        """只返回 save_ckpt=True 的模块的 state_dict，避免 text_encoder 等污染 IO。"""
+        """只返回 save_ckpt=True 的模块状态；LoRA 模块默认只存 adapter 权重。"""
         sd = {}
         for name in self._save_ckpt_modules:
-            sd[name] = getattr(self, name).state_dict()
+            if self._module_checkpoint_formats[name] == 'lora':
+                sd[name] = get_lora_state_dict(getattr(self, name))
+            else:
+                sd[name] = getattr(self, name).state_dict()
         return sd
 
     def load_state_dict_selective(self, state_dict: dict):
@@ -165,11 +230,6 @@ hftrainer/datasets/
 │   ├── base_classification_dataset.py  # 接口：{'image': Tensor, 'label': int}
 │   ├── imagenet_dataset.py
 │   └── hf_image_classification_dataset.py
-└── detection/
-    ├── __init__.py
-    ├── base_detection_dataset.py    # 接口：{'image': Tensor, 'boxes': Tensor, 'labels': Tensor}
-    ├── coco_dataset.py
-    └── objects365_dataset.py
 ```
 
 每个 `base_{task}_dataset.py` 中用 ABC 定义接口，同时提供公共的 transform 逻辑和
@@ -199,8 +259,8 @@ ModelBundle          ← 持有所有子模块 + 所有原子前向函数（enco
 具体到 WAN 为例：
 
 ```python
-# hftrainer/models/wan/wan_bundle.py
-class WanModelBundle(ModelBundle):
+# hftrainer/models/text2video/wan_bundle.py
+class WanBundle(ModelBundle):
     """
     持有 WAN 的所有子模块，并实现所有原子前向函数。
     Trainer 和 Pipeline 都使用这个类。
@@ -234,7 +294,7 @@ class WanTrainer(BaseTrainer):
     只负责训练逻辑：组装训练前向图、计算 loss。
     所有前向函数从 bundle 调用，不重复实现。
     """
-    def __init__(self, model: WanModelBundle, loss_cfg, **kwargs):
+    def __init__(self, model: WanBundle, loss_cfg, **kwargs):
         self.bundle = model
 
     def train_step(self, batch) -> dict:
@@ -254,7 +314,7 @@ class WanPipeline(BasePipeline):
     只负责推理逻辑：denoising loop、后处理。
     所有前向函数从 bundle 调用，不重复实现。
     """
-    def __init__(self, model: WanModelBundle, **kwargs):
+    def __init__(self, model: WanBundle, **kwargs):
         self.bundle = model
 
     @torch.no_grad()
@@ -268,7 +328,7 @@ class WanPipeline(BasePipeline):
 ```
 
 **关键收益**：
-- `encode_text`、`predict_noise` 等函数**只写一次**，在 `WanModelBundle` 里
+- `encode_text`、`predict_noise` 等函数**只写一次**，在 `WanBundle` 里
 - 改动模型（比如修改 transformer 的 forward 参数）只需改 `bundle.predict_noise`，
   Trainer 和 Pipeline 自动同步
 - Pipeline 从训练好的 checkpoint 加载：`bundle.load_state_dict_selective(ckpt)`，
@@ -278,7 +338,7 @@ class WanPipeline(BasePipeline):
 
 ```python
 # 加载训练 config 中的 ModelBundle，切换到推理
-bundle = WanModelBundle.from_cfg(cfg.model)
+bundle = WanBundle.from_config(cfg.model)
 bundle.load_state_dict_selective(torch.load('work_dirs/wan_exp/checkpoint.pth'))
 pipeline = WanPipeline(model=bundle)
 video = pipeline("a cat running in the park")
@@ -296,13 +356,13 @@ resume 和 load_checkpoint 本质上是"加载哪些东西"的程度差异，而
 
 # 场景 A：只加载 model weights（迁移学习 / 从 pretrained 开始 finetune）
 load_from = dict(
-    path='work_dirs/wan_exp/checkpoint-10000/',
+    path='work_dirs/wan_exp/checkpoint-iter_10000/',
     load_scope='model',        # 只加载模型权重，optimizer/scheduler/meta 全部重置
 )
 
 # 场景 B：完整 resume（中断后续训练）
 load_from = dict(
-    path='work_dirs/wan_exp/checkpoint-10000/',
+    path='work_dirs/wan_exp/checkpoint-iter_10000/',
     load_scope='full',         # 加载 model + optimizer + scheduler + training meta (epoch/iter)
 )
 
@@ -341,10 +401,23 @@ elif cfg.get('load_from'):
 
 ---
 
-### Issue 5: 多 Optimizer 支持（GAN 等）
+### Issue 5: 多 Optimizer 支持（GAN / Distillation 等）
 
-单 optimizer 设计无法支持 GAN（G/D 各一个 optimizer，每步交替更新）。
-设计原则：**optimizer 的构建和更新逻辑都下沉到 Trainer**，Runner 不强制持有单个 optimizer。
+单 optimizer 设计无法支持 GAN（G/D 各一个 optimizer，每步交替更新）、知识蒸馏（student/discriminator）等场景。
+设计通过 `trainer_controls_optimization` 标志和 `params` 显式参数映射来解决。
+
+> 详细文档和 recipes 见 `docs/design/multi_optimizer.md`
+
+**核心机制：`trainer_controls_optimization` 标志**
+
+`BaseTrainer` 有一个类属性 `trainer_controls_optimization = False`（默认）。
+当 trainer 子类设为 `True` 时：
+- Runner 把构建好的 optimizers/schedulers 注入 trainer（调用 `trainer.set_optimizers()`）
+- Runner 训练循环中**跳过** backward/step/zero_grad
+- Trainer 在 `train_step()` 中自主管理所有优化步骤
+- `accelerator.accumulate()` 上下文仍然包裹 `train_step`（控制 DDP 梯度同步）
+
+所有现有 trainer（ViT、SD15、WAN、LLM）默认 `False`，完全不受影响。
 
 **Config 层**：`optimizer` 字段支持单个 dict（常规情况）或命名 dict（多 optimizer）：
 
@@ -352,10 +425,17 @@ elif cfg.get('load_from'):
 # 常规：单 optimizer
 optimizer = dict(type='AdamW', lr=1e-5)
 
-# GAN：多 optimizer，key 与 Trainer 内部的属性名对应
+# GAN：多 optimizer，key 匹配 bundle 模块名
 optimizer = dict(
-    generator=dict(type='AdamW', lr=1e-4, betas=(0.0, 0.999)),
-    discriminator=dict(type='AdamW', lr=4e-4, betas=(0.0, 0.999)),
+    generator=dict(type='Adam', lr=2e-4, betas=(0.5, 0.999)),
+    discriminator=dict(type='Adam', lr=2e-4, betas=(0.5, 0.999)),
+)
+
+# DMD 蒸馏：optimizer 名与模块名不同时，用 params 显式指定
+# 'student' optimizer -> 管理 'student_unet' 模块的参数
+optimizer = dict(
+    student=dict(type='AdamW', lr=1e-5, params=['student_unet']),
+    discriminator=dict(type='AdamW', lr=4e-5),
 )
 
 # 同理，lr_scheduler 也支持多个
@@ -365,45 +445,76 @@ lr_scheduler = dict(
 )
 ```
 
-**Runner 层**：检测 `optimizer` 是单 dict 还是命名 dict，分别构建，统一传给 Trainer：
+**Runner 层**：`_build_optimizers` 检测命名 dict，支持 `params` key：
 
 ```python
-# AccelerateRunner.build_optimizers(cfg, trainer)
-if all(isinstance(v, dict) and 'type' in v for v in optimizer_cfg.values()):
-    # 多 optimizer：为每个命名模块构建
-    optimizers = {
-        name: build_optimizer(opt_cfg, trainer.bundle.get_module(name).parameters())
-        for name, opt_cfg in optimizer_cfg.items()
-    }
-else:
-    # 单 optimizer
-    optimizers = {'default': build_optimizer(optimizer_cfg, trainer.bundle.trainable_parameters())}
+# 多 optimizer 检测逻辑
+if is_multi:
+    for name, opt_cfg in optimizer_cfg.items():
+        param_names = opt_cfg.pop('params', None)
+        if param_names is not None:
+            # 显式指定：从 bundle 中按名字收集参数
+            params = bundle.get_module_parameters(*param_names)
+        else:
+            # 默认：optimizer 名 == bundle 模块名
+            params = list(getattr(bundle, name).parameters())
+        optimizers[name] = build_optimizer(opt_cfg, params)
 
-# accelerator.prepare 支持多个 optimizer
-prepared = accelerator.prepare(*optimizers.values(), ...)
-trainer.set_optimizers(optimizers)
+# trainer_controls_optimization=True 时注入 trainer
+if trainer.trainer_controls_optimization:
+    trainer.set_optimizers(optimizers, lr_schedulers)
 ```
 
-**Trainer 层**：`train_step` 完全自主控制多个 optimizer 的更新顺序，
-Runner 只负责构建和 prepare，不参与更新逻辑：
+**Trainer 层**：通过 `self.get_optimizer(name)` / `self.get_lr_scheduler(name)` 访问，
+`train_step` 完全自主控制更新顺序：
 
 ```python
+@TRAINERS.register_module()
 class GANTrainer(BaseTrainer):
-    def train_step(self, batch, step: int) -> dict:
-        # === Train Discriminator ===
-        self.opt_d.zero_grad()
-        loss_d = self._discriminator_loss(batch)
-        self.accelerator.backward(loss_d)
-        self.opt_d.step()
+    trainer_controls_optimization = True   # 关键标志
 
-        # === Train Generator (every 1 step) ===
-        self.opt_g.zero_grad()
-        loss_g = self._generator_loss(batch)
+    def train_step(self, batch) -> dict:
+        opt_d = self.get_optimizer('discriminator')
+        opt_g = self.get_optimizer('generator')
+
+        # === Phase 1: Train Discriminator ===
+        opt_d.zero_grad()
+        # torch.no_grad() 阻止梯度流入 G，节省显存
+        with torch.no_grad():
+            fake_data = self.bundle.generator(noise)
+        loss_d = discriminator_loss(real_data, fake_data)
+        self.accelerator.backward(loss_d)  # 必须用 accelerator.backward()
+        opt_d.step()
+
+        # === Phase 2: Train Generator ===
+        opt_g.zero_grad()
+        fake_data = self.bundle.generator(noise)       # WITH gradient
+        fake_score = self.bundle.discriminator(fake_data)  # 梯度流经 D
+        loss_g = generator_loss(fake_score)
         self.accelerator.backward(loss_g)
-        self.opt_g.step()
+        opt_g.step()
 
-        return {'loss_d': loss_d, 'loss_g': loss_g}
+        return {'loss': None, 'loss_d': loss_d.detach(), 'loss_g': loss_g.detach()}
+        #        ^^^^^^^^^^
+        #        loss=None 告诉 Runner 不要再执行 backward/step
 ```
+
+**关键注意事项**：
+- 始终使用 `self.accelerator.backward(loss)`，不要用 `loss.backward()`
+- 用 `torch.no_grad()` 隔离梯度（比 `.detach()` 更省显存）
+- 返回 `'loss': None` 防止 Runner 重复 backward
+- 返回 dict 中的 loss 值要 `.detach()` 避免内存泄漏
+
+**LR 日志**：多 optimizer 时日志自动显示 `lr_{name}=`：
+```
+step [100/10000]  lr_generator=2.00e-04  lr_discriminator=4.00e-04  loss_d=0.45  loss_g=1.23
+```
+
+**Demo 实现**：
+- `hftrainer/trainers/gan/gan_trainer.py` — GAN 对抗训练（支持 StyleGAN2-style loss / regularization）
+- `hftrainer/trainers/distillation/dmd_trainer.py` — DMD 蒸馏（distribution matching + fake score）
+- `configs/gan/gan_demo.py` — GAN 配置示例
+- `configs/distillation/dmd_demo.py` — DMD 蒸馏配置示例（带 `params` key）
 
 **Checkpoint** 时 `accelerator.save_state()` 会自动保存所有 optimizer 的 state，
 `load_scope='full'` 时也自动恢复，无需特殊处理。
@@ -429,9 +540,6 @@ data/
 ├── classification/demo/
 │   ├── images/
 │   └── labels.txt
-└── detection/demo/
-    ├── images/
-    └── annotations.json     # COCO 格式
 ```
 
 `tools/download_demo_data.py` 用 `datasets` 库从 HuggingFace Hub 下载：
@@ -445,7 +553,6 @@ DEMO_SOURCES = {
     'text2video':    ('BestWishYsh/ConsisID-preview', 5),
     'llm':           ('tatsu-lab/alpaca', 10),
     'classification':('zh-plus/tiny-imagenet', 20),
-    'detection':     ('detection-datasets/coco_n_samples', 20),
 }
 ```
 
@@ -482,16 +589,6 @@ dataloader = Text2ImageDataset.demo()
     'scores':  Tensor[B, num_cls],    # logits / softmax scores
     'gts':     Tensor[B],             # 真实类别 id
     'metas':   list[dict],            # 可选：图片路径等
-}
-
-# detection val_step 返回
-{
-    'pred_boxes':   list[Tensor[N,4]],  # 每张图的预测框 xyxy
-    'pred_scores':  list[Tensor[N]],
-    'pred_labels':  list[Tensor[N]],
-    'gt_boxes':     list[Tensor[M,4]],
-    'gt_labels':    list[Tensor[M]],
-    'metas':        list[dict],          # image_id 等，供 COCO eval 使用
 }
 
 # llm val_step 返回
@@ -566,231 +663,51 @@ visualizer.visualize(all_outputs[-1], step=self.global_step)
 hf_trainer/
 ├── CLAUDE.md                               # This file
 ├── README.md
-├── setup.py / pyproject.toml
-├── requirements.txt
+├── setup.py
 │
-├── configs/                                # All experiment configs (.py, MMEngine style)
-│   ├── _base_/
-│   │   ├── default_runtime.py
-│   │   ├── datasets/
-│   │   │   ├── laion_text2image.py
-│   │   │   ├── webvid_text2video.py
-│   │   │   ├── alpaca_llm.py
-│   │   │   ├── imagenet_classification.py
-│   │   │   └── coco_detection.py
-│   │   └── schedules/
-│   │       ├── adamw_cosine.py
-│   │       ├── adamw_warmup_constant.py
-│   │       └── adamw_linear_warmup.py
-│   ├── text2image/
-│   │   ├── sd15_finetune.py
-│   │   ├── sdxl_lora.py
-│   │   └── sd3_dreambooth.py
-│   ├── text2video/
-│   │   ├── wan_t2v_finetune.py
-│   │   └── wan_lora.py
-│   ├── llm/
-│   │   ├── llama_sft.py
-│   │   ├── llama_lora.py
-│   │   └── llama_pretraining.py
-│   ├── classification/
-│   │   ├── vit_base_imagenet.py
-│   │   └── vit_large_imagenet.py
-│   └── detection/
-│       ├── detr_r50_coco.py
-│       └── dino_swin_coco.py
+├── configs/                                # Runnable demo configs (.py, config-driven)
+│   ├── classification/vit_base_demo.py
+│   ├── distillation/dmd_demo.py
+│   ├── gan/gan_demo.py
+│   ├── llm/llama_lora_demo.py
+│   ├── llm/llama_sft_demo.py
+│   ├── text2image/sd15_demo.py
+│   └── text2video/wan_demo.py
 │
 ├── hftrainer/                              # Core framework package
-│   ├── __init__.py
-│   ├── registry.py                         # TRAINERS, DATASETS, HF_MODELS, HOOKS, METRICS, TRANSFORMS
-│   │                                       # + build_hf_model_from_cfg (from_pretrained/from_config/from_single_file)
-│   │                                       # + build_trainer_from_cfg
-│   │
-│   ├── runner/
-│   │   ├── __init__.py
-│   │   ├── accelerate_runner.py            # AccelerateRunner.from_cfg: 构建所有组件，驱动训练循环
-│   │   └── loops.py                        # EpochBasedLoop / IterBasedLoop
-│   │
-│   ├── models/                             # ModelBundle 基类 + 各任务的 ModelBundle 实现
-│   │   ├── __init__.py
-│   │   ├── base_model_bundle.py            # ModelBundle 基类（_build_modules, trainable_parameters,
-│   │   │                                   #   state_dict_to_save, load_state_dict_selective）
-│   │   ├── peft_utils.py                   # apply_lora / apply_qlora helpers
-│   │   ├── text2image/
-│   │   │   ├── __init__.py
-│   │   │   ├── sd15_bundle.py              # SD15ModelBundle: encode_text, encode_image, predict_noise, decode_latent
-│   │   │   ├── sdxl_bundle.py
-│   │   │   └── sd3_bundle.py
-│   │   ├── text2video/
-│   │   │   ├── __init__.py
-│   │   │   └── wan_bundle.py               # WanModelBundle: encode_text, encode_video, predict_noise, decode_latent
-│   │   ├── llm/
-│   │   │   ├── __init__.py
-│   │   │   └── causal_lm_bundle.py         # CausalLMBundle: tokenize, forward_logits, generate
-│   │   ├── classification/
-│   │   │   ├── __init__.py
-│   │   │   └── vit_bundle.py               # ViTBundle: preprocess_image, forward_features, classify
-│   │   └── detection/
-│   │       ├── __init__.py
-│   │       └── detr_bundle.py              # DETRBundle: preprocess_image, forward_encoder, forward_decoder
-│   │
-│   ├── trainers/                           # 只负责训练逻辑（组装 loss，调用 bundle 的原子函数）
-│   │   ├── __init__.py
-│   │   ├── base_trainer.py                 # BaseTrainer: train_step / val_step 接口，持有 ModelBundle
-│   │   ├── diffusion_trainer.py            # DiffusionTrainer: 通用 diffusion loss（noise/v/x0 prediction）
-│   │   ├── text2image/
-│   │   │   ├── __init__.py
-│   │   │   ├── sd15_trainer.py
-│   │   │   └── sdxl_trainer.py
-│   │   ├── text2video/
-│   │   │   ├── __init__.py
-│   │   │   └── wan_trainer.py
-│   │   ├── llm/
-│   │   │   ├── __init__.py
-│   │   │   └── causal_lm_trainer.py
-│   │   ├── classification/
-│   │   │   ├── __init__.py
-│   │   │   └── classification_trainer.py
-│   │   └── detection/
-│   │       ├── __init__.py
-│   │       └── detection_trainer.py
-│   │
-│   ├── pipelines/                          # 只负责推理逻辑（denoising loop，后处理，调用 bundle 的原子函数）
-│   │   ├── __init__.py
-│   │   ├── base_pipeline.py                # BasePipeline: __call__ 接口，from_bundle / from_checkpoint 类方法
-│   │   ├── text2image/
-│   │   │   ├── __init__.py
-│   │   │   ├── sd15_pipeline.py
-│   │   │   └── sdxl_pipeline.py
-│   │   ├── text2video/
-│   │   │   ├── __init__.py
-│   │   │   └── wan_pipeline.py
-│   │   ├── llm/
-│   │   │   ├── __init__.py
-│   │   │   └── causal_lm_pipeline.py
-│   │   ├── classification/
-│   │   │   ├── __init__.py
-│   │   │   └── classification_pipeline.py
-│   │   └── detection/
-│   │       ├── __init__.py
-│   │       └── detection_pipeline.py
-│   │
-│   ├── datasets/                           # 标准 torch Dataset，按任务组织
-│   │   ├── __init__.py
-│   │   ├── text2image/
-│   │   │   ├── __init__.py
-│   │   │   ├── base_text2image_dataset.py  # 接口：{'image': Tensor, 'text': str}
-│   │   │   ├── laion_dataset.py
-│   │   │   ├── webdataset_t2i.py
-│   │   │   └── hf_imagefolder_dataset.py
-│   │   ├── text2video/
-│   │   │   ├── __init__.py
-│   │   │   ├── base_text2video_dataset.py  # 接口：{'video': Tensor[T,C,H,W], 'text': str}
-│   │   │   ├── webvid_dataset.py
-│   │   │   └── internvid_dataset.py
-│   │   ├── llm/
-│   │   │   ├── __init__.py
-│   │   │   ├── base_llm_dataset.py         # 接口：{'input_ids', 'labels', 'attention_mask'}
-│   │   │   ├── alpaca_dataset.py
-│   │   │   ├── sharegpt_dataset.py
-│   │   │   └── pretrain_jsonl_dataset.py
-│   │   ├── classification/
-│   │   │   ├── __init__.py
-│   │   │   ├── base_classification_dataset.py  # 接口：{'image': Tensor, 'label': int}
-│   │   │   ├── imagenet_dataset.py
-│   │   │   └── hf_image_classification_dataset.py
-│   │   ├── detection/
-│   │   │   ├── __init__.py
-│   │   │   ├── base_detection_dataset.py   # 接口：{'image': Tensor, 'boxes': Tensor, 'labels': Tensor}
-│   │   │   ├── coco_dataset.py
-│   │   │   └── objects365_dataset.py
-│   │   └── transforms/                     # 跨任务共用的 transforms（图像、文本、视频）
-│   │       ├── __init__.py
-│   │       ├── image_transforms.py
-│   │       ├── video_transforms.py
-│   │       └── text_transforms.py
-│   │
+│   ├── registry.py                         # Registries + HF model construction helpers
+│   ├── runner/                             # AccelerateRunner + loop abstractions
+│   ├── models/                             # ModelBundle base class + task bundles
+│   ├── trainers/                           # Training logic only
+│   ├── pipelines/                          # Inference logic only
+│   ├── datasets/                           # Task-specific dataset implementations
 │   ├── hooks/
-│   │   ├── __init__.py
-│   │   ├── checkpoint_hook.py              # 调用 bundle.state_dict_to_save()，只保存 save_ckpt=True 的模块
-│   │   │                                   # auto_resume: 启动时自动检测 work_dir 最新 ckpt
-│   │   ├── logger_hook.py
-│   │   ├── ema_hook.py
-│   │   ├── validation_hook.py              # 触发 val epoch + evaluator.compute() + visualizer.visualize()
-│   │   └── lr_scheduler_hook.py
-│   │
-│       ├── __init__.py
-│       ├── config_utils.py
-│       ├── logger.py
-│       ├── checkpoint_utils.py
-│       └── env.py
-│
 │   ├── evaluation/
-│   │   ├── __init__.py
-│   │   ├── base_evaluator.py               # BaseEvaluator: process(output_dict) / compute() -> metrics_dict
-│   │   ├── text2image/
-│   │   │   ├── fid_evaluator.py            # 消费 output['preds'] + output['gts']
-│   │   │   └── clip_score_evaluator.py     # 消费 output['preds'] + output['prompts']
-│   │   ├── text2video/
-│   │   │   └── fvd_evaluator.py
-│   │   ├── llm/
-│   │   │   ├── perplexity_evaluator.py
-│   │   │   └── bleu_evaluator.py
-│   │   ├── classification/
-│   │   │   └── accuracy_evaluator.py       # 消费 output['preds'] + output['gts']
-│   │   └── detection/
-│   │       └── coco_evaluator.py           # 消费 output['pred_boxes/scores/labels'] + output['gt_*']
-│   │
 │   ├── visualization/
-│   │   ├── __init__.py
-│   │   ├── base_visualizer.py              # BaseVisualizer: visualize(output_dict, step)
-│   │   ├── file_visualizer.py              # FileVisualizer: saves val outputs to disk (images/text)
-│   │   ├── wandb_visualizer.py             # WandB backend
-│   │   ├── tensorboard_visualizer.py       # TensorBoard backend
-│   │   ├── text2image_visualizer.py        # 消费 output['preds'] + output['prompts']
-│   │   ├── text2video_visualizer.py
-│   │   ├── llm_visualizer.py               # 消费 output['preds'] + output['input_prompts']
-│   │   ├── classification_visualizer.py
-│   │   └── detection_visualizer.py
-│   │
 │   └── utils/
-│       ├── __init__.py
-│       ├── config_utils.py
-│       ├── logger.py
-│       ├── checkpoint_utils.py
-│       └── env.py
 │
 ├── tools/
 │   ├── train.py
-│   ├── test.py
-│   ├── dist_train.sh                       # accelerate launch 封装
-│   ├── dist_test.sh
-│   ├── download_demo_data.py               # 从 HuggingFace datasets 下载各任务 demo 数据
+│   ├── infer.py
+│   ├── dist_train.sh
+│   ├── download_demo_data.py
+│   ├── download_checkpoints.sh
 │   └── analysis_tools/
-│       ├── get_flops.py
-│       └── print_config.py
 │
-├── data/                                   # Demo 数据（少量样本，用于 smoke test）
-│   ├── text2image/demo/
-│   │   ├── images/                         # 几张测试图片
-│   │   └── metadata.jsonl                  # {"image": "images/001.jpg", "text": "a cat"}
-│   ├── text2video/demo/
-│   │   ├── videos/
-│   │   └── metadata.jsonl
-│   ├── llm/demo/
-│   │   └── alpaca_sample.json              # 10 条 instruction 样本
-│   ├── classification/demo/
-│   │   ├── images/
-│   │   └── labels.txt
-│   └── detection/demo/
-│       ├── images/
-│       └── annotations.json                # COCO 格式，少量样本
+├── docs/
+│   ├── en/                                 # Public English docs, source of truth
+│   ├── zh-cn/                              # Public Simplified Chinese docs, source of truth
+│   ├── design/                             # Root-level compatibility pages for design docs
+│   └── *.md                                # Root-level landing / compatibility pages
 │
-└── examples/
-    ├── train_wan_t2v.py
-    ├── train_llama_lora.py
-    └── train_vit_imagenet.py
+└── data/                                   # Demo data used by smoke tests and examples
 ```
+
+**文档约定**：
+- `docs/en/` 和 `docs/zh-cn/` 是对外文档的 source of truth
+- 根目录 `docs/*.md` 和 `docs/design/*.md` 只保留轻量入口与兼容页，不再继续堆混合语言正文
+- 公共 API 文档集中放在 `docs/en/api_reference.md` 和 `docs/zh-cn/api_reference.md`，优先覆盖 runner / bundle / trainer / pipeline / hook / CLI 这些用户入口
+- 需要解释控制流时，优先在 `architecture`、`experiment_dir`、`lora` 这些高频入口页用 Mermaid 流程图
 
 ---
 
@@ -817,19 +734,29 @@ Config (.py) ──► AccelerateRunner.from_cfg(cfg)
                      └─ Run loop: for batch in dataloader: trainer.train_step(batch)
 ```
 
+**Hook system boundary**：
+- Hook 是 runner 持有的回调，只负责 logging / checkpoint / EMA 这类副作用
+- Hook 不负责任务前向、loss 组装、优化顺序；这些仍然属于 trainer
+- Evaluator / Visualizer 是 validation 组件，不属于 hook
+- Hook 按 `priority` 升序执行；当前内置顺序是 `LoggerHook(10)` → `EMAHook(15)` → `LRSchedulerHook(20, compatibility no-op)` → `CheckpointHook(80)`
+
 **LoggerHook 日志格式**：
 
-Iter-based:
+LoggerHook 的 `by_epoch` 默认为 `None`，自动从 `train_cfg.by_epoch` 继承。
+
+Iter-based (`by_epoch=False`，每 N iter 打印一次):
 ```
 step [5/10]  lr=2.00e-05  loss=1.45  data_time=0.01s  train_time=0.12s  eta=0:00:01
 ```
 
-Epoch-based:
+Epoch-based (`by_epoch=True`，每 N epoch 结束打印 summary):
 ```
-epoch [1/100] step [5/200]  lr=2.00e-05  loss=1.45  data_time=0.01s  train_time=0.12s  eta=2:30:00
+epoch [1/100]  lr=2.00e-05  loss=1.45  epoch_time=120.3s  avg_iter_time=0.60s  eta=2:30:00
 ```
 
 **Experiment Directory Layout**：
+
+Checkpoint 命名基于训练模式：iter-based 用 `checkpoint-iter_N`，epoch-based 用 `checkpoint-epoch_N`。
 
 ```
 work_dirs/{experiment}/
@@ -839,8 +766,8 @@ work_dirs/{experiment}/
 │   └── training/              # TensorBoard events
 ├── 20260310_091200/           # second run (separate logs)
 │   └── ...
-├── checkpoint-5000/           # work_dir: checkpoints at base level
-├── checkpoint-10000/
+├── checkpoint-iter_5000/      # iter-based checkpoint
+├── checkpoint-iter_10000/
 └── vis/                       # FileVisualizer output (if configured)
     └── step_5/
 ```
@@ -880,7 +807,7 @@ class WanTrainer(BaseTrainer):
 class WanPipeline(BasePipeline):
     @classmethod
     def from_checkpoint(cls, bundle_cfg, ckpt_path):
-        bundle = WanModelBundle(bundle_cfg)
+        bundle = WanBundle(bundle_cfg)
         bundle.load_state_dict_selective(torch.load(ckpt_path))
         return cls(bundle)
 
@@ -901,7 +828,7 @@ _base_ = ['../_base_/default_runtime.py']
 
 # ModelBundle 声明：每个子模块独立控制 trainable / save_ckpt
 model = dict(
-    type='WanModelBundle',
+    type='WanBundle',
     text_encoder=dict(
         type='UMT5EncoderModel',
         from_pretrained=dict(pretrained_model_name_or_path='/path/to/Wan2.1-T2V-14B'),
@@ -1006,14 +933,24 @@ VISUALIZERS = Registry('visualizer')
 auto_resume = True    # 自动检测 work_dir 最新 ckpt，full resume
 
 # 只加载模型权重（迁移学习 / 切换数据集重新训练）
-load_from = dict(path='work_dirs/wan_exp/checkpoint-10000/', load_scope='model')
+load_from = dict(path='work_dirs/wan_exp/checkpoint-iter_10000/', load_scope='model')
 
 # full resume（等同于 auto_resume，但指定具体路径）
-load_from = dict(path='work_dirs/wan_exp/checkpoint-10000/', load_scope='full')
+load_from = dict(path='work_dirs/wan_exp/checkpoint-iter_10000/', load_scope='full')
 ```
+
+**Checkpoint 命名**：
+- Iter-based (`by_epoch=False`): `checkpoint-iter_5000`
+- Epoch-based (`by_epoch=True`): `checkpoint-epoch_3`
+- 旧格式 `checkpoint-N` 在加载时仍然兼容
 
 **Save**：`CheckpointHook` 调用 `bundle.state_dict_to_save()`，只写 `save_ckpt=True` 的模块。
 `accelerator.save_state()` 同时写 optimizer / scheduler states（用于 full resume）。
+Checkpoint 保存统一由 `CheckpointHook` 控制，`train_cfg` 中无需 `save_interval`。LoRA 模块默认走
+adapter-only 保存，模块级 checkpoint format 元信息记录在 `model.pt` 的 `__hftrainer_meta__` 中。
+
+**`by_epoch` 自动继承**：`CheckpointHook` 和 `LoggerHook` 的 `by_epoch` 默认为 `None`，
+自动从 `train_cfg.by_epoch` 继承。用户无需手动在每个 hook 上写 `by_epoch=True`。
 
 **`max_keep_ckpts`**：通过 `CheckpointHook` 的 `max_keep_ckpts` 参数控制磁盘上保留的
 checkpoint 数量。每次保存新 checkpoint 后，自动删除最旧的 checkpoint 直到不超过上限。
@@ -1023,8 +960,8 @@ checkpoint 数量。每次保存新 checkpoint 后，自动删除最旧的 check
 default_hooks = dict(
     checkpoint=dict(
         type='CheckpointHook',
-        interval=2000,
-        max_keep_ckpts=3,     # 只保留最近 3 个 checkpoint
+        interval=2000,         # 按 train_cfg.by_epoch 自动解释为 iter 或 epoch
+        max_keep_ckpts=3,      # 只保留最近 3 个 checkpoint
     ),
 )
 ```
@@ -1035,7 +972,7 @@ Resume 时会输出清晰的日志：
 
 ```
 ============================================================
-Resuming from checkpoint: work_dirs/wan_exp/checkpoint-5000
+Resuming from checkpoint: work_dirs/wan_exp/checkpoint-iter_5000
 Resumed: global_step=5000, epoch=0. Training will continue from step 5001.
 ============================================================
 ```
@@ -1045,7 +982,8 @@ state_dict 里有哪个模块的 key 就加载哪个，没有的跳过，optimiz
 
 **Inference**：`WanPipeline.from_checkpoint(bundle_cfg, ckpt_path)` —— 先完整构建
 ModelBundle（text_encoder / vae 等从 pretrained 加载），再用 `load_state_dict_selective`
-覆盖 transformer 的 finetune 权重，无需特殊适配。
+覆盖 transformer 的 finetune 权重，无需特殊适配。对于 LoRA 模块，推理阶段还可以做 merge
+（例如 `tools/infer.py --merge-lora`）。
 
 ### 8. Val Loop & Evaluator/Visualizer 流程
 
@@ -1076,7 +1014,6 @@ for vis in visualizers:
 | text2video | `preds` (Tensor[B,T,C,H,W]), `prompts` (list[str]) |
 | llm | `preds` (list[str]), `gts` (list[str]), `input_prompts` (list[str]) |
 | classification | `preds` (Tensor[B]), `scores` (Tensor[B,C]), `gts` (Tensor[B]) |
-| detection | `pred_boxes/scores/labels` (list[Tensor]), `gt_boxes/labels` (list[Tensor]), `metas` |
 
 ---
 
@@ -1084,11 +1021,10 @@ for vis in visualizers:
 
 | Task | ModelBundle | Trainer | Pipeline | Example Models |
 |------|-------------|---------|----------|----------------|
-| Text-to-Image | `SD15ModelBundle` | `SD15Trainer` | `SD15Pipeline` | SD1.5, SDXL, SD3, Flux |
-| Text-to-Video | `WanModelBundle` | `WanTrainer` | `WanPipeline` | WAN, CogVideoX |
+| Text-to-Image | `SD15Bundle` | `SD15Trainer` | `SD15Pipeline` | SD1.5, SDXL, SD3, Flux |
+| Text-to-Video | `WanBundle` | `WanTrainer` | `WanPipeline` | WAN, CogVideoX |
 | LLM | `CausalLMBundle` | `CausalLMTrainer` | `CausalLMPipeline` | LLaMA, Qwen, Mistral |
 | Classification | `ViTBundle` | `ClassificationTrainer` | `ClassificationPipeline` | ViT, DeiT, Swin |
-| Detection | `DETRBundle` | `DetectionTrainer` | `DetectionPipeline` | DETR, DINO, RT-DETR |
 
 ---
 

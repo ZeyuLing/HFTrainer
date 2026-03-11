@@ -5,6 +5,21 @@ from typing import Dict, Any, Optional
 import torch.nn as nn
 
 
+def _unwrap_module(module: nn.Module) -> nn.Module:
+    while hasattr(module, 'module') and isinstance(module.module, nn.Module):
+        module = module.module
+    return module
+
+
+def is_peft_model(module: nn.Module) -> bool:
+    try:
+        from peft import PeftModel
+    except ImportError:
+        return False
+    module = _unwrap_module(module)
+    return isinstance(module, PeftModel)
+
+
 def apply_lora(module: nn.Module, lora_cfg: Optional[Dict[str, Any]] = None) -> nn.Module:
     """
     Apply LoRA to a module using peft.
@@ -29,6 +44,8 @@ def apply_lora(module: nn.Module, lora_cfg: Optional[Dict[str, Any]] = None) -> 
 
     if lora_cfg is None:
         lora_cfg = {}
+    else:
+        lora_cfg = dict(lora_cfg)
 
     # Map task_type string to peft TaskType enum
     task_type_str = lora_cfg.pop('task_type', None)
@@ -46,6 +63,60 @@ def apply_lora(module: nn.Module, lora_cfg: Optional[Dict[str, Any]] = None) -> 
     )
 
     return get_peft_model(module, config)
+
+
+def get_lora_state_dict(
+    module: nn.Module,
+    state_dict: Optional[Dict[str, Any]] = None,
+    adapter_name: str = 'default',
+) -> Dict[str, Any]:
+    try:
+        from peft import get_peft_model_state_dict
+    except ImportError:
+        raise ImportError("peft is required for LoRA. Install with: pip install peft")
+
+    module = _unwrap_module(module)
+    return get_peft_model_state_dict(
+        module,
+        state_dict=state_dict,
+        adapter_name=adapter_name,
+    )
+
+
+def set_lora_state_dict(
+    module: nn.Module,
+    state_dict: Dict[str, Any],
+    adapter_name: str = 'default',
+):
+    try:
+        from peft import set_peft_model_state_dict
+    except ImportError:
+        raise ImportError("peft is required for LoRA. Install with: pip install peft")
+
+    module = _unwrap_module(module)
+    return set_peft_model_state_dict(
+        module,
+        peft_model_state_dict=state_dict,
+        adapter_name=adapter_name,
+    )
+
+
+def looks_like_lora_state_dict(state_dict: Dict[str, Any]) -> bool:
+    if not state_dict:
+        return False
+    return any(
+        'lora_' in key or 'modules_to_save' in key
+        for key in state_dict.keys()
+    )
+
+
+def merge_lora(module: nn.Module) -> nn.Module:
+    module = _unwrap_module(module)
+    if not hasattr(module, 'merge_and_unload'):
+        raise TypeError(
+            f"Module {type(module).__name__} does not expose merge_and_unload()."
+        )
+    return module.merge_and_unload()
 
 
 def apply_qlora(module: nn.Module, lora_cfg: Optional[Dict[str, Any]] = None) -> nn.Module:

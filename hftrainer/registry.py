@@ -102,6 +102,7 @@ def _import_hf_class(class_name: str):
         'transformers',
         'diffusers',
         'diffusers.schedulers',
+        'peft',
         'torch.optim',
         'torch.optim.lr_scheduler',
     ]

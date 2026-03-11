@@ -6,6 +6,8 @@ from typing import Dict, Any, Optional, List
 import torch
 from torch.utils.data import Dataset
 
+from hftrainer.utils.image import IMAGENET_MEAN, IMAGENET_STD, normalize_image, pil_to_tensor, resize_image
+
 
 class BaseClassificationDataset(Dataset, ABC):
     """
@@ -37,12 +39,16 @@ class BaseClassificationDataset(Dataset, ABC):
                     transforms.Resize((self.image_size, self.image_size)),
                     transforms.ToTensor(),
                     transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225],
+                        mean=IMAGENET_MEAN,
+                        std=IMAGENET_STD,
                     ),
                 ])
             except ImportError:
-                self.transform = None
+                def _fallback_transform(image):
+                    image = resize_image(image, (self.image_size, self.image_size))
+                    tensor = pil_to_tensor(image)
+                    return normalize_image(tensor, IMAGENET_MEAN, IMAGENET_STD)
+                self.transform = _fallback_transform
 
     @abstractmethod
     def __len__(self) -> int:

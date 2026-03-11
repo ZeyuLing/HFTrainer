@@ -12,6 +12,12 @@ class CheckpointHook:
       - Saves model weights via bundle.state_dict_to_save()
       - Saves full accelerator state (optimizer, scheduler) via accelerator.save_state()
       - Saves training meta (global_step, epoch)
+
+    The ``by_epoch`` flag controls how ``interval`` is interpreted:
+      - ``by_epoch=False`` (default for iter-based): save every ``interval`` iters.
+      - ``by_epoch=True``  (default for epoch-based): save every ``interval`` epochs.
+      - ``by_epoch=None``: auto-inherit from ``train_cfg.by_epoch`` at runtime.
+        This is the default so users don't need to manually keep it in sync.
     """
 
     priority = 80  # runs after logger
@@ -21,12 +27,12 @@ class CheckpointHook:
         interval: int = 1000,
         max_keep_ckpts: int = 3,
         save_last: bool = True,
-        by_epoch: bool = False,
+        by_epoch=None,
     ):
         self.interval = interval
         self.max_keep_ckpts = max_keep_ckpts
         self.save_last = save_last
-        self.by_epoch = by_epoch
+        self.by_epoch = by_epoch  # None = auto-inherit from train_cfg
         self.runner = None  # injected by AccelerateRunner
 
     def after_train_iter(self, global_step: int, output: dict = None):

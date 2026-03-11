@@ -1,8 +1,9 @@
 """WAN Text-to-Video ModelBundle."""
 
+import os
 import torch
 import torch.nn as nn
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES
@@ -40,17 +41,17 @@ class WanBundle(ModelBundle):
         super().__init__()
         self.max_token_length = max_token_length
 
+        transformer_cfg = dict(transformer)
+        if gradient_checkpointing and 'gradient_checkpointing' not in transformer_cfg:
+            transformer_cfg['gradient_checkpointing'] = True
+
         # Build sub-modules
         self._build_modules({
             'text_encoder': text_encoder,
             'vae': vae,
-            'transformer': transformer,
+            'transformer': transformer_cfg,
             'scheduler': scheduler,
         })
-
-        # Enable gradient checkpointing to save activation memory
-        if gradient_checkpointing and hasattr(self.transformer, 'enable_gradient_checkpointing'):
-            self.transformer.enable_gradient_checkpointing()
 
         # Load tokenizer
         pretrained_path = tokenizer_path
@@ -64,6 +65,75 @@ class WanBundle(ModelBundle):
             self.tokenizer = AutoTokenizer.from_pretrained(pretrained_path)
         else:
             self.tokenizer = None
+
+    @classmethod
+    def _bundle_config_from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str,
+        text_encoder_type: str = 'UMT5EncoderModel',
+        vae_type: str = 'AutoencoderKLWan',
+        transformer_type: str = 'WanTransformer3DModel',
+        scheduler_type: str = 'FlowMatchEulerDiscreteScheduler',
+        text_encoder_overrides: Optional[Dict[str, Any]] = None,
+        vae_overrides: Optional[Dict[str, Any]] = None,
+        transformer_overrides: Optional[Dict[str, Any]] = None,
+        scheduler_overrides: Optional[Dict[str, Any]] = None,
+        tokenizer_path: Optional[str] = None,
+        max_token_length: int = 512,
+        gradient_checkpointing: bool = False,
+        shared_pretrained_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        shared_pretrained_kwargs = shared_pretrained_kwargs or {}
+
+        def build_component(component_type: str, subfolder: str, overrides: Optional[Dict[str, Any]]):
+            component_cfg = {
+                'type': component_type,
+                'from_pretrained': {
+                    'pretrained_model_name_or_path': pretrained_model_name_or_path,
+                    'subfolder': subfolder,
+                },
+            }
+            cls._merge_nested_dict(component_cfg['from_pretrained'], shared_pretrained_kwargs)
+            cls._merge_nested_dict(component_cfg, overrides)
+            return component_cfg
+
+        return {
+            'text_encoder': build_component(text_encoder_type, 'text_encoder', text_encoder_overrides),
+            'vae': build_component(vae_type, 'vae', vae_overrides),
+            'transformer': build_component(transformer_type, 'transformer', transformer_overrides),
+            'scheduler': build_component(scheduler_type, 'scheduler', scheduler_overrides),
+            'tokenizer_path': tokenizer_path or pretrained_model_name_or_path,
+            'max_token_length': max_token_length,
+            'gradient_checkpointing': gradient_checkpointing,
+        }
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        merge_lora: bool = True,
+        safe_serialization: bool = True,
+        **kwargs,
+    ):
+        from diffusers import WanPipeline
+        from hftrainer.utils.hf_export import safe_hf_export
+
+        os.makedirs(save_directory, exist_ok=True)
+        if merge_lora and self.is_lora_module('transformer'):
+            self.merge_lora_weights(['transformer'])
+
+        pipeline = WanPipeline(
+            tokenizer=self.tokenizer,
+            text_encoder=self.text_encoder,
+            vae=self.vae,
+            scheduler=self.scheduler,
+            transformer=self.transformer,
+        )
+        with safe_hf_export():
+            pipeline.save_pretrained(
+                save_directory,
+                safe_serialization=safe_serialization,
+                **kwargs,
+            )
 
     def encode_text(self, prompts: List[str]) -> torch.Tensor:
         """

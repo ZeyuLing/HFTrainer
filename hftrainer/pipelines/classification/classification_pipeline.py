@@ -33,13 +33,25 @@ class ClassificationPipeline(BasePipeline):
         Returns:
             list of predicted class ids (or dict with 'preds' and 'scores')
         """
-        if not isinstance(images, (list, tuple)):
-            images = [images]
-            single = True
+        if isinstance(images, torch.Tensor):
+            if images.ndim == 3:
+                pixel_values = images.unsqueeze(0)
+                single = True
+            elif images.ndim == 4:
+                pixel_values = images
+                single = images.shape[0] == 1
+            else:
+                raise ValueError(
+                    f"Expected image tensor with 3 or 4 dims, got shape {tuple(images.shape)}"
+                )
         else:
-            single = False
+            if not isinstance(images, (list, tuple)):
+                images = [images]
+                single = True
+            else:
+                single = False
+            pixel_values = self.bundle.preprocess(images)
 
-        pixel_values = self.bundle.preprocess(images)
         pixel_values = pixel_values.to(next(iter(self.bundle.model.parameters())).device)
 
         pred_ids, scores = self.bundle.classify(pixel_values)

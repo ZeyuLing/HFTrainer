@@ -107,6 +107,7 @@ def _import_task_modules():
         'hftrainer.models.text2image.sd15_bundle',
         'hftrainer.trainers.text2image.sd15_trainer',
         'hftrainer.pipelines.text2image.sd15_pipeline',
+        'hftrainer.pipelines.text2image.dmd_pipeline',
         'hftrainer.datasets.text2image.hf_imagefolder_dataset',
         'hftrainer.models.llm.causal_lm_bundle',
         'hftrainer.trainers.llm.causal_lm_trainer',
@@ -117,6 +118,16 @@ def _import_task_modules():
         'hftrainer.trainers.text2video.wan_trainer',
         'hftrainer.pipelines.text2video.wan_pipeline',
         'hftrainer.datasets.text2video.hf_video_dataset',
+        # GAN
+        'hftrainer.models.gan.stylegan2',
+        'hftrainer.models.gan.stylegan2_bundle',
+        'hftrainer.trainers.gan.gan_trainer',
+        'hftrainer.pipelines.gan.stylegan2_pipeline',
+        'hftrainer.datasets.gan.image_folder_gan_dataset',
+        # Distillation
+        'hftrainer.models.distillation.dmd_bundle',
+        'hftrainer.trainers.distillation.dmd_trainer',
+        'hftrainer.datasets.distillation.dmd_image_pair_dataset',
     ]
 
     for mod_name in modules_to_import:

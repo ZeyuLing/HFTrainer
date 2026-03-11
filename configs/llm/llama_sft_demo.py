@@ -50,7 +50,6 @@ train_cfg = dict(
     by_epoch=False,
     max_iters=10,   # smoke test: 10 steps
     val_interval=10,
-    save_interval=10,
 )
 
 # ── Runtime ──

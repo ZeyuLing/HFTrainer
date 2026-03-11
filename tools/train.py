@@ -30,15 +30,16 @@ def parse_args():
                         help='Checkpoint load scope (model: weights only, full: full resume)')
     parser.add_argument('--cfg-options', '--cfg_options', dest='cfg_options', nargs='+',
                         help='Override config options, e.g. optimizer.lr=1e-4')
-    # Accelerate passes this; ignore it
-    parser.add_argument('--local_rank', '--local-rank', type=int, default=0)
+    # `accelerate launch` passes this. In plain single-process runs we should
+    # leave LOCAL_RANK unset so Accelerate stays in non-distributed mode.
+    parser.add_argument('--local_rank', '--local-rank', type=int, default=None)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
 
-    if 'LOCAL_RANK' not in os.environ:
+    if args.local_rank is not None and 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
 
     # Load config

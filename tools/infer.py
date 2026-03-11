@@ -5,27 +5,28 @@ Usage:
     # WAN text-to-video
     python tools/infer.py \\
         --config configs/text2video/wan_demo.py \\
-        --checkpoint work_dirs/wan_smoke/checkpoint-5 \\
+        --checkpoint work_dirs/wan_smoke/checkpoint-iter_5 \\
         --prompt "a cat running in the park" \\
         --output output/video.mp4
 
     # SD1.5 text-to-image
     python tools/infer.py \\
         --config configs/text2image/sd15_demo.py \\
-        --checkpoint work_dirs/sd15_smoke/checkpoint-10 \\
+        --checkpoint work_dirs/sd15_smoke/checkpoint-iter_10 \\
         --prompt "a beautiful sunset" \\
         --output output/image.png
 
     # Classification
     python tools/infer.py \\
         --config configs/classification/vit_base_demo.py \\
-        --checkpoint work_dirs/vit_smoke/checkpoint-10 \\
+        --checkpoint work_dirs/vit_smoke/checkpoint-iter_10 \\
         --input data/classification/demo/images/class_0/0000.jpg
 
     # LLM
     python tools/infer.py \\
-        --config configs/llm/llama_sft_demo.py \\
-        --checkpoint work_dirs/llama_smoke/checkpoint-10 \\
+        --config configs/llm/llama_lora_demo.py \\
+        --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \\
+        --merge-lora \\
         --prompt "What is the capital of France?"
 """
 
@@ -45,50 +46,47 @@ def parse_args():
     parser.add_argument('--output', help='Output file path (e.g., image.png, video.mp4)')
     parser.add_argument('--num-steps', type=int, default=None,
                         help='Number of denoising steps (diffusion tasks)')
+    parser.add_argument('--num-samples', type=int, default=1,
+                        help='Number of samples for unconditional generation tasks')
     parser.add_argument('--num-frames', type=int, default=None,
                         help='Number of output frames (video tasks)')
+    parser.add_argument('--max-new-tokens', type=int, default=200,
+                        help='Maximum number of new tokens for LLM generation.')
     parser.add_argument('--height', type=int, default=None, help='Output height')
     parser.add_argument('--width', type=int, default=None, help='Output width')
+    parser.add_argument('--merge-lora', action='store_true',
+                        help='Merge LoRA adapters into base weights before inference.')
     parser.add_argument('--device', default='cuda', help='Device (cuda, cpu)')
     return parser.parse_args()
 
 
 def load_bundle_from_checkpoint(cfg, checkpoint_path: str, device: str):
     """Build ModelBundle from config and load checkpoint weights."""
-    import torch
     from hftrainer.registry import MODEL_BUNDLES
+    from hftrainer.utils.checkpoint_utils import load_checkpoint
 
     model_cfg = getattr(cfg, 'model', None)
     assert model_cfg is not None, "cfg.model is required"
     if hasattr(model_cfg, 'to_dict'):
         model_cfg = model_cfg.to_dict()
 
-    import copy
-    model_cfg = copy.deepcopy(model_cfg)
-    bundle = MODEL_BUNDLES.build(model_cfg)
+    bundle_type = model_cfg.get('type')
+    if bundle_type is None:
+        raise KeyError("cfg.model.type is required")
+
+    bundle_cls = MODEL_BUNDLES.get(bundle_type)
+    if bundle_cls is None:
+        raise KeyError(f"Unknown bundle type: {bundle_type}")
+
+    bundle = bundle_cls.from_config(model_cfg)
     bundle.eval()
 
     # Load checkpoint
-    ckpt_file = os.path.join(checkpoint_path, 'model.safetensors')
-    if not os.path.exists(ckpt_file):
-        ckpt_file = os.path.join(checkpoint_path, 'model.pt')
-    if not os.path.exists(ckpt_file):
-        # Look for per-module files
-        import glob
-        ckpt_files = glob.glob(os.path.join(checkpoint_path, '*.safetensors')) + \
-                     glob.glob(os.path.join(checkpoint_path, '*.pt'))
-        if ckpt_files:
-            ckpt_file = ckpt_files[0]
-
-    if os.path.exists(ckpt_file):
-        print(f'Loading checkpoint: {ckpt_file}')
-        if ckpt_file.endswith('.safetensors'):
-            from safetensors.torch import load_file
-            state_dict = load_file(ckpt_file)
-        else:
-            state_dict = torch.load(ckpt_file, map_location='cpu')
+    try:
+        state_dict = load_checkpoint(checkpoint_path, map_location='cpu')
+        print(f'Loading checkpoint: {checkpoint_path}')
         bundle.load_state_dict_selective(state_dict)
-    else:
+    except FileNotFoundError:
         print(f'Warning: No checkpoint file found in {checkpoint_path}, using pretrained weights.')
 
     bundle = bundle.to(device)
@@ -136,6 +134,7 @@ def infer_text2video(bundle, args):
 def infer_text2image(bundle, args):
     """Run SD1.5 text-to-image inference."""
     from hftrainer.pipelines.text2image.sd15_pipeline import SD15Pipeline
+    from hftrainer.utils.image import save_tensor_image
 
     pipeline = SD15Pipeline(
         bundle=bundle,
@@ -152,30 +151,69 @@ def infer_text2image(bundle, args):
     output = args.output or 'output_image.png'
     os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
 
-    import torchvision.utils as vutils
-    vutils.save_image(images[0], output)
+    try:
+        import torchvision.utils as vutils
+        vutils.save_image(images[0], output)
+    except Exception:
+        save_tensor_image(images[0], output)
+    print(f'Saved image to: {output}')
+
+
+def infer_dmd(bundle, args):
+    """Run DMD one-step text-to-image inference."""
+    from hftrainer.pipelines.text2image.dmd_pipeline import DMDPipeline
+    from hftrainer.utils.image import save_tensor_image
+
+    pipeline = DMDPipeline(bundle=bundle)
+    prompt = args.prompt or 'a beautiful landscape'
+    print(f'Generating image for prompt: "{prompt}"')
+    images = pipeline(prompt)
+
+    output = args.output or 'output_dmd.png'
+    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
+    try:
+        import torchvision.utils as vutils
+        vutils.save_image(images[0], output)
+    except Exception:
+        save_tensor_image(images[0], output)
+    print(f'Saved image to: {output}')
+
+
+def infer_gan(bundle, args):
+    """Run StyleGAN2 inference."""
+    from hftrainer.pipelines.gan.stylegan2_pipeline import StyleGAN2Pipeline
+    from hftrainer.utils.image import save_tensor_image
+
+    pipeline = StyleGAN2Pipeline(bundle=bundle)
+    images = pipeline(num_samples=args.num_samples or 1)
+    output = args.output or 'output_gan.png'
+    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
+    try:
+        import torchvision.utils as vutils
+        if images.shape[0] == 1:
+            vutils.save_image(images[0], output)
+        else:
+            vutils.save_image(images, output, nrow=min(4, images.shape[0]))
+    except Exception:
+        save_tensor_image(images[0], output)
     print(f'Saved image to: {output}')
 
 
 def infer_classification(bundle, args):
     """Run ViT classification inference."""
-    import torch
     from hftrainer.pipelines.classification.classification_pipeline import ClassificationPipeline
 
     pipeline = ClassificationPipeline(bundle=bundle)
 
     if args.input:
         from PIL import Image
-        import torchvision.transforms as T
-        transform = T.Compose([
-            T.Resize((224, 224)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
         img = Image.open(args.input).convert('RGB')
-        pixel_values = transform(img).unsqueeze(0).to(args.device)
-        pred_ids, scores = pipeline(pixel_values)
-        print(f'Predicted class: {pred_ids[0].item()}, score: {scores[0].max().item():.4f}')
+        result = pipeline(img, return_scores=True)
+        pred_ids = result['preds']
+        scores = result['scores']
+        pred_id = pred_ids if isinstance(pred_ids, int) else pred_ids[0]
+        score = scores.max().item() if scores.ndim == 1 else scores[0].max().item()
+        print(f'Predicted class: {pred_id}, score: {score:.4f}')
     else:
         print('Please provide --input path to an image for classification.')
 
@@ -189,12 +227,18 @@ def infer_llm(bundle, args):
     prompt = args.prompt or 'What is artificial intelligence?'
     print(f'Prompt: {prompt}')
 
-    outputs = pipeline([prompt], max_new_tokens=200)
+    outputs = pipeline([prompt], max_new_tokens=args.max_new_tokens)
     print(f'Generated: {outputs[0]}')
 
 
 def main():
     args = parse_args()
+
+    if args.device == 'cuda':
+        import torch
+        if not torch.cuda.is_available():
+            print('CUDA is not available, falling back to cpu.')
+            args.device = 'cpu'
 
     from mmengine.config import Config
     cfg = Config.fromfile(args.config)
@@ -210,11 +254,18 @@ def main():
 
     print(f'Loading bundle from config: {args.config}')
     bundle = load_bundle_from_checkpoint(cfg, args.checkpoint, args.device)
+    if args.merge_lora:
+        bundle.merge_lora_weights()
+        print('Merged LoRA adapters into base weights.')
 
     if 'Wan' in trainer_type:
         infer_text2video(bundle, args)
+    elif 'DMD' in trainer_type:
+        infer_dmd(bundle, args)
     elif 'SD15' in trainer_type or 'Text2Image' in trainer_type:
         infer_text2image(bundle, args)
+    elif 'GAN' in trainer_type:
+        infer_gan(bundle, args)
     elif 'Classification' in trainer_type:
         infer_classification(bundle, args)
     elif 'CausalLM' in trainer_type or 'LLM' in trainer_type:

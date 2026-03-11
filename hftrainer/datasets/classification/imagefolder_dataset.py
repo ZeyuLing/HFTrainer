@@ -9,6 +9,7 @@ from PIL import Image
 
 from hftrainer.datasets.classification.base_classification_dataset import BaseClassificationDataset
 from hftrainer.registry import DATASETS
+from hftrainer.utils.image import IMAGENET_MEAN, IMAGENET_STD, normalize_image, pil_to_tensor, resize_image
 
 
 @DATASETS.register_module()
@@ -116,8 +117,8 @@ class ImageFolderDataset(BaseClassificationDataset):
         if self.transform is not None:
             pixel_values = self.transform(image)
         else:
-            import torchvision.transforms.functional as TF
-            pixel_values = TF.to_tensor(TF.resize(image, [self.image_size, self.image_size]))
+            image = resize_image(image, (self.image_size, self.image_size))
+            pixel_values = normalize_image(pil_to_tensor(image), IMAGENET_MEAN, IMAGENET_STD)
 
         return {
             'pixel_values': pixel_values,

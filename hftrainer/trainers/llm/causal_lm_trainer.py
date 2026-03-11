@@ -70,6 +70,12 @@ class CausalLMTrainer(BaseTrainer):
         input_prompts = batch.get('input_prompts', [''] * batch['input_ids'].shape[0])
         gt_texts = batch.get('output_texts', [''] * batch['input_ids'].shape[0])
 
+        outputs = self.bundle.forward_logits(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+            labels=batch['labels'],
+        )
+
         # Generate
         preds = self.bundle.generate(
             input_prompts,
@@ -81,4 +87,5 @@ class CausalLMTrainer(BaseTrainer):
             'preds': preds,
             'gts': gt_texts,
             'input_prompts': input_prompts,
+            'loss_lm': outputs.loss.detach(),
         }

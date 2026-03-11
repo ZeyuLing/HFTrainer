@@ -1,11 +1,13 @@
 """ViT classification ModelBundle."""
 
+import os
 import torch
 import torch.nn as nn
-from typing import Dict, Tuple, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES, HF_MODELS
+from hftrainer.utils.image import IMAGENET_MEAN, IMAGENET_STD, normalize_image, pil_to_tensor
 
 
 @MODEL_BUNDLES.register_module()
@@ -49,6 +51,55 @@ class ViTBundle(ModelBundle):
             except Exception:
                 pass
 
+    @classmethod
+    def _bundle_config_from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str,
+        model_type: str = 'AutoModelForImageClassification',
+        model_kwargs: Optional[Dict[str, Any]] = None,
+        model_overrides: Optional[Dict[str, Any]] = None,
+        num_labels: Optional[int] = None,
+        image_size: int = 224,
+    ) -> Dict[str, Any]:
+        model_cfg = {
+            'type': model_type,
+            'from_pretrained': {
+                'pretrained_model_name_or_path': pretrained_model_name_or_path,
+            },
+        }
+        if num_labels is not None:
+            model_cfg['from_pretrained']['num_labels'] = num_labels
+            model_cfg['from_pretrained'].setdefault('ignore_mismatched_sizes', True)
+        cls._merge_nested_dict(model_cfg['from_pretrained'], model_kwargs)
+        cls._merge_nested_dict(model_cfg, model_overrides)
+        return {
+            'model': model_cfg,
+            'num_labels': num_labels,
+            'image_size': image_size,
+        }
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        merge_lora: bool = True,
+        safe_serialization: bool = True,
+        **kwargs,
+    ):
+        from hftrainer.utils.hf_export import safe_hf_export
+
+        os.makedirs(save_directory, exist_ok=True)
+        if merge_lora and self.is_lora_module('model'):
+            self.merge_lora_weights(['model'])
+
+        with safe_hf_export():
+            self.model.save_pretrained(
+                save_directory,
+                safe_serialization=safe_serialization,
+                **kwargs,
+            )
+        if self._image_processor is not None and hasattr(self._image_processor, 'save_pretrained'):
+            self._image_processor.save_pretrained(save_directory)
+
     def preprocess(self, images) -> torch.Tensor:
         """
         Preprocess images to pixel_values tensor.
@@ -67,13 +118,11 @@ class ViTBundle(ModelBundle):
             return inputs['pixel_values']
 
         # Fallback: manual normalization
-        import torchvision.transforms.functional as TF
-        tensors = [TF.to_tensor(img) for img in images]
+        tensors = [pil_to_tensor(img) for img in images]
         pixel_values = torch.stack(tensors)
-        # ImageNet normalization
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-        return (pixel_values - mean) / std
+        mean = torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1)
+        std = torch.tensor(IMAGENET_STD).view(1, 3, 1, 1)
+        return normalize_image(pixel_values, mean.flatten().tolist(), std.flatten().tolist())
 
     def forward_features(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """

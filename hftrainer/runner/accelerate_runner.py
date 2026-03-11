@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from accelerate import Accelerator
+from accelerate.utils import DistributedType
 from mmengine.config import Config
 
 from hftrainer.utils.logger import get_logger, add_file_handler
@@ -79,10 +80,17 @@ class AccelerateRunner:
 
         # Inject accelerator into trainer
         self.trainer.accelerator = accelerator
+        self.trainer.runner = self
 
         # Inject runner into hooks
         for hook in self.hooks:
             hook.runner = self
+
+        # Auto-inherit by_epoch from train_cfg to hooks that have by_epoch=None
+        by_epoch = self.train_cfg.get('by_epoch', False)
+        for hook in self.hooks:
+            if hasattr(hook, 'by_epoch') and hook.by_epoch is None:
+                hook.by_epoch = by_epoch
 
     @classmethod
     def from_cfg(cls, cfg) -> 'AccelerateRunner':
@@ -103,16 +111,6 @@ class AccelerateRunner:
         accel_cfg = getattr(cfg, 'accelerator', {})
         if hasattr(accel_cfg, 'to_dict'):
             accel_cfg = accel_cfg.to_dict()
-
-        # When running without `accelerate launch`, ensure distributed env vars
-        # are not partially set (which would cause init_process_group to fail)
-        if 'RANK' not in os.environ and 'WORLD_SIZE' not in os.environ:
-            # Single-process mode: set env vars to avoid distributed init
-            os.environ.setdefault('RANK', '0')
-            os.environ.setdefault('LOCAL_RANK', '0')
-            os.environ.setdefault('WORLD_SIZE', '1')
-            os.environ.setdefault('MASTER_ADDR', '127.0.0.1')
-            os.environ.setdefault('MASTER_PORT', '29500')
 
         accelerator = Accelerator(
             mixed_precision=accel_cfg.get('mixed_precision', 'no'),
@@ -263,6 +261,15 @@ class AccelerateRunner:
             except Exception as e:
                 logger.warning(f"Could not init trackers: {e}")
 
+        # If trainer controls optimization, inject optimizers/schedulers into it
+        if runner.trainer.trainer_controls_optimization:
+            runner.trainer.set_optimizers(runner.optimizers, runner.lr_schedulers)
+            logger.info(
+                f"trainer_controls_optimization=True: injected "
+                f"{list(runner.optimizers.keys())} optimizers into "
+                f"{type(runner.trainer).__name__}"
+            )
+
         # Handle checkpoint loading
         runner._handle_load()
 
@@ -355,6 +362,12 @@ class AccelerateRunner:
             dl_cfg = dl_cfg.to_dict()
         dl_cfg = copy.deepcopy(dl_cfg)
 
+        dataset_cfg = dl_cfg.pop('dataset', None)
+        if dataset_cfg is None:
+            dataset_cfg = dl_cfg
+        elif hasattr(dataset_cfg, 'to_dict'):
+            dataset_cfg = dataset_cfg.to_dict()
+
         batch_size = dl_cfg.pop('batch_size', 1)
         num_workers = dl_cfg.pop('num_workers', 0)
         shuffle = dl_cfg.pop('shuffle', True)
@@ -364,7 +377,9 @@ class AccelerateRunner:
         persistent_workers = dl_cfg.pop('persistent_workers', False)
         sampler = dl_cfg.pop('sampler', None)
 
-        dataset = DATASETS.build(dl_cfg)
+        dataset = DATASETS.build(dataset_cfg)
+        if collate_fn is None and hasattr(dataset, 'collate_fn'):
+            collate_fn = dataset.collate_fn
 
         loader_kwargs = dict(
             batch_size=batch_size,
@@ -405,12 +420,38 @@ class AccelerateRunner:
         if is_multi:
             optimizers = {}
             for name, opt_cfg in optimizer_cfg.items():
-                # Get params for this named module
-                module = getattr(bundle, name, None)
-                if module is not None and isinstance(module, nn.Module):
-                    params = list(module.parameters())
+                opt_cfg = copy.deepcopy(opt_cfg)
+                # Support explicit 'params' key: list of bundle module names
+                param_names = opt_cfg.pop('params', None)
+                if param_names is not None:
+                    params = []
+                    for mod_name in param_names:
+                        module = getattr(bundle, mod_name, None)
+                        if module is not None and isinstance(module, nn.Module):
+                            params.extend(
+                                param for param in module.parameters()
+                                if param.requires_grad
+                            )
+                        else:
+                            raise ValueError(
+                                f"Optimizer '{name}' references module '{mod_name}' "
+                                f"which does not exist in the bundle or is not nn.Module. "
+                                f"Available modules: {bundle._trainable_modules}"
+                            )
                 else:
-                    params = bundle.trainable_parameters()
+                    # Fallback: match optimizer name to bundle module name
+                    module = getattr(bundle, name, None)
+                    if module is not None and isinstance(module, nn.Module):
+                        params = [
+                            param for param in module.parameters()
+                            if param.requires_grad
+                        ]
+                    else:
+                        raise ValueError(
+                            f"Optimizer '{name}' does not match any bundle module. "
+                            f"Use 'params' key to specify module names explicitly. "
+                            f"Available trainable modules: {bundle._trainable_modules}"
+                        )
                 optimizers[name] = AccelerateRunner._build_single_optimizer(opt_cfg, params)
             return optimizers
         else:
@@ -606,7 +647,7 @@ class AccelerateRunner:
             # Try to restore global_step from metadata
             meta_path = os.path.join(path, 'meta.pt')
             if os.path.exists(meta_path):
-                meta = torch.load(meta_path, map_location='cpu')
+                meta = torch.load(meta_path, map_location='cpu', weights_only=False)
                 self.global_step = meta.get('global_step', 0)
                 self.current_epoch = meta.get('current_epoch', 0)
             logger.info(
@@ -615,39 +656,46 @@ class AccelerateRunner:
             )
             logger.info(sep)
         elif load_scope == 'model':
-            import torch
             from hftrainer.utils.checkpoint_utils import load_checkpoint
-            # Load model weights only
-            ckpt_path = os.path.join(path, 'model.pt') if os.path.isdir(path) else path
-            if os.path.exists(ckpt_path):
-                state_dict = torch.load(ckpt_path, map_location='cpu')
+            try:
+                state_dict = load_checkpoint(path, map_location='cpu')
                 self.bundle.load_state_dict_selective(state_dict)
                 logger.info(sep)
-                logger.info(f"Loaded model weights from: {ckpt_path}")
+                logger.info(f"Loaded model weights from: {path}")
                 logger.info("Optimizer and training state reset to initial.")
                 logger.info(sep)
-            else:
-                logger.warning(f"model.pt not found at {path}, skipping model load")
+            except FileNotFoundError:
+                logger.warning(f"No model checkpoint found at {path}, skipping model load")
         else:
             raise ValueError(f"Unknown load_scope: {load_scope}. Expected 'model' or 'full'.")
 
     def save_checkpoint(self):
-        """Save checkpoint at current global_step."""
+        """Save checkpoint. Directory name reflects training mode."""
+        by_epoch = self.train_cfg.get('by_epoch', False)
+        if by_epoch:
+            ckpt_dir = os.path.join(self.work_dir, f'checkpoint-epoch_{self.current_epoch}')
+        else:
+            ckpt_dir = os.path.join(self.work_dir, f'checkpoint-iter_{self.global_step}')
+
+        if self.accelerator.is_main_process:
+            os.makedirs(ckpt_dir, exist_ok=True)
+        self.accelerator.wait_for_everyone()
+
+        # Save the accelerator state on every process so distributed backends
+        # can write their rank-local shards and RNG state.
+        self.accelerator.save_state(ckpt_dir)
+        self.accelerator.wait_for_everyone()
+
+        # Save selective model weights in a backend-aware way.
+        state_dict = self._state_dict_to_save()
+
         if not self.accelerator.is_main_process:
             return
 
-        ckpt_dir = os.path.join(self.work_dir, f'checkpoint-{self.global_step}')
-        os.makedirs(ckpt_dir, exist_ok=True)
-
-        # Save model weights (selective)
         import torch
-        state_dict = self.bundle.state_dict_to_save()
         torch.save(state_dict, os.path.join(ckpt_dir, 'model.pt'))
 
-        # Save full accelerator state (optimizer, scheduler, etc.)
-        self.accelerator.save_state(ckpt_dir)
-
-        # Save meta
+        # Save meta using completed step / epoch counts for exact resume.
         meta = {'global_step': self.global_step, 'current_epoch': self.current_epoch}
         torch.save(meta, os.path.join(ckpt_dir, 'meta.pt'))
 
@@ -666,19 +714,71 @@ class AccelerateRunner:
         if max_keep is None:
             return
 
-        import glob, re
+        import glob, shutil
         pattern = os.path.join(self.work_dir, 'checkpoint-*')
-        ckpts = sorted(
-            glob.glob(pattern),
-            key=lambda p: int(re.search(r'checkpoint-(\d+)', p).group(1))
-            if re.search(r'checkpoint-(\d+)', p) else 0
-        )
+        candidates = [c for c in glob.glob(pattern) if os.path.isdir(c)]
+        ckpts = sorted(candidates, key=self._extract_ckpt_order)
         while len(ckpts) > max_keep:
-            import shutil
             oldest = ckpts.pop(0)
             if os.path.isdir(oldest):
                 shutil.rmtree(oldest)
             logger.info(f"Removed old checkpoint: {oldest}")
+
+    def _state_dict_to_save(self) -> Dict[str, dict]:
+        """Build a nested state dict for save_ckpt=True modules."""
+        from hftrainer.models.peft_utils import get_lora_state_dict
+
+        state_dict = {'__hftrainer_meta__': self.bundle.checkpoint_metadata()}
+        for name in self.bundle._save_ckpt_modules:
+            module = getattr(self.bundle, name, None)
+            if not isinstance(module, nn.Module):
+                continue
+            if name in self.bundle._trainable_modules:
+                module_state = self._get_module_state_dict(module)
+            else:
+                module_state = module.state_dict()
+
+            if self.bundle.get_module_checkpoint_format(name) == 'lora':
+                module_state = get_lora_state_dict(module, state_dict=module_state)
+
+            state_dict[name] = module_state
+        return state_dict
+
+    def _get_module_state_dict(self, module: nn.Module) -> dict:
+        """Return a saveable state dict without forcing unnecessary backend imports."""
+        if self.accelerator.distributed_type in {
+            DistributedType.FSDP,
+            DistributedType.DEEPSPEED,
+            DistributedType.MEGATRON_LM,
+        }:
+            return self.accelerator.get_state_dict(module)
+
+        while hasattr(module, 'module') and isinstance(module.module, nn.Module):
+            module = module.module
+        return module.state_dict()
+
+    @staticmethod
+    def _extract_ckpt_order(path):
+        """Extract sort key from checkpoint directory name.
+
+        Supports: checkpoint-iter_N, checkpoint-epoch_N, checkpoint-N (legacy).
+        Falls back to meta.pt global_step if directory name cannot be parsed.
+        """
+        import re
+        basename = os.path.basename(path)
+        # checkpoint-iter_5000 -> 5000
+        m = re.match(r'checkpoint-iter_(\d+)$', basename)
+        if m:
+            return int(m.group(1))
+        # checkpoint-epoch_3 -> 3  (epoch number, not directly comparable to iter)
+        m = re.match(r'checkpoint-epoch_(\d+)$', basename)
+        if m:
+            return int(m.group(1))
+        # Legacy: checkpoint-5000 -> 5000
+        m = re.match(r'checkpoint-(\d+)$', basename)
+        if m:
+            return int(m.group(1))
+        return -1
 
     # ─────────────────────────────────────────────────────────────────────────
     # Training loop
@@ -691,7 +791,6 @@ class AccelerateRunner:
         train_cfg = self.train_cfg
         by_epoch = train_cfg.get('by_epoch', False)
         val_interval = train_cfg.get('val_interval', None)
-        save_interval = train_cfg.get('save_interval', val_interval)
 
         # Call before_run hooks
         for hook in self.hooks:
@@ -699,9 +798,9 @@ class AccelerateRunner:
                 hook.before_run()
 
         if by_epoch:
-            self._train_by_epoch(train_cfg, val_interval, save_interval)
+            self._train_by_epoch(train_cfg, val_interval)
         else:
-            self._train_by_iter(train_cfg, val_interval, save_interval)
+            self._train_by_iter(train_cfg, val_interval)
 
         # Call after_run hooks (CheckpointHook.after_run saves final checkpoint)
         for hook in self.hooks:
@@ -716,10 +815,9 @@ class AccelerateRunner:
 
         logger.info("Training complete.")
 
-    def _train_by_iter(self, train_cfg: dict, val_interval, save_interval):
+    def _train_by_iter(self, train_cfg: dict, val_interval):
         """Iteration-based training loop."""
         max_iters = train_cfg.get('max_iters', 10000)
-        grad_accum = getattr(self.accelerator, 'gradient_accumulation_steps', 1)
 
         self.bundle.train()
         self.trainer.train()
@@ -727,19 +825,16 @@ class AccelerateRunner:
         loop = IterBasedLoop(
             self.train_dataloader, max_iters,
             val_interval=val_interval or max_iters,
-            save_interval=save_interval or val_interval or max_iters,
         )
 
-        for global_step, batch in loop.iter_batches():
-            if global_step < self.global_step:
+        for step_idx, batch in loop.iter_batches():
+            if step_idx < self.global_step:
                 continue  # skip already-trained steps when resuming
-
-            self.global_step = global_step
 
             # Before-iter hooks
             for hook in self.hooks:
                 if hasattr(hook, 'before_train_iter'):
-                    hook.before_train_iter(global_step)
+                    hook.before_train_iter(step_idx)
 
             # Training step
             with self.accelerator.accumulate(*[
@@ -747,29 +842,33 @@ class AccelerateRunner:
                 if isinstance(getattr(self.bundle, n), nn.Module)
             ]):
                 output = self.trainer.train_step(batch)
-                loss = output.get('loss')
-                if loss is not None:
-                    self.accelerator.backward(loss)
-                    for opt in self.optimizers.values():
-                        opt.step()
-                        opt.zero_grad()
-                    for sched in self.lr_schedulers.values():
-                        sched.step()
+
+                if not self.trainer.trainer_controls_optimization:
+                    # Runner-controlled optimization (default single-loss path)
+                    loss = output.get('loss')
+                    if loss is not None:
+                        self.accelerator.backward(loss)
+                        for opt in self.optimizers.values():
+                            opt.step()
+                            opt.zero_grad()
+                        for sched in self.lr_schedulers.values():
+                            sched.step()
+                # else: trainer already did backward/step/zero_grad in train_step
+
+            self.global_step = step_idx + 1
 
             # After-iter hooks (CheckpointHook handles saving at its interval)
             for hook in self.hooks:
                 if hasattr(hook, 'after_train_iter'):
-                    hook.after_train_iter(global_step, output)
+                    hook.after_train_iter(step_idx, output)
 
             # Validation
-            if val_interval and (global_step + 1) % val_interval == 0:
+            if val_interval and self.global_step % val_interval == 0:
                 self.val()
                 self.bundle.train()
                 self.trainer.train()
 
-        self.global_step = max_iters
-
-    def _train_by_epoch(self, train_cfg: dict, val_interval, save_interval):
+    def _train_by_epoch(self, train_cfg: dict, val_interval):
         """Epoch-based training loop."""
         max_epochs = train_cfg.get('max_epochs', 100)
 
@@ -783,42 +882,46 @@ class AccelerateRunner:
                     hook.before_train_epoch(epoch)
 
             for batch_idx, batch in enumerate(self.train_dataloader):
+                current_step = self.global_step
+
                 # Before-iter hooks
                 for hook in self.hooks:
                     if hasattr(hook, 'before_train_iter'):
-                        hook.before_train_iter(self.global_step)
+                        hook.before_train_iter(current_step)
 
                 with self.accelerator.accumulate(*[
                     getattr(self.bundle, n) for n in self.bundle._trainable_modules
                     if isinstance(getattr(self.bundle, n), nn.Module)
                 ]):
                     output = self.trainer.train_step(batch)
-                    loss = output.get('loss')
-                    if loss is not None:
-                        self.accelerator.backward(loss)
-                        for opt in self.optimizers.values():
-                            opt.step()
-                            opt.zero_grad()
-                        for sched in self.lr_schedulers.values():
-                            sched.step()
 
-                self.global_step += 1
+                    if not self.trainer.trainer_controls_optimization:
+                        # Runner-controlled optimization (default single-loss path)
+                        loss = output.get('loss')
+                        if loss is not None:
+                            self.accelerator.backward(loss)
+                            for opt in self.optimizers.values():
+                                opt.step()
+                                opt.zero_grad()
+                            for sched in self.lr_schedulers.values():
+                                sched.step()
+                    # else: trainer already did backward/step/zero_grad in train_step
+
+                self.global_step = current_step + 1
 
                 for hook in self.hooks:
                     if hasattr(hook, 'after_train_iter'):
-                        hook.after_train_iter(self.global_step, output)
+                        hook.after_train_iter(current_step, output)
 
+            self.current_epoch = epoch + 1
             for hook in self.hooks:
                 if hasattr(hook, 'after_train_epoch'):
                     hook.after_train_epoch(epoch)
 
-            if val_interval and (epoch + 1) % val_interval == 0:
+            if val_interval and self.current_epoch % val_interval == 0:
                 self.val()
                 self.bundle.train()
                 self.trainer.train()
-
-            if save_interval and (epoch + 1) % save_interval == 0:
-                self.save_checkpoint()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Validation loop

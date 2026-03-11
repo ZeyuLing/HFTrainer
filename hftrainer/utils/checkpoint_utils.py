@@ -5,38 +5,53 @@ import glob
 import re
 from typing import Optional
 
+import torch
+
 
 def find_latest_checkpoint(work_dir: str) -> Optional[str]:
     """
     Find the latest checkpoint in work_dir.
-    Looks for directories named 'checkpoint-{step}' or 'checkpoint-epoch{epoch}'.
-    Returns the path with the highest step/epoch number, or None if not found.
+
+    Looks for directories named ``checkpoint-iter_N``, ``checkpoint-epoch_N``,
+    or the legacy ``checkpoint-N`` format.
+
+    Sorting priority:
+      1. If ``meta.pt`` exists inside the checkpoint dir, use ``global_step``
+         from the saved metadata (most reliable across formats).
+      2. Otherwise fall back to parsing the directory name.
+
+    Returns the path with the highest step, or None if not found.
     """
     if not os.path.isdir(work_dir):
         return None
 
     # Look for checkpoint directories
     pattern = os.path.join(work_dir, 'checkpoint-*')
-    candidates = glob.glob(pattern)
+    candidates = [c for c in glob.glob(pattern) if os.path.isdir(c)]
 
     if not candidates:
         return None
 
     def extract_step(path):
+        # Try to read meta.pt for accurate ordering
+        meta_path = os.path.join(path, 'meta.pt')
+        if os.path.exists(meta_path):
+            try:
+                meta = torch.load(meta_path, map_location='cpu', weights_only=False)
+                return meta.get('global_step', -1)
+            except Exception:
+                pass
+        # Fallback: parse directory name
         basename = os.path.basename(path)
-        # Try 'checkpoint-{number}'
-        m = re.match(r'checkpoint-(\d+)$', basename)
-        if m:
-            return int(m.group(1))
-        # Try 'checkpoint-epoch{number}'
-        m = re.match(r'checkpoint-epoch(\d+)$', basename)
-        if m:
-            return int(m.group(1))
+        for pat in [
+            r'checkpoint-iter_(\d+)$',
+            r'checkpoint-epoch_(\d+)$',
+            r'checkpoint-(\d+)$',
+        ]:
+            m = re.match(pat, basename)
+            if m:
+                return int(m.group(1))
         return -1
-
-    candidates = [c for c in candidates if os.path.isdir(c)]
-    if not candidates:
-        return None
 
     latest = max(candidates, key=extract_step)
     if extract_step(latest) < 0:
@@ -53,21 +68,21 @@ def load_checkpoint(path: str, map_location='cpu') -> dict:
             from safetensors.torch import load_file
             return load_file(path, device=map_location)
         else:
-            return torch.load(path, map_location=map_location)
+            return torch.load(path, map_location=map_location, weights_only=False)
     elif os.path.isdir(path):
-        # Try safetensors first
+        # Prefer HF-Trainer selective model weights over accelerator state files.
+        pt_path = os.path.join(path, 'model.pt')
+        if os.path.exists(pt_path):
+            import torch
+            return torch.load(pt_path, map_location=map_location, weights_only=False)
         st_path = os.path.join(path, 'model.safetensors')
         if os.path.exists(st_path):
             from safetensors.torch import load_file
             return load_file(st_path, device=map_location)
-        pt_path = os.path.join(path, 'model.pt')
-        if os.path.exists(pt_path):
-            import torch
-            return torch.load(pt_path, map_location=map_location)
         pt_path = os.path.join(path, 'pytorch_model.bin')
         if os.path.exists(pt_path):
             import torch
-            return torch.load(pt_path, map_location=map_location)
+            return torch.load(pt_path, map_location=map_location, weights_only=False)
     raise FileNotFoundError(f"No checkpoint found at: {path}")
 
 
