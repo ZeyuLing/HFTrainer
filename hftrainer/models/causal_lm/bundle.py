@@ -1,9 +1,7 @@
 """CausalLM ModelBundle for LLM training."""
 
-import os
 import torch
-import torch.nn as nn
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional
 
 from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES
@@ -23,6 +21,28 @@ class CausalLMBundle(ModelBundle):
       - forward_logits(input_ids, attention_mask, labels) -> CausalLMOutput
       - generate(prompts, **kwargs) -> list[str]
     """
+
+    HF_PRETRAINED_SPEC = {
+        'components': {
+            'model': {
+                'default_type': 'AutoModelForCausalLM',
+                'type_arg': 'model_type',
+                'pretrained_kwargs_arg': 'model_kwargs',
+                'overrides_arg': 'model_overrides',
+            },
+        },
+        'init_args': {
+            'tokenizer_path': {'default': ModelBundle._PRETRAINED_PATH_SENTINEL},
+            'max_length': 512,
+            'padding_side': 'right',
+        },
+    }
+    HF_SAVE_PRETRAINED_SPEC = {
+        'kind': 'module',
+        'module': 'model',
+        'merge_lora_modules': ['model'],
+        'extra_artifacts': ['tokenizer'],
+    }
 
     def __init__(
         self,
@@ -56,54 +76,6 @@ class CausalLMBundle(ModelBundle):
             self.tokenizer = tok
         else:
             self.tokenizer = None
-
-    @classmethod
-    def _bundle_config_from_pretrained(
-        cls,
-        pretrained_model_name_or_path: str,
-        model_type: str = 'AutoModelForCausalLM',
-        model_kwargs: Optional[Dict[str, Any]] = None,
-        model_overrides: Optional[Dict[str, Any]] = None,
-        tokenizer_path: Optional[str] = None,
-        max_length: int = 512,
-        padding_side: str = 'right',
-    ) -> Dict[str, Any]:
-        model_cfg = {
-            'type': model_type,
-            'from_pretrained': {
-                'pretrained_model_name_or_path': pretrained_model_name_or_path,
-            },
-        }
-        cls._merge_nested_dict(model_cfg['from_pretrained'], model_kwargs)
-        cls._merge_nested_dict(model_cfg, model_overrides)
-        return {
-            'model': model_cfg,
-            'tokenizer_path': tokenizer_path or pretrained_model_name_or_path,
-            'max_length': max_length,
-            'padding_side': padding_side,
-        }
-
-    def save_pretrained(
-        self,
-        save_directory: str,
-        merge_lora: bool = True,
-        safe_serialization: bool = True,
-        **kwargs,
-    ):
-        from hftrainer.utils.hf_export import safe_hf_export
-
-        os.makedirs(save_directory, exist_ok=True)
-        if merge_lora and self.is_lora_module('model'):
-            self.merge_lora_weights(['model'])
-
-        with safe_hf_export():
-            self.model.save_pretrained(
-                save_directory,
-                safe_serialization=safe_serialization,
-                **kwargs,
-            )
-        if self.tokenizer is not None and hasattr(self.tokenizer, 'save_pretrained'):
-            self.tokenizer.save_pretrained(save_directory)
 
     def tokenize(
         self,

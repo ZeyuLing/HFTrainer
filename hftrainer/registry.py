@@ -14,7 +14,7 @@ Registries:
 """
 
 import copy
-from mmengine.registry import Registry
+from mmengine.registry import Registry, TRANSFORMS as MMENGINE_TRANSFORMS
 
 # Map string shorthand to torch.dtype
 _DTYPE_MAP = {
@@ -119,11 +119,15 @@ def _import_hf_class(class_name: str):
 
 # Core registries
 HF_MODELS = Registry('hf_model', build_func=build_hf_model_from_cfg)
+# Compatibility alias for vendored model code that expects a generic model
+# registry. HF_MODELS can already build plain nn.Module classes, not only
+# HuggingFace-native ones, so reusing it keeps the migration surface small.
+MODELS = HF_MODELS
 MODEL_BUNDLES = Registry('model_bundle')
 TRAINERS = Registry('trainer')
 PIPELINES = Registry('pipeline')
 DATASETS = Registry('dataset')
-TRANSFORMS = Registry('transform')
+TRANSFORMS = MMENGINE_TRANSFORMS
 HOOKS = Registry('hook')
 EVALUATORS = Registry('evaluator')
 VISUALIZERS = Registry('visualizer')

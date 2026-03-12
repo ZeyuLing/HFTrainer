@@ -15,8 +15,8 @@
 职责划分是：
 
 - 父类负责统一 public API 形状
-- HF-native 的 bundle 子类只需要提供 `_bundle_config_from_pretrained(...)`
-- HF-native 的 bundle 子类可以按需覆盖 `save_pretrained(...)`，把训练结果导出成官方 `diffusers` / `transformers` 能直接读取的 artifact
+- 普通 HF-native bundle 优先通过 `HF_PRETRAINED_SPEC` 和 `HF_SAVE_PRETRAINED_SPEC` 完成接入
+- 只有在 artifact 结构特殊到声明式 spec 表达不了时，才需要覆盖 `_bundle_config_from_pretrained(...)` 或 `save_pretrained(...)`
 
 ## 路径 1：从现有 HuggingFace 模型开始
 
@@ -33,7 +33,7 @@
 1. 一个 `ModelBundle` 子类，用来组织任务所需组件。
 2. 一组任务原子前向函数，例如 `encode_text`、`predict_noise`、`generate`、`classify`。
 3. 一个 task trainer，定义 loss 和优化顺序。
-4. 如有需要，实现 `save_pretrained(...)`，让训练产物能直接被官方推理 API 读取。
+4. 通常只要声明导出 spec；只有导出格式特殊时才需要手写 `save_pretrained(...)`。
 
 显存和精度控制也应该放在 bundle config 这一层完成，而不是去改写官方模型类。常见 override 包括 `trainable`、`save_ckpt`、`checkpoint_format`、`lora_cfg`、`gradient_checkpointing`、`from_pretrained.torch_dtype` 和 `module_dtype`。
 
@@ -42,17 +42,25 @@
 ```python
 @MODEL_BUNDLES.register_module()
 class MyLMBundle(ModelBundle):
-    @classmethod
-    def _bundle_config_from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
-        return dict(
-            model=dict(
-                type='AutoModelForCausalLM',
-                from_pretrained=dict(
-                    pretrained_model_name_or_path=pretrained_model_name_or_path,
-                ),
-            ),
-            tokenizer_path=pretrained_model_name_or_path,
-        )
+    HF_PRETRAINED_SPEC = {
+        'components': {
+            'model': {
+                'default_type': 'AutoModelForCausalLM',
+                'pretrained_kwargs_arg': 'model_kwargs',
+                'overrides_arg': 'model_overrides',
+            },
+        },
+        'init_args': {
+            'tokenizer_path': {
+                'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
+            },
+        },
+    }
+    HF_SAVE_PRETRAINED_SPEC = {
+        'kind': 'module',
+        'module': 'model',
+        'extra_artifacts': ['tokenizer'],
+    }
 
     def __init__(self, model, tokenizer_path=None):
         super().__init__()
@@ -97,7 +105,7 @@ bundle = SD15Bundle.from_pretrained(
 
 ### 如何导出回官方推理 API
 
-HF-native bundle 应该实现 `save_pretrained(...)`。
+HF-native bundle 通常应该声明 `HF_SAVE_PRETRAINED_SPEC`。只有少数导出格式特殊的任务才需要手写 `save_pretrained(...)`。
 
 当前已实现：
 
@@ -175,9 +183,10 @@ bundle = MyCustomBundle.from_config(
 
 这时需要：
 
-1. 实现 `_bundle_config_from_pretrained(...)`
-2. 实现 `save_pretrained(...)`
-3. 文档里明确导出 artifact 的格式
+1. 先尝试 `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC`
+2. 如果声明式 spec 表达不了，再实现 `_bundle_config_from_pretrained(...)`
+3. 只有当导出还需要任务相关逻辑时，再实现 `save_pretrained(...)`
+4. 文档里明确导出 artifact 的格式
 
 如果不需要这些保证，只用 `from_config(...)` 加 checkpoint save/load 就够了。
 

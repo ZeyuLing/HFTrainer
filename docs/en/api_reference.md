@@ -127,8 +127,9 @@ Each bundle sub-module can declare:
 ### Construction semantics
 
 - `from_config(...)` is fully generic and should be the default entry for custom/self-developed models.
-- `from_pretrained(...)` is a generic parent-class API, but each HF-native bundle still defines how one pretrained artifact maps to sub-modules through `_bundle_config_from_pretrained(...)`.
-- `save_pretrained(...)` is intentionally task-specific. Implement it only when the bundle can export an artifact that official inference APIs can read.
+- `from_pretrained(...)` is a generic parent-class API. Ordinary HF-native bundles should use `HF_PRETRAINED_SPEC` instead of hand-writing `_bundle_config_from_pretrained(...)`.
+- `save_pretrained(...)` is intentionally task-specific, but ordinary HF-native bundles should prefer `HF_SAVE_PRETRAINED_SPEC` over a hand-written method.
+- Override `_bundle_config_from_pretrained(...)` or `save_pretrained(...)` only when the artifact layout is unusual enough that the declarative specs are not sufficient.
 - `from_pretrained.torch_dtype` / `dtype` are passed through to the underlying HF loader, while `module_dtype` is an HF-Trainer post-load cast.
 - See [Memory and Precision](memory.md) for global AMP, per-module dtype, and gradient-checkpointing guidance.
 

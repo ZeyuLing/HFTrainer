@@ -1,15 +1,10 @@
 """Simple image folder dataset (no HF dependency)."""
 
 import os
-import glob
-from typing import Dict, Any, Optional, List
-
-import torch
-from PIL import Image
+from typing import Optional
 
 from hftrainer.datasets.classification.base_classification_dataset import BaseClassificationDataset
 from hftrainer.registry import DATASETS
-from hftrainer.utils.image import IMAGENET_MEAN, IMAGENET_STD, normalize_image, pil_to_tensor, resize_image
 
 
 @DATASETS.register_module()
@@ -30,27 +25,27 @@ class ImageFolderDataset(BaseClassificationDataset):
         data_root: str,
         split: str = 'train',
         image_size: int = 224,
-        transform=None,
+        pipeline=None,
         max_samples: Optional[int] = None,
         label_file: Optional[str] = None,
+        serialize_data: bool = False,
     ):
-        super().__init__(image_size=image_size, transform=transform)
         self.data_root = data_root
+        self.split = split
+        self.max_samples = max_samples
+        self.label_file = label_file
 
-        self.samples = []
         self.classes = []
         self.class_to_idx = {}
-
-        if label_file and os.path.exists(label_file):
-            self._load_from_label_file(label_file)
-        elif os.path.isdir(data_root):
-            self._load_from_folder(data_root)
-
-        if max_samples is not None:
-            self.samples = self.samples[:max_samples]
+        super().__init__(
+            image_size=image_size,
+            pipeline=pipeline,
+            serialize_data=serialize_data,
+        )
 
     def _load_from_folder(self, root: str):
         """Load from ImageFolder structure: root/class_name/image.jpg"""
+        records = []
         class_dirs = sorted([
             d for d in os.listdir(root)
             if os.path.isdir(os.path.join(root, d))
@@ -63,10 +58,11 @@ class ImageFolderDataset(BaseClassificationDataset):
                 class_dir = os.path.join(root, class_name)
                 for fname in sorted(os.listdir(class_dir)):
                     if fname.lower().endswith(self.EXTENSIONS):
-                        self.samples.append((
-                            os.path.join(class_dir, fname),
-                            self.class_to_idx[class_name]
-                        ))
+                        records.append({
+                            'img_path': os.path.join(class_dir, fname),
+                            'label': self.class_to_idx[class_name],
+                            'class_name': class_name,
+                        })
         else:
             # Flat directory: try metadata.jsonl
             meta_path = os.path.join(root, 'metadata.jsonl')
@@ -86,42 +82,49 @@ class ImageFolderDataset(BaseClassificationDataset):
 
                 self.classes = sorted(labels_set)
                 self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
-                self.samples = [
-                    (p, self.class_to_idx.get(str(l), int(l) if str(l).isdigit() else 0))
+                records = [
+                    {
+                        'img_path': p,
+                        'label': self.class_to_idx.get(str(l), int(l) if str(l).isdigit() else 0),
+                        'class_name': str(l),
+                    }
                     for p, l in items
                 ]
             else:
                 # Just load all images with label 0
                 for fname in sorted(os.listdir(root)):
                     if fname.lower().endswith(self.EXTENSIONS):
-                        self.samples.append((os.path.join(root, fname), 0))
+                        records.append({
+                            'img_path': os.path.join(root, fname),
+                            'label': 0,
+                            'class_name': 'unknown',
+                        })
                 self.classes = ['unknown']
+                self.class_to_idx = {'unknown': 0}
+        return records
 
     def _load_from_label_file(self, label_file: str):
+        records = []
         with open(label_file) as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     img_path = os.path.join(self.data_root, parts[0])
                     label = int(parts[1])
-                    self.samples.append((img_path, label))
+                    records.append({
+                        'img_path': img_path,
+                        'label': label,
+                        'class_name': str(label),
+                    })
+        return records
 
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        img_path, label = self.samples[idx]
-
-        image = Image.open(img_path).convert('RGB')
-
-        if self.transform is not None:
-            pixel_values = self.transform(image)
+    def load_data_list(self):
+        if self.label_file and os.path.exists(self.label_file):
+            records = self._load_from_label_file(self.label_file)
+        elif os.path.isdir(self.data_root):
+            records = self._load_from_folder(self.data_root)
         else:
-            image = resize_image(image, (self.image_size, self.image_size))
-            pixel_values = normalize_image(pil_to_tensor(image), IMAGENET_MEAN, IMAGENET_STD)
-
-        return {
-            'pixel_values': pixel_values,
-            'labels': label,
-            'metas': {'path': img_path, 'idx': idx},
-        }
+            records = []
+        if self.max_samples is not None:
+            records = records[:self.max_samples]
+        return records

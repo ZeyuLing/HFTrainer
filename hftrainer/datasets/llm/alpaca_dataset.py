@@ -2,9 +2,7 @@
 
 import json
 import os
-from typing import Dict, Any, Optional, List
-
-import torch
+from typing import Optional
 
 from hftrainer.datasets.llm.base_llm_dataset import BaseLLMDataset
 from hftrainer.registry import DATASETS
@@ -49,84 +47,33 @@ class AlpacaDataset(BaseLLMDataset):
         max_length: int = 512,
         split: str = 'train',
         max_samples: Optional[int] = None,
+        pipeline=None,
+        serialize_data: bool = False,
     ):
+        self.data_path = data_path
+        self.tokenizer_name_or_path = tokenizer_name_or_path
         self.max_length = max_length
+        self.split = split
+        self.max_samples = max_samples
+        super().__init__(pipeline=pipeline, serialize_data=serialize_data)
 
-        # Load tokenizer
-        from transformers import AutoTokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        self.tokenizer.padding_side = 'right'
+    def build_default_pipeline(self):
+        return [
+            dict(type='FormatAlpacaPrompt'),
+            dict(
+                type='TokenizeAlpacaSample',
+                tokenizer_name_or_path=self.tokenizer_name_or_path,
+                max_length=self.max_length,
+            ),
+        ]
 
-        # Load data
-        if os.path.isfile(data_path):
-            with open(data_path) as f:
-                data = json.load(f)
-        else:
-            raise FileNotFoundError(f"Data file not found: {data_path}")
-
+    def load_data_list(self):
+        if not os.path.isfile(self.data_path):
+            raise FileNotFoundError(f"Data file not found: {self.data_path}")
+        with open(self.data_path) as f:
+            data = json.load(f)
         if not isinstance(data, list):
             raise ValueError(f"Expected list of dicts, got {type(data)}")
-
-        self.data = data
-        if max_samples is not None:
-            self.data = self.data[:max_samples]
-
-    def __len__(self) -> int:
-        return len(self.data)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        item = self.data[idx]
-        instruction = item.get('instruction', '')
-        context = item.get('input', '')
-        output = item.get('output', '')
-
-        # Format prompt
-        input_part = self.INPUT_PART if context else ''
-        prompt = self.PROMPT_TEMPLATE.format(
-            input_part=input_part,
-            instruction=instruction,
-        )
-        if context:
-            # Insert context before Response
-            prompt = prompt.replace(
-                '### Response:\n',
-                f'### Input:\n{context}\n\n### Response:\n'
-            )
-
-        # Full text = prompt + response
-        full_text = prompt + output + self.tokenizer.eos_token
-
-        # Tokenize
-        encoded = self.tokenizer(
-            full_text,
-            truncation=True,
-            max_length=self.max_length,
-            padding='max_length',
-            return_tensors='pt',
-        )
-        input_ids = encoded['input_ids'].squeeze(0)
-        attention_mask = encoded['attention_mask'].squeeze(0)
-
-        # Create labels: mask prompt tokens with -100
-        prompt_encoded = self.tokenizer(
-            prompt,
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors='pt',
-        )
-        prompt_len = prompt_encoded['input_ids'].shape[1]
-
-        labels = input_ids.clone()
-        labels[:prompt_len] = -100  # mask prompt
-        labels[attention_mask == 0] = -100  # mask padding
-
-        return {
-            'input_ids': input_ids,
-            'attention_mask': attention_mask,
-            'labels': labels,
-            'input_prompts': prompt,
-            'output_texts': output,
-        }
+        if self.max_samples is not None:
+            data = data[:self.max_samples]
+        return data

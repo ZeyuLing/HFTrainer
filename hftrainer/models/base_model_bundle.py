@@ -12,6 +12,8 @@ between Trainer and Pipeline. It handles:
 """
 
 import copy
+import importlib
+import os
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -52,6 +54,17 @@ class ModelBundle(nn.Module):
         'bfloat16': torch.bfloat16,
         'torch.bfloat16': torch.bfloat16,
     }
+    _PRETRAINED_PATH_SENTINEL = '__pretrained__'
+
+    # Optional declarative specs for HF-native bundles. Common single-model and
+    # diffusers-style bundles can set these instead of hand-writing
+    # _bundle_config_from_pretrained() / save_pretrained().
+    #
+    # HF_PRETRAINED_SPEC describes how one pretrained artifact maps to bundle
+    # component configs. HF_SAVE_PRETRAINED_SPEC describes how the bundle
+    # exports back to an inference artifact.
+    HF_PRETRAINED_SPEC: Optional[Dict[str, Any]] = None
+    HF_SAVE_PRETRAINED_SPEC: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def _to_plain_dict(cfg: Optional[dict]) -> Dict[str, Any]:
@@ -60,6 +73,152 @@ class ModelBundle(nn.Module):
         if hasattr(cfg, 'to_dict'):
             cfg = cfg.to_dict()
         return copy.deepcopy(dict(cfg))
+
+    @classmethod
+    def _resolve_pretrained_default(cls, value, pretrained_model_name_or_path: str):
+        if value == cls._PRETRAINED_PATH_SENTINEL:
+            return pretrained_model_name_or_path
+        return copy.deepcopy(value)
+
+    @staticmethod
+    def _import_object(obj_or_path):
+        if not isinstance(obj_or_path, str):
+            return obj_or_path
+        module_name, _, attr_name = obj_or_path.rpartition('.')
+        if not module_name or not attr_name:
+            raise ValueError(f"Expected import path like 'pkg.mod.Class', got: {obj_or_path!r}")
+        module = importlib.import_module(module_name)
+        return getattr(module, attr_name)
+
+    @classmethod
+    def _build_bundle_config_from_spec(
+        cls,
+        pretrained_model_name_or_path: str,
+        spec: Dict[str, Any],
+        **kwargs,
+    ) -> Dict[str, Any]:
+        shared_pretrained_kwargs = kwargs.pop(
+            spec.get('shared_pretrained_kwargs_arg', 'shared_pretrained_kwargs'),
+            None,
+        ) or {}
+
+        bundle_cfg: Dict[str, Any] = {}
+
+        for component_name, component_spec in spec.get('components', {}).items():
+            component_type = kwargs.pop(
+                component_spec.get('type_arg', f'{component_name}_type'),
+                component_spec['default_type'],
+            )
+            component_overrides = kwargs.pop(
+                component_spec.get('overrides_arg', f'{component_name}_overrides'),
+                None,
+            )
+            component_pretrained_kwargs = kwargs.pop(
+                component_spec.get('pretrained_kwargs_arg', f'{component_name}_kwargs'),
+                None,
+            )
+
+            component_cfg = {'type': component_type}
+            if component_spec.get('load_mode', 'from_pretrained') == 'from_pretrained':
+                from_pretrained = {
+                    'pretrained_model_name_or_path': pretrained_model_name_or_path,
+                }
+                subfolder = component_spec.get('subfolder')
+                if subfolder:
+                    from_pretrained['subfolder'] = subfolder
+                cls._merge_nested_dict(from_pretrained, shared_pretrained_kwargs)
+                cls._merge_nested_dict(
+                    from_pretrained,
+                    component_spec.get('from_pretrained_defaults'),
+                )
+                cls._merge_nested_dict(from_pretrained, component_pretrained_kwargs)
+                component_cfg['from_pretrained'] = from_pretrained
+            cls._merge_nested_dict(component_cfg, component_spec.get('cfg_defaults'))
+            cls._merge_nested_dict(component_cfg, component_overrides)
+            bundle_cfg[component_name] = component_cfg
+
+        for field_name, field_spec in spec.get('init_args', {}).items():
+            if isinstance(field_spec, dict):
+                arg_name = field_spec.get('arg', field_name)
+                default_value = field_spec.get('default')
+            else:
+                arg_name = field_name
+                default_value = field_spec
+            value = kwargs.pop(arg_name, default_value)
+            bundle_cfg[field_name] = cls._resolve_pretrained_default(
+                value,
+                pretrained_model_name_or_path,
+            )
+
+        if kwargs:
+            unexpected = ', '.join(sorted(kwargs))
+            raise TypeError(
+                f"Unexpected from_pretrained kwargs for {cls.__name__}: {unexpected}"
+            )
+
+        return bundle_cfg
+
+    def _save_pretrained_from_spec(
+        self,
+        save_directory: str,
+        spec: Dict[str, Any],
+        merge_lora: bool = True,
+        safe_serialization: bool = True,
+        **kwargs,
+    ):
+        from hftrainer.utils.hf_export import safe_hf_export
+
+        os.makedirs(save_directory, exist_ok=True)
+
+        merge_modules = [
+            name for name in spec.get('merge_lora_modules', [])
+            if self.is_lora_module(name)
+        ]
+        if merge_lora and merge_modules:
+            self.merge_lora_weights(merge_modules)
+
+        export_kind = spec.get('kind', 'module')
+        if export_kind == 'module':
+            module = getattr(self, spec['module'])
+            with safe_hf_export():
+                module.save_pretrained(
+                    save_directory,
+                    safe_serialization=safe_serialization,
+                    **kwargs,
+                )
+        elif export_kind == 'pipeline':
+            pipeline_cls = self._import_object(spec['pipeline_class'])
+            pipeline_kwargs = {}
+            for ctor_key, attr_name in spec.get('components', {}).items():
+                pipeline_kwargs[ctor_key] = getattr(self, attr_name)
+            pipeline_kwargs.update(copy.deepcopy(spec.get('pipeline_kwargs', {})))
+            pipeline = pipeline_cls(**pipeline_kwargs)
+            with safe_hf_export():
+                pipeline.save_pretrained(
+                    save_directory,
+                    safe_serialization=safe_serialization,
+                    **kwargs,
+                )
+        else:
+            raise ValueError(
+                f"Unsupported HF_SAVE_PRETRAINED_SPEC kind '{export_kind}' "
+                f"for {type(self).__name__}."
+            )
+
+        for extra_spec in spec.get('extra_artifacts', []):
+            if isinstance(extra_spec, str):
+                extra_spec = {'attr': extra_spec}
+            attr_name = extra_spec['attr']
+            artifact = getattr(self, attr_name, None)
+            if artifact is None or not hasattr(artifact, 'save_pretrained'):
+                continue
+            subdir = extra_spec.get('subdir')
+            artifact_dir = (
+                save_directory
+                if subdir in (None, '', '.')
+                else os.path.join(save_directory, subdir)
+            )
+            artifact.save_pretrained(artifact_dir)
 
     @classmethod
     def _resolve_module_dtype(cls, dtype_spec) -> torch.dtype:
@@ -183,6 +342,12 @@ class ModelBundle(nn.Module):
         pretrained_model_name_or_path: str,
         **kwargs,
     ) -> Dict[str, Any]:
+        if cls.HF_PRETRAINED_SPEC is not None:
+            return cls._build_bundle_config_from_spec(
+                pretrained_model_name_or_path=pretrained_model_name_or_path,
+                spec=cls.HF_PRETRAINED_SPEC,
+                **kwargs,
+            )
         raise NotImplementedError(
             f"{cls.__name__}.from_pretrained() is only available for bundles that "
             "define how a HuggingFace/diffusers pretrained artifact maps to bundle "
@@ -212,6 +377,12 @@ class ModelBundle(nn.Module):
         return cls.from_config(bundle_cfg)
 
     def save_pretrained(self, save_directory: str, **kwargs):
+        if type(self).HF_SAVE_PRETRAINED_SPEC is not None:
+            return self._save_pretrained_from_spec(
+                save_directory=save_directory,
+                spec=type(self).HF_SAVE_PRETRAINED_SPEC,
+                **kwargs,
+            )
         raise NotImplementedError(
             f"{type(self).__name__}.save_pretrained() is task-specific. "
             "HF-native bundles should override it to export an artifact that "

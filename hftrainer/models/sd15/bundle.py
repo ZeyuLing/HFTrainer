@@ -1,9 +1,7 @@
 """SD1.5 Text-to-Image ModelBundle."""
 
-import os
 import torch
-import torch.nn as nn
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES
@@ -27,6 +25,57 @@ class SD15Bundle(ModelBundle):
       - decode_latent(latents) -> images
       - predict_noise(noisy_latents, timesteps, encoder_hidden_states) -> noise_pred
     """
+
+    HF_PRETRAINED_SPEC = {
+        'shared_pretrained_kwargs_arg': 'shared_pretrained_kwargs',
+        'components': {
+            'text_encoder': {
+                'default_type': 'CLIPTextModel',
+                'type_arg': 'text_encoder_type',
+                'subfolder': 'text_encoder',
+                'overrides_arg': 'text_encoder_overrides',
+            },
+            'vae': {
+                'default_type': 'AutoencoderKL',
+                'type_arg': 'vae_type',
+                'subfolder': 'vae',
+                'overrides_arg': 'vae_overrides',
+            },
+            'unet': {
+                'default_type': 'UNet2DConditionModel',
+                'type_arg': 'unet_type',
+                'subfolder': 'unet',
+                'overrides_arg': 'unet_overrides',
+            },
+            'scheduler': {
+                'default_type': 'DDPMScheduler',
+                'type_arg': 'scheduler_type',
+                'subfolder': 'scheduler',
+                'overrides_arg': 'scheduler_overrides',
+            },
+        },
+        'init_args': {
+            'tokenizer_path': {'default': ModelBundle._PRETRAINED_PATH_SENTINEL},
+            'max_token_length': 77,
+        },
+    }
+    HF_SAVE_PRETRAINED_SPEC = {
+        'kind': 'pipeline',
+        'pipeline_class': 'diffusers.StableDiffusionPipeline',
+        'components': {
+            'vae': 'vae',
+            'text_encoder': 'text_encoder',
+            'tokenizer': 'tokenizer',
+            'unet': 'unet',
+            'scheduler': 'scheduler',
+        },
+        'pipeline_kwargs': {
+            'safety_checker': None,
+            'feature_extractor': None,
+            'requires_safety_checker': False,
+        },
+        'merge_lora_modules': ['text_encoder', 'unet'],
+    }
 
     def __init__(
         self,
@@ -64,76 +113,6 @@ class SD15Bundle(ModelBundle):
             )
         else:
             self.tokenizer = None
-
-    @classmethod
-    def _bundle_config_from_pretrained(
-        cls,
-        pretrained_model_name_or_path: str,
-        text_encoder_type: str = 'CLIPTextModel',
-        vae_type: str = 'AutoencoderKL',
-        unet_type: str = 'UNet2DConditionModel',
-        scheduler_type: str = 'DDPMScheduler',
-        text_encoder_overrides: Optional[Dict[str, Any]] = None,
-        vae_overrides: Optional[Dict[str, Any]] = None,
-        unet_overrides: Optional[Dict[str, Any]] = None,
-        scheduler_overrides: Optional[Dict[str, Any]] = None,
-        tokenizer_path: Optional[str] = None,
-        max_token_length: int = 77,
-        shared_pretrained_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        shared_pretrained_kwargs = shared_pretrained_kwargs or {}
-
-        def build_component(component_type: str, subfolder: str, overrides: Optional[Dict[str, Any]]):
-            component_cfg = {
-                'type': component_type,
-                'from_pretrained': {
-                    'pretrained_model_name_or_path': pretrained_model_name_or_path,
-                    'subfolder': subfolder,
-                },
-            }
-            cls._merge_nested_dict(component_cfg['from_pretrained'], shared_pretrained_kwargs)
-            cls._merge_nested_dict(component_cfg, overrides)
-            return component_cfg
-
-        return {
-            'text_encoder': build_component(text_encoder_type, 'text_encoder', text_encoder_overrides),
-            'vae': build_component(vae_type, 'vae', vae_overrides),
-            'unet': build_component(unet_type, 'unet', unet_overrides),
-            'scheduler': build_component(scheduler_type, 'scheduler', scheduler_overrides),
-            'tokenizer_path': tokenizer_path or pretrained_model_name_or_path,
-            'max_token_length': max_token_length,
-        }
-
-    def save_pretrained(
-        self,
-        save_directory: str,
-        merge_lora: bool = True,
-        safe_serialization: bool = True,
-        **kwargs,
-    ):
-        from diffusers import StableDiffusionPipeline
-        from hftrainer.utils.hf_export import safe_hf_export
-
-        os.makedirs(save_directory, exist_ok=True)
-        if merge_lora:
-            self.merge_lora_weights([name for name in ('text_encoder', 'unet') if self.is_lora_module(name)])
-
-        pipeline = StableDiffusionPipeline(
-            vae=self.vae,
-            text_encoder=self.text_encoder,
-            tokenizer=self.tokenizer,
-            unet=self.unet,
-            scheduler=self.scheduler,
-            safety_checker=None,
-            feature_extractor=None,
-            requires_safety_checker=False,
-        )
-        with safe_hf_export():
-            pipeline.save_pretrained(
-                save_directory,
-                safe_serialization=safe_serialization,
-                **kwargs,
-            )
 
     def encode_text(self, prompts: List[str]) -> torch.Tensor:
         """

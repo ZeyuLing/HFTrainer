@@ -5,7 +5,7 @@ Imports all sub-modules to trigger registry registrations.
 
 # Core infrastructure
 from hftrainer.registry import (
-    HF_MODELS, MODEL_BUNDLES, TRAINERS, PIPELINES,
+    HF_MODELS, MODELS, MODEL_BUNDLES, TRAINERS, PIPELINES,
     DATASETS, TRANSFORMS, HOOKS, EVALUATORS, VISUALIZERS,
     build_hf_model_from_cfg,
 )
@@ -94,6 +94,8 @@ def _import_task_modules():
         # Visualization
         'hftrainer.visualization.tensorboard_visualizer',
         'hftrainer.visualization.file_visualizer',
+        # Generic dataset transforms
+        'hftrainer.datasets.transforms',
         # ViT
         'hftrainer.models.vit.bundle',
         'hftrainer.trainers.classification.classification_trainer',
@@ -128,6 +130,30 @@ def _import_task_modules():
         'hftrainer.models.dmd.bundle',
         'hftrainer.trainers.distillation.dmd_trainer',
         'hftrainer.datasets.distillation.dmd_image_pair_dataset',
+        # Motion
+        'hftrainer.models.motion.components.autoencoder_prism.autoencoder_kl_prism_2d',
+        'hftrainer.models.motion.components.autoencoder_prism.autoencoder_kl_prism_1d',
+        'hftrainer.models.motion.components.autoencoder_prism.vqvae_prism_2d',
+        'hftrainer.models.motion.components.autoencoder_prism.vqvae_prism_1d',
+        'hftrainer.models.motion.components.fs_quantizer',
+        'hftrainer.models.motion.components.motion_prism.transformer_prism',
+        'hftrainer.models.motion.components.motion_prism.transformer_prism_notext',
+        'hftrainer.models.motion.components.body_models.smplx_lite',
+        'hftrainer.models.motion.components.motion_processor.smpl_processor',
+        'hftrainer.models.motion.components.wavtokenizer.wavtokenizer',
+        'hftrainer.models.vermo.llama',
+        'hftrainer.models.vermo.qwen3',
+        'hftrainer.models.vermo.processor',
+        'hftrainer.models.prism.bundle',
+        'hftrainer.trainers.motion.prism_trainer',
+        'hftrainer.pipelines.motion.prism_pipeline',
+        'hftrainer.models.vermo.bundle',
+        'hftrainer.trainers.motion.vermo_trainer',
+        'hftrainer.pipelines.motion.vermo_pipeline',
+        'hftrainer.datasets.motion.random_motion_text_dataset',
+        'hftrainer.datasets.motion.vermo_toy_dataset',
+        'hftrainer.datasets.motionhub.transforms',
+        'hftrainer.datasets.motionhub',
     ]
 
     for mod_name in modules_to_import:
@@ -148,7 +174,7 @@ _import_task_modules()
 __version__ = '0.1.0'
 
 __all__ = [
-    'HF_MODELS', 'MODEL_BUNDLES', 'TRAINERS', 'PIPELINES',
+    'HF_MODELS', 'MODELS', 'MODEL_BUNDLES', 'TRAINERS', 'PIPELINES',
     'DATASETS', 'TRANSFORMS', 'HOOKS', 'EVALUATORS', 'VISUALIZERS',
     'build_hf_model_from_cfg',
     'ModelBundle',

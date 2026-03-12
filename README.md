@@ -50,12 +50,13 @@ It is built for a specific workflow:
 | native large-model runtime behavior | `accelerate` for DDP, FSDP, DeepSpeed, mixed precision, logging, and state save/load |
 | direct use of HuggingFace components | native `transformers`, `diffusers`, and `peft` classes without framework-specific wrapper semantics |
 | one place to implement task logic | `ModelBundle` shared by `Trainer` and `Pipeline` |
+| less framework glue for HF-native tasks | parent-level `from_config` / `from_pretrained` plus declarative bundle specs instead of per-bundle boilerplate |
 | memory-aware fine-tuning | config-driven freeze, LoRA, per-module dtype, gradient checkpointing, and accumulation |
 | reliable restart and export | `auto_resume`, model-only load, full accelerator resume, and task-native `save_pretrained(...)` |
 
 ## Runnable Today
 
-| Task | Core Stack | Demo Config | Status |
+| Task | Core Stack | Example Config | Status |
 | --- | --- | --- | --- |
 | Classification | `ViTBundle` + `ClassificationTrainer` + `ClassificationPipeline` | `configs/classification/vit_base_demo.py` | verified |
 | Text-to-image | `SD15Bundle` + `SD15Trainer` + `SD15Pipeline` | `configs/text2image/sd15_demo.py` | verified |
@@ -156,7 +157,8 @@ HF-Trainer exposes two clear ways to adopt the framework:
 Rule of thumb:
 
 - if HuggingFace already has the model class, keep the official class inside the bundle and only add training wiring
-- if HuggingFace does not have the model class, use `ModelBundle.from_config(...)` and add `from_pretrained/save_pretrained` only when you need a stable exported artifact
+- if HuggingFace already has the artifact layout, declare `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC` on the bundle instead of hand-writing loader/export methods
+- if HuggingFace does not have the model class, use `ModelBundle.from_config(...)` and add custom `from_pretrained/save_pretrained` logic only when you need a stable exported artifact
 
 ## Documentation
 
@@ -203,13 +205,26 @@ checkpoints/  local pretrained checkpoints for demos
 tests/        startup smoke tests and focused unit tests
 ```
 
-Model-specific task stacks are organized under:
+Model code, task runtime, and data code are intentionally separated:
 
 ```text
 hftrainer/models/<model_name>/
   bundle.py
-  trainer.py
-  pipeline.py
+  ...
+hftrainer/trainers/<task_name>/
+  ...
+hftrainer/pipelines/<task_name>/
+  ...
+hftrainer/datasets/<task_name>/
+  ...
+```
+
+Datasets follow an MMEngine-style split:
+
+```text
+dataset.load_data_list()  -> raw records
+dataset.pipeline          -> decoding / tokenize / resize / pack transforms
+collate_fn                -> batch assembly
 ```
 
 ## Scope Notes
