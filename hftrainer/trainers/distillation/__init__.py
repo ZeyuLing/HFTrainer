@@ -1,5 +1,5 @@
 """Distillation trainer module."""
 
-from hftrainer.models.dmd.trainer import DMDTrainer
+from hftrainer.trainers.distillation.dmd_trainer import DMDTrainer
 
 __all__ = ['DMDTrainer']

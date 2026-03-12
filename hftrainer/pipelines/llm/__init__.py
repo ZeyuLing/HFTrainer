@@ -1,2 +1,2 @@
-from hftrainer.models.causal_lm.pipeline import CausalLMPipeline
+from hftrainer.pipelines.llm.causal_lm_pipeline import CausalLMPipeline
 __all__ = ['CausalLMPipeline']

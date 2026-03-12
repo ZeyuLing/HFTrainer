@@ -96,8 +96,8 @@ def _import_task_modules():
         'hftrainer.visualization.file_visualizer',
         # ViT
         'hftrainer.models.vit.bundle',
-        'hftrainer.models.vit.trainer',
-        'hftrainer.models.vit.pipeline',
+        'hftrainer.trainers.classification.classification_trainer',
+        'hftrainer.pipelines.classification.classification_pipeline',
         'hftrainer.datasets.classification.hf_image_classification_dataset',
         'hftrainer.datasets.classification.imagefolder_dataset',
     ]
@@ -105,28 +105,28 @@ def _import_task_modules():
     # Conditionally import task modules (may not all exist yet)
     optional_modules = [
         'hftrainer.models.sd15.bundle',
-        'hftrainer.models.sd15.trainer',
-        'hftrainer.models.sd15.pipeline',
-        'hftrainer.models.dmd.pipeline',
+        'hftrainer.trainers.text2image.sd15_trainer',
+        'hftrainer.pipelines.text2image.sd15_pipeline',
+        'hftrainer.pipelines.text2image.dmd_pipeline',
         'hftrainer.datasets.text2image.hf_imagefolder_dataset',
         'hftrainer.models.causal_lm.bundle',
-        'hftrainer.models.causal_lm.trainer',
-        'hftrainer.models.causal_lm.pipeline',
+        'hftrainer.trainers.llm.causal_lm_trainer',
+        'hftrainer.pipelines.llm.causal_lm_pipeline',
         'hftrainer.datasets.llm.alpaca_dataset',
         'hftrainer.evaluation.llm.perplexity_evaluator',
         'hftrainer.models.wan.bundle',
-        'hftrainer.models.wan.trainer',
-        'hftrainer.models.wan.pipeline',
+        'hftrainer.trainers.text2video.wan_trainer',
+        'hftrainer.pipelines.text2video.wan_pipeline',
         'hftrainer.datasets.text2video.hf_video_dataset',
         # StyleGAN2
         'hftrainer.models.stylegan2.model',
         'hftrainer.models.stylegan2.bundle',
-        'hftrainer.models.stylegan2.trainer',
-        'hftrainer.models.stylegan2.pipeline',
+        'hftrainer.trainers.gan.gan_trainer',
+        'hftrainer.pipelines.gan.stylegan2_pipeline',
         'hftrainer.datasets.gan.image_folder_gan_dataset',
         # DMD
         'hftrainer.models.dmd.bundle',
-        'hftrainer.models.dmd.trainer',
+        'hftrainer.trainers.distillation.dmd_trainer',
         'hftrainer.datasets.distillation.dmd_image_pair_dataset',
     ]
 
