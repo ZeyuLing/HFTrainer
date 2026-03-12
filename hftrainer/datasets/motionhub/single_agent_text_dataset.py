@@ -1,6 +1,5 @@
 import os
-from typing import Dict, List, Union
-from mmcv.transforms import BaseTransform
+from typing import Any, Dict, List, Union
 
 from hftrainer.datasets.motionhub.single_agent_dataset import MotionHubSingleAgentDataset
 from hftrainer.registry import DATASETS
@@ -15,7 +14,7 @@ class MotionHubSingleAgentTextDataset(MotionHubSingleAgentDataset):
         caption_key: str = "hierarchical_caption",
         data_dir: str = "data/motionhub",
         anno_file: str = "data/motionhub/train.json",
-        pipeline: Union[Dict, BaseTransform, List[Union[Dict, BaseTransform]]] = None,
+        pipeline: Union[Dict, Any, List[Union[Dict, Any]]] = None,
         refetch=False,
         verbose: bool = True,
     ):

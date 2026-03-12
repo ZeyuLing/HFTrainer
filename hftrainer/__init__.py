@@ -94,6 +94,8 @@ def _import_task_modules():
         # Visualization
         'hftrainer.visualization.tensorboard_visualizer',
         'hftrainer.visualization.file_visualizer',
+        # Generic dataset transforms
+        'hftrainer.datasets.transforms',
         # ViT
         'hftrainer.models.vit.bundle',
         'hftrainer.trainers.classification.classification_trainer',

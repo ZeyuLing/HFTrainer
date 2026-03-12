@@ -15,8 +15,8 @@ This page answers two practical questions:
 The split is:
 
 - the parent class owns the public API shape
-- HF-native bundle subclasses only provide `_bundle_config_from_pretrained(...)`
-- HF-native bundle subclasses optionally override `save_pretrained(...)` so exported artifacts can be read by official `diffusers` / `transformers` APIs
+- ordinary HF-native bundles should prefer `HF_PRETRAINED_SPEC` and `HF_SAVE_PRETRAINED_SPEC`
+- override `_bundle_config_from_pretrained(...)` or `save_pretrained(...)` only when the artifact layout is unusual enough that the declarative specs are not enough
 
 ## Path 1: Start From An Existing HuggingFace Model
 
@@ -33,7 +33,7 @@ Use this path when the core model class already exists in `transformers` or `dif
 1. A `ModelBundle` subclass that groups the task components.
 2. Task atomic forward methods such as `encode_text`, `predict_noise`, `generate`, or `classify`.
 3. A task trainer that defines losses and optimization order.
-4. Optionally `save_pretrained(...)` so the trained artifact can be loaded by official inference APIs.
+4. Usually just a declarative export spec, and only a custom `save_pretrained(...)` override when the export format is unusual.
 
 Memory and precision control are also added at the bundle-config layer, not by rewriting the official model class. Common overrides include `trainable`, `save_ckpt`, `checkpoint_format`, `lora_cfg`, `gradient_checkpointing`, `from_pretrained.torch_dtype`, and `module_dtype`.
 
@@ -42,17 +42,25 @@ Memory and precision control are also added at the bundle-config layer, not by r
 ```python
 @MODEL_BUNDLES.register_module()
 class MyLMBundle(ModelBundle):
-    @classmethod
-    def _bundle_config_from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
-        return dict(
-            model=dict(
-                type='AutoModelForCausalLM',
-                from_pretrained=dict(
-                    pretrained_model_name_or_path=pretrained_model_name_or_path,
-                ),
-            ),
-            tokenizer_path=pretrained_model_name_or_path,
-        )
+    HF_PRETRAINED_SPEC = {
+        'components': {
+            'model': {
+                'default_type': 'AutoModelForCausalLM',
+                'pretrained_kwargs_arg': 'model_kwargs',
+                'overrides_arg': 'model_overrides',
+            },
+        },
+        'init_args': {
+            'tokenizer_path': {
+                'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
+            },
+        },
+    }
+    HF_SAVE_PRETRAINED_SPEC = {
+        'kind': 'module',
+        'module': 'model',
+        'extra_artifacts': ['tokenizer'],
+    }
 
     def __init__(self, model, tokenizer_path=None):
         super().__init__()
@@ -97,7 +105,7 @@ See [Memory and Precision](memory.md) for the full config contract and caveats a
 
 ### Export Back To Official Inference APIs
 
-HF-native bundles should implement `save_pretrained(...)`.
+HF-native bundles should usually declare `HF_SAVE_PRETRAINED_SPEC`. Only special export formats need a hand-written `save_pretrained(...)`.
 
 Current implementations:
 
@@ -175,9 +183,10 @@ You only need a bundle-specific pretrained path when you want one of these:
 
 In that case:
 
-1. implement `_bundle_config_from_pretrained(...)`
-2. implement `save_pretrained(...)`
-3. document the exported artifact format
+1. try `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC` first
+2. only if the spec cannot express the mapping, implement `_bundle_config_from_pretrained(...)`
+3. implement `save_pretrained(...)` only when export also needs task-specific logic
+4. document the exported artifact format
 
 If you do not need those guarantees, `from_config(...)` plus checkpoint save/load is enough.
 

@@ -27,10 +27,12 @@ Without a shared bundle, the same task logic tends to be duplicated in both trai
 `ModelBundle` now has one parent-class construction contract:
 
 - `from_config(...)` is generic and works for all bundles
-- `from_pretrained(...)` is also defined on the parent class, but HF-native bundles supply `_bundle_config_from_pretrained(...)`
-- `save_pretrained(...)` is task-specific and should only be implemented when the bundle can export an artifact official inference APIs understand
+- `from_pretrained(...)` is also defined on the parent class
+- most HF-native bundles should declare `HF_PRETRAINED_SPEC` instead of hand-writing `_bundle_config_from_pretrained(...)`
+- most HF-native bundles should declare `HF_SAVE_PRETRAINED_SPEC` instead of hand-writing `save_pretrained(...)`
+- custom method overrides are reserved for unusual artifact layouts or task-specific side effects
 
-That means users only need to learn one public shape, while bundle subclasses only fill in task-specific mapping logic.
+That means users only need to learn one public shape, while ordinary bundle authors usually only fill in declarative specs.
 
 ## Two Integration Paths
 
@@ -40,8 +42,9 @@ If `transformers` or `diffusers` already has the model class:
 
 - keep the official class inside the bundle
 - use `Bundle.from_pretrained(...)` as the public entry
+- declare `HF_PRETRAINED_SPEC` to map the official artifact into bundle components
 - add training behavior through config overrides such as `trainable`, `save_ckpt`, `checkpoint_format`, and `lora_cfg`
-- implement `save_pretrained(...)` if you want the training result to round-trip through official inference APIs
+- declare `HF_SAVE_PRETRAINED_SPEC` if you want the training result to round-trip through official inference APIs
 
 ### Path B: Custom or self-developed models
 
@@ -49,9 +52,52 @@ If the model does not exist in HuggingFace libraries:
 
 - implement your own `nn.Module`
 - instantiate it through `Bundle.from_config(...)`
-- only add bundle-specific `from_pretrained(...)` / `save_pretrained(...)` if you need a stable exported artifact
+- only add custom `from_pretrained(...)` / `save_pretrained(...)` logic if you need a stable exported artifact and the declarative specs are not enough
 
 See [Integration Guide](../integration.md) for concrete examples.
+
+## Declarative HF Specs
+
+For most HF-native bundles, the parent class already provides the boilerplate.
+
+### `HF_PRETRAINED_SPEC`
+
+Describe how one pretrained artifact becomes one bundle config:
+
+```python
+class MyBundle(ModelBundle):
+    HF_PRETRAINED_SPEC = {
+        'components': {
+            'model': {
+                'default_type': 'AutoModelForCausalLM',
+                'pretrained_kwargs_arg': 'model_kwargs',
+                'overrides_arg': 'model_overrides',
+            },
+        },
+        'init_args': {
+            'tokenizer_path': {
+                'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
+            },
+            'max_length': 1024,
+        },
+    }
+```
+
+### `HF_SAVE_PRETRAINED_SPEC`
+
+Describe how the bundle exports back to an inference artifact:
+
+```python
+class MyBundle(ModelBundle):
+    HF_SAVE_PRETRAINED_SPEC = {
+        'kind': 'module',
+        'module': 'model',
+        'merge_lora_modules': ['model'],
+        'extra_artifacts': ['tokenizer'],
+    }
+```
+
+With that, ordinary bundle code only needs `__init__` plus task atomic methods.
 
 ## Per-Module Control
 

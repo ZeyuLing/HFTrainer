@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Dict
 
 import torch
-from torch.utils.data import Dataset
 
+from hftrainer.datasets.base_dataset import PipelineDataset
 from hftrainer.registry import DATASETS
 
 
 @DATASETS.register_module()
-class RandomMotionTextDataset(Dataset):
+class RandomMotionTextDataset(PipelineDataset):
     """Return fixed-shape random motion samples with captions."""
 
     def __init__(
@@ -35,14 +35,14 @@ class RandomMotionTextDataset(Dataset):
             num_joints * rot_dim + 6,
             generator=generator,
         )
+        super().__init__(pipeline=None, serialize_data=False)
 
-    def __len__(self):
-        return self.num_samples
+    def load_data_list(self):
+        return [{'sample_id': idx} for idx in range(self.num_samples)]
 
-    def __getitem__(self, idx) -> Dict:
+    def get_data_info(self, idx) -> Dict:
         return {
             'motion': self.motion[idx].clone(),
             'num_frames': torch.tensor(self.num_frames, dtype=torch.long),
             'caption': self.captions[idx % len(self.captions)],
         }
-

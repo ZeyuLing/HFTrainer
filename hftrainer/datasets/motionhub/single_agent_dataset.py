@@ -1,14 +1,13 @@
 import logging
 import os
 import random
-from typing import Dict, List, Union
-from mmcv import BaseTransform
+from typing import Any, Dict, List, Union
+
 import mmengine
 from tqdm import tqdm
 from mmengine.dataset import BaseDataset
 from mmengine import print_log
 
-from hftrainer.datasets.motionhub.common import Compose
 from hftrainer.datasets.motionhub.flexible_collate import flexible_collate
 from hftrainer.registry import DATASETS
 
@@ -34,21 +33,28 @@ class MotionHubSingleAgentDataset(BaseDataset):
         motion_key: str = "smplx",
         data_dir: str = "data/motionhub",
         anno_file: str = "data/motionhub/train.json",
-        pipeline: Union[Dict, BaseTransform, List[Union[Dict, BaseTransform]]] = None,
+        pipeline: Union[Dict, Any, List[Union[Dict, Any]]] = None,
         refetch: bool = False,
         max_refetch: int = 100,
         verbose: bool = True,
     ):
+        self.motion_key = motion_key
         self.data_dir = data_dir
         self.anno_file = anno_file
-        self._metainfo = {}
-        self.motion_key = motion_key
-
-        self.pipeline = Compose(pipeline)
-        self.data_list = self.load_data_list()
         self.refetch = refetch
         self.max_refetch = max_refetch  # 单次 __getitem__ 内最多 refetch 次数，超过则抛出异常终止
         self.verbose = verbose
+        super().__init__(
+            ann_file=anno_file,
+            metainfo=None,
+            data_root=data_dir,
+            data_prefix={},
+            serialize_data=False,
+            pipeline=list(pipeline) if pipeline is not None else [],
+            test_mode=False,
+            lazy_init=False,
+            max_refetch=max_refetch,
+        )
 
     def load_data_list(self) -> List[dict]:
         """Copied from mmengine.dataset.based_dataset.BaseDataset
@@ -153,7 +159,7 @@ class MotionHubSingleAgentDataset(BaseDataset):
             return self.__getitem__(new_idx, _refetch_depth + 1)
 
     def full_init(self):
-        pass
+        super().full_init()
 
     def prepare_data(self, idx: int) -> dict:
         raw_data_info = self.data_list[idx]

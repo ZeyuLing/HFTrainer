@@ -1,13 +1,10 @@
-from __future__ import annotations
-
 import json
 import re
 from pathlib import Path
-from typing import Any, Iterable, List
+from typing import Any
 
 import torch
-
-from hftrainer.registry import TRANSFORMS
+from mmengine.dataset import Compose
 
 
 hm3d_pattern = re.compile(
@@ -34,22 +31,3 @@ def convert_to_tensor(value: Any):
     if value is None:
         return None
     return torch.as_tensor(value)
-
-
-class Compose:
-    """Minimal transform compose backed by HFTrainer's transform registry."""
-
-    def __init__(self, transforms: Iterable[Any] | None):
-        self.transforms: List[Any] = []
-        for transform in transforms or []:
-            if isinstance(transform, dict):
-                self.transforms.append(TRANSFORMS.build(transform))
-            else:
-                self.transforms.append(transform)
-
-    def __call__(self, data: dict) -> dict:
-        for transform in self.transforms:
-            data = transform(data)
-            if data is None:
-                return None
-        return data

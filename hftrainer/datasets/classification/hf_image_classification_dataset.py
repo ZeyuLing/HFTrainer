@@ -1,14 +1,11 @@
 """HuggingFace image classification dataset wrapper."""
 
 import os
-from typing import Dict, Any, Optional, List
-
-import torch
-from PIL import Image
+import itertools
+from typing import Optional
 
 from hftrainer.datasets.classification.base_classification_dataset import BaseClassificationDataset
 from hftrainer.registry import DATASETS
-from hftrainer.utils.image import IMAGENET_MEAN, IMAGENET_STD, normalize_image, pil_to_tensor, resize_image
 
 
 @DATASETS.register_module()
@@ -37,14 +34,17 @@ class HFImageClassificationDataset(BaseClassificationDataset):
         image_column: str = 'image',
         label_column: str = 'label',
         image_size: int = 224,
-        transform=None,
+        pipeline=None,
         max_samples: Optional[int] = None,
         streaming: bool = False,
+        serialize_data: bool = False,
     ):
-        super().__init__(image_size=image_size, transform=transform)
-
+        self.dataset_name_or_path = dataset_name_or_path
+        self.split = split
         self.image_column = image_column
         self.label_column = label_column
+        self.max_samples = max_samples
+        self.streaming = streaming
 
         # Load dataset
         from datasets import load_dataset
@@ -62,50 +62,54 @@ class HFImageClassificationDataset(BaseClassificationDataset):
                     split=split,
                 )
         else:
-            self.hf_dataset = load_dataset(
-                dataset_name_or_path,
-                split=split,
-                streaming=streaming,
-            )
+            if streaming:
+                if max_samples is None:
+                    raise ValueError(
+                        "streaming=True requires max_samples so the dataset remains indexable."
+                    )
+                stream_ds = load_dataset(
+                    dataset_name_or_path,
+                    split=split,
+                    streaming=True,
+                )
+                self.hf_dataset = list(itertools.islice(stream_ds, max_samples))
+            else:
+                self.hf_dataset = load_dataset(
+                    dataset_name_or_path,
+                    split=split,
+                    streaming=False,
+                )
 
-        if max_samples is not None:
+        if max_samples is not None and hasattr(self.hf_dataset, 'select'):
             self.hf_dataset = self.hf_dataset.select(range(min(max_samples, len(self.hf_dataset))))
 
         # Build label2id mapping if available
         self.label2id = {}
         self.id2label = {}
-        if hasattr(self.hf_dataset.features.get(label_column, None), 'names'):
-            names = self.hf_dataset.features[label_column].names
+        features = getattr(self.hf_dataset, 'features', None)
+        label_feature = features.get(label_column, None) if features is not None else None
+        if hasattr(label_feature, 'names'):
+            names = label_feature.names
             self.id2label = {i: n for i, n in enumerate(names)}
             self.label2id = {n: i for i, n in enumerate(names)}
+        super().__init__(
+            image_size=image_size,
+            pipeline=pipeline,
+            serialize_data=serialize_data,
+        )
 
-    def __len__(self) -> int:
-        return len(self.hf_dataset)
+    def load_data_list(self):
+        return [{'hf_index': idx} for idx in range(len(self.hf_dataset))]
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        item = self.hf_dataset[idx]
-
-        # Get image
-        image = item[self.image_column]
-        if not isinstance(image, Image.Image):
-            image = Image.fromarray(image)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-
-        # Apply transform
-        if self.transform is not None:
-            pixel_values = self.transform(image)
-        else:
-            image = resize_image(image, (self.image_size, self.image_size))
-            pixel_values = normalize_image(pil_to_tensor(image), IMAGENET_MEAN, IMAGENET_STD)
-
-        # Get label
+    def get_data_info(self, idx: int):
+        data_info = super().get_data_info(idx)
+        item = self.hf_dataset[data_info['hf_index']]
         label = item[self.label_column]
         if isinstance(label, str):
             label = self.label2id.get(label, 0)
-
         return {
-            'pixel_values': pixel_values,
-            'labels': int(label),
-            'metas': {'idx': idx},
+            'image': item[self.image_column],
+            'label': int(label),
+            'class_name': self.id2label.get(int(label), str(label)),
+            'sample_idx': data_info['sample_idx'],
         }

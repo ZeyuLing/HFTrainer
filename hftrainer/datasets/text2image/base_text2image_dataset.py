@@ -1,54 +1,49 @@
-"""Base text-to-image dataset interface."""
+"""Base text-to-image dataset with MMEngine-style pipelines."""
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from abc import ABC
+from typing import Callable, Dict, Any, List, Optional, Sequence, Union
 
 import torch
-from torch.utils.data import Dataset
 
-from hftrainer.utils.image import pil_to_tensor, resize_image
+from hftrainer.datasets.base_dataset import PipelineDataset
 
 
-class BaseText2ImageDataset(Dataset, ABC):
+class BaseText2ImageDataset(PipelineDataset, ABC):
     """
     Abstract base class for text-to-image datasets.
 
-    __getitem__ must return:
-        {
-            'pixel_values': Tensor[3, H, W],  # normalized image in [-1, 1]
-            'text': str,                       # caption / prompt
-        }
+    Subclasses should emit raw ``img_path`` / ``image`` and ``text`` fields.
+    Concrete image preprocessing is delegated to transforms.
     """
 
-    def __init__(self, image_size: int = 512, transform=None):
+    def __init__(
+        self,
+        image_size: int = 512,
+        random_horizontal_flip: bool = True,
+        pipeline: Optional[Sequence[Union[dict, Callable]]] = None,
+        serialize_data: bool = False,
+    ):
         self.image_size = image_size
-        self.transform = transform
-        self._build_default_transform()
+        self.random_horizontal_flip = random_horizontal_flip
+        super().__init__(pipeline=pipeline, serialize_data=serialize_data)
 
-    def _build_default_transform(self):
-        if self.transform is None:
-            try:
-                from torchvision import transforms
-                self.transform = transforms.Compose([
-                    transforms.Resize((self.image_size, self.image_size)),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),  # [-1, 1]
-                ])
-            except ImportError:
-                def _fallback_transform(image):
-                    image = resize_image(image, (self.image_size, self.image_size))
-                    tensor = pil_to_tensor(image)
-                    return (tensor - 0.5) / 0.5
-                self.transform = _fallback_transform
-
-    @abstractmethod
-    def __len__(self) -> int:
-        pass
-
-    @abstractmethod
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """Return dict with 'pixel_values' and 'text'."""
+    def build_default_pipeline(self):
+        pipeline = [
+            dict(type='LoadImage'),
+            dict(type='ResizeImage', size=(self.image_size, self.image_size)),
+        ]
+        if self.random_horizontal_flip:
+            pipeline.append(dict(type='RandomHorizontalFlipImage'))
+        pipeline.extend([
+            dict(type='HFTrainerImageToTensor', image_key='image', output_key='pixel_values'),
+            dict(
+                type='NormalizeTensor',
+                key='pixel_values',
+                mean=[0.5, 0.5, 0.5],
+                std=[0.5, 0.5, 0.5],
+            ),
+        ])
+        return pipeline
 
     @classmethod
     def collate_fn(cls, batch: List[Dict[str, Any]]) -> Dict[str, Any]:

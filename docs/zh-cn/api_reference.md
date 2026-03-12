@@ -127,8 +127,9 @@ from hftrainer.models import ModelBundle
 ### 构造语义
 
 - `from_config(...)` 是完全通用的，应该作为自研模型的默认入口。
-- `from_pretrained(...)` 是父类上的统一 public API，但每个 HF-native bundle 仍然要通过 `_bundle_config_from_pretrained(...)` 定义“一个 pretrained artifact 如何映射成多个子模块”。
-- `save_pretrained(...)` 保持任务相关，只有当 bundle 能导出官方推理 API 可以读取的 artifact 时才应该实现。
+- `from_pretrained(...)` 是父类上的统一 public API。普通 HF-native bundle 应该优先通过 `HF_PRETRAINED_SPEC` 完成映射，而不是手写 `_bundle_config_from_pretrained(...)`。
+- `save_pretrained(...)` 保持任务相关，但普通 HF-native bundle 应该优先通过 `HF_SAVE_PRETRAINED_SPEC` 完成导出，而不是手写方法。
+- 只有当 artifact 结构特殊到声明式 spec 不足以表达时，才需要覆盖 `_bundle_config_from_pretrained(...)` 或 `save_pretrained(...)`。
 - `from_pretrained.torch_dtype` / `dtype` 会直接透传给底层 HF loader，`module_dtype` 则是 HF-Trainer 自己的 post-load cast。
 - 全局 AMP、按模块 dtype 和 gradient checkpointing 的推荐写法见 [显存与精度](memory.md)。
 

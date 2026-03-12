@@ -14,7 +14,7 @@ Registries:
 """
 
 import copy
-from mmengine.registry import Registry
+from mmengine.registry import Registry, TRANSFORMS as MMENGINE_TRANSFORMS
 
 # Map string shorthand to torch.dtype
 _DTYPE_MAP = {
@@ -127,7 +127,7 @@ MODEL_BUNDLES = Registry('model_bundle')
 TRAINERS = Registry('trainer')
 PIPELINES = Registry('pipeline')
 DATASETS = Registry('dataset')
-TRANSFORMS = Registry('transform')
+TRANSFORMS = MMENGINE_TRANSFORMS
 HOOKS = Registry('hook')
 EVALUATORS = Registry('evaluator')
 VISUALIZERS = Registry('visualizer')

@@ -1,30 +1,27 @@
-"""Base text-to-video dataset interface."""
+"""Base text-to-video dataset with MMEngine-style pipelines."""
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from abc import ABC
+from typing import Callable, Dict, Any, List, Optional, Sequence, Union
 
 import torch
-from torch.utils.data import Dataset
+
+from hftrainer.datasets.base_dataset import PipelineDataset
 
 
-class BaseText2VideoDataset(Dataset, ABC):
+class BaseText2VideoDataset(PipelineDataset, ABC):
     """
     Abstract base class for text-to-video datasets.
 
-    __getitem__ must return:
-        {
-            'video': Tensor[C, T, H, W] or Tensor[T, C, H, W],  # in [-1, 1]
-            'text': str,                                           # caption
-        }
+    Subclasses should emit raw ``video_path`` / metadata and ``text``. Concrete
+    decoding is delegated to transforms.
     """
 
-    @abstractmethod
-    def __len__(self) -> int:
-        pass
-
-    @abstractmethod
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        pass
+    def __init__(
+        self,
+        pipeline: Optional[Sequence[Union[dict, Callable]]] = None,
+        serialize_data: bool = False,
+    ):
+        super().__init__(pipeline=pipeline, serialize_data=serialize_data)
 
     @classmethod
     def collate_fn(cls, batch: List[Dict[str, Any]]) -> Dict[str, Any]:

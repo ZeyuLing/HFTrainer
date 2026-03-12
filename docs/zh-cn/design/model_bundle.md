@@ -27,10 +27,12 @@
 `ModelBundle` 现在有一套统一的父类构造约定：
 
 - `from_config(...)` 是通用方法，所有 bundle 都能用
-- `from_pretrained(...)` 也定义在父类上，但由 HF-native bundle 提供 `_bundle_config_from_pretrained(...)`
-- `save_pretrained(...)` 是任务相关能力，只有在 bundle 能导出官方推理 API 可理解的 artifact 时才应该实现
+- `from_pretrained(...)` 也定义在父类上
+- 大多数 HF-native bundle 应该通过声明 `HF_PRETRAINED_SPEC` 来完成加载映射，而不是手写 `_bundle_config_from_pretrained(...)`
+- 大多数 HF-native bundle 应该通过声明 `HF_SAVE_PRETRAINED_SPEC` 来完成导出，而不是手写 `save_pretrained(...)`
+- 只有在 artifact 结构很特殊，或者导出还有额外副作用时，才需要自己覆盖方法
 
-这样用户只需要记一套 public API，bundle 子类只需要补任务相关的映射逻辑。
+这样用户只需要记一套 public API，普通 bundle 作者通常也只需要写声明式 spec。
 
 ## 两条接入路径
 
@@ -40,8 +42,9 @@
 
 - 在 bundle 内继续使用官方类
 - 对外入口用 `Bundle.from_pretrained(...)`
+- 通过声明 `HF_PRETRAINED_SPEC` 把官方 artifact 映射成 bundle 组件
 - 通过 `trainable`、`save_ckpt`、`checkpoint_format`、`lora_cfg` 这些 config 覆盖项附加训练行为
-- 如果希望训练产物能回到官方推理 API，就实现 `save_pretrained(...)`
+- 如果希望训练产物能回到官方推理 API，就声明 `HF_SAVE_PRETRAINED_SPEC`
 
 ### 路径 B：自研模型
 
@@ -49,9 +52,52 @@
 
 - 自己实现 `nn.Module`
 - 通过 `Bundle.from_config(...)` 实例化
-- 只有在你需要稳定导出 artifact 时，再实现 bundle 自己的 `from_pretrained(...)` / `save_pretrained(...)`
+- 只有在你需要稳定导出 artifact，且声明式 spec 不足以表达时，再补自定义 `from_pretrained(...)` / `save_pretrained(...)`
 
 具体例子见 [模型接入](../integration.md)。
+
+## 声明式 HF Spec
+
+对大多数 HF-native bundle，父类已经把模板代码准备好了。
+
+### `HF_PRETRAINED_SPEC`
+
+用它描述“一个 pretrained artifact 如何变成 bundle config”：
+
+```python
+class MyBundle(ModelBundle):
+    HF_PRETRAINED_SPEC = {
+        'components': {
+            'model': {
+                'default_type': 'AutoModelForCausalLM',
+                'pretrained_kwargs_arg': 'model_kwargs',
+                'overrides_arg': 'model_overrides',
+            },
+        },
+        'init_args': {
+            'tokenizer_path': {
+                'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
+            },
+            'max_length': 1024,
+        },
+    }
+```
+
+### `HF_SAVE_PRETRAINED_SPEC`
+
+用它描述“bundle 如何导出回推理 artifact”：
+
+```python
+class MyBundle(ModelBundle):
+    HF_SAVE_PRETRAINED_SPEC = {
+        'kind': 'module',
+        'module': 'model',
+        'merge_lora_modules': ['model'],
+        'extra_artifacts': ['tokenizer'],
+    }
+```
+
+这样普通 bundle 一般只需要写 `__init__` 和任务原子方法。
 
 ## 按模块控制
 
