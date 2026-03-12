@@ -62,6 +62,8 @@ It is built for a specific workflow:
 | Causal LM SFT | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_sft_demo.py` | verified |
 | Causal LM LoRA | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_lora_demo.py` | verified |
 | Text-to-video | `WanBundle` + `WanTrainer` + `WanPipeline` | `configs/text2video/wan_demo.py` | verified |
+| Motion generation (PRISM) | `PrismBundle` + `PrismTrainer` + `PrismPipeline` | `configs/motion/prism_demo.py` | verified reference |
+| Motion generation / understanding (VerMo) | `VermoBundle` + `VermoTrainer` + `VermoPipeline` | `configs/motion/vermo_demo.py` | verified reference |
 | GAN | `StyleGAN2Bundle` + `GANTrainer` + `StyleGAN2Pipeline` | `configs/gan/gan_demo.py` | verified reference |
 | DMD | `DMDBundle` + `DMDTrainer` + `DMDPipeline` | `configs/distillation/dmd_demo.py` | verified reference |
 

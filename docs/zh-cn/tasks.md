@@ -9,6 +9,8 @@
 | Causal LM SFT | `CausalLMBundle` | `CausalLMTrainer` | `CausalLMPipeline` | `configs/llm/llama_sft_demo.py` |
 | Causal LM LoRA | `CausalLMBundle` | `CausalLMTrainer` | `CausalLMPipeline` | `configs/llm/llama_lora_demo.py` |
 | 文生视频 | `WanBundle` | `WanTrainer` | `WanPipeline` | `configs/text2video/wan_demo.py` |
+| 动作生成（PRISM） | `PrismBundle` | `PrismTrainer` | `PrismPipeline` | `configs/motion/prism_demo.py` |
+| 动作生成 / 理解（VerMo） | `VermoBundle` | `VermoTrainer` | `VermoPipeline` | `configs/motion/vermo_demo.py` |
 | GAN | `StyleGAN2Bundle` | `GANTrainer` | `StyleGAN2Pipeline` | `configs/gan/gan_demo.py` |
 | DMD 一步蒸馏 | `DMDBundle` | `DMDTrainer` | `DMDPipeline` | `configs/distillation/dmd_demo.py` |
 
@@ -17,4 +19,5 @@
 - 分类：`preds`、`scores`、`gts`、可选 `metas`
 - 文生图：`preds`、`prompts`、可选 `gts`
 - 文生视频：`preds`、`prompts`
+- 动作生成：按任务返回动作产物或原始多模态响应文本
 - LLM：`preds`、`gts`、`input_prompts`、可选 `loss_lm`

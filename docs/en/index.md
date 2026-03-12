@@ -35,5 +35,6 @@ Runnable demos:
 - Causal LM SFT
 - Causal LM LoRA
 - Text-to-video
+- Motion generation (PRISM, VerMo)
 - StyleGAN2-style GAN training
 - DMD-style distillation

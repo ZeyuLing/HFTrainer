@@ -119,6 +119,10 @@ def _import_hf_class(class_name: str):
 
 # Core registries
 HF_MODELS = Registry('hf_model', build_func=build_hf_model_from_cfg)
+# Compatibility alias for vendored model code that expects a generic model
+# registry. HF_MODELS can already build plain nn.Module classes, not only
+# HuggingFace-native ones, so reusing it keeps the migration surface small.
+MODELS = HF_MODELS
 MODEL_BUNDLES = Registry('model_bundle')
 TRAINERS = Registry('trainer')
 PIPELINES = Registry('pipeline')

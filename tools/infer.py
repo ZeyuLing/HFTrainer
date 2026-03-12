@@ -50,6 +50,18 @@ def parse_args():
                         help='Number of samples for unconditional generation tasks')
     parser.add_argument('--num-frames', type=int, default=None,
                         help='Number of output frames (video tasks)')
+    parser.add_argument('--task', help='Task name for multi-task pipelines like VerMo.')
+    parser.add_argument('--negative-prompt', help='Negative prompt for motion/image generation.')
+    parser.add_argument('--first-frame-motion', help='Path to first-frame condition motion (.npz) for PRISM.')
+    parser.add_argument('--motion', help='Motion npz path for motion-conditioned tasks.')
+    parser.add_argument('--past-motion', help='Past motion npz path for motion completion tasks.')
+    parser.add_argument('--future-motion', help='Future motion npz path for inbetween tasks.')
+    parser.add_argument('--music', help='Music/audio wav path for dance tasks.')
+    parser.add_argument('--audio', help='Audio wav path for speech tasks.')
+    parser.add_argument('--speech-script', help='Optional transcript for speech tasks.')
+    parser.add_argument('--genre', help='Optional genre string for dance tasks.')
+    parser.add_argument('--num-person', type=int, default=None, help='Number of persons for motion tasks.')
+    parser.add_argument('--duration', type=float, default=None, help='Target duration in seconds for motion tasks.')
     parser.add_argument('--max-new-tokens', type=int, default=200,
                         help='Maximum number of new tokens for LLM generation.')
     parser.add_argument('--height', type=int, default=None, help='Output height')
@@ -231,6 +243,80 @@ def infer_llm(bundle, args):
     print(f'Generated: {outputs[0]}')
 
 
+def infer_prism(bundle, args):
+    from hftrainer.pipelines.motion.prism_pipeline import PrismPipeline
+
+    pipeline = PrismPipeline(bundle=bundle)
+    prompts = args.prompt or 'a person walks forward'
+    output = pipeline(
+        prompts=prompts,
+        negative_prompt=args.negative_prompt,
+        first_frame_motion_path=args.first_frame_motion,
+        num_frames_per_segment=args.num_frames or 33,
+        num_inference_steps=args.num_steps or 4,
+        guidance_scale=5.0,
+        use_static=False,
+        use_smooth=False,
+        normalize=False,
+    )
+    output_path = args.output or 'output_prism.npz'
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+    bundle.smpl_pose_processor.save_smplx_npz(output_path, output)
+    print(f'Saved motion to: {output_path}')
+
+
+def infer_vermo(bundle, args):
+    from hftrainer.pipelines.motion.vermo_pipeline import VermoPipeline
+
+    task = args.task or 't2m_1p'
+    pipeline = VermoPipeline(bundle=bundle)
+    output = pipeline(
+        task=task,
+        caption=args.prompt,
+        num_person=args.num_person,
+        duration=args.duration,
+        music=args.music,
+        genre=args.genre,
+        audio=args.audio,
+        speech_script=args.speech_script,
+        motion=args.motion,
+        past_motion=args.past_motion,
+        future_motion=args.future_motion,
+        max_new_tokens=args.max_new_tokens,
+        do_sample=False,
+    )
+    output_path = args.output
+    saved = False
+    for key, value in output.items():
+        modal_name = getattr(key, 'name', None)
+        if modal_name is None:
+            continue
+        if modal_name in {'motion', 'middle_motion', 'future_motion'} and isinstance(value, dict):
+            target = output_path or f'output_{modal_name}.npz'
+            os.makedirs(os.path.dirname(target) if os.path.dirname(target) else '.', exist_ok=True)
+            bundle.processor.smpl_pose_processor.save_smplx_npz(target, value)
+            print(f'Saved motion to: {target}')
+            saved = True
+            break
+        if modal_name == 'caption' and isinstance(value, str):
+            target = output_path or 'output_vermo.txt'
+            os.makedirs(os.path.dirname(target) if os.path.dirname(target) else '.', exist_ok=True)
+            with open(target, 'w', encoding='utf-8') as f:
+                f.write(value)
+            print(f'Saved text to: {target}')
+            saved = True
+            break
+    if not saved:
+        response = output.get('response', output)
+        if output_path:
+            os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(str(response))
+            print(f'Saved response to: {output_path}')
+        else:
+            print(response)
+
+
 def main():
     args = parse_args()
 
@@ -268,11 +354,15 @@ def main():
         infer_gan(bundle, args)
     elif 'Classification' in trainer_type:
         infer_classification(bundle, args)
+    elif 'Prism' in trainer_type:
+        infer_prism(bundle, args)
+    elif 'Vermo' in trainer_type:
+        infer_vermo(bundle, args)
     elif 'CausalLM' in trainer_type or 'LLM' in trainer_type:
         infer_llm(bundle, args)
     else:
         print(f'Unknown trainer type: {trainer_type}. Cannot auto-detect pipeline.')
-        print('Supported: WanTrainer, SD15Trainer, ClassificationTrainer, CausalLMTrainer')
+        print('Supported: WanTrainer, SD15Trainer, DMDTrainer, GANTrainer, ClassificationTrainer, CausalLMTrainer, PrismTrainer, VermoTrainer')
 
 
 if __name__ == '__main__':

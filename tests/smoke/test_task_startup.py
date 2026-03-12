@@ -188,6 +188,20 @@ def _customize_dmd(cfg: Config, has_cuda: bool):
     cfg.accelerator.mixed_precision = 'no'
 
 
+def _customize_prism(cfg: Config, has_cuda: bool):
+    cfg.train_dataloader.batch_size = 1
+    cfg.train_dataloader.num_workers = 0
+    cfg.accelerator.mixed_precision = 'no'
+
+
+def _customize_vermo(cfg: Config, has_cuda: bool):
+    cfg.train_dataloader.batch_size = 1
+    cfg.train_dataloader.num_workers = 0
+    cfg.train_dataloader.dataset.num_samples = 2
+    cfg.train_dataloader.dataset.tasks = ['t2m']
+    cfg.accelerator.mixed_precision = 'no'
+
+
 def _classification_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
     return [
         '--input', str(_first_demo_image(repo_root)),
@@ -243,6 +257,26 @@ def _dmd_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
         '--prompt', 'a cat portrait',
         '--output', str(output_path),
         '--device', _device_for_infer(has_cuda),
+    ]
+
+
+def _prism_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
+    return [
+        '--prompt', 'a person walks forward',
+        '--output', str(output_path),
+        '--device', _device_for_infer(has_cuda),
+        '--num-frames', '17',
+        '--num-steps', '2',
+    ]
+
+
+def _vermo_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
+    return [
+        '--task', 't2m_1p',
+        '--prompt', 'a person raises both hands',
+        '--output', str(output_path),
+        '--device', _device_for_infer(has_cuda),
+        '--max-new-tokens', '32',
     ]
 
 
@@ -361,6 +395,44 @@ SMOKE_CASES = [
         marks=[pytest.mark.smoke, pytest.mark.gpu],
         id='dmd',
     ),
+    pytest.param(
+        SmokeCase(
+            name='prism',
+            config_path='configs/motion/prism_demo.py',
+            required_paths=[
+                'tests/assets/motion/tiny_tokenizer',
+                'tests/assets/motion/tiny_t5_encoder',
+                'tests/assets/motion/smpl_stats.json',
+            ],
+            customize_cfg=_customize_prism,
+            build_infer_args=_prism_infer_args,
+            validate_infer=_validate_file_output,
+            requires_cuda=False,
+            train_timeout=900,
+            infer_timeout=900,
+        ),
+        marks=pytest.mark.smoke,
+        id='prism',
+    ),
+    pytest.param(
+        SmokeCase(
+            name='vermo',
+            config_path='configs/motion/vermo_demo.py',
+            required_paths=[
+                'tests/assets/motion/tiny_tokenizer',
+                'tests/assets/motion/tiny_llama',
+                'tests/assets/motion/smpl_stats.json',
+            ],
+            customize_cfg=_customize_vermo,
+            build_infer_args=_vermo_infer_args,
+            validate_infer=_validate_file_output,
+            requires_cuda=False,
+            train_timeout=900,
+            infer_timeout=900,
+        ),
+        marks=pytest.mark.smoke,
+        id='vermo',
+    ),
 ]
 
 
@@ -384,6 +456,10 @@ def test_train_and_infer_startup(case: SmokeCase, tmp_path: Path, repo_root: Pat
     output_path = work_dir / f'{case.name}_infer_output'
     if case.name in {'gan', 'sd15', 'dmd'}:
         output_path = output_path.with_suffix('.png')
+    elif case.name == 'prism':
+        output_path = output_path.with_suffix('.npz')
+    elif case.name == 'vermo':
+        output_path = output_path.with_suffix('.txt')
     elif case.name == 'wan':
         output_path = output_path.with_suffix('.mp4')
 
