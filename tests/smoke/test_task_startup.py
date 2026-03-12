@@ -398,7 +398,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='prism',
-            config_path='configs/motion/prism_demo.py',
+            config_path='configs/prism/prism_smoke.py',
             required_paths=[
                 'tests/assets/motion/tiny_tokenizer',
                 'tests/assets/motion/tiny_t5_encoder',
@@ -417,7 +417,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='vermo',
-            config_path='configs/motion/vermo_demo.py',
+            config_path='configs/vermo/vermo_smoke.py',
             required_paths=[
                 'tests/assets/motion/tiny_tokenizer',
                 'tests/assets/motion/tiny_llama',
