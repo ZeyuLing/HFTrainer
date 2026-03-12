@@ -1,6 +1,6 @@
 """Compatibility package for motion pipeline imports."""
 
-from hftrainer.models.prism.pipeline import PrismPipeline
-from hftrainer.models.vermo.pipeline import VermoPipeline
+from hftrainer.pipelines.motion.prism_pipeline import PrismPipeline
+from hftrainer.pipelines.motion.vermo_pipeline import VermoPipeline
 
 __all__ = ['PrismPipeline', 'VermoPipeline']

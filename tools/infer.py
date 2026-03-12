@@ -108,7 +108,7 @@ def load_bundle_from_checkpoint(cfg, checkpoint_path: str, device: str):
 def infer_text2video(bundle, args):
     """Run WAN text-to-video inference."""
     import torch
-    from hftrainer.models.wan.pipeline import WanPipeline
+    from hftrainer.pipelines.text2video.wan_pipeline import WanPipeline
 
     pipeline = WanPipeline(
         bundle=bundle,
@@ -145,7 +145,7 @@ def infer_text2video(bundle, args):
 
 def infer_text2image(bundle, args):
     """Run SD1.5 text-to-image inference."""
-    from hftrainer.models.sd15.pipeline import SD15Pipeline
+    from hftrainer.pipelines.text2image.sd15_pipeline import SD15Pipeline
     from hftrainer.utils.image import save_tensor_image
 
     pipeline = SD15Pipeline(
@@ -173,7 +173,7 @@ def infer_text2image(bundle, args):
 
 def infer_dmd(bundle, args):
     """Run DMD one-step text-to-image inference."""
-    from hftrainer.models.dmd.pipeline import DMDPipeline
+    from hftrainer.pipelines.text2image.dmd_pipeline import DMDPipeline
     from hftrainer.utils.image import save_tensor_image
 
     pipeline = DMDPipeline(bundle=bundle)
@@ -193,7 +193,7 @@ def infer_dmd(bundle, args):
 
 def infer_gan(bundle, args):
     """Run StyleGAN2 inference."""
-    from hftrainer.models.stylegan2.pipeline import StyleGAN2Pipeline
+    from hftrainer.pipelines.gan.stylegan2_pipeline import StyleGAN2Pipeline
     from hftrainer.utils.image import save_tensor_image
 
     pipeline = StyleGAN2Pipeline(bundle=bundle)
@@ -213,7 +213,7 @@ def infer_gan(bundle, args):
 
 def infer_classification(bundle, args):
     """Run ViT classification inference."""
-    from hftrainer.models.vit.pipeline import ClassificationPipeline
+    from hftrainer.pipelines.classification.classification_pipeline import ClassificationPipeline
 
     pipeline = ClassificationPipeline(bundle=bundle)
 
@@ -232,7 +232,7 @@ def infer_classification(bundle, args):
 
 def infer_llm(bundle, args):
     """Run LLM text generation inference."""
-    from hftrainer.models.causal_lm.pipeline import CausalLMPipeline
+    from hftrainer.pipelines.llm.causal_lm_pipeline import CausalLMPipeline
 
     pipeline = CausalLMPipeline(bundle=bundle)
 

@@ -24,7 +24,6 @@ class VermoBundle(ModelBundle):
         self.mean_init_embeddings = mean_init_embeddings
         self._build_modules({'processor': processor, 'lm': lm})
         self._resize_token_embeddings()
-        self._pipeline = None
 
     @classmethod
     def _bundle_config_from_pretrained(
@@ -88,16 +87,3 @@ class VermoBundle(ModelBundle):
 
     def forward_lm(self, inputs: Dict[str, Any]):
         return self.lm(**self.process_train(inputs))
-
-    def build_backend_pipeline(self):
-        if self._pipeline is None:
-            from hftrainer.models.vermo.backend import VermoPipeline
-
-            self._pipeline = VermoPipeline(
-                vqvae=self.processor.motion_tokenizer,
-                audio_tokenizer=self.processor.audio_tokenizer,
-                text_tokenizer=self.processor.text_tokenizer,
-                smpl_processor=self.processor.smpl_pose_processor,
-                lm=self.lm,
-            )
-        return self._pipeline

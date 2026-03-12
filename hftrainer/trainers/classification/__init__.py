@@ -1,2 +1,2 @@
-from hftrainer.models.vit.trainer import ClassificationTrainer
+from hftrainer.trainers.classification.classification_trainer import ClassificationTrainer
 __all__ = ['ClassificationTrainer']
