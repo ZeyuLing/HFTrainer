@@ -1,2 +1,2 @@
-from hftrainer.trainers.text2video.wan_trainer import WanTrainer
+from hftrainer.models.wan.trainer import WanTrainer
 __all__ = ['WanTrainer']

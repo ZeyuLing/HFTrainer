@@ -1,2 +1,2 @@
-from hftrainer.models.llm.causal_lm_bundle import CausalLMBundle
+from hftrainer.models.causal_lm.bundle import CausalLMBundle
 __all__ = ['CausalLMBundle']

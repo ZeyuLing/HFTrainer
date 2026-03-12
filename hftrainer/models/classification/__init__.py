@@ -1,3 +1,3 @@
 """ViT classification models."""
-from hftrainer.models.classification.vit_bundle import ViTBundle
+from hftrainer.models.vit.bundle import ViTBundle
 __all__ = ['ViTBundle']

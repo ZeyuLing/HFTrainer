@@ -205,6 +205,15 @@ checkpoints/  local pretrained checkpoints for demos
 tests/        startup smoke tests and focused unit tests
 ```
 
+Model-specific task stacks are organized under:
+
+```text
+hftrainer/models/<model_name>/
+  bundle.py
+  trainer.py
+  pipeline.py
+```
+
 ## Scope Notes
 
 - `docs/en/` and `docs/zh-cn/` are the source-of-truth public docs
