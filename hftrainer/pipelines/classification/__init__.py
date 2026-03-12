@@ -1,2 +1,2 @@
-from hftrainer.pipelines.classification.classification_pipeline import ClassificationPipeline
+from hftrainer.models.vit.pipeline import ClassificationPipeline
 __all__ = ['ClassificationPipeline']

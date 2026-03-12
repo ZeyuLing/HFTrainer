@@ -1,5 +1,5 @@
 """GAN trainer module."""
 
-from hftrainer.trainers.gan.gan_trainer import GANTrainer
+from hftrainer.models.stylegan2.trainer import GANTrainer
 
 __all__ = ['GANTrainer']

@@ -1,2 +1,2 @@
-from hftrainer.models.text2video.wan_bundle import WanBundle
+from hftrainer.models.wan.bundle import WanBundle
 __all__ = ['WanBundle']
