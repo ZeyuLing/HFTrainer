@@ -189,6 +189,16 @@ class AccelerateRunner:
             if isinstance(getattr(bundle, name), nn.Module)
         ]
 
+        # Identify bundle-level trainable Parameters (e.g. null_vtxt_feat,
+        # null_ctxt_input) that live outside any registered sub-module.
+        # These cannot be DDP-wrapped directly, so we manually all_reduce
+        # their gradients after each backward pass (see _sync_orphan_param_grads).
+        self._orphan_trainable_params = [
+            param
+            for _name, param in bundle.named_parameters(recurse=False)
+            if param.requires_grad
+        ]
+
         # Move frozen modules to device manually
         for name in bundle._frozen_modules:
             mod = getattr(bundle, name, None)
@@ -725,7 +735,12 @@ class AccelerateRunner:
             logger.info(f"Removed old checkpoint: {oldest}")
 
     def _state_dict_to_save(self) -> Dict[str, dict]:
-        """Build a nested state dict for save_ckpt=True modules."""
+        """Build a nested state dict for save_ckpt=True modules.
+
+        Also saves bundle-level nn.Parameters (e.g. null_vtxt_feat,
+        null_ctxt_input) and buffers (e.g. mean, std) that live outside any
+        sub-module.  These are stored under the key ``'__bundle_params__'``.
+        """
         from hftrainer.models.peft_utils import get_lora_state_dict
 
         state_dict = {'__hftrainer_meta__': self.bundle.checkpoint_metadata()}
@@ -742,7 +757,45 @@ class AccelerateRunner:
                 module_state = get_lora_state_dict(module, state_dict=module_state)
 
             state_dict[name] = module_state
+
+        # Save bundle-level nn.Parameters and buffers (direct children only).
+        # Without this, parameters like null_vtxt_feat / null_ctxt_input are
+        # lost across checkpoint save/load cycles.
+        bundle_params = {}
+        for param_name, param in self.bundle.named_parameters(recurse=False):
+            bundle_params[param_name] = param.data.clone()
+        for buf_name, buf in self.bundle.named_buffers(recurse=False):
+            bundle_params[buf_name] = buf.clone()
+        if bundle_params:
+            state_dict['__bundle_params__'] = bundle_params
+
         return state_dict
+
+    def _sync_orphan_param_grads(self):
+        """All-reduce gradients for bundle-level Parameters not in any DDP module.
+
+        DDP automatically syncs gradients for parameters inside wrapped modules,
+        but bundle-level Parameters (e.g. ``null_vtxt_feat``) live outside any
+        DDP-wrapped sub-module.  Without explicit sync, their gradients diverge
+        across ranks during multi-GPU training.
+
+        This is a no-op when ``_orphan_trainable_params`` is empty or when
+        running on a single device (no distributed backend).
+        """
+        if not self._orphan_trainable_params:
+            return
+        if self.accelerator.num_processes <= 1:
+            return
+
+        import torch.distributed as dist
+        if not dist.is_initialized():
+            return
+
+        world_size = dist.get_world_size()
+        for param in self._orphan_trainable_params:
+            if param.grad is not None:
+                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+                param.grad.div_(world_size)
 
     def _get_module_state_dict(self, module: nn.Module) -> dict:
         """Return a saveable state dict without forcing unnecessary backend imports."""
@@ -848,6 +901,7 @@ class AccelerateRunner:
                     loss = output.get('loss')
                     if loss is not None:
                         self.accelerator.backward(loss)
+                        self._sync_orphan_param_grads()
                         for opt in self.optimizers.values():
                             opt.step()
                             opt.zero_grad()
@@ -900,6 +954,7 @@ class AccelerateRunner:
                         loss = output.get('loss')
                         if loss is not None:
                             self.accelerator.backward(loss)
+                            self._sync_orphan_param_grads()
                             for opt in self.optimizers.values():
                                 opt.step()
                                 opt.zero_grad()
