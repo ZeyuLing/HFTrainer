@@ -182,6 +182,23 @@ class AccelerateRunner:
         vis_cfg = getattr(cfg, 'val_visualizer', None)
         visualizers = cls._build_visualizers(vis_cfg)
 
+        # ── Pre-prepare model-only load for FSDP / DeepSpeed ──
+        # FSDP and DeepSpeed flatten/shard parameters during prepare(), so
+        # model-only checkpoints (which store original-shape tensors) must
+        # be loaded BEFORE prepare().  Full-resume checkpoints that contain
+        # accelerator state files are handled AFTER prepare() via
+        # accelerator.load_state().
+        _pre_loaded_model = False
+        _pre_loaded_meta = None
+        uses_sharding = (
+            accelerator.distributed_type == DistributedType.FSDP
+            or accelerator.distributed_type == DistributedType.DEEPSPEED
+        )
+        if uses_sharding:
+            _pre_loaded_model, _pre_loaded_meta = cls._pre_prepare_load(
+                bundle, cfg, work_dir, accelerator,
+            )
+
         # ── Accelerator prepare ──
         # Only prepare trainable modules, not frozen ones
         trainable_module_list = [
@@ -193,7 +210,7 @@ class AccelerateRunner:
         # null_ctxt_input) that live outside any registered sub-module.
         # These cannot be DDP-wrapped directly, so we manually all_reduce
         # their gradients after each backward pass (see _sync_orphan_param_grads).
-        self._orphan_trainable_params = [
+        _orphan_trainable_params = [
             param
             for _name, param in bundle.named_parameters(recurse=False)
             if param.requires_grad
@@ -264,6 +281,18 @@ class AccelerateRunner:
             cfg=cfg,
         )
 
+        # Assign orphan trainable params
+        runner._orphan_trainable_params = _orphan_trainable_params
+
+        # Apply pre-loaded meta (global_step / epoch) if we did a pre-prepare load
+        if _pre_loaded_model and _pre_loaded_meta is not None:
+            runner.global_step = _pre_loaded_meta.get('global_step', 0)
+            runner.current_epoch = _pre_loaded_meta.get('current_epoch', 0)
+            logger.info(
+                f"Restored training position: global_step={runner.global_step}, "
+                f"epoch={runner.current_epoch}. Optimizer state was reset."
+            )
+
         # Initialize tensorboard / trackers
         if accelerator.is_main_process:
             try:
@@ -280,8 +309,9 @@ class AccelerateRunner:
                 f"{type(runner.trainer).__name__}"
             )
 
-        # Handle checkpoint loading
-        runner._handle_load()
+        # Handle checkpoint loading (skipped if pre-prepare load already handled it)
+        if not _pre_loaded_model:
+            runner._handle_load()
 
         return runner
 
@@ -297,6 +327,117 @@ class AccelerateRunner:
             model_cfg = model_cfg.to_dict()
         model_cfg = copy.deepcopy(model_cfg)
         return MODEL_BUNDLES.build(model_cfg)
+
+    @staticmethod
+    def _pre_prepare_load(bundle, cfg, work_dir, accelerator):
+        """Load model-only checkpoint BEFORE accelerator.prepare().
+
+        FSDP and DeepSpeed flatten/shard parameters during prepare(),
+        making it impossible to load original-shape state dicts afterwards.
+        This method detects model-only checkpoints and loads them while
+        the model still has original parameter shapes.
+
+        For full-resume checkpoints (containing ``model.safetensors`` or
+        ``pytorch_model.bin``), loading is deferred to ``_handle_load()``
+        which runs after prepare() and uses ``accelerator.load_state()``.
+
+        Returns:
+            (loaded: bool, meta: dict | None)
+        """
+        from hftrainer.utils.checkpoint_utils import load_checkpoint
+        import gc
+
+        auto_resume = getattr(cfg, 'auto_resume', False)
+        load_from = getattr(cfg, 'load_from', None)
+
+        # Determine checkpoint path and whether it is model-only
+        ckpt_path = None
+        is_model_only = False
+        is_auto_resume_ckpt = False
+
+        if auto_resume:
+            latest = find_latest_checkpoint(work_dir)
+            if latest:
+                has_accel_state = (
+                    os.path.exists(os.path.join(latest, 'model.safetensors'))
+                    or os.path.exists(os.path.join(latest, 'pytorch_model.bin'))
+                )
+                if has_accel_state:
+                    # Full resume — let _handle_load deal with it after prepare
+                    return False, None
+                else:
+                    ckpt_path = latest
+                    is_model_only = True
+                    is_auto_resume_ckpt = True
+            # else: no checkpoint found — fall through to check load_from
+
+        # When auto_resume found no checkpoint (or is disabled), check load_from
+        # so that model-only pretrained weights are loaded BEFORE FSDP wrapping.
+        if not ckpt_path and load_from is not None:
+            if hasattr(load_from, 'to_dict'):
+                load_from = load_from.to_dict()
+            if isinstance(load_from, dict):
+                scope = load_from.get('load_scope', 'model')
+                if scope == 'model':
+                    ckpt_path = load_from.get('path', None)
+                    is_model_only = True
+                # scope == 'full' is handled after prepare by _handle_load
+
+        if not ckpt_path or not is_model_only:
+            return False, None
+
+        # Serialised loading: one rank at a time to avoid OOM
+        is_distributed = torch.distributed.is_initialized()
+        num_processes = accelerator.num_processes if is_distributed else 1
+        my_rank = accelerator.process_index if is_distributed else 0
+
+        try:
+            for loading_rank in range(num_processes):
+                if my_rank == loading_rank:
+                    logger.info(
+                        "[Pre-FSDP] Rank %d/%d: loading model weights "
+                        "from %s ...",
+                        my_rank, num_processes, ckpt_path,
+                    )
+                    state_dict = load_checkpoint(ckpt_path, map_location='cpu')
+                    bundle.load_state_dict_selective(state_dict)
+                    del state_dict
+                    gc.collect()
+
+                # Barrier: wait for the current loading_rank to finish before
+                # the next rank starts, keeping peak CPU RAM bounded.
+                if is_distributed:
+                    torch.distributed.barrier()
+
+            sep = '=' * 60
+            logger.info(sep)
+            logger.info(
+                f"[Pre-FSDP] Loaded model weights from: {ckpt_path}"
+            )
+            logger.info(
+                "Weights loaded before FSDP sharding. "
+                "Optimizer state was reset."
+            )
+            logger.info(sep)
+        except FileNotFoundError:
+            logger.warning(
+                f"No model checkpoint found at {ckpt_path}, "
+                "skipping pre-prepare load"
+            )
+            return False, None
+
+        # Read meta for step/epoch restoration — only for auto_resume
+        # checkpoints.  When load_from with load_scope='model' is used,
+        # we start a NEW training run, so global_step/epoch stay at 0.
+        meta = None
+        if is_auto_resume_ckpt:
+            meta_path = os.path.join(ckpt_path, 'meta.pt')
+            if os.path.exists(meta_path):
+                meta = torch.load(
+                    meta_path, map_location='cpu', weights_only=False,
+                )
+
+        return True, meta
 
     @staticmethod
     def _log_model_summary(bundle):
