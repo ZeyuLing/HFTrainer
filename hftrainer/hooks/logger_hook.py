@@ -28,12 +28,19 @@ class LoggerHook:
     The ``by_epoch`` flag controls how ``interval`` is interpreted:
 
       - ``by_epoch=False``: log every ``interval`` iterations.
-      - ``by_epoch=True``: log an epoch summary every ``interval`` epochs.
+      - ``by_epoch=True``: log an epoch summary every ``interval`` epochs,
+        **and** log per-iteration metrics every ``iter_interval`` iterations
+        within each epoch (default 100).  Set ``iter_interval=0`` to disable
+        per-iteration logging and only show epoch summaries.
       - ``by_epoch=None`` (default): auto-inherit from ``train_cfg.by_epoch``.
 
     Log format (iter-based)::
 
         step [5/10]  lr=2.00e-05  loss=1.45  data_time=0.01s  train_time=0.12s  eta=0:00:01
+
+    Log format (epoch-based, per-iter)::
+
+        epoch [1/100]  step [50/3216]  lr=2.00e-05  loss=1.45  data_time=0.01s  train_time=0.12s  eta=2:30:00
 
     Log format (epoch-based, epoch summary)::
 
@@ -42,9 +49,10 @@ class LoggerHook:
 
     priority = 10  # runs early
 
-    def __init__(self, interval: int = 10, by_epoch=None):
+    def __init__(self, interval: int = 10, by_epoch=None, iter_interval: int = 10):
         self.interval = interval
         self.by_epoch = by_epoch  # None = auto-inherit from train_cfg
+        self.iter_interval = iter_interval  # per-iter log interval when by_epoch=True
         self.runner = None
         self._start_time = None
 
@@ -103,6 +111,11 @@ class LoggerHook:
                 except Exception:
                     pass
             self._epoch_iter_count += 1
+
+            # Also log per-iteration within each epoch so users get timely
+            # feedback (especially for large-epoch training).
+            if self.iter_interval and self._epoch_iter_count % self.iter_interval == 0:
+                self._log(global_step, output, data_time=data_time, train_time=train_time)
         else:
             # Iter-based: log every N iters
             if (global_step + 1) % self.interval == 0:
@@ -231,11 +244,16 @@ class LoggerHook:
                 try:
                     if hasattr(v, 'item'):
                         val = v.item()
-                        parts.append(f"{k}={val:.4f}")
-                        scalar_metrics[k] = val
                     elif isinstance(v, float):
-                        parts.append(f"{k}={v:.4f}")
-                        scalar_metrics[k] = v
+                        val = v
+                    else:
+                        continue
+                    # Adaptive precision: use scientific notation for very small values
+                    if val != 0 and abs(val) < 1e-4:
+                        parts.append(f"{k}={val:.2e}")
+                    else:
+                        parts.append(f"{k}={val:.4f}")
+                    scalar_metrics[k] = val
                 except Exception:
                     pass
 

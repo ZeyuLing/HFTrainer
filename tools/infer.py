@@ -265,6 +265,46 @@ def infer_prism(bundle, args):
     print(f'Saved motion to: {output_path}')
 
 
+def infer_prism_mcm(bundle, args):
+    import torch
+    from hftrainer.pipelines.motion.prism_mcm_pipeline import PrismMCMPipeline
+
+    pipeline = PrismMCMPipeline(bundle=bundle)
+    prompts = args.prompt or 'a person dances to music'
+
+    # Load audio if provided
+    audio_tensor = None
+    if args.audio or args.music:
+        audio_path = args.audio or args.music
+        try:
+            import librosa
+            waveform, sr = librosa.load(audio_path, sr=16000, mono=True)
+            audio_tensor = torch.from_numpy(waveform).unsqueeze(0).to(
+                device=next(bundle.transformer.parameters()).device
+            )
+        except ImportError:
+            print('Warning: librosa not installed, skipping audio loading.')
+
+    output = pipeline(
+        prompts=prompts,
+        audio=audio_tensor,
+        num_frames_per_segment=args.num_frames or 33,
+        num_inference_steps=args.num_steps or 4,
+        guidance_scale=5.0,
+    )
+
+    output_path = args.output or 'output_prism_mcm.npz'
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+
+    # Save the raw motion latent as npz
+    import numpy as np
+    motion = output['motion']
+    if isinstance(motion, torch.Tensor):
+        motion = motion.cpu().float().numpy()
+    np.savez(output_path, motion=motion)
+    print(f'Saved motion to: {output_path}')
+
+
 def infer_vermo(bundle, args):
     from hftrainer.pipelines.motion.vermo_pipeline import VermoPipeline
 
@@ -317,6 +357,92 @@ def infer_vermo(bundle, args):
             print(response)
 
 
+def infer_hymotion_m2m(bundle, args):
+    """Run HyMotion-M2M motion-to-motion inference."""
+    import torch
+    import numpy as np
+    from hftrainer.pipelines.motion.hymotion_m2m_pipeline import HyMotionM2MPipeline
+
+    pipeline = HyMotionM2MPipeline(
+        bundle=bundle,
+        num_steps=args.num_steps or 50,
+    )
+
+    # Build a simple batch from args or generate random input
+    device = next(bundle.motion_transformer.parameters()).device
+    if args.input and os.path.exists(args.input):
+        data = np.load(args.input)
+        src_motion = torch.from_numpy(data['src_motion']).float().unsqueeze(0).to(device)
+        src_mask = None
+        if 'src_mask' in data:
+            src_mask = torch.from_numpy(data['src_mask']).float().unsqueeze(0).to(device)
+        L = src_motion.shape[1]
+    else:
+        L = args.num_frames or 64
+        D = 135
+        src_motion = torch.randn(1, L, D, device=device)
+        src_mask = torch.ones(1, L, D, device=device)
+
+    batch = {
+        'src_motion': src_motion,
+        'src_mask': src_mask,
+        'src_length': [L],
+        'tgt_length': [L],
+    }
+    with torch.no_grad():
+        output = pipeline(batch)
+
+    output_path = args.output or 'output_hymotion_m2m.npz'
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+
+    save_dict = {}
+    for key in ('rot6d', 'transl', 'latent'):
+        if key in output and isinstance(output[key], torch.Tensor):
+            save_dict[key] = output[key].cpu().numpy()
+    if output.get('keypoints3d') is not None:
+        save_dict['keypoints3d'] = output['keypoints3d'].cpu().numpy()
+    np.savez(output_path, **save_dict)
+    print(f'Saved motion to: {output_path}')
+
+
+def infer_hymotion_t2m(bundle, args):
+    """Run HyMotion-T2M text-to-motion inference."""
+    import torch
+    import numpy as np
+    from hftrainer.pipelines.motion.hymotion_t2m_pipeline import HyMotionT2MPipeline
+
+    pipeline = HyMotionT2MPipeline(
+        bundle=bundle,
+        num_steps=args.num_steps or 50,
+        text_guidance_scale=getattr(args, 'guidance_scale', 5.0) or 5.0,
+    )
+
+    L = args.num_frames or 64
+    batch = {
+        'tgt_length': [L],
+    }
+
+    # Add text conditioning if prompt is provided
+    if args.prompt:
+        batch['caption'] = [args.prompt]
+
+    device = next(bundle.motion_transformer.parameters()).device
+    with torch.no_grad():
+        output = pipeline(batch)
+
+    output_path = args.output or 'output_hymotion_t2m.npz'
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+
+    save_dict = {}
+    for key in ('rot6d', 'transl', 'latent'):
+        if key in output and isinstance(output[key], torch.Tensor):
+            save_dict[key] = output[key].cpu().numpy()
+    if output.get('keypoints3d') is not None:
+        save_dict['keypoints3d'] = output['keypoints3d'].cpu().numpy()
+    np.savez(output_path, **save_dict)
+    print(f'Saved motion to: {output_path}')
+
+
 def main():
     args = parse_args()
 
@@ -354,15 +480,21 @@ def main():
         infer_gan(bundle, args)
     elif 'Classification' in trainer_type:
         infer_classification(bundle, args)
+    elif 'PrismMCM' in trainer_type:
+        infer_prism_mcm(bundle, args)
     elif 'Prism' in trainer_type:
         infer_prism(bundle, args)
     elif 'Vermo' in trainer_type:
         infer_vermo(bundle, args)
+    elif 'HyMotionM2M' in trainer_type:
+        infer_hymotion_m2m(bundle, args)
+    elif 'HyMotionT2M' in trainer_type:
+        infer_hymotion_t2m(bundle, args)
     elif 'CausalLM' in trainer_type or 'LLM' in trainer_type:
         infer_llm(bundle, args)
     else:
         print(f'Unknown trainer type: {trainer_type}. Cannot auto-detect pipeline.')
-        print('Supported: WanTrainer, SD15Trainer, DMDTrainer, GANTrainer, ClassificationTrainer, CausalLMTrainer, PrismTrainer, VermoTrainer')
+        print('Supported: WanTrainer, SD15Trainer, DMDTrainer, GANTrainer, ClassificationTrainer, CausalLMTrainer, PrismTrainer, PrismMCMTrainer, VermoTrainer, HyMotionM2MTrainer')
 
 
 if __name__ == '__main__':

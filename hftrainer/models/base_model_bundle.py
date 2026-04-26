@@ -518,7 +518,20 @@ class ModelBundle(nn.Module):
         return {'format_version': 2, 'modules': modules}
 
     def trainable_parameters(self) -> List[torch.nn.Parameter]:
-        """Return all trainable parameters for optimizer construction."""
+        """Return all trainable parameters for optimizer construction.
+
+        Includes:
+          - Parameters from all ``_trainable_modules`` sub-modules.
+          - **Bundle-level** ``nn.Parameter`` attributes (e.g. ``null_vtxt_feat``,
+            ``null_ctxt_input``) that are direct children of the bundle but not
+            inside any registered sub-module.  These are collected via
+            ``self.named_parameters(recurse=False)``.
+
+        Historical note: before this fix, bundle-level Parameters were silently
+        excluded from the optimizer, so they were never trained.  This caused
+        inference divergence when the null embeddings (loaded from a pretrained
+        checkpoint) were not saved in M2M/T2M checkpoints.
+        """
         params = []
         for name in self._trainable_modules:
             module = getattr(self, name)
@@ -526,6 +539,10 @@ class ModelBundle(nn.Module):
                 params.extend(
                     param for param in module.parameters() if param.requires_grad
                 )
+        # Bundle-level nn.Parameters (direct children, not in any sub-module)
+        for _name, param in self.named_parameters(recurse=False):
+            if param.requires_grad:
+                params.append(param)
         return params
 
     def trainable_named_parameters(self):
@@ -536,6 +553,10 @@ class ModelBundle(nn.Module):
                 for param_name, param in module.named_parameters():
                     if param.requires_grad:
                         yield f"{mod_name}.{param_name}", param
+        # Bundle-level nn.Parameters
+        for param_name, param in self.named_parameters(recurse=False):
+            if param.requires_grad:
+                yield param_name, param
 
     def get_module_parameters(self, *names: str) -> List[torch.nn.Parameter]:
         """
@@ -575,8 +596,13 @@ class ModelBundle(nn.Module):
 
     def state_dict_to_save(self) -> Dict[str, dict]:
         """
-        Return a nested state dict containing only save_ckpt=True modules.
-        Format: {module_name: state_dict}
+        Return a nested state dict containing only save_ckpt=True modules,
+        plus any bundle-level nn.Parameters and registered buffers.
+
+        Format: {module_name: state_dict, '__bundle_params__': {...}}
+
+        Automatically unwraps DDP/FSDP wrappers so checkpoint keys are clean
+        (without ``module.`` prefix).
         """
         from hftrainer.models.peft_utils import get_lora_state_dict
 
@@ -587,16 +613,34 @@ class ModelBundle(nn.Module):
         for name in self._save_ckpt_modules:
             module = getattr(self, name)
             if isinstance(module, nn.Module):
+                # Unwrap DDP / FSDP wrappers to get clean keys
+                save_target = module
+                while hasattr(save_target, 'module'):
+                    save_target = save_target.module
                 if self.get_module_checkpoint_format(name) == 'lora':
-                    sd[name] = get_lora_state_dict(module)
+                    sd[name] = get_lora_state_dict(save_target)
                 else:
-                    sd[name] = module.state_dict()
+                    sd[name] = save_target.state_dict()
+
+        # Save bundle-level nn.Parameters and buffers (direct children only).
+        # These live outside any sub-module and would otherwise be lost.
+        bundle_params = {}
+        for pname, param in self.named_parameters(recurse=False):
+            bundle_params[pname] = param.data.clone()
+        for bname, buf in self.named_buffers(recurse=False):
+            bundle_params[bname] = buf.clone()
+        if bundle_params:
+            sd['__bundle_params__'] = bundle_params
+
         return sd
 
     def load_state_dict_selective(self, state_dict: Dict[str, dict], strict: bool = False):
         """
         Load only modules that are present in state_dict.
         Modules not present in state_dict are left unchanged.
+
+        Also restores bundle-level nn.Parameters and buffers from
+        ``'__bundle_params__'`` if present in the checkpoint.
 
         Args:
             state_dict: {module_name: module_state_dict} or flat state dict
@@ -615,6 +659,25 @@ class ModelBundle(nn.Module):
             meta = state_dict.pop('__hftrainer_meta__')
             if isinstance(meta, dict):
                 checkpoint_meta = meta.get('modules', {}) or {}
+
+        # Restore bundle-level parameters / buffers saved by state_dict_to_save().
+        bundle_params = state_dict.pop('__bundle_params__', None)
+        if bundle_params and isinstance(bundle_params, dict):
+            for pname, pval in bundle_params.items():
+                if hasattr(self, pname):
+                    attr = getattr(self, pname)
+                    if isinstance(attr, nn.Parameter):
+                        if attr.shape == pval.shape:
+                            attr.data.copy_(pval)
+                        else:
+                            from hftrainer.utils.logger import get_logger
+                            get_logger().warning(
+                                f"Shape mismatch for bundle param '{pname}': "
+                                f"ckpt {tuple(pval.shape)} vs model {tuple(attr.shape)}, skipped"
+                            )
+                    elif isinstance(attr, torch.Tensor):
+                        if attr.shape == pval.shape:
+                            attr.copy_(pval)
 
         if not state_dict:
             return
@@ -648,7 +711,34 @@ class ModelBundle(nn.Module):
                         set_lora_state_dict(module, sd)
                         continue
 
-                    missing, unexpected = module.load_state_dict(sd, strict=strict)
+                    # Unwrap DDP / FSDP wrappers so checkpoint keys (without
+                    # ``module.`` prefix) match the underlying model's state_dict.
+                    load_target = module
+                    while hasattr(load_target, 'module'):
+                        load_target = load_target.module
+
+                    # Filter out shape-mismatched parameters to avoid RuntimeError.
+                    # PyTorch's load_state_dict with strict=False still raises on
+                    # shape mismatches; we skip them gracefully and warn.
+                    if not strict:
+                        target_sd = load_target.state_dict()
+                        shape_mismatched = []
+                        for k, v in list(sd.items()):
+                            if k in target_sd and isinstance(v, torch.Tensor):
+                                if v.shape != target_sd[k].shape:
+                                    shape_mismatched.append(
+                                        f"{k}: ckpt {tuple(v.shape)} vs model {tuple(target_sd[k].shape)}"
+                                    )
+                                    del sd[k]
+                        if shape_mismatched:
+                            from hftrainer.utils.logger import get_logger
+                            logger = get_logger()
+                            logger.warning(
+                                f"Skipped {len(shape_mismatched)} shape-mismatched params "
+                                f"in module '{name}': {shape_mismatched[:5]}"
+                            )
+
+                    missing, unexpected = load_target.load_state_dict(sd, strict=strict)
                     if missing:
                         from hftrainer.utils.logger import get_logger
                         logger = get_logger()
@@ -657,6 +747,18 @@ class ModelBundle(nn.Module):
                         from hftrainer.utils.logger import get_logger
                         logger = get_logger()
                         logger.warning(f"Unexpected keys in module '{name}': {unexpected[:5]}...")
+                elif isinstance(module, (nn.Parameter, torch.Tensor)):
+                    # Handle direct nn.Parameter or buffer attributes.
+                    # sd is a dict like {name: tensor} from the flat→nested conversion.
+                    tensor_val = sd.get(name) if isinstance(sd, dict) else sd
+                    if isinstance(tensor_val, torch.Tensor):
+                        if isinstance(module, nn.Parameter):
+                            if module.shape == tensor_val.shape:
+                                module.data.copy_(tensor_val)
+                        else:
+                            # buffer
+                            if module.shape == tensor_val.shape:
+                                module.copy_(tensor_val)
 
     def merge_lora_weights(self, module_names: Optional[List[str]] = None):
         """Merge LoRA adapters into their base modules for inference/export."""

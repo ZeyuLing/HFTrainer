@@ -59,8 +59,34 @@ def find_latest_checkpoint(work_dir: str) -> Optional[str]:
     return latest
 
 
+def _unwrap_legacy_checkpoint(data: dict) -> dict:
+    """Unwrap legacy checkpoint formats to a flat/nested state_dict.
+
+    Supported wrappers:
+      - MMEngine / OpenMMLab: ``{state_dict: {...}, optimizer: {...}, meta: {...}}``
+      - HunyuanMotion / PyTorch Lightning: ``{model_state_dict: {...}, epoch: ..., global_step: ...}``
+
+    This function extracts just the model weights part so it can be consumed by
+    ``ModelBundle.load_state_dict_selective()``.
+    """
+    if 'state_dict' in data and isinstance(data['state_dict'], dict):
+        # Looks like MMEngine / OpenMMLab format — unwrap
+        return data['state_dict']
+    if 'model_state_dict' in data and isinstance(data['model_state_dict'], dict):
+        # Looks like HunyuanMotion / PyTorch Lightning format — unwrap
+        return data['model_state_dict']
+    return data
+
+
 def load_checkpoint(path: str, map_location='cpu') -> dict:
-    """Load a checkpoint file (safetensors or pytorch)."""
+    """Load a checkpoint file (safetensors or pytorch).
+
+    Handles multiple formats:
+      - HF-Trainer ``model.pt`` (nested or flat state dict)
+      - safetensors files
+      - MMEngine ``.pth`` files (auto-unwraps ``ckpt['state_dict']``)
+      - pytorch ``pytorch_model.bin``
+    """
     import torch
 
     if os.path.isfile(path):
@@ -68,13 +94,15 @@ def load_checkpoint(path: str, map_location='cpu') -> dict:
             from safetensors.torch import load_file
             return load_file(path, device=map_location)
         else:
-            return torch.load(path, map_location=map_location, weights_only=False)
+            data = torch.load(path, map_location=map_location, weights_only=False)
+            return _unwrap_legacy_checkpoint(data)
     elif os.path.isdir(path):
         # Prefer HF-Trainer selective model weights over accelerator state files.
         pt_path = os.path.join(path, 'model.pt')
         if os.path.exists(pt_path):
             import torch
-            return torch.load(pt_path, map_location=map_location, weights_only=False)
+            data = torch.load(pt_path, map_location=map_location, weights_only=False)
+            return _unwrap_legacy_checkpoint(data)
         st_path = os.path.join(path, 'model.safetensors')
         if os.path.exists(st_path):
             from safetensors.torch import load_file
@@ -82,7 +110,8 @@ def load_checkpoint(path: str, map_location='cpu') -> dict:
         pt_path = os.path.join(path, 'pytorch_model.bin')
         if os.path.exists(pt_path):
             import torch
-            return torch.load(pt_path, map_location=map_location, weights_only=False)
+            data = torch.load(pt_path, map_location=map_location, weights_only=False)
+            return _unwrap_legacy_checkpoint(data)
     raise FileNotFoundError(f"No checkpoint found at: {path}")
 
 

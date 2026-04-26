@@ -11,6 +11,7 @@ Responsibilities:
 import os
 import copy
 import math
+import traceback
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
@@ -77,6 +78,11 @@ class AccelerateRunner:
 
         self.global_step = 0
         self.current_epoch = 0
+        self.max_grad_norm = train_cfg.get('max_grad_norm', None)
+
+        # Bundle-level Parameters outside any sub-module (DDP-unsafe).
+        # Assigned by from_cfg() after cls() construction; default to empty.
+        self._orphan_trainable_params: List[torch.nn.Parameter] = []
 
         # Inject accelerator into trainer
         self.trainer.accelerator = accelerator
@@ -111,12 +117,44 @@ class AccelerateRunner:
         accel_cfg = getattr(cfg, 'accelerator', {})
         if hasattr(accel_cfg, 'to_dict'):
             accel_cfg = accel_cfg.to_dict()
+        accel_cfg = copy.deepcopy(accel_cfg)
+
+        # Build FSDP plugin if specified in config
+        fsdp_plugin = None
+        fsdp_cfg = accel_cfg.pop('fsdp_plugin', None)
+        if fsdp_cfg is not None:
+            from accelerate import FullyShardedDataParallelPlugin
+            if hasattr(fsdp_cfg, 'to_dict'):
+                fsdp_cfg = fsdp_cfg.to_dict()
+            fsdp_plugin = FullyShardedDataParallelPlugin(**fsdp_cfg)
+
+        # Build DeepSpeed plugin if specified in config
+        deepspeed_plugin = None
+        ds_cfg = accel_cfg.pop('deepspeed_plugin', None)
+        if ds_cfg is not None:
+            from accelerate import DeepSpeedPlugin
+            if hasattr(ds_cfg, 'to_dict'):
+                ds_cfg = ds_cfg.to_dict()
+            deepspeed_plugin = DeepSpeedPlugin(**ds_cfg)
+
+        # Auto-fallback: bf16 → fp16 if device doesn't support bf16
+        requested_mp = accel_cfg.get('mixed_precision', 'no')
+        if requested_mp == 'bf16':
+            import torch as _torch
+            if _torch.cuda.is_available() and not _torch.cuda.is_bf16_supported():
+                logger.warning(
+                    "bf16 mixed precision requested but not supported on this device. "
+                    "Falling back to fp16."
+                )
+                accel_cfg['mixed_precision'] = 'fp16'
 
         accelerator = Accelerator(
             mixed_precision=accel_cfg.get('mixed_precision', 'no'),
             gradient_accumulation_steps=accel_cfg.get('gradient_accumulation_steps', 1),
             log_with=accel_cfg.get('log_with', 'tensorboard'),
             project_dir=run_dir,
+            fsdp_plugin=fsdp_plugin,
+            deepspeed_plugin=deepspeed_plugin,
         )
 
         # ── File logging, config dump, env info (main process only) ──
@@ -143,15 +181,21 @@ class AccelerateRunner:
         # ── Build Trainer ──
         trainer_cfg = getattr(cfg, 'trainer', None)
         assert trainer_cfg is not None, "cfg.trainer is required"
+        if accelerator.is_main_process:
+            logger.info("Building trainer...")
         trainer = cls._build_trainer(trainer_cfg, bundle)
 
         # ── Build DataLoaders ──
+        if accelerator.is_main_process:
+            logger.info("Building dataloaders...")
         train_dl_cfg = getattr(cfg, 'train_dataloader', None)
         val_dl_cfg = getattr(cfg, 'val_dataloader', None)
         train_dataloader = cls._build_dataloader(train_dl_cfg) if train_dl_cfg else None
         val_dataloader = cls._build_dataloader(val_dl_cfg) if val_dl_cfg else None
 
         # ── Build Optimizers ──
+        if accelerator.is_main_process:
+            logger.info("Building optimizers...")
         optimizer_cfg = getattr(cfg, 'optimizer', None)
         assert optimizer_cfg is not None or train_dataloader is None, "cfg.optimizer is required for training"
         optimizers = cls._build_optimizers(optimizer_cfg, bundle) if optimizer_cfg else {}
@@ -182,18 +226,84 @@ class AccelerateRunner:
         vis_cfg = getattr(cfg, 'val_visualizer', None)
         visualizers = cls._build_visualizers(vis_cfg)
 
+        # ── Pre-prepare model-only load for FSDP / DeepSpeed ──
+        # FSDP and DeepSpeed flatten/shard parameters during prepare(), so
+        # model-only checkpoints (which store original-shape tensors) must
+        # be loaded BEFORE prepare().  Full-resume checkpoints that contain
+        # accelerator state files are handled AFTER prepare() via
+        # accelerator.load_state().
+        _pre_loaded_model = False
+        _pre_loaded_meta = None
+        uses_sharding = fsdp_plugin is not None or deepspeed_plugin is not None
+        if uses_sharding:
+            _pre_loaded_model, _pre_loaded_meta = cls._pre_prepare_load(
+                bundle, cfg, work_dir, accelerator,
+            )
+
         # ── Accelerator prepare ──
         # Only prepare trainable modules, not frozen ones
+        if accelerator.is_main_process:
+            logger.info("Starting accelerator.prepare()...")
         trainable_module_list = [
             getattr(bundle, name) for name in bundle._trainable_modules
             if isinstance(getattr(bundle, name), nn.Module)
+        ]
+
+        # Identify bundle-level trainable Parameters (e.g. null_vtxt_feat,
+        # null_ctxt_input) that live outside any registered sub-module.
+        # These cannot be DDP-wrapped directly, so we manually all_reduce
+        # their gradients after each backward pass (see train loop).
+        # NOTE: from_cfg is a classmethod so 'self' doesn't exist yet;
+        # we store in a local variable and assign to runner after cls().
+        _orphan_trainable_params = [
+            param
+            for _name, param in bundle.named_parameters(recurse=False)
+            if param.requires_grad
         ]
 
         # Move frozen modules to device manually
         for name in bundle._frozen_modules:
             mod = getattr(bundle, name, None)
             if isinstance(mod, nn.Module):
-                mod.to(accelerator.device)
+                # Check for meta tensors (e.g. from HF from_pretrained with
+                # missing checkpoint keys).  to_empty() materialises them as
+                # uninitialised storage on the target device, which is fine
+                # because they were already "newly initialised" by HF and
+                # will be overwritten by any subsequent load_state_dict.
+                has_meta = any(
+                    p.device.type == 'meta'
+                    for p in mod.parameters()
+                ) or any(
+                    b.device.type == 'meta'
+                    for b in mod.buffers()
+                )
+                if has_meta:
+                    mod.to_empty(device=accelerator.device)
+                    # Re-initialise any remaining uninitialised params
+                    for p in mod.parameters():
+                        if not p.is_complex() and p.requires_grad:
+                            torch.nn.init.normal_(p)
+                else:
+                    mod.to(accelerator.device)
+
+        # Move orphan parameters/buffers (registered directly on the bundle,
+        # not inside any sub-module) to the accelerator device.
+        _child_params = set()
+        for child in bundle.children():
+            for p in child.parameters():
+                _child_params.add(p.data_ptr())
+            for b in child.buffers():
+                _child_params.add(b.data_ptr())
+        for p in bundle.parameters():
+            if p.data_ptr() not in _child_params:
+                p.data = p.data.to(accelerator.device)
+        for name, buf in bundle.named_buffers():
+            if buf.data_ptr() not in _child_params:
+                # re-register buffer on device
+                parts = name.rsplit('.', 1)
+                if len(parts) == 1:
+                    bundle.register_buffer(parts[0], buf.to(accelerator.device))
+                # nested buffers inside sub-modules are already handled
 
         # Prepare trainable modules + optimizer + dataloader
         optimizer_list = list(optimizers.values())
@@ -254,6 +364,18 @@ class AccelerateRunner:
             cfg=cfg,
         )
 
+        # Assign orphan trainable params (bundle-level Parameters outside sub-modules)
+        runner._orphan_trainable_params = _orphan_trainable_params
+
+        # Apply pre-loaded meta (global_step / epoch) if we did a pre-prepare load
+        if _pre_loaded_model and _pre_loaded_meta is not None:
+            runner.global_step = _pre_loaded_meta.get('global_step', 0)
+            runner.current_epoch = _pre_loaded_meta.get('current_epoch', 0)
+            logger.info(
+                f"Restored training position: global_step={runner.global_step}, "
+                f"epoch={runner.current_epoch}. Optimizer state was reset."
+            )
+
         # Initialize tensorboard / trackers
         if accelerator.is_main_process:
             try:
@@ -270,8 +392,9 @@ class AccelerateRunner:
                 f"{type(runner.trainer).__name__}"
             )
 
-        # Handle checkpoint loading
-        runner._handle_load()
+        # Handle checkpoint loading (skipped if pre-prepare load already handled it)
+        if not _pre_loaded_model:
+            runner._handle_load()
 
         return runner
 
@@ -287,6 +410,132 @@ class AccelerateRunner:
             model_cfg = model_cfg.to_dict()
         model_cfg = copy.deepcopy(model_cfg)
         return MODEL_BUNDLES.build(model_cfg)
+
+    @staticmethod
+    def _pre_prepare_load(bundle, cfg, work_dir, accelerator):
+        """Load model-only checkpoint BEFORE accelerator.prepare().
+
+        FSDP and DeepSpeed flatten/shard parameters during prepare(),
+        making it impossible to load original-shape state dicts afterwards.
+        This method detects model-only checkpoints (no accelerator state
+        files) and loads them while the model still has original shapes.
+
+        For full-resume checkpoints (containing ``model.safetensors``),
+        loading is deferred to ``_handle_load()`` which runs after
+        prepare() and uses ``accelerator.load_state()``.
+
+        **Memory optimisation**: In distributed mode the checkpoint is
+        loaded **one rank at a time** (rank 0 first, then the rest in
+        sequence).  Each rank frees the raw state-dict immediately after
+        ``load_state_dict_selective`` so that at most one copy of the
+        checkpoint coexists with the model weights in CPU RAM.  Without
+        this serialisation, *all* ranks loading a large ``.pth`` file
+        simultaneously can easily exceed host memory (e.g. 8 × 40 GB on
+        a 375 GB node).
+
+        Returns:
+            (loaded: bool, meta: dict | None)
+        """
+        from hftrainer.utils.checkpoint_utils import (
+            find_latest_checkpoint, load_checkpoint,
+        )
+        import gc
+
+        auto_resume = getattr(cfg, 'auto_resume', False)
+        load_from = getattr(cfg, 'load_from', None)
+
+        # Determine checkpoint path and whether it is model-only
+        ckpt_path = None
+        is_model_only = False
+        is_auto_resume_ckpt = False  # True only when ckpt comes from auto_resume
+
+        if auto_resume:
+            latest = find_latest_checkpoint(work_dir)
+            if latest:
+                has_accel_state = (
+                    os.path.exists(os.path.join(latest, 'model.safetensors'))
+                    or os.path.exists(os.path.join(latest, 'pytorch_model.bin'))
+                )
+                if has_accel_state:
+                    # Full resume — let _handle_load deal with it after prepare
+                    return False, None
+                else:
+                    ckpt_path = latest
+                    is_model_only = True
+                    is_auto_resume_ckpt = True
+            # else: no checkpoint found — fall through to check load_from
+
+        # When auto_resume found no checkpoint (or is disabled), check load_from
+        # so that model-only pretrained weights are loaded BEFORE FSDP wrapping.
+        if not ckpt_path and load_from is not None:
+            if hasattr(load_from, 'to_dict'):
+                load_from = load_from.to_dict()
+            if isinstance(load_from, dict):
+                scope = load_from.get('load_scope', 'model')
+                if scope == 'model':
+                    ckpt_path = load_from.get('path', None)
+                    is_model_only = True
+                # scope == 'full' is handled after prepare by _handle_load
+
+        if not ckpt_path or not is_model_only:
+            return False, None
+
+        # -----------------------------------------------------------
+        # Serialised loading: one rank at a time to avoid OOM
+        # -----------------------------------------------------------
+        is_distributed = torch.distributed.is_initialized()
+        num_processes = accelerator.num_processes if is_distributed else 1
+        my_rank = accelerator.process_index if is_distributed else 0
+
+        try:
+            for loading_rank in range(num_processes):
+                if my_rank == loading_rank:
+                    logger.info(
+                        "[Pre-FSDP] Rank %d/%d: loading model weights "
+                        "from %s ...",
+                        my_rank, num_processes, ckpt_path,
+                    )
+                    state_dict = load_checkpoint(ckpt_path, map_location='cpu')
+                    bundle.load_state_dict_selective(state_dict)
+                    del state_dict
+                    gc.collect()
+
+                # Barrier: wait for the current loading_rank to finish before
+                # the next rank starts, keeping peak CPU RAM bounded.
+                if is_distributed:
+                    torch.distributed.barrier()
+
+            sep = '=' * 60
+            logger.info(sep)
+            logger.info(
+                f"[Pre-FSDP] Loaded model weights from: {ckpt_path}"
+            )
+            logger.info(
+                "Weights loaded before FSDP sharding. "
+                "Optimizer state was reset."
+            )
+            logger.info(sep)
+        except FileNotFoundError:
+            logger.warning(
+                f"No model checkpoint found at {ckpt_path}, "
+                "skipping pre-prepare load"
+            )
+            return False, None
+
+        # Read meta for step/epoch restoration — only for auto_resume
+        # checkpoints (i.e. ckpt_path was set by the auto_resume branch).
+        # When load_from with load_scope='model' is used, we are starting a
+        # NEW training run from pretrained weights, so global_step/epoch
+        # must stay at 0.
+        meta = None
+        if is_auto_resume_ckpt:
+            meta_path = os.path.join(ckpt_path, 'meta.pt')
+            if os.path.exists(meta_path):
+                meta = torch.load(
+                    meta_path, map_location='cpu', weights_only=False,
+                )
+
+        return True, meta
 
     @staticmethod
     def _log_model_summary(bundle):
@@ -619,7 +868,33 @@ class AccelerateRunner:
         if self.auto_resume:
             latest = find_latest_checkpoint(self.work_dir)
             if latest:
-                self._load(latest, load_scope='full')
+                # Determine the appropriate load scope.
+                # If the checkpoint dir has accelerator state files (model.safetensors
+                # or pytorch_model.bin), do a full resume (model + optimizer + meta).
+                # Otherwise fall back to model-only selective load — this handles
+                # migrated legacy checkpoints that only contain model.pt / meta.pt.
+                has_accel_state = (
+                    os.path.exists(os.path.join(latest, 'model.safetensors'))
+                    or os.path.exists(os.path.join(latest, 'pytorch_model.bin'))
+                )
+                if has_accel_state:
+                    self._load(latest, load_scope='full')
+                else:
+                    logger.info(
+                        f"Checkpoint {latest} has no accelerator state files. "
+                        "Loading model weights only (optimizer will be reset)."
+                    )
+                    self._load(latest, load_scope='model')
+                    # Still restore global_step / epoch from meta if available
+                    meta_path = os.path.join(latest, 'meta.pt')
+                    if os.path.exists(meta_path):
+                        meta = torch.load(meta_path, map_location='cpu', weights_only=False)
+                        self.global_step = meta.get('global_step', 0)
+                        self.current_epoch = meta.get('current_epoch', 0)
+                        logger.info(
+                            f"Restored training position: global_step={self.global_step}, "
+                            f"epoch={self.current_epoch}. Optimizer state was reset."
+                        )
                 return
             else:
                 logger.info("auto_resume=True but no checkpoint found. Starting from scratch.")
@@ -725,7 +1000,12 @@ class AccelerateRunner:
             logger.info(f"Removed old checkpoint: {oldest}")
 
     def _state_dict_to_save(self) -> Dict[str, dict]:
-        """Build a nested state dict for save_ckpt=True modules."""
+        """Build a nested state dict for save_ckpt=True modules.
+
+        Also saves bundle-level nn.Parameters (e.g. null_vtxt_feat,
+        null_ctxt_input) that live outside any sub-module.  These are
+        stored under the key ``'__bundle_params__'``.
+        """
         from hftrainer.models.peft_utils import get_lora_state_dict
 
         state_dict = {'__hftrainer_meta__': self.bundle.checkpoint_metadata()}
@@ -742,7 +1022,45 @@ class AccelerateRunner:
                 module_state = get_lora_state_dict(module, state_dict=module_state)
 
             state_dict[name] = module_state
+
+        # Save bundle-level nn.Parameters that are not inside any sub-module.
+        # Without this, parameters like null_vtxt_feat / null_ctxt_input are
+        # lost across checkpoint save/load cycles.
+        bundle_params = {}
+        for param_name, param in self.bundle.named_parameters(recurse=False):
+            bundle_params[param_name] = param.data.clone()
+        for buf_name, buf in self.bundle.named_buffers(recurse=False):
+            bundle_params[buf_name] = buf.clone()
+        if bundle_params:
+            state_dict['__bundle_params__'] = bundle_params
+
         return state_dict
+
+    def _sync_orphan_param_grads(self):
+        """All-reduce gradients for bundle-level Parameters not in any DDP module.
+
+        DDP automatically syncs gradients for parameters inside wrapped modules,
+        but bundle-level Parameters (e.g. ``null_vtxt_feat``) live outside any
+        DDP-wrapped sub-module.  Without explicit sync, their gradients diverge
+        across ranks during multi-GPU training.
+
+        This is a no-op when ``_orphan_trainable_params`` is empty or when
+        running on a single device (no distributed backend).
+        """
+        if not self._orphan_trainable_params:
+            return
+        if self.accelerator.num_processes <= 1:
+            return
+
+        import torch.distributed as dist
+        if not dist.is_initialized():
+            return
+
+        world_size = dist.get_world_size()
+        for param in self._orphan_trainable_params:
+            if param.grad is not None:
+                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+                param.grad.div_(world_size)
 
     def _get_module_state_dict(self, module: nn.Module) -> dict:
         """Return a saveable state dict without forcing unnecessary backend imports."""
@@ -837,23 +1155,35 @@ class AccelerateRunner:
                     hook.before_train_iter(step_idx)
 
             # Training step
-            with self.accelerator.accumulate(*[
-                getattr(self.bundle, n) for n in self.bundle._trainable_modules
-                if isinstance(getattr(self.bundle, n), nn.Module)
-            ]):
-                output = self.trainer.train_step(batch)
+            try:
+                with self.accelerator.accumulate(*[
+                    getattr(self.bundle, n) for n in self.bundle._trainable_modules
+                    if isinstance(getattr(self.bundle, n), nn.Module)
+                ]):
+                    output = self.trainer.train_step(batch)
 
-                if not self.trainer.trainer_controls_optimization:
-                    # Runner-controlled optimization (default single-loss path)
-                    loss = output.get('loss')
-                    if loss is not None:
-                        self.accelerator.backward(loss)
-                        for opt in self.optimizers.values():
-                            opt.step()
-                            opt.zero_grad()
-                        for sched in self.lr_schedulers.values():
-                            sched.step()
-                # else: trainer already did backward/step/zero_grad in train_step
+                    if not self.trainer.trainer_controls_optimization:
+                        # Runner-controlled optimization (default single-loss path)
+                        loss = output.get('loss')
+                        if loss is not None:
+                            self.accelerator.backward(loss)
+                            self._sync_orphan_param_grads()
+                            if self.max_grad_norm is not None:
+                                params = list(self.bundle.trainable_parameters())
+                                self.accelerator.clip_grad_norm_(params, self.max_grad_norm)
+                            for opt in self.optimizers.values():
+                                opt.step()
+                                opt.zero_grad()
+                            for sched in self.lr_schedulers.values():
+                                sched.step()
+                    # else: trainer already did backward/step/zero_grad in train_step
+            except Exception:
+                rank = self.accelerator.process_index
+                logger.error(
+                    f"[Rank {rank}] Exception in train_step at global_step={step_idx}:\n"
+                    + traceback.format_exc()
+                )
+                raise
 
             self.global_step = step_idx + 1
 
@@ -889,23 +1219,36 @@ class AccelerateRunner:
                     if hasattr(hook, 'before_train_iter'):
                         hook.before_train_iter(current_step)
 
-                with self.accelerator.accumulate(*[
-                    getattr(self.bundle, n) for n in self.bundle._trainable_modules
-                    if isinstance(getattr(self.bundle, n), nn.Module)
-                ]):
-                    output = self.trainer.train_step(batch)
+                try:
+                    with self.accelerator.accumulate(*[
+                        getattr(self.bundle, n) for n in self.bundle._trainable_modules
+                        if isinstance(getattr(self.bundle, n), nn.Module)
+                    ]):
+                        output = self.trainer.train_step(batch)
 
-                    if not self.trainer.trainer_controls_optimization:
-                        # Runner-controlled optimization (default single-loss path)
-                        loss = output.get('loss')
-                        if loss is not None:
-                            self.accelerator.backward(loss)
-                            for opt in self.optimizers.values():
-                                opt.step()
-                                opt.zero_grad()
-                            for sched in self.lr_schedulers.values():
-                                sched.step()
-                    # else: trainer already did backward/step/zero_grad in train_step
+                        if not self.trainer.trainer_controls_optimization:
+                            # Runner-controlled optimization (default single-loss path)
+                            loss = output.get('loss')
+                            if loss is not None:
+                                self.accelerator.backward(loss)
+                                self._sync_orphan_param_grads()
+                                if self.max_grad_norm is not None:
+                                    params = list(self.bundle.trainable_parameters())
+                                    self.accelerator.clip_grad_norm_(params, self.max_grad_norm)
+                                for opt in self.optimizers.values():
+                                    opt.step()
+                                    opt.zero_grad()
+                                for sched in self.lr_schedulers.values():
+                                    sched.step()
+                        # else: trainer already did backward/step/zero_grad in train_step
+                except Exception:
+                    rank = self.accelerator.process_index
+                    logger.error(
+                        f"[Rank {rank}] Exception in train_step at epoch={epoch} "
+                        f"batch={batch_idx} global_step={current_step}:\n"
+                        + traceback.format_exc()
+                    )
+                    raise
 
                 self.global_step = current_step + 1
 

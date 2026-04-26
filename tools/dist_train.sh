@@ -35,7 +35,6 @@ accelerate launch \
     --machine_rank=$NODE_RANK \
     --main_process_ip=$MASTER_ADDR \
     --main_process_port=$MASTER_PORT \
-    --mixed_precision=no \
     "$(dirname "$0")/train.py" \
     "$CONFIG" \
     "${@:3}"

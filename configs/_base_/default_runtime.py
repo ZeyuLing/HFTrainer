@@ -14,7 +14,7 @@ default_hooks = dict(
     ),
     logger=dict(
         type='LoggerHook',
-        interval=10,
+        interval=1,
     ),
 )
 

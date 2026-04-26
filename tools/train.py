@@ -14,6 +14,13 @@ import sys
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Pre-import the HuggingFace `datasets` library before hftrainer so that
+# `hftrainer.datasets` does not shadow it in sys.modules.
+try:
+    import datasets as _hf_datasets  # noqa: F401
+except ImportError:
+    pass
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a model with hftrainer')
@@ -56,8 +63,12 @@ def main():
     if args.cfg_options:
         cfg.merge_from_dict(_parse_cfg_options(args.cfg_options))
 
-    # Set default work_dir if not specified
-    if not getattr(cfg, 'work_dir', None):
+    # Derive work_dir from config filename unless explicitly overridden.
+    # The base runtime sets work_dir='work_dirs/default' as a placeholder;
+    # always replace it with a config-name-specific directory to prevent
+    # cross-experiment checkpoint contamination during auto-resume.
+    cfg_work_dir = getattr(cfg, 'work_dir', None) or ''
+    if not args.work_dir and (not cfg_work_dir or cfg_work_dir == 'work_dirs/default'):
         cfg.work_dir = os.path.join(
             'work_dirs', os.path.splitext(os.path.basename(args.config))[0]
         )
@@ -71,8 +82,12 @@ def main():
 
     # Build runner and train
     from hftrainer import AccelerateRunner
-    runner = AccelerateRunner.from_cfg(cfg)
-    runner.train()
+    try:
+        runner = AccelerateRunner.from_cfg(cfg)
+        runner.train()
+    except Exception:
+        logger.exception("Training failed with exception:")
+        raise
 
 
 def _parse_cfg_options(options):
