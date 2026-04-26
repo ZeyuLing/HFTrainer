@@ -6,8 +6,13 @@ build/
 work_dirs/
 data/
 checkpoints/
+ckpts/
 *.pt
 *.bin
 *.safetensors
 .cache/
 CLAUDE.md
+tools/taiji_dist_train.sh
+thesis/
+ref_paper/
+.claude/skills/taiji/.token
