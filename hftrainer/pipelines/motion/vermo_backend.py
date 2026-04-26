@@ -6,8 +6,8 @@ from typing import Dict, List, Optional, Tuple, Union
 from einops import rearrange
 import numpy as np
 import torch
-from hftrainer.models.vermo.task_utils import LOCATABLE_MODALS
-from hftrainer.models.vermo.task_utils.modality import (
+from hftrainer.models.motion.vermo.task_utils import LOCATABLE_MODALS
+from hftrainer.models.motion.vermo.task_utils.modality import (
     Audio,
     Caption,
     Duration,
@@ -22,13 +22,9 @@ from hftrainer.models.vermo.task_utils.modality import (
     SpeechScript,
     is_modal,
 )
-from hftrainer.models.motion.components import (
-    VQVAEWanMotion2DTK,
-)
-from hftrainer.models.motion.components import (
-    VQVAEWanMotion1D,
-)
-from hftrainer.models.motion.components import WavTokenizer
+from hftrainer.models.motion.vermo.vqvae_2d import VQVAEVermo2DTK as VQVAEWanMotion2DTK
+from hftrainer.models.motion.vermo.vqvae_1d import VQVAEVermo1D as VQVAEWanMotion1D
+from hftrainer.models.motion.vermo.wavtokenizer import WavTokenizer
 from hftrainer.models.motion.components.motion_processor.smpl_processor import SMPLPoseProcessor
 
 from hftrainer.trainers.motion.vermo_trainer import VermoTrainer

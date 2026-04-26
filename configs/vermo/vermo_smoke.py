@@ -87,7 +87,7 @@ train_cfg = dict(
 )
 
 default_hooks = dict(
-    logger=dict(type='LoggerHook', interval=1),
+    logger=dict(type='LoggerHook', interval=1, iter_interval=1),
     checkpoint=dict(type='CheckpointHook', interval=5, max_keep_ckpts=2, save_last=True),
 )
 

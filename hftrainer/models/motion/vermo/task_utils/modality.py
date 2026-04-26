@@ -70,7 +70,7 @@ class Modality(ABC):
             raise ValueError(
                 f"Modality {type(cls)} doesnt support string to index, u can encode it with tokenizer"
             )
-        pattern = re.escape(cls.token_format).replace("\\{\\}", "(\d+)")
+        pattern = re.escape(cls.token_format).replace("\\{\\}", r"(\d+)")
         ids = re.findall(pattern, string)
         ids = [int(i) for i in ids]
         if return_tensor:
@@ -119,7 +119,7 @@ class Motion(Modality):
             # super
             if string is None:
                 return None
-            pattern = re.escape(cls.token_format).replace("\\{\\}", "(\d+)")
+            pattern = re.escape(cls.token_format).replace("\\{\\}", r"(\d+)")
             ids = re.findall(pattern, string)
             ids = [int(i) for i in ids]
             if return_tensor:

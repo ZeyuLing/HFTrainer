@@ -7,7 +7,7 @@ from typing import Dict, List
 import torch
 
 from hftrainer.datasets.base_dataset import PipelineDataset
-from hftrainer.models.vermo.task_utils import ABBR_TASK_MAPPING
+from hftrainer.models.motion.vermo.task_utils import ABBR_TASK_MAPPING
 from hftrainer.registry import DATASETS
 
 

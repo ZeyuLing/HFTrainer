@@ -1,4 +1,9 @@
-"""VerMo inference pipeline wrapper."""
+"""VerMo inference pipeline wrapper.
+
+TASK_PROMPTS must use templates from training task definitions to avoid OOD
+prompts.  Each entry is taken verbatim from the corresponding task class in
+``hftrainer/models/motion/vermo/task_utils/task_lib/``.
+"""
 
 from __future__ import annotations
 
@@ -8,16 +13,25 @@ from hftrainer.pipelines.base_pipeline import BasePipeline
 from hftrainer.registry import PIPELINES
 
 
+# Each prompt is copied verbatim from the training task's ``templates`` list so
+# the model sees an in-distribution task description at inference time.
 TASK_PROMPTS = {
-    't2m_1p': 'Generate motion sequence from the given caption.',
-    't2m_2p': 'Generate multi-person motion sequence from the given caption.',
-    'm2t_1p': 'Describe the given motion.',
-    'm2t_2p': 'Describe the given multi-person motion.',
+    # Caption2Motion.templates[0]
+    't2m_1p': 'Create motion from the given description',
+    't2m_2p': 'Create motion from the given description',
+    # Motion2Caption.templates[0]
+    'm2t_1p': 'Caption the given motion.',
+    'm2t_2p': 'Caption the given motion.',
+    # Music2Dance.templates[42]  (short, no optional mention)
     'm2d': 'Dance to the given music.',
-    'd2m': 'Add music to this dance.',
-    's2g': 'Add body movements to speech.',
-    'pred': 'Predict future motion from past motion.',
-    'inbetween': 'Interpolate between two motion segments.',
+    # Dance2Music.templates[0]
+    'd2m': 'Create music that matches the dance motion.',
+    # Speech2Gesture.templates[0]
+    's2g': 'Given the speech, generate the corresponding gesture motion.',
+    # MotionPrediction.templates[0]
+    'pred': 'Given the motion of past frames, predict the future motion',
+    # MotionInbetween.templates[0]
+    'inbetween': 'Given the motion of past frames and future frames, generate the middle frame',
 }
 
 

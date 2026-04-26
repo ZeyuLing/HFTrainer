@@ -13,16 +13,17 @@ import os
 from mmengine.runner import load_checkpoint
 from mmengine import print_log
 from tqdm import tqdm
-from hftrainer.models.motion.components import WavTokenizer, VQVAEWanMotion2DTK
-from hftrainer.models.motion.components import VQVAEWanMotion1D
+from hftrainer.models.motion.vermo.wavtokenizer import WavTokenizer
+from hftrainer.models.motion.vermo.vqvae_2d import VQVAEVermo2DTK as VQVAEWanMotion2DTK
+from hftrainer.models.motion.vermo.vqvae_1d import VQVAEVermo1D as VQVAEWanMotion1D
 from hftrainer.models.motion.components.motion_processor.smpl_processor import SMPLPoseProcessor
 
 
-from hftrainer.models.vermo.task_utils import (
+from hftrainer.models.motion.vermo.task_utils import (
     ALL_MODALS,
     LOCATABLE_MODALS,
 )
-from hftrainer.models.vermo.task_utils.task_lib.base_task import (
+from hftrainer.models.motion.vermo.task_utils.task_lib.base_task import (
     BaseTask,
 )
 
@@ -31,7 +32,7 @@ from transformers.tokenization_utils_fast import BatchEncoding
 from mmengine.config import Config
 from hftrainer.registry import HF_MODELS, MODELS
 from hftrainer.models.motion.utils import print_colored_log
-from hftrainer.models.vermo.task_utils.modality import (
+from hftrainer.models.motion.vermo.task_utils.modality import (
     Audio,
     Caption,
     Duration,

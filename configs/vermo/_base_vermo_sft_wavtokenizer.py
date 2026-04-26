@@ -2,8 +2,9 @@ _base_ = './_base_vermo_pretrain_wavtokenizer.py'
 
 train_dataloader = dict(
     batch_size=2,
-    num_workers=4,
-    persistent_workers=False,
+    num_workers=8,
+    persistent_workers=True,
+    prefetch_factor=4,
     dataset=dict(
         task_bucket_mode='modality',
         verbose=True,

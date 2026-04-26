@@ -1,8 +1,8 @@
 _base_ = '../_base_/default_runtime.py'
 
 default_hooks = dict(
-    logger=dict(type='LoggerHook', interval=10),
-    checkpoint=dict(type='CheckpointHook', interval=1000, max_keep_ckpts=5, save_last=True),
+    logger=dict(type='LoggerHook', interval=1, iter_interval=1),
+    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=1000, max_keep_ckpts=5, save_last=True),
 )
 
 model = dict(
