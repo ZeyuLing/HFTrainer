@@ -18,15 +18,15 @@ import torch
 from mmcv.transforms import BaseTransform
 from scipy.spatial.transform import Rotation as R
 
-from hftrainer.datasets.motionhub.common import read_json
-from hftrainer.datasets.motionhub.transforms.load_smplx import (
+from hftrainer.datasets.motion.motionhub.common import read_json
+from hftrainer.datasets.motion.motionhub.transforms.load_smplx import (
     _build_Ry_from_deg,
     _read_one_person_npz,
     apply_root_yaw_to_axis_angle,
     process_smplx_pose,
     process_transl,
 )
-from hftrainer.models.vermo.task_utils.modality import Audio
+from hftrainer.models.motion.vermo.task_utils.modality import Audio
 from hftrainer.registry import TRANSFORMS
 
 logger = logging.getLogger(__name__)

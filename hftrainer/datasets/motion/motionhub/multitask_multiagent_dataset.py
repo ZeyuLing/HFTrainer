@@ -6,12 +6,12 @@ from tqdm import tqdm
 
 from overrides import override
 import mmengine
-from hftrainer.models.vermo.task_utils import ALL_TASKS, abbr_list_to_task_list
-from hftrainer.models.vermo.task_utils.modality import Audio, Caption, Modality
-from hftrainer.models.vermo.task_utils.task_lib.base_task import BaseTask
-from hftrainer.models.vermo.task_utils.task_lib.completion_tasks.motion_inbetween import MotionInbetween
-from hftrainer.datasets.motionhub.single_agent_dataset import MotionHubSingleAgentDataset
-from hftrainer.datasets.motionhub.flexible_collate import flexible_collate
+from hftrainer.models.motion.vermo.task_utils import ALL_TASKS, abbr_list_to_task_list
+from hftrainer.models.motion.vermo.task_utils.modality import Audio, Caption, Modality
+from hftrainer.models.motion.vermo.task_utils.task_lib.base_task import BaseTask
+from hftrainer.models.motion.vermo.task_utils.task_lib.completion_tasks.motion_inbetween import MotionInbetween
+from hftrainer.datasets.motion.motionhub.single_agent_dataset import MotionHubSingleAgentDataset
+from hftrainer.datasets.motion.motionhub.flexible_collate import flexible_collate
 from mmcv.transforms import BaseTransform
 from mmengine.logging import print_log
 from hftrainer.registry import DATASETS
@@ -109,7 +109,7 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
 
     def _inject_dataset_into_compose_transforms(self):
         """Wire dataset reference into ComposeMultiPerson transforms in the pipeline."""
-        from hftrainer.datasets.motionhub.transforms.compose_multi_person import ComposeMultiPerson
+        from hftrainer.datasets.motion.motionhub.transforms.compose_multi_person import ComposeMultiPerson
 
         if hasattr(self, "pipeline") and hasattr(self.pipeline, "transforms"):
             for transform in self.pipeline.transforms:

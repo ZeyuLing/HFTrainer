@@ -8,7 +8,7 @@ from tqdm import tqdm
 from mmengine.dataset import BaseDataset
 from mmengine import print_log
 
-from hftrainer.datasets.motionhub.flexible_collate import flexible_collate
+from hftrainer.datasets.motion.motionhub.flexible_collate import flexible_collate
 from hftrainer.registry import DATASETS
 
 

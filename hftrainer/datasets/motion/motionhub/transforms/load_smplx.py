@@ -87,6 +87,10 @@ def process_smplx_pose(
         D = 3
     elif rot_type == "rotation_6d":
         out = axis_angle_to_rotation_6d(aa_flat).reshape(T, J, 6)
+        # axis_angle_to_rotation_6d outputs column-major: [R00,R10,R20, R01,R11,R21]
+        # HyMotion convention is row-major: [R00,R01, R10,R11, R20,R21]
+        # Rearrange: col_major[0,3,1,4,2,5] -> row_major
+        out = out[:, :, [0, 3, 1, 4, 2, 5]]
         D = 6
     elif rot_type == "quaternion":
         out = axis_angle_to_quaternion(aa_flat).reshape(T, J, 4)
@@ -228,7 +232,10 @@ class LoadSmplx55(BaseTransform):
         transl_type: str = "abs",
         smpl_type: str = "smpl_22",
         # ===== Augmentation knobs (Y-up world) =====
-        transl_aug_prob: float = 0.75,  # 概率做增强（同时作用于 translation 与 root 朝向）
+        # Default OFF: augmentation changes data distribution (especially root rotation
+        # and translation), so mean/std stats must be computed with matching aug settings.
+        # Enable explicitly in config when needed.
+        transl_aug_prob: float = 0.0,  # 概率做增强（同时作用于 translation 与 root 朝向）
         transl_aug_yaw_deg: float = 180.0,  # 绕 Y 轴随机旋转角度范围 [-deg, +deg]
         transl_aug_offset_std: Tuple[float, float, float] = (
             1.0,

@@ -1,7 +1,7 @@
 import os
 from typing import Any, Dict, List, Union
 
-from hftrainer.datasets.motionhub.single_agent_dataset import MotionHubSingleAgentDataset
+from hftrainer.datasets.motion.motionhub.single_agent_dataset import MotionHubSingleAgentDataset
 from hftrainer.registry import DATASETS
 
 

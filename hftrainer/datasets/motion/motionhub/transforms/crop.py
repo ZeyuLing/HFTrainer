@@ -452,7 +452,7 @@ class MotionAudioRandomCrop(BaseTransform):
     @staticmethod
     def _task_has_caption(task_cls) -> bool:
         try:
-            from hftrainer.models.vermo.task_utils.modality import Caption
+            from hftrainer.models.motion.vermo.task_utils.modality import Caption
 
             for modal in task_cls.all_modality():
                 if isinstance(modal, type) and issubclass(modal, Caption):

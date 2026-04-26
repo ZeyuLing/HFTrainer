@@ -5,7 +5,7 @@ from mmcv.transforms.base import BaseTransform
 import numpy as np
 import torch
 
-from hftrainer.datasets.motionhub.common import convert_to_tensor
+from hftrainer.datasets.motion.motionhub.common import convert_to_tensor
 from hftrainer.registry import TRANSFORMS
 
 

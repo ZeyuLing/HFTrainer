@@ -1,0 +1,291 @@
+"""Compute 198-dim motion representation from 135-dim motion.
+
+Adds 63-dim position channels (21 joints, Scheme D: XZ relative to pelvis,
+Y absolute world) to the base 135-dim (3 trans + 132 rot6d).
+
+The transform:
+1. Runs differentiable FK on the 135-dim motion (always using LOCAL rotation)
+2. Applies Scheme D encoding (XZ relative to pelvis, Y absolute)
+3. Removes pelvis position (always [0, pelvis_y, 0], redundant with translation)
+4. Concatenates position channels to produce 198-dim output
+
+Usage in pipeline:
+    # For local rotation models:
+    dict(type='LoadSmplx55', ...),
+    dict(type='Compute198DimPosition', key='motion'),  # 135 -> 198
+    dict(type='RandomCropPadding', ...),
+
+    # For global rotation models:
+    dict(type='LoadSmplx55', ...),
+    dict(type='Compute198DimPosition', key='motion'),  # 135 -> 198 (FK uses local rot)
+    dict(type='LocalToGlobalRotation', key='motion'),  # rotation channels -> global
+    dict(type='RandomCropPadding', ...),
+
+    Note: Compute198DimPosition MUST come BEFORE LocalToGlobalRotation because
+    FK requires local rotation. LocalToGlobalRotation only changes the rotation
+    channels (dims 3:135), position channels (dims 135:198) are unaffected.
+"""
+
+from __future__ import annotations
+
+import os.path as osp
+from typing import Dict, Optional, Tuple
+
+import torch
+from mmcv import BaseTransform
+from torch import Tensor
+
+from hftrainer.registry import TRANSFORMS
+
+
+def compute_position_channels(
+    motion_135: Tensor,
+    bone_offsets: Tensor,
+) -> Tensor:
+    """Compute 63-dim position channels from 135-dim local-rotation motion.
+
+    Args:
+        motion_135: (*, 135) motion tensor in local rotation space.
+        bone_offsets: (22, 3) bone offsets tensor.
+
+    Returns:
+        (*, 63) position channels (21 joints, Scheme D).
+    """
+    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+
+    leading = motion_135.shape[:-1]
+
+    # FK always uses local rotation
+    with torch.no_grad():
+        world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='local')
+
+    # world_pos: (*, 22, 3)
+    pelvis_world = world_pos[..., 0:1, :]  # (*, 1, 3)
+
+    # Scheme D: XZ relative to pelvis, Y absolute world
+    joint_pos = world_pos[..., 1:, :].clone()  # (*, 21, 3), skip pelvis
+    joint_pos[..., 0] -= pelvis_world[..., 0]  # X: relative to pelvis
+    joint_pos[..., 2] -= pelvis_world[..., 2]  # Z: relative to pelvis
+    # Y: keep absolute world height
+
+    return joint_pos.reshape(*leading, 63)
+
+
+def motion135_to_198(
+    motion_135: Tensor,
+    bone_offsets: Tensor,
+) -> Tensor:
+    """Convert 135-dim motion to 198-dim by appending position channels.
+
+    Args:
+        motion_135: (*, 135) motion tensor.
+        bone_offsets: (22, 3) bone offsets.
+
+    Returns:
+        (*, 198) motion tensor.
+    """
+    pos_63 = compute_position_channels(motion_135, bone_offsets)
+    return torch.cat([motion_135, pos_63], dim=-1)
+
+
+def motion198_to_135(motion_198: Tensor) -> Tensor:
+    """Extract 135-dim (trans + rot6d) from 198-dim motion.
+
+    Simply takes the first 135 dimensions, discarding position channels.
+
+    Args:
+        motion_198: (*, 198) motion tensor.
+
+    Returns:
+        (*, 135) motion tensor.
+    """
+    return motion_198[..., :135]
+
+
+def recompute_position_from_rotation(
+    motion_198: Tensor,
+    bone_offsets: Tensor,
+    rotation_space: str = 'local',
+) -> Tensor:
+    """Recompute position channels from rotation/translation in 198-dim motion.
+
+    This is used for FK consistency loss: given a 198-dim prediction, extract
+    the rotation+translation (first 135 dims), run FK, and compute what the
+    position channels SHOULD be. Compare with the predicted position channels
+    to enforce FK consistency.
+
+    Args:
+        motion_198: (*, 198) denormalized motion tensor.
+        bone_offsets: (22, 3) bone offsets.
+        rotation_space: 'local' or 'global'.
+
+    Returns:
+        (*, 63) FK-derived position channels (Scheme D, 21 joints).
+    """
+    motion_135 = motion_198[..., :135]
+
+    # If global rotation, convert to local for FK
+    if rotation_space == 'global':
+        from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+        # motion135_to_fk handles global->local conversion internally
+        world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='global')
+    else:
+        from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+        world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='local')
+
+    # Scheme D: XZ relative to pelvis, Y absolute
+    pelvis_world = world_pos[..., 0:1, :]
+    joint_pos = world_pos[..., 1:, :].clone()
+    joint_pos[..., 0] -= pelvis_world[..., 0]
+    joint_pos[..., 2] -= pelvis_world[..., 2]
+
+    leading = motion_198.shape[:-1]
+    return joint_pos.reshape(*leading, 63)
+
+
+def motion198_fk_loss(
+    pred_198_norm: Tensor,
+    mean: Tensor,
+    std: Tensor,
+    bone_offsets: Tensor,
+    rotation_space: str = 'local',
+    timesteps: Optional[Tensor] = None,
+    data_mask_temporal: Optional[Tensor] = None,
+) -> Tensor:
+    """Compute FK consistency loss between predicted position and FK-derived position.
+
+    The loss penalizes inconsistency between the rotation/translation channels
+    and the position channels in the 198-dim prediction.
+
+    Args:
+        pred_198_norm: (B, L, 198) predicted motion in NORMALIZED space.
+        mean: (198,) normalization mean.
+        std: (198,) normalization std.
+        bone_offsets: (22, 3) bone offsets.
+        rotation_space: 'local' or 'global'.
+        timesteps: (B,) diffusion timesteps for t² weighting. If None, no weighting.
+        data_mask_temporal: (B, L) boolean/{0,1} mask, 1 = valid frame, 0 = padded.
+            When provided, padded frames are excluded from the loss so the
+            replicated tail (RandomCropPadding pad_mode='replicate') and
+            zeroed-out tgt frames cannot leak into the FK-consistency signal.
+
+    Returns:
+        Scalar FK consistency loss.
+    """
+    std_safe = torch.where(std < 1e-3, torch.ones_like(std), std)
+    pred_denorm = pred_198_norm * std_safe + mean
+
+    pred_pos = pred_denorm[..., 135:]  # (B, L, 63)
+
+    fk_pos = recompute_position_from_rotation(
+        pred_denorm, bone_offsets, rotation_space
+    )  # (B, L, 63)
+
+    loss_per_dim = torch.nn.functional.smooth_l1_loss(
+        pred_pos, fk_pos, reduction='none'
+    )  # (B, L, 63)
+
+    loss = loss_per_dim.mean(dim=-1)  # (B, L)
+
+    if timesteps is not None:
+        t_sq = (timesteps ** 2).unsqueeze(-1)  # (B, 1)
+        loss = loss * t_sq
+
+    if data_mask_temporal is not None:
+        m = data_mask_temporal.to(loss.device).to(loss.dtype)
+        # Align temporal length: prepare_padding may have prepended ref_pose
+        # tokens onto tgt_padding_mask, making it longer than the FK loss
+        # (which only covers tgt_motion frames). Slice from the right.
+        if m.shape[-1] != loss.shape[-1]:
+            m = m[..., -loss.shape[-1]:]
+        denom = torch.clamp(m.sum(), min=1.0)
+        return (loss * m).sum() / denom
+
+    return loss.mean()
+
+
+def motion198_get_positions(motion_198: Tensor) -> Tensor:
+    """Extract 63-dim position channels from 198-dim motion.
+
+    Args:
+        motion_198: (*, 198) motion tensor.
+
+    Returns:
+        (*, 63) position channels.
+    """
+    return motion_198[..., 135:]
+
+
+# Default bone offsets path (relative to repo root)
+_DEFAULT_BONE_OFFSETS_PATH = osp.join(
+    osp.dirname(osp.dirname(osp.dirname(osp.dirname(osp.dirname(osp.dirname(__file__)))))),
+    'data', 'hymotion_m2m_data', 'bone_offsets_22.pt',
+)
+
+
+@TRANSFORMS.register_module()
+class Compute198DimPosition(BaseTransform):
+    """Transform to compute 198-dim motion from 135-dim.
+
+    Adds 63-dim position channels (21 joints, Scheme D) via FK.
+
+    Must be placed BEFORE LocalToGlobalRotation in the pipeline
+    (FK requires local rotation).
+
+    Parameters
+    ----------
+    key : str
+        Key for the motion tensor in results dict.
+    bone_offsets_path : str or None
+        Path to bone offsets file. If None, uses default path.
+    """
+
+    def __init__(
+        self,
+        key: str = 'motion',
+        bone_offsets_path: Optional[str] = None,
+    ):
+        self.key = key
+        self._bone_offsets_path = bone_offsets_path or _DEFAULT_BONE_OFFSETS_PATH
+        self._bone_offsets: Optional[Tensor] = None
+
+    def _load_bone_offsets(self) -> Tensor:
+        if self._bone_offsets is None:
+            path = self._bone_offsets_path
+            if not osp.isfile(path):
+                raise FileNotFoundError(
+                    f'Bone offsets not found at {path}. '
+                    'Run: PYTHONPATH=. python3 tools/precompute_bone_offsets.py first.'
+                )
+            self._bone_offsets = torch.load(path, map_location='cpu').float()
+        return self._bone_offsets
+
+    def transform(self, results: Dict) -> Dict:
+        motion = results[self.key]
+        assert isinstance(motion, torch.Tensor), (
+            f'Expected torch.Tensor for key {self.key!r}, got {type(motion)}'
+        )
+
+        # Handle multi-person (P, T, D) or single-person (T, D)
+        orig_shape = motion.shape
+        if motion.ndim == 3:
+            P, T, D = motion.shape
+            assert D == 135, f"Expected motion_dim=135, got {D}"
+            motion_flat = motion.reshape(P * T, D)
+        elif motion.ndim == 2:
+            T, D = motion.shape
+            assert D == 135, f"Expected motion_dim=135, got {D}"
+            motion_flat = motion
+        else:
+            raise ValueError(f"Unexpected motion shape: {orig_shape}")
+
+        bone_offsets = self._load_bone_offsets()
+        motion_198 = motion135_to_198(motion_flat, bone_offsets)
+
+        if motion.ndim == 3:
+            motion_198 = motion_198.reshape(P, T, 198)
+        else:
+            motion_198 = motion_198.reshape(T, 198)
+
+        results[self.key] = motion_198
+        return results

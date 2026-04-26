@@ -3,8 +3,185 @@ import random
 from typing import Dict, List, Optional, Tuple, Union
 from mmcv.transforms import BaseTransform
 
-from hftrainer.datasets.motionhub.common import hm3d_pattern, read_json, read_txt
+import torch
+
+from hftrainer.datasets.motion.motionhub.common import hm3d_pattern, read_json, read_txt
 from hftrainer.registry import TRANSFORMS
+
+
+# ---------------------------------------------------------------------------
+# Mapping: caption dir name → pre-extracted qwen3 embedding dir name.
+# When a caption JSON file lives under dir X, the corresponding .pt embedding
+# file (if it exists) lives under the sibling dir CAPTION_TO_QWEN3_DIR[X].
+# The .pt file has the same relative path as the .json but with .pt suffix.
+# ---------------------------------------------------------------------------
+CAPTION_TO_QWEN3_DIR = {
+    # Academic / AcademicRetarget / Game / Taobao (and their mirror variants)
+    'human_checked_augmented_caption': 'qwen3_augmented',
+    'human_checked_augmented_caption_deprecated_mirror_251215': 'qwen3_augmented',
+    'human_checked_augmented_caption_mirror': 'qwen3_augmented',
+    'human_checked_caption': 'qwen3_human_checked_short',
+    'human_checked_caption_deprecated_mirror_251215': 'qwen3_human_checked_short',
+    'human_checked_caption_mirror': 'qwen3_human_checked_short',
+    'improved_simple_augmented_caption': 'qwen3_improved_simple_short',
+    'improved_simple_augmented_caption_deprecated_mirror_251215': 'qwen3_improved_simple_short',
+    'improved_simple_caption': 'qwen3_improved_simple_short',
+    'improved_simple_caption_deprecated_mirror_251215': 'qwen3_improved_simple_short',
+    # Variants with qwen3embedding prefix (older dirs)
+    'augmented_caption': 'qwen3embedding_augmented',
+    'augmented_caption_deprecated_250905': 'qwen3embedding_augmented',
+    'augmented_caption_deprecated_250926': 'qwen3embedding_augmented',
+}
+
+
+def _caption_path_to_embedding_path(caption_path: str) -> Optional[str]:
+    """Given an absolute caption .json path, return the corresponding .pt
+    pre-extracted embedding path, or None if no mapping is known.
+
+    The .pt file has identical structure to the embedding dict returned by
+    HYTextModel.encode():
+        data['result'][i] = {
+            'caption': str,
+            'text_embedding': {
+                'text_vec_raw':        Tensor[1, 1, 768],
+                'text_ctxt_raw':       Tensor[1, seq, 4096],
+                'text_ctxt_raw_length': Tensor[1],
+            },
+            ...
+        }
+    """
+    # Normalize the path first (resolve ../ segments)
+    caption_path = os.path.normpath(caption_path)
+    # Walk up the path to find the first path component that matches a known
+    # caption dir name.
+    parts = caption_path.replace('\\', '/').split('/')
+    for i, part in enumerate(parts):
+        if part in CAPTION_TO_QWEN3_DIR:
+            qwen3_dir = CAPTION_TO_QWEN3_DIR[part]
+            new_parts = parts[:i] + [qwen3_dir] + parts[i + 1:]
+            pt_path = '/'.join(new_parts)
+            # Replace .json → .pt
+            if pt_path.endswith('.json'):
+                pt_path = pt_path[:-5] + '.pt'
+            return pt_path
+    return None
+
+
+@TRANSFORMS.register_module(force=True)
+class LoadPreExtractedTextEmbedding(BaseTransform):
+    """Load pre-extracted Qwen3+CLIP text embeddings from .pt files.
+
+    For each sample, the caption JSON path (``results['caption_path']``) is
+    mapped to a sibling .pt file that contains pre-extracted embeddings.
+    If the .pt file exists, the embeddings are loaded directly (bypassing
+    online Qwen3-8B inference during training).  If no .pt file is found,
+    the transform falls back gracefully: it leaves ``results`` unchanged so
+    that the downstream trainer can fall back to online encoding or null
+    embeddings.
+
+    The .pt file format expected::
+
+        data['result'][i] = {
+            'caption': str,
+            'text_embedding': {
+                'text_vec_raw':         Tensor[1, 1, 768],   # CLIP-L
+                'text_ctxt_raw':        Tensor[1, seq, 4096], # Qwen3
+                'text_ctxt_raw_length': Tensor[1],
+            },
+            ...
+        }
+
+    Output keys added to results (when successful):
+        ``text_vec_raw``, ``text_ctxt_raw``, ``text_ctxt_raw_length``
+    The ``caption`` string is also set (from the chosen embedding item) so
+    that existing CFG dropout logic continues to work.
+
+    Args:
+        key (str): Key prefix for caption path in results dict.
+            Default ``'caption'`` → reads ``results['caption_path']``.
+        allow_none (bool): If True, silently skip when caption_path is None.
+        fallback_to_caption (bool): If True (default), keep ``caption`` text
+            in results even when embedding is found, so text-only fallback
+            pipelines still work.
+    """
+
+    def __init__(
+        self,
+        key: str = 'caption',
+        allow_none: bool = True,
+        fallback_to_caption: bool = True,
+        vtxt_dim: int = 768,
+        ctxt_dim: int = 4096,
+    ):
+        self.key = key
+        self.allow_none = allow_none
+        self.fallback_to_caption = fallback_to_caption
+        self.vtxt_dim = vtxt_dim
+        self.ctxt_dim = ctxt_dim
+
+    def _fill_null_embedding(self, results: Dict) -> Dict:
+        """Fill null (zero) embedding tensors so that every sample in a batch
+        has a consistent tensor type for collation.  The trainer's CFG dropout
+        (mask_text_cond) will replace these with the *learned* null embeddings
+        when cond_mask_prob triggers, but having zeros here prevents mixed
+        Tensor/None collation errors.
+
+        Note: we mark null samples with text_ctxt_raw_length=0 so the trainer
+        can build a correct attention mask (all False → padding).
+        """
+        results['text_vec_raw'] = torch.zeros(1, self.vtxt_dim)
+        results['text_ctxt_raw'] = torch.zeros(1, self.ctxt_dim)
+        results['text_ctxt_raw_length'] = torch.tensor(0)
+        results['_text_is_null'] = True
+        return results
+
+    def transform(self, results: Dict) -> Dict:
+        caption_path = results.get(f'{self.key}_path')
+        if caption_path is None:
+            if self.allow_none:
+                return self._fill_null_embedding(results)
+            raise ValueError(
+                f"LoadPreExtractedTextEmbedding: '{self.key}_path' not found in results"
+            )
+
+        # Derive .pt path from caption JSON path
+        pt_path = _caption_path_to_embedding_path(caption_path)
+        if pt_path is None or not os.path.exists(pt_path):
+            # No pre-extracted embedding available — fill null embedding.
+            return self._fill_null_embedding(results)
+
+        try:
+            data = torch.load(pt_path, map_location='cpu', weights_only=False)
+        except Exception:
+            # Corrupted file – fill null embedding
+            return self._fill_null_embedding(results)
+
+        result_list = data.get('result', [])
+        if not result_list:
+            return self._fill_null_embedding(results)
+
+        # Randomly select one caption variant (data augmentation)
+        idx = random.randint(0, len(result_list) - 1)
+        item = result_list[idx]
+        emb = item.get('text_embedding')
+        if emb is None:
+            return self._fill_null_embedding(results)
+
+        # Unpack: remove the leading batch dim added during extraction
+        # Each tensor was saved as [1, ...] from a batch-size-1 encode call.
+        text_vec_raw = emb['text_vec_raw'].squeeze(0)          # [1, 768]
+        text_ctxt_raw = emb['text_ctxt_raw'].squeeze(0)        # [seq, 4096]
+        text_ctxt_raw_length = emb['text_ctxt_raw_length'].squeeze(0)  # scalar
+
+        results['text_vec_raw'] = text_vec_raw
+        results['text_ctxt_raw'] = text_ctxt_raw
+        results['text_ctxt_raw_length'] = text_ctxt_raw_length
+
+        # Also store caption string (for logging / CFG dropout compatibility)
+        if self.fallback_to_caption and 'caption' not in results:
+            results['caption'] = item.get('caption', '')
+
+        return results
 
 
 @TRANSFORMS.register_module(force=True)
@@ -55,21 +232,33 @@ class LoadHYMotionCaption(BaseTransform):
         result_list: List[Dict] = hierarchical_caption.get("result", [])
 
         # 遍历 result 数组中的每个元素
+        # NOTE: Some caption files use "short caption" (space) instead of
+        # "short_caption" (underscore). Accept both variants.
         for item in result_list:
             # 如果存在 short_caption_rewritten，使用它作为 caption 列表
-            if "short_caption_rewritten" in item and isinstance(
-                item["short_caption_rewritten"], list
+            rewritten_key = (
+                "short_caption_rewritten" if "short_caption_rewritten" in item
+                else "short caption_rewritten" if "short caption_rewritten" in item
+                else None
+            )
+            caption_key = (
+                "short_caption" if "short_caption" in item
+                else "short caption" if "short caption" in item
+                else None
+            )
+            if rewritten_key is not None and isinstance(
+                item[rewritten_key], list
             ):
                 # short_caption_rewritten 是一个字符串数组
-                for rewritten_caption in item["short_caption_rewritten"]:
+                for rewritten_caption in item[rewritten_key]:
                     if (
                         isinstance(rewritten_caption, str)
                         and len(rewritten_caption.strip()) > 0
                     ):
                         caption_list.append(rewritten_caption.strip())
             # 否则使用 short_caption
-            elif "short_caption" in item and isinstance(item["short_caption"], str):
-                short_caption = item["short_caption"].strip()
+            elif caption_key is not None and isinstance(item[caption_key], str):
+                short_caption = item[caption_key].strip()
                 if len(short_caption) > 0:
                     caption_list.append(short_caption)
 
@@ -109,10 +298,12 @@ class LoadCompatibleCaption(BaseTransform):
         if not isinstance(result_list, list) or len(result_list) == 0:
             return False
         # 检查 result 数组中的元素是否有 short_caption 或 short_caption_rewritten
+        # Also accept "short caption" (space) variant
         for item in result_list:
             if not isinstance(item, dict):
                 continue
-            if "short_caption" in item or "short_caption_rewritten" in item:
+            if any(k in item for k in ("short_caption", "short_caption_rewritten",
+                                        "short caption", "short caption_rewritten")):
                 return True
         return False
 
@@ -144,17 +335,27 @@ class LoadCompatibleCaption(BaseTransform):
             # LoadHYMotionCaption 格式
             result_list: List[Dict] = hierarchical_caption.get("result", [])
             for item in result_list:
-                if "short_caption_rewritten" in item and isinstance(
-                    item["short_caption_rewritten"], list
+                rewritten_key = (
+                    "short_caption_rewritten" if "short_caption_rewritten" in item
+                    else "short caption_rewritten" if "short caption_rewritten" in item
+                    else None
+                )
+                caption_key = (
+                    "short_caption" if "short_caption" in item
+                    else "short caption" if "short caption" in item
+                    else None
+                )
+                if rewritten_key is not None and isinstance(
+                    item[rewritten_key], list
                 ):
-                    for rewritten_caption in item["short_caption_rewritten"]:
+                    for rewritten_caption in item[rewritten_key]:
                         if (
                             isinstance(rewritten_caption, str)
                             and len(rewritten_caption.strip()) > 0
                         ):
                             caption_list.append(rewritten_caption.strip())
-                elif "short_caption" in item and isinstance(item["short_caption"], str):
-                    short_caption = item["short_caption"].strip()
+                elif caption_key is not None and isinstance(item[caption_key], str):
+                    short_caption = item[caption_key].strip()
                     if len(short_caption) > 0:
                         caption_list.append(short_caption)
             assert len(caption_list) > 0, f"{filename} contains no captions"

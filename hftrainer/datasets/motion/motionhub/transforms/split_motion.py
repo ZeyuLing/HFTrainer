@@ -4,10 +4,10 @@ from mmcv import BaseTransform
 import numpy as np
 import torch
 
-from hftrainer.models.vermo.task_utils.task_lib.completion_tasks.motion_inbetween import (
+from hftrainer.models.motion.vermo.task_utils.task_lib.completion_tasks.motion_inbetween import (
     MotionInbetween,
 )
-from hftrainer.models.vermo.task_utils.task_lib.completion_tasks.motion_prediction import (
+from hftrainer.models.motion.vermo.task_utils.task_lib.completion_tasks.motion_prediction import (
     MotionPrediction,
 )
 from hftrainer.registry import TRANSFORMS
@@ -499,5 +499,94 @@ class PrepareM2MForVersatileMotion(BaseTransform):
             assert all(
                 tensor.numel() > 0 for tensor in split_result
             ), f"Split segments for {key} cannot be empty"
+
+        return results
+
+
+@TRANSFORMS.register_module(force=True)
+class PrepareM2MCompletion(BaseTransform):
+    """Convert full motion into M2M src/tgt/mask format for completion training.
+
+    This transform randomly splits motion into past/middle/future segments
+    (in-between style) and produces:
+      - ``src_motion``: full motion (all frames)
+      - ``tgt_motion``: full motion (same as src_motion, for loss computation)
+      - ``src_mask``: binary mask (T, D), 1=needs generation (middle), 0=keep
+      - ``tgt_length``: number of valid frames
+      - ``src_length``: same as tgt_length
+
+    Designed for use with :class:`HyMotionM2MTrainer` which uses
+    VACE-style conditioning (src_motion * mask → inactive / reactive).
+
+    Parameters
+    ----------
+    key : str
+        Motion key in results dict.
+    past_ratio : float
+        Fraction of frames for the past segment.
+    future_ratio : float
+        Fraction of frames for the future segment.
+    random_ratio : bool
+        If True, randomly sample ratios from [0.1, 0.3].
+    min_edge_frames : int
+        Minimum frames for past/future.
+    min_middle_frames : int
+        Minimum frames for the middle (masked) region.
+    """
+
+    def __init__(
+        self,
+        key: str = 'motion',
+        past_ratio: float = 0.2,
+        future_ratio: float = 0.2,
+        random_ratio: bool = True,
+        min_edge_frames: int = 4,
+        min_middle_frames: int = 4,
+    ):
+        self.key = key
+        self.past_ratio = past_ratio
+        self.future_ratio = future_ratio
+        self.random_ratio = random_ratio
+        self.min_edge_frames = min_edge_frames
+        self.min_middle_frames = min_middle_frames
+
+    def transform(self, results: Dict) -> Dict:
+        motion = results[self.key]
+        assert isinstance(motion, torch.Tensor), f"Expected Tensor, got {type(motion)}"
+
+        T = motion.shape[-2]
+        D = motion.shape[-1]
+
+        # Determine split points
+        if self.random_ratio:
+            pr = float(np.random.uniform(0.1, 0.3))
+            fr = float(np.random.uniform(0.1, 0.3))
+        else:
+            pr = self.past_ratio
+            fr = self.future_ratio
+
+        past_frames = max(self.min_edge_frames, int(T * pr))
+        future_frames = max(self.min_edge_frames, int(T * fr))
+
+        # Ensure middle region is at least min_middle_frames
+        total_edge = past_frames + future_frames
+        if total_edge + self.min_middle_frames > T:
+            # Shrink edges proportionally
+            available = max(0, T - self.min_middle_frames)
+            past_frames = max(1, available // 2)
+            future_frames = max(1, available - past_frames)
+
+        past_frames = int(np.clip(past_frames, 1, T - 2))
+        future_frames = int(np.clip(future_frames, 1, T - past_frames - 1))
+
+        # Build mask: 0 for known (past/future), 1 for unknown (middle)
+        mask = torch.zeros(T, D, dtype=motion.dtype)
+        mask[past_frames:T - future_frames] = 1.0
+
+        results['src_motion'] = motion.clone()
+        results['tgt_motion'] = motion.clone()
+        results['src_mask'] = mask
+        results['tgt_length'] = T
+        results['src_length'] = T
 
         return results
