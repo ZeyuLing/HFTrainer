@@ -23,9 +23,9 @@ from diffusers.utils.accelerate_utils import apply_forward_hook
 from diffusers.loaders import FromOriginalModelMixin
 
 from hftrainer.registry import MODELS, HF_MODELS
-from .wan_causalconv import WanCausalConv1d
-from .wan_encdec import WanEncoder1D, WanDecoder1D
-from ..gaussian_distribution import DiagonalGaussianDistributionNd
+from ..components.wan_blocks.wan_causalconv import WanCausalConv1d
+from ..components.wan_blocks.wan_encdec import WanEncoder1D, WanDecoder1D
+from .gaussian_distribution import DiagonalGaussianDistributionNd
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,10 @@ class AutoencoderKLPrism1D(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         if x.dim() != 3:
             raise ValueError(f"Expected input as [B, T, D], got {tuple(x.shape)}")
         x_bdt = x.permute(0, 2, 1).contiguous()  # [B, D, T]
-        return self._encode(x_bdt)
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = x_bdt.device.type
+        with torch.autocast(device_type, enabled=False):
+            return self._encode(x_bdt.float())
 
     def _decode(self, z: torch.Tensor):
         """z: [B, z_dim, T_down]"""
@@ -188,7 +191,10 @@ class AutoencoderKLPrism1D(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         """
         if z.dim() != 3:
             raise ValueError(f"Expected latent as [B, z_dim, T_down], got {tuple(z.shape)}")
-        decoded = self._decode(z)  # [B, D, T]
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = z.device.type
+        with torch.autocast(device_type, enabled=False):
+            decoded = self._decode(z.float())  # [B, D, T]
         return decoded.permute(0, 2, 1).contiguous()  # [B, T, D]
 
     def forward(

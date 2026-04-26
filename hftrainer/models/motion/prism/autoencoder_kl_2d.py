@@ -16,9 +16,9 @@ from diffusers.utils.accelerate_utils import apply_forward_hook  # diffusers uti
 from diffusers.loaders import FromOriginalModelMixin
 
 from hftrainer.registry import MODELS, HF_MODELS
-from .wan_causalconv import WanCausalConv2dTK
-from .wan_encdec import WanEncoder2DTK, WanDecoder2DTK
-from ..gaussian_distribution import (
+from ..components.wan_blocks.wan_causalconv import WanCausalConv2dTK
+from ..components.wan_blocks.wan_encdec import WanEncoder2DTK, WanDecoder2DTK
+from .gaussian_distribution import (
     DiagonalGaussianDistributionNd,
 )
 
@@ -170,7 +170,10 @@ class AutoencoderKLPrism2DTK(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             raise ValueError(f"Expected input as [B, T, K, C], got {tuple(x.shape)}")
         x_bct = x.permute(0, 3, 1, 2).contiguous()  # [B, C, T, K]
 
-        h = self._encode(x_bct)
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = x_bct.device.type
+        with torch.autocast(device_type, enabled=False):
+            h = self._encode(x_bct.float())
 
         return h
 
@@ -210,7 +213,10 @@ class AutoencoderKLPrism2DTK(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         if z.dim() != 4:
             raise ValueError(f"Expected latent as [B, z_dim, T], got {tuple(z.shape)}")
 
-        decoded = self._decode(z)  # [B, C_out, T, K]
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = z.device.type
+        with torch.autocast(device_type, enabled=False):
+            decoded = self._decode(z.float())  # [B, C_out, T, K]
 
         # Return [B, T, J, C] to match motion use-cases; no clamping for motion params
         decoded = decoded.permute(0, 2, 3, 1).contiguous()

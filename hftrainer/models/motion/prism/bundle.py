@@ -10,7 +10,7 @@ import torch
 from einops import rearrange
 
 from hftrainer.models.base_model_bundle import ModelBundle
-from hftrainer.models.motion.components.gaussian_distribution import (
+from hftrainer.models.motion.prism.gaussian_distribution import (
     DiagonalGaussianDistributionNd,
 )
 from hftrainer.registry import MODEL_BUNDLES
@@ -145,7 +145,10 @@ class PrismBundle(ModelBundle):
             motion = torch.cat([motion, static_joints], dim=-1)
         motion = rearrange(motion, 'b t (j d) -> b t j d', d=6)
 
-        latents = self.vae.encode(motion)
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = motion.device.type
+        with torch.autocast(device_type, enabled=False):
+            latents = self.vae.encode(motion.float())
         latents = DiagonalGaussianDistributionNd(latents).mode()
         latents = (latents - self.latents_mean.to(latents)) / self.latents_std.to(latents)
         return latents

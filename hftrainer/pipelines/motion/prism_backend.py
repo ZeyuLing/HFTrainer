@@ -8,12 +8,12 @@ from einops import rearrange
 import numpy as np
 import torch
 from transformers import PreTrainedTokenizer, UMT5EncoderModel
-from hftrainer.models.motion.components import AutoencoderKLPrism2DTK
-from hftrainer.models.motion.components.gaussian_distribution import (
+from hftrainer.models.motion.prism.autoencoder_kl_2d import AutoencoderKLPrism2DTK
+from hftrainer.models.motion.prism.gaussian_distribution import (
     DiagonalGaussianDistributionNd,
 )
 from hftrainer.models.motion.components.motion_processor.smpl_processor import SMPLPoseProcessor
-from hftrainer.models.motion.components import PrismTransformerMotionModel
+from hftrainer.models.motion.prism.network import PrismTransformerMotionModel
 from diffusers.schedulers import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -190,7 +190,10 @@ class PrismARPipeline(DiffusionPipeline):
         """
         # Encode by SMPL VAE: [B, T, J, C] -> [B, Z_dim*2, T_latent, J]
         # VAE internally permutes to [B, C, T, J] before encoding
-        z = self.vae.encode(motion)
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = motion.device.type
+        with torch.autocast(device_type, enabled=False):
+            z = self.vae.encode(motion.float())
 
         # Sample from the latent distribution (use mode for deterministic encoding)
         lat = DiagonalGaussianDistributionNd(z)
@@ -465,7 +468,10 @@ class PrismARPipeline(DiffusionPipeline):
             Motion tensor of shape [B, T, J, C].
         """
         latents = latents * self.latents_std.to(latents.device) + self.latents_mean.to(latents.device)
-        motion = self.vae.decode(latents)
+        # VAE must run in fp32 — override any global AMP autocast.
+        device_type = latents.device.type
+        with torch.autocast(device_type, enabled=False):
+            motion = self.vae.decode(latents.float())
         return motion
 
     def post_process_motion(
