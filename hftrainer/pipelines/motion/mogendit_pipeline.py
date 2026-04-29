@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import logging
+import importlib.util
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +24,21 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-MOGENDIT_ROOT = '/apdcephfs_cq10/share_1467498/home/chengxuzuo/projects/MoGenDIT'
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_LOCAL_MOGENDIT_ROOT = PROJECT_ROOT / 'ref_repo' / 'MoGenDiT'
+_LEGACY_MOGENDIT_ROOT = Path(
+    '/apdcephfs_cq10/share_1467498/home/chengxuzuo/projects/MoGenDIT')
+MOGENDIT_ROOT = os.environ.get(
+    'MOGENDIT_ROOT',
+    str(_LOCAL_MOGENDIT_ROOT if _LOCAL_MOGENDIT_ROOT.exists()
+        else _LEGACY_MOGENDIT_ROOT),
+)
+_DEFAULT_CKPT_ROOT = Path(MOGENDIT_ROOT) / 'save' / 'ckpt'
+MOGENDIT_CKPT_ROOT = os.environ.get(
+    'MOGENDIT_CKPT_ROOT',
+    str(_DEFAULT_CKPT_ROOT if _DEFAULT_CKPT_ROOT.exists()
+        else _LEGACY_MOGENDIT_ROOT / 'save' / 'ckpt'),
+)
 
 
 def _ensure_mogendit_imports():
@@ -50,6 +65,26 @@ def _ensure_mogendit_imports():
             logger.warning(f'Failed to create body_model symlink: {e}')
 
 
+def _load_npz_motion_class():
+    """Load MoGenDIT's NpzMotion without importing trainer/__init__.py.
+
+    The upstream trainer package imports training-only Aplus modules from its
+    __init__, but inference only needs trainer/data_loader.py. Loading that file
+    directly keeps the reference NpzMotion code while avoiding the side effect.
+    """
+    module_name = '_mogendit_trainer_data_loader'
+    if module_name in sys.modules:
+        return sys.modules[module_name].NpzMotion
+    data_loader_path = Path(MOGENDIT_ROOT) / 'trainer' / 'data_loader.py'
+    spec = importlib.util.spec_from_file_location(module_name, data_loader_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f'Cannot load MoGenDIT data_loader: {data_loader_path}')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module.NpzMotion
+
+
 class MoGenDITRepairPipeline:
     """MoGenDIT-based motion repair pipeline.
 
@@ -63,14 +98,14 @@ class MoGenDITRepairPipeline:
     - ``trans_regen``: Regenerate translation/joint trajectories while keeping
       pose rotations. Good for fixing foot skating and trajectory drift.
 
-    Args:
-        model_name: Model variant name. One of 'MoreDiff-0.03B', 'MoreDiff-0.1B',
-            'MoreDiff-0.3B' or their variants (e.g. 'MoreDiff-0.1B-A1').
-        ckpt_dir: Path to checkpoint directory. If None, defaults to
-            ``{MOGENDIT_ROOT}/save/ckpt/{model_name}``.
-        device: Device string, e.g. 'cuda:0' or 'cpu'.
-        use_ema: If True, load EMA checkpoint (recommended for inference).
-    """
+        Args:
+            model_name: Model variant name. One of 'MoreDiff-0.03B', 'MoreDiff-0.1B',
+                'MoreDiff-0.3B' or their variants (e.g. 'MoreDiff-0.1B-A1').
+            ckpt_dir: Path to checkpoint directory. If None, defaults to
+                ``{MOGENDIT_CKPT_ROOT}/{model_name}``.
+            device: Device string, e.g. 'cuda:0' or 'cpu'.
+            use_ema: If True, load EMA checkpoint (recommended for inference).
+        """
 
     VALID_MODES = ('denoise', 'ada_denoise', 'trans_regen')
 
@@ -97,7 +132,7 @@ class MoGenDITRepairPipeline:
 
         # Resolve checkpoint directory
         if ckpt_dir is None:
-            ckpt_dir = os.path.join(MOGENDIT_ROOT, 'save', 'ckpt', model_name)
+            ckpt_dir = os.path.join(MOGENDIT_CKPT_ROOT, model_name)
         self.ckpt_dir = ckpt_dir
 
         # Parse version from model_name (e.g. 'MoreDiff-0.1B-A1' -> '0.1B')
@@ -204,7 +239,7 @@ class MoGenDITRepairPipeline:
             metadata: dict with 'betas', 'gender', 'hand_pose', 'file_name',
                 'mocap_framerate' for reconstructing output NPZ.
         """
-        from trainer.data_loader import NpzMotion
+        NpzMotion = _load_npz_motion_class()
 
         npz_path = Path(npz_path)
         if not npz_path.exists():

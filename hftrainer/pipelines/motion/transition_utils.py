@@ -35,7 +35,7 @@ See docs/temp/m2m_canonical_ood_solution.md for derivation.
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -196,16 +196,39 @@ def canonicalize_segment(
     motion: Tensor,
     anchor_frame: int = 0,
     rotation_space: str = "local",
+    bone_offsets: Optional[Tensor] = None,
+    ground_anchor: str = "y_min",
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    """Place anchor frame's XZ at origin with heading +Z (yaw = 0). Y is
-    preserved so the canonical motion stays in the training pelvis-height
-    distribution (v2 mean_Y ≈ 1.09m).
+    """Place anchor frame's XZ at origin with heading +Z (yaw = 0).
 
-    ⚠️ Bug fix (2026-04-21): Previously subtracted full anchor_pos including
-    Y, pushing the canonical pelvis down to near-ground (Y≈0). The model was
-    trained on motions with pelvis Y ≈ 1.09m ± 0.14 — a Y=0 input is ~8σ
-    OOD and caused transition generation to drift wildly in height
-    (E14/E15 floating artifact, 2026-04-21).
+    Y handling depends on ``bone_offsets``:
+
+    - ``bone_offsets is None`` (legacy):  Y is left untouched.  Pelvis stays at
+      whatever world height the input has.  This was the 2026-04-21 fix that
+      replaced the original "subtract full anchor.Y → pelvis at Y=0" behavior,
+      because pushing pelvis to Y=0 is ~8σ OOD vs the training pelvis-height
+      distribution (mean_Y ≈ 1.07m).  Kept for backward-compat callers that do
+      not have a skeleton on hand (e.g. unit tests on synthetic motions).
+
+    - ``bone_offsets is not None`` (preferred, 2026-04-27): perform a full
+      ground-anchored canonicalization, matching the training data's actual
+      distribution discovered via 200-clip audit:
+
+          * frame-0 (tx, tz) = (0, 0):    100% of training clips satisfy this.
+          * all-frame joint y_min ≈ 0:    80%/98% of training clips have
+            ``|y_min| < 5cm / 10cm`` after FK (taobao/game/academicretarget
+            subsets are 100%).  The "pelvis Y stays at 1.07m" property is a
+            *consequence* of "feet on ground", not an independent constraint.
+
+      With this option enabled we shift Y by ``-y_min(motion_after_yaw)`` so
+      the lowest joint of the *whole segment* sits on the floor — same
+      distribution the network saw during training.  Pelvis falls to its
+      natural ~1.07m height (or whatever the source motion implies).
+
+    The previously-shipped behavior of "freeze Y" turned out to be wrong for
+    inputs whose feet were not already grounded — most notably the standard
+    ``test_motionhub_1p.json`` test set, which the audit found to float ~14.6cm
+    above ground (mean), pushing inference inputs ~4σ OOD.
 
     ⚠️ Bug fix (2026-04-23): ``rotation_space`` passed through so that
     global-rot motions also get their body joints yaw-rotated (not just
@@ -219,6 +242,14 @@ def canonicalize_segment(
         rotation_space: "local" (body rot is parent-relative, unchanged by
             world yaw) or "global" (body rot is world-referenced, MUST be
             yaw-rotated alongside pelvis).
+        bone_offsets: optional (22, 3) bone offsets. When provided, Y is
+            shifted to ground-anchor the motion (see ``ground_anchor``).
+        ground_anchor: how to set Y when ``bone_offsets`` is given:
+            "y_min" (default) — shift so min joint Y across all frames = 0.
+            "anchor_y_min" — shift so min joint Y of the anchor frame = 0
+                (use when only the anchor's grounding matters, e.g. stitching
+                where the rest of the segment hasn't been generated yet).
+            "preserve" — do not shift Y (matches ``bone_offsets=None`` path).
 
     Returns:
         motion_canon: (T, 135) canonicalized motion.
@@ -230,9 +261,36 @@ def canonicalize_segment(
 
     anchor_pos = motion[anchor_frame, 0:3]
     rotated = torch.einsum('ij,j->i', R_canon, anchor_pos)
+
+    # Y-axis offset (default: do not move).
+    y_off = torch.zeros_like(rotated[0])
+    if bone_offsets is not None and ground_anchor != "preserve":
+        # Apply the XZ + yaw transform first so we can FK in canonical XZ
+        # space.  Y is currently zero-shifted; we then compute the y_min of
+        # the FK output and push everything down by that amount.
+        offset_xz_only = torch.stack([
+            -rotated[0],
+            torch.zeros_like(rotated[0]),
+            -rotated[2],
+        ])
+        motion_xz_canon = apply_rigid_transform_to_motion(
+            motion, R_canon, offset_xz_only, rotation_space=rotation_space)
+        from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+        with torch.no_grad():
+            world_pos, _, _, _ = motion135_to_fk(
+                motion_xz_canon,
+                bone_offsets.to(motion.device).to(motion.dtype),
+                rotation_space=rotation_space,
+            )
+        if ground_anchor == "anchor_y_min":
+            y_min = world_pos[anchor_frame, :, 1].min()
+        else:
+            y_min = world_pos[..., 1].min()
+        y_off = -y_min
+
     offset_canon = torch.stack([
         -rotated[0],
-        torch.zeros_like(rotated[0]),
+        y_off,
         -rotated[2],
     ])
 
@@ -398,6 +456,35 @@ def _self_test():
     body_after = motion_b_world[:, 9:135]
     assert torch.allclose(body_before, body_after, atol=1e-5), (
         "body rot6d must be invariant under Y-axis rigid transform"
+    )
+
+    # Test 6: canonicalize_segment with bone_offsets grounds y_min to 0,
+    # and the round-trip via decanonicalize still recovers the original.
+    bone_offsets = torch.zeros(22, 3)
+    bone_offsets[0] = torch.tensor([0.0, 1.0, 0.0])
+    bone_offsets[1] = torch.tensor([0.1, -0.5, 0.0])
+    bone_offsets[2] = torch.tensor([-0.1, -0.5, 0.0])
+
+    motion_floating = motion.clone()
+    motion_floating[:, 1] = 0.5
+
+    motion_canon, R_canon, offset_canon = canonicalize_segment(
+        motion_floating, bone_offsets=bone_offsets, ground_anchor="y_min")
+    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    with torch.no_grad():
+        wp_canon, _, _, _ = motion135_to_fk(motion_canon, bone_offsets, rotation_space='local')
+    y_min_canon = wp_canon[..., 1].min().item()
+    assert abs(y_min_canon) < 1e-4, f"y_min should be 0 after grounding, got {y_min_canon}"
+
+    motion_recovered = decanonicalize_segment(motion_canon, R_canon, offset_canon)
+    err = (motion_floating - motion_recovered).abs().max().item()
+    assert err < 1e-4, f"y_min round-trip error {err}"
+
+    # Test 7: bone_offsets=None preserves legacy behavior (Y unchanged)
+    motion_canon_legacy, _, _ = canonicalize_segment(
+        motion_floating, bone_offsets=None)
+    assert torch.allclose(motion_canon_legacy[:, 1], motion_floating[:, 1], atol=1e-5), (
+        "legacy path (no bone_offsets) must not modify Y"
     )
 
     print("transition_utils self-test OK")
