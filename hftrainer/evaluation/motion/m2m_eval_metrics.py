@@ -53,6 +53,69 @@ def motion135_to_positions_np(
     return world_pos.numpy()
 
 
+def canonicalize_motion_135d_np(
+    motion: np.ndarray,
+    bone_offsets: np.ndarray,
+    rotation_space: str = 'local',
+    ground: bool = True,
+    zero_xz: bool = True,
+) -> np.ndarray:
+    """Numpy convenience: enforce the input distribution the network was
+    trained on.
+
+    Audited 2026-04-27 over 200 random training clips
+    (``train_hymotion_400h_hq_20260403.json``):
+
+      * frame-0 ``tx`` and ``tz`` are exactly 0 in 100% of clips
+        (offline-canonicalized at data-generation time).
+      * all-frame joint ``y_min`` is centered at 0 (mean=-0.003m, std=0.038m,
+        80% within 5cm, 98% within 10cm; taobao/game/academicretarget
+        subsets are 100% within 5cm).
+      * yaw is uniformly distributed (NOT canonical) — left untouched.
+
+    The default test set (``test_motionhub_1p.json``) however shows
+    ``y_min ≈ +0.146m`` (entire test set floats ~14.6cm), which is ~4σ OOD
+    relative to training.  This helper closes that gap by:
+
+      1. shifting the whole clip in X/Z so that frame-0 ``(tx, tz) = (0, 0)``
+         (no-op for already-canonical training data, fixes externally
+         supplied data).
+      2. shifting the whole clip in Y so that the lowest joint position
+         across all frames sits on the ground plane (``y_min = 0``).
+
+    Yaw is intentionally NOT touched (training data isn't yaw-canonical).
+
+    Args:
+        motion: (T, 135) world-coord motion (abs trans + rot6d).
+        bone_offsets: (22, 3) SMPL-22 bone offsets, used by FK to compute
+            joint positions.
+        rotation_space: ``'local'`` or ``'global'`` — which rot6d convention
+            the input uses.
+        ground: if True, shift Y so all-frame joint y_min = 0.
+        zero_xz: if True, shift XZ so frame-0 (tx, tz) = (0, 0).
+
+    Returns:
+        (T, 135) canonical motion (same dtype as input).
+    """
+    if motion is None or motion.shape[0] == 0:
+        return motion
+
+    out = motion.astype(np.float32, copy=True)
+    if zero_xz:
+        out[:, 0] -= out[0, 0]
+        out[:, 2] -= out[0, 2]
+
+    if ground:
+        if rotation_space == 'local':
+            world_pos = motion135_to_positions_np(out, bone_offsets)
+        else:
+            world_pos = motion135_to_positions_global_np(out, bone_offsets)
+        y_min = float(world_pos[..., 1].min())
+        out[:, 1] -= y_min
+
+    return out
+
+
 def motion135_to_positions_global_np(
     motion: np.ndarray,
     bone_offsets: np.ndarray,

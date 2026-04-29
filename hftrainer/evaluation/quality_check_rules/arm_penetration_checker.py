@@ -279,7 +279,18 @@ class ArmPenetrationChecker(BaseQualityChecker):
             torso_idx = int(nearest_torso_idx[frame_idx, worst_local])
             torso_joint_ids = list(TORSO_SEGMENTS[torso_idx])
             for seg_idx in active_segment_indices:
-                joint_ids.update(SEGMENT_NAME_TO_JOINTS[SEGMENT_NAMES[seg_idx]])
+                seg_name = SEGMENT_NAMES[seg_idx]
+                joint_ids.update(SEGMENT_NAME_TO_JOINTS[seg_name])
+                # 2026-04-27: When an arm segment penetrates the torso, the
+                # whole shoulder chain (collar → shoulder → elbow → wrist) is
+                # typically misposed. Geometric line-line distance often
+                # misses the collar/shoulder root, so include the same-side
+                # collar in the invalid mask. This lets QC mask propagate
+                # repair to the shoulder root, not just the elbow/wrist.
+                if seg_name == "L_upper_arm" or seg_name == "L_forearm":
+                    joint_ids.add(13)  # left_collar
+                elif seg_name == "R_upper_arm" or seg_name == "R_forearm":
+                    joint_ids.add(14)  # right_collar
             joint_ids.update(torso_joint_ids)
             joint_ids_sorted = sorted(joint_ids)
             penetration_joint_ids_per_frame[frame_idx] = joint_ids_sorted

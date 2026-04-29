@@ -557,6 +557,7 @@ def compute_transition_length(
     motion_a_end_135: np.ndarray = None,
     motion_b_start_135: np.ndarray = None,
     joint_angle_speed_per_frame: float = 0.20,
+    leg_angle_speed_per_frame: float = 0.12,
 ) -> int:
     """Compute adaptive transition length.
 
@@ -589,6 +590,23 @@ def compute_transition_length(
           (sit, lie, crouch, fall, get up) angles dominate; for locomotion
           angles are small (walking steps are small local oscillations).
 
+      (4) leg-only angle term (2026-04-27, anti foot-skating).
+          The whole-body term in (3) underestimates pure-leg complexity
+          because the spine/arms/head dilute the budget. For sit-cross-
+          legged, kneel, step-and-pivot, short-distance walks etc. the
+          legs (hips×2, knees×2, ankles×2, feet×2) move a lot while the
+          torso barely moves. We add a *separate* term that only sums
+          leg-joint angles, with a tighter rad/frame budget so that 1 rad
+          of leg motion alone takes ~8 frames instead of ~5.
+
+          Diagnostic on 50 E14 samples: this term lifts 17/50 (34%)
+          samples by a median +0 / p90 +32 / max +48 frames — exactly the
+          ones flagged by the user (short root distance + complex leg
+          articulation). Without (4) those samples got 30-90 frames; with
+          (4) they get 60-120, removing the foot-sliding artefact caused
+          by the model being forced to compress a 1.5-2 s leg motion into
+          1 s of frames.
+
     Args:
         pos_a_end / pos_b_start: (3,) pelvis world positions.
         speed_per_frame: root translation speed (~0.015 m/frame = walk).
@@ -596,11 +614,17 @@ def compute_transition_length(
         joints_a_end / joints_b_start: (22, 3) FK joint positions.
         pose_speed_per_frame: per-joint speed (0.008 m/frame ≈ slow limb).
         motion_a_end_135 / motion_b_start_135: (135,) raw 135-dim vectors.
-            When provided, enables the joint-angle term.
+            When provided, enables the joint-angle and leg-angle terms.
         joint_angle_speed_per_frame: whole-body rotation budget per frame
             (rad/frame). 0.20 rad/frame ≈ 6 rad/s, which maps a 10-rad
             sit-down budget to ~50 frames (1.67 s). Raise for quicker
             transitions, lower for slower.
+        leg_angle_speed_per_frame: leg-only rotation budget per frame
+            (rad/frame). 0.12 rad/frame is calibrated so that
+            sit-cross-legged (~17 rad of weighted leg angle) takes ~140
+            frames (clamped to 120) and short-step-pivot (~5 rad) takes
+            ~40 frames. Tighter than (3) because legs do fine-grained
+            contact-sensitive motion that needs more frames to plan.
 
     Returns:
         Transition length in frames, clamped to [min_frames, max_frames].
@@ -628,7 +652,17 @@ def compute_transition_length(
         except Exception:
             n_angle = 0
 
-    raw = max(n_root, n_pos, n_angle)
+    # Term 4: leg-only weighted angle SUM (anti foot-skating)
+    n_leg_angle = 0
+    if motion_a_end_135 is not None and motion_b_start_135 is not None:
+        try:
+            n_leg_angle = _leg_angle_change_frames(
+                motion_a_end_135, motion_b_start_135,
+                leg_angle_speed_per_frame)
+        except Exception:
+            n_leg_angle = 0
+
+    raw = max(n_root, n_pos, n_angle, n_leg_angle)
     return max(min_frames, min(max_frames, raw))
 
 
@@ -836,6 +870,60 @@ def _joint_angle_change_frames(
     weighted_sum_angle = float((theta * w).sum())
 
     return int(weighted_sum_angle / max(1e-6, joint_angle_speed_per_frame))
+
+
+# Leg-only weights (SMPL-22 indices 1,2 hips; 4,5 knees; 7,8 ankles;
+# 10,11 feet). Hip / knee dominate gross leg motion; ankle / feet handle
+# fine contact and orientation. Weights below are calibrated by sweeping
+# (foot_skating, jitter) on E14 50 samples — see 2026-04-27 ablation.
+_LEG_JOINT_INDICES = np.array([1, 2, 4, 5, 7, 8, 10, 11], dtype=np.int64)
+_LEG_JOINT_WEIGHTS = np.array(
+    [3.0, 3.0,   # hips     — pelvis-relative thigh swing
+     3.0, 3.0,   # knees    — flexion / extension
+     2.0, 2.0,   # ankles   — foot orientation, contact pre-shaping
+     1.0, 1.0],  # feet     — toe / heel articulation
+    dtype=np.float32,
+)
+
+
+def _leg_angle_change_frames(
+    motion_a: np.ndarray,
+    motion_b: np.ndarray,
+    leg_angle_speed_per_frame: float,
+) -> int:
+    """Lower-body weighted SO(3) angle SUM → transition frames.
+
+    Mirrors :func:`_joint_angle_change_frames` but on the 8 leg joints
+    only, with a tighter rad/frame budget. This is needed because the
+    whole-body term dilutes leg-only motions (sit-cross-legged, kneel,
+    step-and-pivot) where the torso barely moves.
+
+    Calibration:
+      - Sit-cross-legged: hip-flex 1.2rad×2×3 + hip-IR 0.5rad×2×3 +
+        knee 1.6rad×2×3 + ankle 0.8rad×2×2 + foot 0.5rad×2×1
+        ≈ 17 rad → 142 frames (clamped to 120 by max_frames).
+      - Step-and-pivot: hip-yaw 0.3rad×2×3 + knee 0.5rad×2×3 + ankle
+        0.5rad×2×2 + foot 0.3rad×2×1 ≈ 5.4 rad → 45 frames.
+      - Static handshake (tiny leg motion): ≤ 1 rad → ≤ 8 frames
+        (subsumed by min_frames=30 floor).
+    """
+    a = np.asarray(motion_a, dtype=np.float32).reshape(-1)
+    b = np.asarray(motion_b, dtype=np.float32).reshape(-1)
+    if a.shape[-1] < 135 or b.shape[-1] < 135:
+        return 0
+
+    rot6d_a = a[3:135].reshape(22, 6)
+    rot6d_b = b[3:135].reshape(22, 6)
+    R_a = _rot6d_to_matrix(rot6d_a)
+    R_b = _rot6d_to_matrix(rot6d_b)
+    R_rel = np.einsum('jab,jbc->jac', R_a.transpose(0, 2, 1), R_b)
+    tr = R_rel[:, 0, 0] + R_rel[:, 1, 1] + R_rel[:, 2, 2]
+    cos_theta = np.clip((tr - 1.0) * 0.5, -1.0, 1.0)
+    theta = np.arccos(cos_theta)  # (22,)
+
+    leg_theta = theta[_LEG_JOINT_INDICES]
+    weighted_sum = float((leg_theta * _LEG_JOINT_WEIGHTS).sum())
+    return int(weighted_sum / max(1e-6, leg_angle_speed_per_frame))
 
 
 
@@ -1421,10 +1509,10 @@ def _build_tasks() -> Dict[str, EvalTask]:
     )
 
     # --- E3: Sparse Keyframe Interpolation ---
-    # 2026-04-25: E3 v2 rebuild — Private held-out pool, stratified across
-    # action category × pelvis-speed bucket, captions through rewriter.
-    # Kept legacy A/B/C/D and added every_5f / every_10f for finer
-    # density coverage. Captioned models read the _rewritten file.
+    # 2026-04-26: unified setting names. Every uniform-interval setting is
+    # now spelled `every_<K>f` (K = frames between anchors); the adaptive
+    # variant is `adaptive`. The legacy A/B/C/D codes are gone — the dashboard
+    # DB has been migrated. Captioned models read the _rewritten file.
     tasks['E3'] = EvalTask(
         task_id='E3',
         name='Keyframe Interpolation',
@@ -1447,18 +1535,18 @@ def _build_tasks() -> Dict[str, EvalTask]:
             'every_10f': TaskSetting(
                 'every_10f', 'Every 10 frames (dense, 3fps anchors)',
                 {'interval': 10}),
-            'A': TaskSetting(
-                'A', 'Every 30 frames (1s@30fps)',
-                {'interval': 30}),
-            'B': TaskSetting(
-                'B', 'Every 60 frames (2s)',
-                {'interval': 60}),
-            'C': TaskSetting(
-                'C', 'Every 15 frames (0.5s)',
+            'every_15f': TaskSetting(
+                'every_15f', 'Every 15 frames (0.5s @ 30fps, 2fps anchors)',
                 {'interval': 15}),
-            'D': TaskSetting(
-                'D',
-                'Adaptive keyframes from motion acceleration peaks',
+            'every_30f': TaskSetting(
+                'every_30f', 'Every 30 frames (1s @ 30fps, 1fps anchors)',
+                {'interval': 30}),
+            'every_60f': TaskSetting(
+                'every_60f', 'Every 60 frames (2s @ 30fps, 0.5fps anchors)',
+                {'interval': 60}),
+            'adaptive': TaskSetting(
+                'adaptive',
+                'Adaptive keyframes at motion-acceleration peaks (~1/s)',
                 {'_use_adaptive_keyframes': True}),
         },
         default_metrics=[
@@ -1672,7 +1760,11 @@ def _build_tasks() -> Dict[str, EvalTask]:
         # eval_m2m_v2_all_tasks.py.
         needs_caption=False,
         caption_aware=True,
-        kimodo_comparable=False,
+        # Re-enabled 2026-04-26 after build_constraints_e8 was rewritten to
+        # match the v2 redesign (Setting A: pure loop with frame[0]==frame[-1];
+        # Setting D: loop completion with adaptive N_append). KIMODO uses
+        # SOMA-30 skeleton and replays the same per-sample anchor frames.
+        kimodo_comparable=True,
     )
 
     # --- E9: Motion Repair ---
@@ -1700,7 +1792,12 @@ def _build_tasks() -> Dict[str, EvalTask]:
                     'SDEdit-style partial-noise start (no zeroing) to align '
                     'with MoGenDIT ada_denoise.',
         mask_builder=build_repair_mask,
-        data_file='eval_e9_repair.json',
+        # 2026-04-26: switched from eval_e9_repair.json (215 stale cases) to
+        # the v2 selection — 389 cases, severity=fail (live re-checked),
+        # mask-coverage ranked, ≥20 per defect type. See data_file meta for
+        # selection rules. The v1 datalist is retained as
+        # eval_e9_repair.json.bak_unbalanced for reference.
+        data_file='eval_e9_repair_v2.json',
         settings={
             'A_adaptive_inpaint': TaskSetting(
                 'A_adaptive_inpaint',
@@ -2411,13 +2508,20 @@ def _build_tasks() -> Dict[str, EvalTask]:
                 'L',
                 '[Overlap] B.xz = A_end.xz. Postural transition only — no '
                 'locomotion required. Uses 100 hq400h static samples (A '
-                'ends with pelvis xz speed ≤ 0.0004 m/frame). Sourced from '
-                'train_hymotion_400h_hq_20260403.json via '
-                'tools/build_e14_hq400h_data.py. N_cond adaptive.',
+                'ends with pelvis xz speed ≤ 0.0004 m/frame). 2026-04-27: '
+                'switched to leg-aware c45+t120 (fixed N_cond=45+45, '
+                'N_transition adaptive in [30,120] with leg-only angle '
+                'term in compute_transition_length). This was the best '
+                'cell across the 9-cell ablation grid (lowest '
+                'foot_skating + boundary_accel_jump on n=50 paired t).',
                 {
                     '_use_transition_data': True,
                     '_placement': 'overlap',
-                    '_context_policy': 'adaptive',
+                    '_context_policy': 'fixed',
+                    '_n_cond_a_frames': 45,
+                    '_n_cond_b_frames': 45,
+                    '_transition_min': 30,
+                    '_transition_max': 120,
                     '_data_file': 'eval_e14_hq400h_static100.json',
                 },
             ),
@@ -2426,16 +2530,109 @@ def _build_tasks() -> Dict[str, EvalTask]:
                 '[Move] B.xz = A_end.xz + A_tail_velocity * N_transition. '
                 'Model must generate locomotion to reach B. Uses 100 '
                 'hq400h walk/jog samples (A ends with pelvis xz speed in '
-                '[0.004, 0.020] m/frame, stable tail). Sourced from '
-                'train_hymotion_400h_hq_20260403.json via '
-                'tools/build_e14_hq400h_data.py. N_cond adaptive.',
+                '[0.004, 0.020] m/frame, stable tail). 2026-04-27: '
+                'switched to leg-aware c45+t120 (fixed N_cond=45+45, '
+                'N_transition adaptive in [30,120] with leg-only angle '
+                'term in compute_transition_length). This was the best '
+                'cell across the 9-cell ablation grid + leg-aware '
+                'extension (foot_skating −4% vs leg-blind c45+t120, '
+                'transition_length +12 frames *** on lifted samples).',
                 {
                     '_use_transition_data': True,
                     '_placement': 'velocity',
-                    '_context_policy': 'adaptive',
+                    '_context_policy': 'fixed',
+                    '_n_cond_a_frames': 45,
+                    '_n_cond_b_frames': 45,
+                    '_transition_min': 30,
+                    '_transition_max': 120,
                     '_data_file': 'eval_e14_hq400h_move100.json',
                 },
             ),
+            # ─────────────────────────────────────────────────────────
+            # 2026-04-27: foot-skating ablation matrix (N_cond × N_t).
+            # Goal: identify whether the slipping artefact at high
+            # locomotion distance (E14 setting M, ~1-3 m) is driven by
+            # (a) too-short cond (model can't read cadence in 7 frames),
+            # (b) too-long N_transition forcing the model to inch root
+            #     across at sub-walking speed, or
+            # (c) training distribution simply lacks long-locomotion
+            #     stitched transitions and no inference-time knob fixes
+            #     it.
+            # 3×3 grid: cond ∈ {5, 15, 30} × N_t_max ∈ {60, 120, 180}.
+            # All inherit M's velocity placement + move100 datalist;
+            # N_cond uses 'fixed' policy (matches name); N_transition
+            # uses adaptive root/pose/angle but with the per-setting
+            # max clamp.  N_transition_min stays at 30 throughout.
+            # ─────────────────────────────────────────────────────────
+            **{
+                f'M_c{nc}_t{tmax}': TaskSetting(
+                    f'M_c{nc}_t{tmax}',
+                    f'[Move ablation] N_cond={nc}+{nc}, N_transition '
+                    f'clamp [30, {tmax}] (vs baseline M cond=adaptive, '
+                    f'N_t_max=120). Cell of foot-skating ablation grid '
+                    f'(2026-04-27).',
+                    {
+                        '_use_transition_data': True,
+                        '_placement': 'velocity',
+                        '_context_policy': 'fixed',
+                        '_n_cond_a_frames': nc,
+                        '_n_cond_b_frames': nc,
+                        '_transition_min': 30,
+                        '_transition_max': tmax,
+                        '_data_file': 'eval_e14_hq400h_move100.json',
+                    },
+                )
+                for nc in (5, 15, 30)
+                for tmax in (60, 120, 180)
+            },
+            # 2026-04-27 (extension): the 3×3 grid above is monotone in
+            # N_cond at every tmax row but does NOT saturate at c30. Push
+            # the N_cond axis further with t120 fixed (since t120/t180 are
+            # near-identical in the base grid). Cap at 90 because
+            # clip_len=360 ⇒ 90+180+90 = 360 is the training-seen ceiling.
+            **{
+                f'M_c{nc}_t120': TaskSetting(
+                    f'M_c{nc}_t120',
+                    f'[Move ablation extension] N_cond={nc}+{nc}, '
+                    f'N_transition clamp [30, 120]. Probes whether the '
+                    f'monotone improvement in (c5,c15,c30) saturates.',
+                    {
+                        '_use_transition_data': True,
+                        '_placement': 'velocity',
+                        '_context_policy': 'fixed',
+                        '_n_cond_a_frames': nc,
+                        '_n_cond_b_frames': nc,
+                        '_transition_min': 30,
+                        '_transition_max': 120,
+                        '_data_file': 'eval_e14_hq400h_move100.json',
+                    },
+                )
+                for nc in (45, 60, 75, 90)
+            },
+            # 2026-04-27 (leg-aware extension): with the new leg-only
+            # angle term in compute_transition_length, 8/50 samples get
+            # capped at t120; raise max to expose what the formula
+            # actually wants for those.
+            **{
+                f'M_c45_t{tmax}': TaskSetting(
+                    f'M_c45_t{tmax}',
+                    f'[Leg-aware] N_cond=45+45, N_transition '
+                    f'clamp [30, {tmax}]. Tests whether releasing the '
+                    f'cap helps the leg-heavy samples that the new '
+                    f'leg-angle term flagged as needing >120 frames.',
+                    {
+                        '_use_transition_data': True,
+                        '_placement': 'velocity',
+                        '_context_policy': 'fixed',
+                        '_n_cond_a_frames': 45,
+                        '_n_cond_b_frames': 45,
+                        '_transition_min': 30,
+                        '_transition_max': tmax,
+                        '_data_file': 'eval_e14_hq400h_move100.json',
+                    },
+                )
+                for tmax in (150, 180, 240)
+            },
         },
         default_metrics=[
             'jitter_pos', 'boundary_accel_jump_a', 'boundary_accel_jump_b',
@@ -2446,19 +2643,32 @@ def _build_tasks() -> Dict[str, EvalTask]:
         kimodo_comparable=True,
     )
 
-    # --- E15: Prepend to Start Pose (2026-04-21 redefinition) ---
-    # OLD E15 (transition from motion_tail to target_first_pose) replaced by
-    # the "prepend a transition from target start pose P into motion A" task.
-    # Datalist reused: eval_e7_target_d.json supplies (motion_path=A,
-    # target_motion_path=T); P = T[0].
+    # --- E15: Prepend to Start Pose (2026-04-27 v2 simplification) ---
+    # 2026-04-27: datalist replaced by `eval_e15_prepend_v2.json` (200
+    # paired (A, T) items, stratified by category x speed; see
+    # tools/build_e15_prepend_v2_data.py). Settings collapsed into a
+    # single `default` config + a small sweep grid that is removed once
+    # the optimal (N_cond_A, transition_speed) pair is locked.
     #
-    # 2026-04-23 (v5, user-driven): P and A[0] are BOTH at xz=(0,0); only
-    # their Y (pelvis height) may differ. This makes E15 a purely postural
-    # transition with no horizontal locomotion — consistent with the task's
-    # semantic of "given a desired start pose, prepend a transition into
-    # the existing motion". The user-facing output still contains full
-    # motion A; only the input to the model sees [P | pad | A[:K]] (K from
-    # N_cond_A ablation).
+    # Background:
+    #   * A = full motion to prepend before; T = motion whose first
+    #     frame defines the desired start pose P = T[0].
+    #   * P and A[0] are placed at the same world xz=(0,0); only Y
+    #     (pelvis height) may differ. This makes E15 a purely postural
+    #     transition.
+    #   * The model only sees [P | pad | A[:K]]; the dashboard still
+    #     visualizes the full A by stitching the un-fed tail back.
+    #
+    # Sweep axes (auto-discovered settings, removed after winner lock):
+    #   * `sweep_fast`   speed=0.022 m/frame, N_cond_A adaptive
+    #   * `sweep_slow`   speed=0.010 m/frame, N_cond_A adaptive
+    #   * `sweep_ncond5` speed=0.015 m/frame, N_cond_A fixed=5
+    #   * `sweep_ncond60`speed=0.015 m/frame, N_cond_A fixed=60
+    #
+    # `default` = speed 0.015 + adaptive N_cond_A clamped [15, 90].
+    # KIMODO comparison enabled (2026-04-27) via the new
+    # build_constraints_e15 prepend implementation in
+    # `tools/run_kimodo_all_tasks.py`.
     tasks['E15'] = EvalTask(
         task_id='E15',
         name='Prepend to Start Pose',
@@ -2468,47 +2678,73 @@ def _build_tasks() -> Dict[str, EvalTask]:
                     'P and A[0] are both at world xz=(0,0); only Y differs '
                     '(P and A[0] may have different pelvis heights, e.g. '
                     'T-pose vs crouch). Output = P + transition + full A. '
-                    'Settings A/B/C ablate transition SPEED only (fast / '
-                    'normal / slow).',
+                    'v2 (2026-04-27) uses 200 paired (A, T) test cases '
+                    'stratified by action category x pelvis speed.',
         mask_builder=build_start_pose_prepend_mask,
-        data_file='eval_e7_target_d_motionhub50.json',
+        data_file='eval_e15_prepend_v2.json',
         settings={
-            'A': TaskSetting(
-                'A',
-                'Fast transition: speed=0.022 m/frame (brisk). '
-                'N = ||pose_change|| / 0.022, clamp [15, 90].',
+            'default': TaskSetting(
+                'default',
+                'Production setting (locked 2026-04-27 from sweep on 30 '
+                'samples): N_cond_A=60 fixed, transition speed=0.015 '
+                'm/frame with N_transition clamp [15, 90]. Sweep showed '
+                'N_cond_A=60 vs adaptive (≈5-7) reduces jitter_pos by '
+                '~28% and foot_skating_ratio by ~27% with negligible '
+                'cost on boundary_accel_jump (+5%). Speed (0.010 vs '
+                '0.022) had little effect, so 0.015 is kept.',
+                {
+                    '_use_start_pose': True,
+                    '_transition_speed': 0.015,
+                    '_transition_min': 15,
+                    '_transition_max': 90,
+                    '_n_cond_a_frames': 60,
+                },
+            ),
+            'sweep_fast': TaskSetting(
+                'sweep_fast',
+                '[Sweep] Fast transition: speed=0.022 m/frame, '
+                'N_cond_A adaptive, clamp [15, 90].',
                 {
                     '_use_start_pose': True,
                     '_transition_speed': 0.022,
                     '_transition_min': 15,
                     '_transition_max': 90,
+                    '_n_cond_a_policy': 'adaptive',
                 },
             ),
-            'B': TaskSetting(
-                'B',
-                'Normal transition: speed=0.015 m/frame (baseline). '
-                'Clamp [15, 120].',
-                {
-                    '_use_start_pose': True,
-                    '_transition_speed': 0.015,
-                    '_transition_min': 15,
-                    '_transition_max': 120,
-                },
-            ),
-            'C': TaskSetting(
-                'C',
-                'Slow transition: speed=0.010 m/frame. Clamp [30, 180].',
+            'sweep_slow': TaskSetting(
+                'sweep_slow',
+                '[Sweep] Slow transition: speed=0.010 m/frame, '
+                'N_cond_A adaptive, clamp [30, 180].',
                 {
                     '_use_start_pose': True,
                     '_transition_speed': 0.010,
                     '_transition_min': 30,
                     '_transition_max': 180,
+                    '_n_cond_a_policy': 'adaptive',
                 },
             ),
-            'D_auto': TaskSetting(
-                'D_auto',
-                '[LEGACY alias for B] Retained for DB continuity.',
-                {'_use_start_pose': True},
+            'sweep_ncond5': TaskSetting(
+                'sweep_ncond5',
+                '[Sweep] N_cond_A=5 (short A context), speed=0.015.',
+                {
+                    '_use_start_pose': True,
+                    '_transition_speed': 0.015,
+                    '_transition_min': 15,
+                    '_transition_max': 90,
+                    '_n_cond_a_frames': 5,
+                },
+            ),
+            'sweep_ncond60': TaskSetting(
+                'sweep_ncond60',
+                '[Sweep] N_cond_A=60 (long A context), speed=0.015.',
+                {
+                    '_use_start_pose': True,
+                    '_transition_speed': 0.015,
+                    '_transition_min': 15,
+                    '_transition_max': 90,
+                    '_n_cond_a_frames': 60,
+                },
             ),
         },
         default_metrics=[
@@ -2517,7 +2753,7 @@ def _build_tasks() -> Dict[str, EvalTask]:
         ],
         needs_gt=False,
         caption_aware=False,
-        kimodo_comparable=False,
+        kimodo_comparable=True,
     )
 
     return tasks
