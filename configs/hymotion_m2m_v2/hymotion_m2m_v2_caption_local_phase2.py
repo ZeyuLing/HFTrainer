@@ -36,10 +36,27 @@ model = dict(
         x1_weight=0.0,
         keypoints3d_weight=0.0,
         translation_weight=0.0,
-        trans_dim_weight=5.0,
+        # Match KIMODO-style component-wise normalization for the main flow
+        # target; the component reduction already gives translation a full
+        # semantic slot, so do not stack the old 5x dimension compensation.
+        velocity_loss_reduction='component_mean',
+        trans_dim_weight=1.0,
         motion_smoothness_weight=0.5,
-        fk_consistency_weight=0.1,
+        # Disabled: KIMODO-style aux fk_consistency below replaces this.
+        fk_consistency_weight=0.0,
         fk_consistency_warmup_steps=2000,
+    ),
+    # KIMODO-style auxiliary losses: see base config for the rationale behind
+    # the weight magnitudes (denormalised-metres regime, smooth_l1 + t²).
+    kimodo_aux_loss_cfg=dict(
+        joint_pos_weight=50.0,
+        joint_vel_weight=500.0,
+        fk_consistency_weight=1500.0,
+        loss_type='smooth_l1',
+        timestep_squared_weighting=True,
+        fk_consistency_warmup_steps=2000,
+        joint_pos_warmup_steps=2000,
+        joint_vel_warmup_steps=2000,
     ),
 )
 
