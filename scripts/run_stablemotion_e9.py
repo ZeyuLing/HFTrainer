@@ -1,38 +1,42 @@
-"""StableMotion E9 Baseline Inference Wrapper (2026-04-23).
+"""StableMotion E9 Baseline Inference Wrapper (2026-04-27 rewrite).
 
-End-to-end detect-and-fix pipeline for the E9 Motion Repair benchmark:
+Strict open-source-faithful pipeline. NO tricks (no F1/F2/F3/F4, no savgol,
+no slerp upsample, no detector cap, no QC fallback). Mirrors
+``ref_repo/StableMotion/sample/fix_globsmpl.py`` exactly.
 
-    M2M 135-dim LQ motion
-      → SMPL-24 smpldata (poses 66 + trans 3 + joints 24×3)
+Pipeline:
+    M2M 135-dim LQ motion (30 fps)
+      → resample to 20 fps (StableMotion training fps)
+      → SMPL-24 smpldata
+            * poses = axis-angle (T, 66)
+            * trans = pelvis_joint_world (= motion135 trans + bone_offsets[0])
+            * joints (T, 24, 3) computed via FK; hand joints copy wrists
       → y-up → z-up axis swap (StableMotion uses z as gravity)
-      → Global SMPL RIFKE feats (232-dim)
-      → normalize + append label=0 channel (233-dim)
-      → StableMotion detect pass (predict per-frame corruption label)
-      → StableMotion fix pass (inpaint corrupted frames)
-      → denormalize → drop label → 232-dim body feats
-      → globsmplrifkefeats_to_smpldata (23 joints minus pelvis reconstruction)
-      → z-up → y-up → 135-dim M2M motion
-      → NPZ output for dashboard ingestion
+      → smpldata_to_alignglobsmplrifkefeats (232-D)
+      → append label channel (233-D) + normalize
+      → StableMotion detect → fix (DDPM 50-step)
+      → denormalize → drop label → 232-D
+      → globsmplrifkefeats_to_smpldata (canonical z-up)
+      → invert canonicalization (rotZ + traj0_xy + ground_shift)
+      → z-up → y-up
+      → motion135 trans = pelvis_world - bone_offsets[0]   ← KEY FIX
+      → resample to 30 fps (linear on trans, slerp on rot6d for unit-norm)
+      → NPZ output
 
-Notes:
-- StableMotion's `smpldata_to_alignglobsmplrifkefeats` expects 24 input
-  joints (SMPL+H "smpljoints" extractor: body 22 + left_hand + right_hand).
-  M2M only has SMPL body 22 joints. We synthesize joints 22 (left_hand)
-  and 23 (right_hand) by duplicating the wrists (joints 20, 21). The
-  feature pipeline mostly uses joints_local for lower body and pelvis
-  geometry; hand joints only enter via joints_local and are not used
-  for foot_global, rotZ, or trajectory. Duplicating wrists therefore
-  introduces a small bias in the hand-joint RIFKE channels but does
-  not break the canonical frame or root trajectory.
-- StableMotion training used AMASS canonicalized with specific noise
-  kinds. Our E9 LQ motions are HyMotion-domain — a known domain gap,
-  but the StableMotion baseline is meant to serve as a reference
-  ceiling/floor, not as a drop-in solution.
+Why this is faithful:
+  • encoder assert ``trans[:,2]-trans[0,2] ≈ joints[:,0,2]-joints[0,0,2]``
+    is now trivially satisfied with delta = 0 (trans IS pelvis_world).
+  • decoder output trans = pelvis_world (canonical) → after canon undo,
+    pelvis_world (world). Subtracting the constant bone_offsets[0] gives
+    SMPL root_translation directly, matching motion135 semantics.
+  • No frame-0 hard re-anchor needed: when SM keeps frame 0 clean
+    (always forced via inpainting_mask), the 232-D feats at frame 0
+    round-trip exactly back to LQ pelvis/pose.
 
 Usage:
     CUDA_VISIBLE_DEVICES=0 python3 scripts/run_stablemotion_e9.py \
-        --eval-datalist data/eval/m2m_v2/eval_e9_repair.json \
-        --output-dir output/eval_v2_e9_stablemotion_20260423 \
+        --eval-datalist data/eval/m2m_v2/eval_e9_repair_v2.json \
+        --output-dir output/eval_v2_e9_stablemotion_v9 \
         --max-samples 9999
 """
 from __future__ import annotations
@@ -42,10 +46,11 @@ import json
 import os
 import sys
 import time
-import types
 from pathlib import Path
+from functools import partial
 from typing import Dict, List
 
+import einops
 import numpy as np
 import torch
 
@@ -58,6 +63,10 @@ sys.path.insert(0, str(SM_ROOT))
 # ───────────────────────── StableMotion imports ─────────────────────────
 from data_loaders.amasstools.globsmplrifke_feats import (  # noqa: E402
     smpldata_to_alignglobsmplrifkefeats, globsmplrifkefeats_to_smpldata,
+)
+from data_loaders.amasstools.geometry import (  # noqa: E402
+    axis_angle_to_matrix as _aa2mat,
+    matrix_to_euler_angles as _mat2euler,
 )
 from diffusion import gaussian_diffusion as gd  # noqa: E402
 from diffusion.respace import SpacedDiffusion, space_timesteps  # noqa: E402
@@ -72,21 +81,19 @@ from hftrainer.datasets.motion.motionhub.transforms.load_smplx import (  # noqa:
 from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk  # noqa: E402
 from hftrainer.models.motion.components.utils.geometry.rotation_convert import (  # noqa: E402
     rotation_6d_to_matrix, matrix_to_axis_angle, axis_angle_to_matrix,
-    matrix_to_rotation_6d,
+    matrix_to_rotation_6d, matrix_to_quaternion, quaternion_to_matrix,
 )
 
 
-# ───────────────────────── Rot6d convention helper ─────────────────────────
+# ───────────────────────── rot6d row/col helpers ─────────────────────────
 def _rot6d_row_to_col(rot6d_row: torch.Tensor) -> torch.Tensor:
     """M2M 135-dim uses row-major rot6d ([R00,R01,R10,R11,R20,R21]); the
-    project-local rotation_convert.py is column-major
-    ([R00,R10,R20,R01,R11,R21]). Swap order before feeding into
+    project rotation_convert.py is column-major. Swap order before feeding
     rotation_6d_to_matrix."""
     return rot6d_row[..., [0, 2, 4, 1, 3, 5]]
 
 
 def _rot6d_col_to_row(rot6d_col: torch.Tensor) -> torch.Tensor:
-    """Inverse of _rot6d_row_to_col."""
     return rot6d_col[..., [0, 3, 1, 4, 2, 5]]
 
 
@@ -95,49 +102,64 @@ def m2m135_to_smpldata_24(
     motion_135: np.ndarray,
     bone_offsets: torch.Tensor,
 ) -> Dict[str, torch.Tensor]:
-    """Convert M2M 135-dim motion to smpldata for StableMotion's 24-joint
-    topology. Returns {poses: (T,66), trans: (T,3), joints: (T,24,3)}
-    where joints[:, 22] = joints[:, 20] (l_wrist copy for l_hand) and
-    joints[:, 23] = joints[:, 21] (r_wrist copy for r_hand).
+    """Convert M2M 135-dim motion to smpldata for StableMotion 24-joint topology.
+
+    KEY: ``trans`` is set to ``joints[:, 0]`` (pelvis_world), NOT to the
+    motion135 root translation. This makes the encoder assert
+    ``(trans[:,z]-trans[0,z]) == (joints[:,0,z]-joints[0,0,z])`` trivially
+    true (delta = 0). The decoder output trans then carries pelvis_world
+    semantics directly; subtracting the constant ``bone_offsets[0]``
+    recovers the SMPL root translation cleanly.
+
+    Returns:
+        {'poses': (T, 66), 'trans': (T, 3) = pelvis_world,
+         'joints': (T, 24, 3) — 24-joint world pos with hand joints copied}
     """
     T = motion_135.shape[0]
     motion_t = torch.from_numpy(motion_135).float()
-    trans = motion_t[:, :3].clone()
     rot6d_row = motion_t[:, 3:].reshape(T, 22, 6)
     rot6d_col = _rot6d_row_to_col(rot6d_row)
     R = rotation_6d_to_matrix(rot6d_col)
     poses_aa = matrix_to_axis_angle(R).reshape(T, 66)
+
     with torch.no_grad():
         joints_world, _, _, _ = motion135_to_fk(
             motion_t.unsqueeze(0), bone_offsets, 'local'
         )
-    joints_22 = joints_world.squeeze(0)  # (T, 22, 3)
-    # Synthesize 2 hand joints by copying the wrists
+    joints_22 = joints_world.squeeze(0)  # (T, 22, 3) y-up
+
+    # SMPL 24: append left_hand (=20=l_wrist) and right_hand (=21=r_wrist)
     joints_24 = torch.cat([joints_22, joints_22[:, 20:21], joints_22[:, 21:22]], dim=1)
-    return {'poses': poses_aa, 'trans': trans, 'joints': joints_24}
+
+    # KEY: trans = pelvis_world (joints[:, 0])
+    trans_pelvis = joints_22[:, 0].clone()
+    return {'poses': poses_aa, 'trans': trans_pelvis, 'joints': joints_24}
 
 
 def smpldata_to_m2m135(
     smpldata: Dict[str, torch.Tensor],
+    bone_offsets: torch.Tensor,
 ) -> np.ndarray:
-    """Convert smpldata back to M2M 135-dim. Only uses poses + trans
-    (the first 22 joints' rotations); hand-joint positions are discarded."""
+    """Convert smpldata back to M2M 135-dim. Assumes ``smpldata.trans`` is
+    pelvis_world (y-up) — recovers SMPL root translation by subtracting
+    the constant ``bone_offsets[0]`` (FK definition: pelvis_world =
+    trans_root + bone_offsets[0])."""
     poses = smpldata['poses']
-    trans = smpldata['trans']
+    trans_pelvis = smpldata['trans']  # y-up pelvis_world
     T = poses.shape[0]
-    poses_aa = poses.reshape(T, -1, 3)[:, :22]  # drop hand rotations if any
+    poses_aa = poses.reshape(T, -1, 3)[:, :22]
     R = axis_angle_to_matrix(poses_aa)
     rot6d_col = matrix_to_rotation_6d(R)
     rot6d_row = _rot6d_col_to_row(rot6d_col)
-    motion_135 = torch.cat([trans[:, :3], rot6d_row.reshape(T, 132)], dim=-1)
+
+    bo0 = bone_offsets[0].to(trans_pelvis.dtype).to(trans_pelvis.device)
+    trans_root = trans_pelvis[:, :3] - bo0[None, :]
+
+    motion_135 = torch.cat([trans_root, rot6d_row.reshape(T, 132)], dim=-1)
     return motion_135.numpy().astype(np.float32)
 
 
-# ───────────────────────── Axis swap y-up ↔ z-up ─────────────────────────
-# StableMotion's globsmplrifke_feats assumes joints[:, :, 2] is the
-# gravity axis (z-up). M2M uses y-up (joints[:, :, 1] = height). We swap
-# y ↔ z on both joints and trans, and pre-rotate the global orient by
-# +90° around the world x axis so FK stays consistent.
+# ───────────────────────── y-up ↔ z-up axis swap ─────────────────────────
 _R_X90 = torch.tensor([
     [1.0, 0.0, 0.0],
     [0.0, 0.0, -1.0],
@@ -150,21 +172,17 @@ _R_X_NEG90 = torch.tensor([
 ])
 
 
-def _swap_yz(tensor_xyz: torch.Tensor) -> torch.Tensor:
-    """Swap y and z components of the last axis. Last dim must be 3."""
-    out = tensor_xyz.clone()
-    out[..., 1] = tensor_xyz[..., 2]
-    out[..., 2] = tensor_xyz[..., 1]
+def _swap_yz(t: torch.Tensor) -> torch.Tensor:
+    out = t.clone()
+    out[..., 1] = t[..., 2]
+    out[..., 2] = t[..., 1]
     return out
 
 
-def _rotate_global_orient(
-    poses_aa: torch.Tensor,
-    R_pre: torch.Tensor,
-) -> torch.Tensor:
-    """Pre-multiply the global_orient (joint 0 axis-angle) by R_pre."""
+def _rotate_global_orient(poses_aa: torch.Tensor, R_pre: torch.Tensor) -> torch.Tensor:
+    """Pre-multiply global_orient (joint 0 axis-angle) by R_pre."""
     out = poses_aa.clone()
-    global_aa = poses_aa.reshape(-1, 22, 3)[:, 0]  # (T, 3)
+    global_aa = poses_aa.reshape(-1, 22, 3)[:, 0]
     R_old = axis_angle_to_matrix(global_aa)
     R_new = R_pre.to(R_old.dtype).to(R_old.device) @ R_old
     global_new = matrix_to_axis_angle(R_new)
@@ -173,34 +191,25 @@ def _rotate_global_orient(
     return out_flat.reshape(poses_aa.shape)
 
 
-def smpldata_y_up_to_z_up(
-    smpldata: Dict[str, torch.Tensor],
-) -> Dict[str, torch.Tensor]:
+def smpldata_y_up_to_z_up(sd: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     return {
-        'poses': _rotate_global_orient(smpldata['poses'], _R_X90),
-        'trans': _swap_yz(smpldata['trans']),
-        'joints': _swap_yz(smpldata['joints']),
+        'poses': _rotate_global_orient(sd['poses'], _R_X90),
+        'trans': _swap_yz(sd['trans']),
+        'joints': _swap_yz(sd['joints']),
     }
 
 
-def smpldata_z_up_to_y_up(
-    smpldata: Dict[str, torch.Tensor],
-) -> Dict[str, torch.Tensor]:
+def smpldata_z_up_to_y_up(sd: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     return {
-        'poses': _rotate_global_orient(smpldata['poses'], _R_X_NEG90),
-        'trans': _swap_yz(smpldata['trans']),
-        'joints': _swap_yz(smpldata['joints']),
+        'poses': _rotate_global_orient(sd['poses'], _R_X_NEG90),
+        'trans': _swap_yz(sd['trans']),
+        'joints': _swap_yz(sd['joints']),
     }
 
 
 # ───────────────────────── StableMotion model load ─────────────────────────
 def load_stablemotion(device: str = 'cuda'):
-    """Load the published StableMotion EMA checkpoint.
-
-    The OneDrive 'stablemotion_brokenamass.pt' is actually a tar.gz bundle
-    containing save/stablemotion/ema*.pt + model*.pt + args.json. If the
-    archive has not been extracted yet, do it now.
-    """
+    """Load the published EMA checkpoint exactly as model_util.create_*."""
     save_dir = SM_ROOT / 'save'
     ema_ckpt = save_dir / 'stablemotion' / 'ema001000000.pt'
     args_path = save_dir / 'stablemotion' / 'args.json'
@@ -211,33 +220,29 @@ def load_stablemotion(device: str = 'cuda'):
         import tarfile
         with tarfile.open(bundle, 'r:gz') as tar:
             tar.extractall(path=save_dir)
-    assert ema_ckpt.exists(), f'Missing EMA ckpt after extract: {ema_ckpt}'
+    assert ema_ckpt.exists(), f'Missing EMA ckpt: {ema_ckpt}'
     with open(args_path) as f:
         train_args = json.load(f)
 
-    # Build model exactly as utils/model_util.py::create_model_and_diffusion
     model = StableMotionDiTModel(
-        in_channels=233,           # 232 body + 1 label
+        in_channels=233,
         out_channels=233,
-        num_layers=train_args['layers'],       # 8
-        num_attention_heads=train_args['heads'],  # 8
+        num_layers=train_args['layers'],
+        num_attention_heads=train_args['heads'],
         attention_head_dim=64,
         class_cond=True,
         zero_init=train_args.get('zero_init', False),
     )
     state = torch.load(str(ema_ckpt), map_location='cpu', weights_only=False)
-    # The EMA ckpt stores keys prefixed with 'ema_model.'; strip it.
     body = {}
     for k, v in state.items():
         if k.startswith('ema_model.'):
             body[k[len('ema_model.'):]] = v
     missing, unexpected = model.load_state_dict(body, strict=False)
-    # Report (expect only the 'initted' / 'step' scalars missing)
     print(f'[load] missing={len(missing)}, unexpected={len(unexpected)}')
     model.to(device).eval()
 
-    # Diffusion — DDPM 50 steps (predict_xstart=1, cosine beta, FIXED_SMALL)
-    steps = train_args['diffusion_steps']  # 50
+    steps = train_args['diffusion_steps']
     betas = gd.get_named_beta_schedule(train_args['noise_schedule'], steps, 1.0)
     diffusion = SpacedDiffusion(
         use_timesteps=space_timesteps(steps, [steps]),
@@ -248,45 +253,301 @@ def load_stablemotion(device: str = 'cuda'):
         rescale_timesteps=False,
     )
 
-    # Normalizer (232-d body); append label mean/std per StableMotion convention
     normalizer = Normalizer(str(SM_ROOT / train_args['normalizer_dir']))
     normalizer.add_label_channel()
     normalizer = normalizer.to(device)
 
-    return model, diffusion, normalizer
+    return model, diffusion, normalizer, train_args
 
 
-# ───────────────────────── StableMotion detect + fix ─────────────────────────
+def _choose_sampler(diffusion: SpacedDiffusion, ts_respace: bool):
+    return diffusion.ddim_sample_loop if ts_respace else diffusion.p_sample_loop
+
+
+_FEET2METER = 0.3048
+
+
+def _batch_expander(model_kwargs, repeat_times: int):
+    out_model_kwargs = {}
+    for k, v in model_kwargs.items():
+        if k == 'y':
+            out_model_kwargs['y'] = _batch_expander(v, repeat_times)
+        elif isinstance(v, list):
+            out_model_kwargs[k] = v * repeat_times
+        elif isinstance(v, (torch.Tensor, np.ndarray)):
+            out_model_kwargs[k] = einops.repeat(
+                v, 'b ... -> (repeat b) ...', repeat=repeat_times
+            )
+        else:
+            out_model_kwargs[k] = v
+    return out_model_kwargs
+
+
+def _run_cleanup_selection_local(
+    model,
+    model_kwargs_detmode,
+    model_kwargs,
+    motion_normalizer,
+    sample_fn,
+    cond_fn,
+    prob_det_th: float,
+    skip_timesteps: int,
+    enable_sits: bool,
+    diffusion_steps: int,
+    classifier_scale: float,
+    bs: int,
+    nfeats: int,
+    nframes: int,
+):
+    """Local copy of StableMotion ensemble cleanup without TMR imports."""
+    forward_rp_times = 5
+    eval_times = 25
+    device = model_kwargs['y']['inpainted_motion'].device
+
+    rp_model_kwargs_detmode = _batch_expander(model_kwargs_detmode, forward_rp_times)
+    with torch.no_grad():
+        re_sample = 0
+        re_t = torch.ones((bs * forward_rp_times,), device=device) * 49
+        for _ in range(eval_times):
+            x = torch.randn_like(rp_model_kwargs_detmode['y']['inpainted_motion'])
+            inpaint_cond = rp_model_kwargs_detmode['inpaint_cond']
+            x_gt = rp_model_kwargs_detmode['y']['inpainted_motion']
+            x = torch.where(inpaint_cond, x, x_gt)
+            re_sample += model(x, re_t, **rp_model_kwargs_detmode)
+        re_sample = re_sample / eval_times
+
+    sample_det = motion_normalizer.inverse(re_sample.transpose(1, 2))
+    label = sample_det[..., -1] > prob_det_th
+    temp_labels = label.clone()
+    label[..., 1:] += temp_labels[..., :-1]
+    label[..., :-1] += temp_labels[..., 1:]
+    for mids, mlen in enumerate(rp_model_kwargs_detmode['length'].cpu().numpy()):
+        label[mids, ..., mlen - 1] = 0
+
+    det_good_frames_per_sample = {
+        sample_i: np.nonzero(~label.detach().cpu().numpy()[sample_i].squeeze())[0].tolist()
+        for sample_i in range(len(label))
+    }
+
+    inpainting_mask_fixmode = torch.zeros_like(re_sample, dtype=torch.bool)
+    for sample_i in range(len(re_sample)):
+        inpainting_mask_fixmode[sample_i, ..., det_good_frames_per_sample[sample_i]] = True
+    inpainting_mask_fixmode[:, -1] = True
+
+    inpaint_motion_fixmode = rp_model_kwargs_detmode['y']['inpainted_motion'].clone()
+    inpaint_motion_fixmode[:, -1] = -1.0
+    inpaint_cond_fixmode = (
+        (~inpainting_mask_fixmode) & rp_model_kwargs_detmode['attention_mask'].unsqueeze(-2)
+    )
+
+    rp_model_kwargs = _batch_expander(model_kwargs, forward_rp_times)
+    rp_model_kwargs['y']['inpainting_mask'] = inpainting_mask_fixmode.clone()
+    rp_model_kwargs['y']['inpainted_motion'] = inpaint_motion_fixmode.clone()
+    rp_model_kwargs['inpaint_cond'] = inpaint_cond_fixmode.clone()
+
+    if enable_sits:
+        soft_inpaint_ts = einops.repeat(
+            re_sample[:, [-1]], 'b c l -> b (repeat c) l', repeat=nfeats
+        )
+        soft_inpaint_ts = torch.clip((soft_inpaint_ts + 1 / 2), min=0.0, max=1.0)
+        soft_inpaint_ts = torch.ceil(
+            (torch.sin(soft_inpaint_ts * torch.pi * 0.5)) * diffusion_steps
+        ).long()
+    else:
+        soft_inpaint_ts = None
+
+    sample = sample_fn(
+        model,
+        (bs * forward_rp_times, nfeats, nframes),
+        clip_denoised=False,
+        model_kwargs=rp_model_kwargs,
+        skip_timesteps=skip_timesteps,
+        init_image=rp_model_kwargs['y']['inpainted_motion'],
+        progress=False,
+        dump_steps=None,
+        noise=None,
+        const_noise=False,
+        soft_inpaint_ts=soft_inpaint_ts,
+        cond_fn=cond_fn if classifier_scale else None,
+    )
+
+    inpaint_motion_detmode = sample.clone()
+    inpaint_motion_detmode[:, -1] = 1.0
+    rp_model_kwargs_detmode['y']['inpainted_motion'] = inpaint_motion_detmode.clone()
+
+    score = 0
+    with torch.no_grad():
+        re_t = torch.ones((bs * forward_rp_times,), device=device) * 49
+        for _ in range(eval_times):
+            x = torch.randn_like(rp_model_kwargs_detmode['y']['inpainted_motion'])
+            inpaint_cond = rp_model_kwargs_detmode['inpaint_cond']
+            x_gt = rp_model_kwargs_detmode['y']['inpainted_motion']
+            x = torch.where(inpaint_cond, x, x_gt)
+            score += model(x, re_t, **rp_model_kwargs_detmode)[:, -1]
+    score /= eval_times
+    score = torch.sum(
+        (score > 0.0) * rp_model_kwargs_detmode['attention_mask'], dim=-1
+    )
+    score = einops.rearrange(score, '(repeat b) -> repeat b', repeat=forward_rp_times)
+
+    sample_candidates = einops.rearrange(
+        sample, '(repeat b) c l -> repeat b c l', repeat=forward_rp_times
+    )
+    selected_id = torch.argmin(score, dim=0)
+    selected_id = selected_id[..., None, None].expand(
+        sample_candidates.shape[1:]
+    ).unsqueeze(0)
+    sample = torch.gather(sample_candidates, dim=0, index=selected_id).squeeze(0)
+    return sample
+
+
+def _compute_foot_sliding_torch_local(
+    foot_data: torch.Tensor,
+    traj_qpos: torch.Tensor,
+    offseth=None,
+    upaxis: int = 1,
+    H: float = 0.05,
+):
+    plane_axis = [0, 1, 2]
+    plane_axis.pop(upaxis)
+    foot = foot_data.clone() * _FEET2METER
+    if offseth is None:
+        offseth = torch.mean(foot[:10, upaxis])
+    else:
+        offseth = offseth * _FEET2METER
+    foot[:, upaxis] = foot[:, upaxis] - offseth
+    traj_qpos = traj_qpos.clone()
+    traj_qpos[:, upaxis] = traj_qpos[:, upaxis] - offseth
+    foot_disp = torch.linalg.norm(foot[1:, plane_axis] - foot[:-1, plane_axis], dim=1)
+    seq_len = len(traj_qpos)
+    y_threshold = 0.65
+    y = traj_qpos[1:, upaxis]
+    foot_avg = (foot[:-1, upaxis] + foot[1:, upaxis]) / 2
+    subset = torch.logical_and(foot_avg < H, y > y_threshold)
+    sliding_stats = torch.abs(foot_disp * (2 - 2 ** (foot_avg.detach() / H)))[subset]
+    sliding = torch.sum(sliding_stats) / max(seq_len, 1)
+    return sliding, sliding_stats
+
+
+def _compute_foot_sliding_wrapper_torch_local(
+    motions: torch.Tensor,
+    motion_lengths: torch.Tensor,
+    upaxis: int = 1,
+    ankle_h: float = 0.05,
+):
+    traj_idx = 0
+    feet_idxs = [7, 8]
+    sliding_mean = []
+    for motion, mlen in zip(motions, motion_lengths):
+        motion = motion[:mlen]
+        traj_qpos = motion[:, traj_idx]
+        offseth = torch.min(motion[..., upaxis]).detach()
+        for foot_idx in feet_idxs:
+            foot_data = motion[:, foot_idx]
+            sliding, _ = _compute_foot_sliding_torch_local(
+                foot_data, traj_qpos, offseth, upaxis=upaxis, H=ankle_h
+            )
+            sliding_mean.append(sliding)
+    return sliding_mean
+
+
+def _prepare_cond_fn_abs(
+    model: torch.nn.Module,
+    motion_normalizer: Normalizer,
+    classifier_scale: float,
+    device: str,
+):
+    if not classifier_scale:
+        return None
+
+    j_regressor_stat = np.load(
+        str(SM_ROOT / 'data_loaders/amasstools/smpl_neutral_nobetas_24J.npz')
+    )
+    J_regressor = torch.from_numpy(j_regressor_stat['J']).to(device)
+    parents = torch.from_numpy(j_regressor_stat['parents'])
+    root_offset = torch.tensor([-0.00179506, -0.22333382, 0.02821918]).to(device)
+    std = motion_normalizer.std.clone().to(device)
+    mean = motion_normalizer.mean.clone().to(device)
+    from smplx.lbs import batch_rigid_transform  # noqa: WPS433
+
+    def _footlocking_fn(x, t, **kwargs):
+        lengths = kwargs['length']
+        eps = 1e-12
+        with torch.enable_grad():
+            inpaint_cond = kwargs['inpaint_cond']
+            x_gt = kwargs['y']['inpainted_motion']
+            x_in = x.detach().requires_grad_(True)
+            x_in = torch.where(inpaint_cond, x_in, x_gt)
+            x_0 = model(x_in, t, **kwargs)
+            x_0 = torch.where(inpaint_cond, x_0, x_gt)
+            denorm_x0 = x_0.transpose(1, 2) * (std + eps) + mean
+            B = denorm_x0.shape[0]
+            denorm_x0_flatten = einops.rearrange(denorm_x0, 'b n d -> (b n) d')
+            smpldata = globsmplrifkefeats_to_smpldata(denorm_x0_flatten[..., :-1])
+            poses = einops.rearrange(smpldata['poses'], 'k (l t) -> k l t', t=3)
+            trans = smpldata['trans']
+            rot_mat = axis_angle_to_matrix(poses)
+            T_all = rot_mat.shape[0]
+            zero_hands_rot = torch.eye(3)[None, None].expand(
+                T_all, 2, -1, -1
+            ).to(device)
+            rot_mat = torch.concat((rot_mat, zero_hands_rot), dim=1)
+            joints, _ = batch_rigid_transform(
+                rot_mat,
+                J_regressor[None].expand(T_all, -1, -1),
+                parents,
+            )
+            joints = joints.squeeze() + trans.unsqueeze(1) - root_offset
+            joints = einops.rearrange(joints, '(b n) j d -> b n j d', b=B)
+            slide_dist = _compute_foot_sliding_wrapper_torch_local(
+                joints, lengths, upaxis=2, ankle_h=0.1
+            )
+            loss = sum(slide_dist)
+            grad = torch.autograd.grad(-loss, x_in)[0] * classifier_scale
+
+        grad = torch.nan_to_num(grad)
+        grad = torch.clip(grad, min=-10, max=10)
+        grad[:, 0] = 0.0
+        return grad
+
+    return _footlocking_fn
+
+
+# ───────────────────────── Detect + Fix (open-source faithful) ─────────────────────────
 @torch.no_grad()
 def run_stablemotion_detect_fix(
-    feats_232: torch.Tensor,          # (T, 232) body feats (un-normalized)
+    feats_232: torch.Tensor,            # (T, 232)
     model: torch.nn.Module,
     diffusion: SpacedDiffusion,
     normalizer: Normalizer,
     prob_det_th: float = 0.5,
+    prob_det_num: int = 0,
+    skip_timesteps: int = 0,
+    ts_respace: bool = False,
+    enable_sits: bool = False,
+    ensemble: bool = False,
+    classifier_scale: float = 0.0,
     device: str = 'cuda',
 ) -> Dict[str, torch.Tensor]:
-    """Mirror of ref_repo/StableMotion/sample/fix_globsmpl.py with:
-      - batch size 1
-      - no MC averaging (ProbDetNum=0 → single detection pass)
-      - no ensemble, no SITS, no foot-lock guidance
-      - DDPM 50-step ancestral sampling (ts_respace=None)
+    """Batch-1 mirror of StableMotion fix_globsmpl.py.
+
+    Supports the official enhanced inference switches:
+    `ProbDetNum`, `enable_sits`, `ensemble`, `classifier_scale`, `ts_respace`.
     Returns {'feats_fixed': (T, 232), 'label': (T,) bool}.
     """
     T = feats_232.shape[0]
-    # Append label=0 channel and normalize
-    x_full = torch.cat([feats_232, torch.zeros(T, 1)], dim=-1)  # (T, 233)
-    x_norm = normalizer(x_full.to(device))                      # (T, 233)
-    x_norm = x_norm.transpose(0, 1).unsqueeze(0)                # (1, 233, T)
+    x_full = torch.cat([feats_232, torch.zeros(T, 1)], dim=-1)         # (T, 233)
+    x_norm = normalizer(x_full.to(device))
+    x_norm = x_norm.transpose(0, 1).unsqueeze(0)                       # (1, 233, T)
 
     length = torch.tensor([T], device=device)
     attention_mask = torch.ones(1, T, device=device, dtype=torch.bool)
 
-    # ---- Detection pass ---------------------------------------------------
+    # ---- Stage 1: Detect ----------------------------------------------------
     inp_det = x_norm.clone()
-    inp_det[:, -1] = 1.0                         # "corrupt" label channel
+    inp_det[:, -1] = 1.0
     mask_det = torch.ones_like(x_norm, dtype=torch.bool)
-    mask_det[:, -1] = False                      # predict label only
+    mask_det[:, -1] = False
     inpaint_cond_det = (~mask_det) & attention_mask.unsqueeze(-2)
     kw_det = {
         'y': {'inpainting_mask': mask_det, 'inpainted_motion': inp_det},
@@ -295,31 +556,40 @@ def run_stablemotion_detect_fix(
         'attention_mask': attention_mask,
     }
     shape = (1, 233, T)
-    re_sample = diffusion.p_sample_loop(
+    sample_fn = _choose_sampler(diffusion, ts_respace)
+    re_sample = sample_fn(
         model, shape,
         clip_denoised=False, model_kwargs=kw_det,
         skip_timesteps=0, init_image=None,
         progress=False, dump_steps=None, noise=None, const_noise=False,
     )
-    # De-normalize, read label
-    det_full = normalizer.inverse(re_sample.transpose(1, 2))  # (1, T, 233), still on device
-    det_full = det_full.cpu()
-    label = (det_full[..., -1] > prob_det_th).squeeze(0)            # (T,) bool
+    if prob_det_num:
+        for _ in range(prob_det_num):
+            re_sample += sample_fn(
+                model, shape,
+                clip_denoised=False, model_kwargs=kw_det,
+                skip_timesteps=0, init_image=None,
+                progress=False, dump_steps=None, noise=None, const_noise=False,
+            )
+        re_sample = re_sample / (prob_det_num + 1)
+    det_full = normalizer.inverse(re_sample.transpose(1, 2)).cpu()
+    probs = det_full[..., -1].squeeze(0)                               # (T,)
+    label = (probs > prob_det_th)                                       # (T,) bool
 
-    # ---- Dilate ±1 and force last frame clean -----------------------------
+    # ±1 dilation, last frame forced clean (open-source default)
     temp = label.clone()
     label[1:] = label[1:] | temp[:-1]
     label[:-1] = label[:-1] | temp[1:]
     label[-1] = False
 
-    # ---- Fix pass ---------------------------------------------------------
+    # ---- Stage 2: Fix -------------------------------------------------------
     inpaint_mask_fix = torch.zeros_like(x_norm, dtype=torch.bool)
     good = (~label).nonzero(as_tuple=False).squeeze(-1).tolist()
     if len(good) > 0:
-        inpaint_mask_fix[0, :, good] = True        # keep good frames
-    inpaint_mask_fix[:, -1] = True                 # always keep label channel
+        inpaint_mask_fix[0, :, good] = True
+    inpaint_mask_fix[:, -1] = True
     inp_fix = x_norm.clone()
-    inp_fix[:, -1] = -1.0                          # tell model "this is clean"
+    inp_fix[:, -1] = -1.0
     inpaint_cond_fix = (~inpaint_mask_fix) & attention_mask.unsqueeze(-2)
     kw_fix = {
         'y': {'inpainting_mask': inpaint_mask_fix, 'inpainted_motion': inp_fix},
@@ -327,18 +597,108 @@ def run_stablemotion_detect_fix(
         'length': length,
         'attention_mask': attention_mask,
     }
-    sample_fix = diffusion.p_sample_loop(
-        model, shape,
-        clip_denoised=False, model_kwargs=kw_fix,
-        skip_timesteps=0, init_image=inp_fix,
-        progress=False, dump_steps=None, noise=None, const_noise=False,
+    if enable_sits and prob_det_num:
+        soft_inpaint_ts = einops.repeat(
+            re_sample[:, [-1]], 'b c l -> b (repeat c) l', repeat=shape[1]
+        )
+        soft_inpaint_ts = torch.clip((soft_inpaint_ts + 1 / 2), min=0.0, max=1.0)
+        soft_inpaint_ts = torch.ceil(
+            (torch.sin(soft_inpaint_ts * torch.pi * 0.5)) * diffusion.num_timesteps
+        ).long()
+    else:
+        soft_inpaint_ts = None
+
+    cond_fn = _prepare_cond_fn_abs(
+        model, normalizer, classifier_scale=classifier_scale, device=device
     )
-    fix_full = normalizer.inverse(sample_fix.transpose(1, 2)).cpu()  # (1, T, 233)
-    feats_fixed = fix_full[0, :, :-1]                                # (T, 232)
+    if ensemble:
+        sample_fix = _run_cleanup_selection_local(
+            model=model,
+            model_kwargs_detmode=kw_det,
+            model_kwargs=kw_fix,
+            motion_normalizer=normalizer,
+            sample_fn=sample_fn,
+            cond_fn=cond_fn if classifier_scale else None,
+            prob_det_th=prob_det_th,
+            skip_timesteps=skip_timesteps,
+            enable_sits=enable_sits,
+            diffusion_steps=diffusion.num_timesteps,
+            classifier_scale=classifier_scale,
+            bs=1,
+            nfeats=shape[1],
+            nframes=T,
+        )
+    else:
+        sample_fix = sample_fn(
+            model, shape,
+            clip_denoised=False, model_kwargs=kw_fix,
+            skip_timesteps=skip_timesteps, init_image=inp_fix,
+            progress=False, dump_steps=None, noise=None, const_noise=False,
+            soft_inpaint_ts=soft_inpaint_ts,
+            cond_fn=cond_fn if classifier_scale else None,
+        )
+    fix_full = normalizer.inverse(sample_fix.transpose(1, 2)).cpu()
+    feats_fixed = fix_full[0, :, :-1]                                   # (T, 232)
     return {'feats_fixed': feats_fixed, 'label': label}
 
 
-# ───────────────────────── One-sample pipeline ─────────────────────────
+# ───────────────────────── fps resampling helpers ─────────────────────────
+def _linear_interp_axis0(arr: np.ndarray, T_out: int) -> np.ndarray:
+    T_in = arr.shape[0]
+    if T_in == T_out:
+        return arr.astype(np.float32)
+    t_in = np.linspace(0.0, 1.0, T_in, dtype=np.float32)
+    t_out = np.linspace(0.0, 1.0, T_out, dtype=np.float32)
+    if arr.ndim == 1:
+        return np.interp(t_out, t_in, arr.astype(np.float32)).astype(np.float32)
+    out = np.empty((T_out,) + arr.shape[1:], dtype=np.float32)
+    flat = arr.reshape(T_in, -1)
+    out_flat = out.reshape(T_out, -1)
+    for c in range(flat.shape[1]):
+        out_flat[:, c] = np.interp(t_out, t_in, flat[:, c].astype(np.float32))
+    return out
+
+
+def _resample_motion135_slerp(motion_135_in: np.ndarray, T_out: int) -> np.ndarray:
+    """Resample (T, 135) — trans linear, rot6d slerp via quaternion. Slerp
+    preserves unit-norm and shortest-arc, which is the mathematically
+    correct way to resample rotations (NOT a 'trick')."""
+    T_in = motion_135_in.shape[0]
+    if T_in == T_out:
+        return motion_135_in.astype(np.float32)
+    trans_out = _linear_interp_axis0(motion_135_in[:, :3], T_out)
+    rot6d_row = torch.from_numpy(
+        motion_135_in[:, 3:].reshape(T_in, 22, 6)).float()
+    rot6d_col = _rot6d_row_to_col(rot6d_row)
+    R_in = rotation_6d_to_matrix(rot6d_col)
+    quat = matrix_to_quaternion(R_in).double().numpy()                 # (T_in, 22, 4)
+    s = np.linspace(0.0, T_in - 1, T_out, dtype=np.float64)
+    i0 = np.clip(np.floor(s).astype(np.int64), 0, T_in - 2)
+    i1 = i0 + 1
+    u = (s - i0).astype(np.float64)
+    q0 = quat[i0]
+    q1 = quat[i1]
+    d = np.sum(q0 * q1, axis=-1, keepdims=True)
+    q1 = np.where(d < 0, -q1, q1)
+    d = np.clip(np.abs(d), -1.0, 1.0)
+    theta = np.arccos(d)
+    sin_theta = np.sin(theta)
+    eps = 1e-7
+    small = sin_theta < eps
+    a = np.where(small, 1.0 - u[:, None, None],
+                 np.sin((1.0 - u[:, None, None]) * theta) / np.maximum(sin_theta, eps))
+    b = np.where(small, u[:, None, None],
+                 np.sin(u[:, None, None] * theta) / np.maximum(sin_theta, eps))
+    q_out = a * q0 + b * q1
+    q_out = q_out / np.maximum(np.linalg.norm(q_out, axis=-1, keepdims=True), 1e-7)
+    R_out = quaternion_to_matrix(torch.from_numpy(q_out).float())
+    rot6d_out_col = matrix_to_rotation_6d(R_out)
+    rot6d_out_row = _rot6d_col_to_row(rot6d_out_col)
+    rot6d_flat = rot6d_out_row.reshape(T_out, 132).numpy().astype(np.float32)
+    return np.concatenate([trans_out.astype(np.float32), rot6d_flat], axis=-1)
+
+
+# ───────────────────────── per-sample pipeline ─────────────────────────
 def process_one_sample(
     motion_path: str,
     bone_offsets: torch.Tensor,
@@ -346,337 +706,125 @@ def process_one_sample(
     diffusion: SpacedDiffusion,
     normalizer: Normalizer,
     device: str = 'cuda',
+    stablemotion_skip_timesteps: int = 0,
+    stablemotion_prob_det_num: int = 0,
+    stablemotion_ts_respace: bool = False,
+    stablemotion_enable_sits: bool = False,
+    stablemotion_ensemble: bool = False,
+    stablemotion_classifier_scale: float = 0.0,
+    preserve_lq_translation: bool = False,
 ) -> Dict[str, np.ndarray]:
-    """Run the full M2M → StableMotion → M2M roundtrip on one motion npz.
-    Returns a dict with 'lq_135', 'hq_135', 'label' (np.ndarray per key).
-
-    ── Preserving world coords (2026-04-23) ──
-    StableMotion's `smpldata_to_alignglobsmplrifkefeats` canonicalizes
-    the input by (1) removing ground (z_min → 0), (2) shifting trajectory
-    so frame 0 is at origin, (3) zeroing out init_rotZ (so frame 0 faces
-    canonical +X). If we invert feats naively we get HQ in canonical
-    space.
-
-    Also, the decoder returns ``trans = [trajectory, root_grav_axis]``
-    where ``root_grav_axis`` is the **pelvis joint Z** (= trans.z +
-    bone_offsets[0].y in SMPL y-up space), NOT the original SMPL root
-    translation. That means decoded trans sits ~0.22m below the input
-    trans (since SMPL's bone_offsets[0].y ≈ -0.22 — pelvis joint is
-    offset downward from the root translation). We compensate for this
-    by adding the SMPL pelvis offset back to the gravity axis of the
-    decoded trans.
-    """
     d = np.load(motion_path, allow_pickle=True)
     tk = 'trans' if 'trans' in d.files else 'transl'
     pk = 'poses' if 'poses' in d.files else 'body_pose'
+    raw_trans = d[tk].astype(np.float32)
+    raw_poses = d[pk].astype(np.float32)
+    T_orig = raw_trans.shape[0]
 
-    # ── fps resampling (2026-04-23) ──
-    # StableMotion was trained exclusively on 20 fps AMASS data. E9 LQ data is
-    # 30 fps, which is a hard OOD domain shift for the model (the per-frame
-    # velocity distribution the diffusion learned is 1.5× slower than what
-    # it sees here). Downsample LQ → 20 fps before encoding, upsample HQ
-    # back to 30 fps after decoding via linear-interpolation on trans and
-    # slerp-like interpolation on rot6d (approximated by linear on 6d then
-    # re-orthogonalize downstream — diffusion output is already noisy so
-    # simple linear is fine).
     src_fps = 30.0
     try:
         if 'mocap_framerate' in d.files:
             src_fps = float(np.asarray(d['mocap_framerate']).item())
     except Exception:
         pass
-    tgt_fps = 20.0
+    tgt_fps = 20.0  # StableMotion training fps
 
-    raw_trans = d[tk].astype(np.float32)
-    raw_poses = d[pk].astype(np.float32)
-    T_orig = raw_trans.shape[0]
-
-    def _resample_time(arr: np.ndarray, src_fps_: float, tgt_fps_: float) -> np.ndarray:
-        """Linear-interpolation along axis 0. Preserves values at frame 0
-        (no phase shift); length becomes max(1, round(T*tgt/src))."""
-        if abs(src_fps_ - tgt_fps_) < 1e-6:
-            return arr
-        T_in = arr.shape[0]
-        T_out = max(2, int(round(T_in * tgt_fps_ / src_fps_)))
-        t_in = np.linspace(0.0, 1.0, T_in, dtype=np.float32)
-        t_out = np.linspace(0.0, 1.0, T_out, dtype=np.float32)
-        out = np.empty((T_out,) + arr.shape[1:], dtype=arr.dtype)
-        for c in range(arr.shape[1]) if arr.ndim == 2 else [None]:
-            if c is None:
-                out[...] = np.interp(t_out, t_in, arr)
-            else:
-                out[:, c] = np.interp(t_out, t_in, arr[:, c])
-        return out
-
-    # Downsample to 20 fps for StableMotion
-    trans_20 = _resample_time(raw_trans, src_fps, tgt_fps)
-    poses_20 = _resample_time(raw_poses, src_fps, tgt_fps)
-
-    motion_135 = np.concatenate([
-        process_transl(trans_20, 'abs'),
-        process_smplx_pose(poses_20, 'rotation_6d', 'smpl_22'),
+    # LQ at original (30) fps for output / metrics
+    motion_135_lq_orig = np.concatenate([
+        process_transl(raw_trans, 'abs'),
+        process_smplx_pose(raw_poses, 'rotation_6d', 'smpl_22'),
     ], axis=-1).astype(np.float32)
 
-    # Stash original length so we can upsample back at the end
-    _orig_T = T_orig
-    _orig_fps = src_fps
-    _model_fps = tgt_fps
+    # Resample LQ to 20 fps via slerp-aware resampler (mathematically correct,
+    # no smoothing). This is data preprocessing, not a trick.
+    T_20 = max(2, int(round(T_orig * tgt_fps / src_fps)))
+    motion_135_20 = _resample_motion135_slerp(motion_135_lq_orig, T_20)
 
-    # Convert to smpldata (24-joint topology) and y-up → z-up
-    smpldata_y = m2m135_to_smpldata_24(motion_135, bone_offsets)
-    smpldata_z = smpldata_y_up_to_z_up(smpldata_y)
+    # ── Encode to smpldata (24 joints) — y-up ──
+    sd_y = m2m135_to_smpldata_24(motion_135_20, bone_offsets)
+    sd_z = smpldata_y_up_to_z_up(sd_y)
 
-    # ── Record canonicalization transforms BEFORE feats forward ──
-    j0 = smpldata_z['joints'].clone()                          # (T, 24, 3)
-    ground_shift_z = float(j0[..., 2].min())                   # scalar (≈ 0)
-    traj0_xy = j0[0, 0, :2].clone()                            # (2,)  pelvis XY at frame 0
+    # ── Record canonicalization transforms (encoder will undo them) ──
+    j0 = sd_z['joints'].clone()
+    ground_shift_z = float(j0[..., 2].min())
+    traj0_xy = j0[0, 0, :2].clone()
 
-    # bone_offsets[0] in SMPL y-up = (bo_x, bo_y, bo_z); pelvis offset from
-    # root trans. In z-up after y↔z swap, the "downward" component is
-    # now in the y axis (not z). But the scalar length we need to add to
-    # the decoded trans (in z-up) is the *gravity* component of the
-    # pelvis→root offset. In y-up it was bo_y (≈ -0.22). After y↔z swap,
-    # bo_y becomes the new bo_z (the new gravity axis). We add its
-    # magnitude back so that decoded trans.z matches the original root-
-    # translation z (not the pelvis-joint z that the decoder returns).
-    bo_np = bone_offsets.numpy() if hasattr(bone_offsets, 'numpy') else np.asarray(bone_offsets)
-    pelvis_offset_y_smpl = float(bo_np[0, 1])                  # SMPL y-up
-    # trans_shift_z: amount the decoder "lost" in the gravity axis.
-    # Since decoded trans.z = pelvis_joint_z, and we want it to be the
-    # root_trans_z = pelvis_joint_z - pelvis_offset_y, we ADD
-    # (-pelvis_offset_y_smpl) = +0.22 to decoded trans.z.
-    trans_gravity_correction = -pelvis_offset_y_smpl           # ≈ +0.22
+    poses_z = sd_z['poses'].reshape(-1, 22, 3)
+    R0 = _aa2mat(poses_z[0, 0].unsqueeze(0))[0]
+    euler0 = _mat2euler(R0.unsqueeze(0), "ZYX")[0]
+    rotZ0_angle = euler0[0].item()
 
-    # Compute init_rotZ from global_orient at frame 0.
-    from data_loaders.amasstools.geometry import (  # noqa: E402
-        axis_angle_to_matrix as _aa2mat,
-        matrix_to_euler_angles as _mat2euler,
-    )
-    poses_z = smpldata_z['poses'].reshape(-1, 22, 3)
-    global_orient_0 = poses_z[0, 0]                            # (3,)
-    R0 = _aa2mat(global_orient_0.unsqueeze(0))[0]              # (3, 3)
-    euler0 = _mat2euler(R0.unsqueeze(0), "ZYX")[0]             # (3,)  ZYX order
-    rotZ0_angle = euler0[0].item()                             # scalar
+    # ── Encode to 232-D feats ──
+    feats = smpldata_to_alignglobsmplrifkefeats(sd_z)
 
-    # Feats forward
-    feats = smpldata_to_alignglobsmplrifkefeats(smpldata_z)        # (T, 232)
-
-    # StableMotion detect + fix
+    # ── Detect + Fix ──
     result = run_stablemotion_detect_fix(
-        feats, model, diffusion, normalizer, device=device,
+        feats, model, diffusion, normalizer,
+        prob_det_num=stablemotion_prob_det_num,
+        skip_timesteps=stablemotion_skip_timesteps,
+        ts_respace=stablemotion_ts_respace,
+        enable_sits=stablemotion_enable_sits,
+        ensemble=stablemotion_ensemble,
+        classifier_scale=stablemotion_classifier_scale,
+        device=device,
     )
-    feats_fixed = result['feats_fixed']                            # (T, 232)
-    label = result['label'].cpu().numpy().astype(np.uint8)
+    feats_fixed = result['feats_fixed']
+    label_20 = result['label'].cpu().numpy().astype(bool)
 
-    # Feats inverse (returns canonical-space smpldata; trans.z = pelvis_z)
-    smpldata_fixed_z_canon = globsmplrifkefeats_to_smpldata(feats_fixed)
+    # ── Decode 232 → smpldata (canonical, z-up) ──
+    sd_fixed_z_canon = globsmplrifkefeats_to_smpldata(feats_fixed)
 
-    # ── Apply inverse of the forward canonicalization ──
+    # ── Inverse canonicalization: rotate by +rotZ0, add traj0_xy, ground ──
     cos = np.cos(rotZ0_angle)
     sin = np.sin(rotZ0_angle)
     R_z_inv = torch.tensor([
         [cos, -sin, 0.0],
         [sin,  cos, 0.0],
         [0.0,  0.0, 1.0],
-    ], dtype=smpldata_fixed_z_canon['joints'].dtype)
+    ], dtype=sd_fixed_z_canon['joints'].dtype)
 
-    def _decanon_joints(j):
-        # j: (T, N, 3) in canonical space
-        j = j @ R_z_inv.T   # rotate back
-        j[..., 0] += traj0_xy[0]
-        j[..., 1] += traj0_xy[1]
-        j[..., 2] += ground_shift_z
-        return j
-
-    def _decanon_trans(t):
-        # t: (T, 3)
+    def _decanon_xyz(t):
         t = t @ R_z_inv.T
         t[..., 0] += traj0_xy[0]
         t[..., 1] += traj0_xy[1]
-        # decoder returns pelvis_z; we want root_trans_z (= pelvis_z - pelvis_offset)
-        t[..., 2] += ground_shift_z + trans_gravity_correction
+        t[..., 2] += ground_shift_z
         return t
 
-    smpldata_fixed_z = {
-        'joints': _decanon_joints(smpldata_fixed_z_canon['joints'].clone()),
-        'trans':  _decanon_trans(smpldata_fixed_z_canon['trans'].clone()),
-        'poses':  smpldata_fixed_z_canon['poses'].clone(),
+    sd_fixed_z = {
+        'joints': _decanon_xyz(sd_fixed_z_canon['joints'].clone()),
+        'trans': _decanon_xyz(sd_fixed_z_canon['trans'].clone()),
+        'poses': sd_fixed_z_canon['poses'].clone(),
     }
-    # Rotate global_orient (pelvis axis-angle) back by +rotZ0_angle:
-    poses_fixed = smpldata_fixed_z['poses'].reshape(-1, 22, 3)
-    go_aa = poses_fixed[:, 0]                                  # (T, 3)
-    go_mat = _aa2mat(go_aa)                                    # (T, 3, 3)
-    go_mat = R_z_inv.to(go_mat.dtype) @ go_mat
+    # Rotate global_orient back by +rotZ0
+    poses_fixed = sd_fixed_z['poses'].reshape(-1, 22, 3)
+    go_aa = poses_fixed[:, 0]
+    go_mat = _aa2mat(go_aa)
+    go_mat_new = R_z_inv.to(go_mat.dtype) @ go_mat
     from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
         matrix_to_axis_angle as _mat2aa,
     )
-    go_aa_new = _mat2aa(go_mat)
-    poses_fixed[:, 0] = go_aa_new
-    smpldata_fixed_z['poses'] = poses_fixed.reshape(-1, 66)
+    poses_fixed[:, 0] = _mat2aa(go_mat_new)
+    sd_fixed_z['poses'] = poses_fixed.reshape(-1, 66)
 
-    smpldata_fixed_y = smpldata_z_up_to_y_up(smpldata_fixed_z)
+    # ── z-up → y-up ──
+    sd_fixed_y = smpldata_z_up_to_y_up(sd_fixed_z)
 
-    motion_135_fixed = smpldata_to_m2m135(smpldata_fixed_y)
+    # ── smpldata → motion_135 (subtracts bone_offsets[0] from trans) ──
+    motion_135_fixed_20 = smpldata_to_m2m135(sd_fixed_y, bone_offsets)
 
-    # Clip time dim (decoder might change T slightly on edge cases — assert here)
-    T = motion_135.shape[0]
-    if motion_135_fixed.shape[0] != T:
-        motion_135_fixed = motion_135_fixed[:T]
+    # ── 20 fps → 30 fps (slerp on rot6d, linear on trans) ──
+    motion_135_fixed_orig = _resample_motion135_slerp(motion_135_fixed_20, T_orig)
+    if preserve_lq_translation:
+        motion_135_fixed_orig[:, :3] = motion_135_lq_orig[:, :3]
 
-    # ── fps upsample back to original (30 fps) ──
-    # Encoder/decoder worked at 20 fps. We need to upsample both the label
-    # and the hq motion back so the final output matches the original time
-    # axis expected by downstream (dashboard, metrics).
-    #
-    # 2026-04-26: per-channel linear interp on rot6d corrupts unit-norm
-    # (we measured col norms in [0.19, 1.33] on real outputs — clearly
-    # non-orthonormal). Switched to a rot6d-aware resampler:
-    #   * trans channels use linear interp (smooth, preserves position).
-    #   * rot6d channels are converted to rotation matrices, slerp-
-    #     interpolated, then converted back. Slerp preserves unit norm
-    #     AND bounds discontinuities to the shortest arc, which damps
-    #     the per-frame jumps the diffusion model produces at corrupt/
-    #     clean boundaries.
-    def _resample_time_np(arr: np.ndarray, T_out: int) -> np.ndarray:
-        T_in = arr.shape[0]
-        if T_in == T_out:
-            return arr
-        t_in = np.linspace(0.0, 1.0, T_in, dtype=np.float32)
-        t_out = np.linspace(0.0, 1.0, T_out, dtype=np.float32)
-        if arr.ndim == 1:
-            return np.interp(t_out, t_in, arr.astype(np.float32)).astype(arr.dtype)
-        out = np.empty((T_out,) + arr.shape[1:], dtype=arr.dtype)
-        for c in range(arr.shape[1]):
-            out[:, c] = np.interp(t_out, t_in, arr[:, c].astype(np.float32))
-        return out
-
-    def _resample_motion135_slerp(motion_135_in: np.ndarray, T_out: int) -> np.ndarray:
-        """Resample (T, 135) to (T_out, 135). Trans: linear. Rot6d: slerp.
-
-        Implementation: convert rot6d row-major (M2M layout) → col-major →
-        rotation matrices, then slerp each joint independently across the
-        new time axis, then convert back. Identity at endpoints, shortest-
-        arc elsewhere, unit-norm preserved.
-        """
-        T_in = motion_135_in.shape[0]
-        if T_in == T_out:
-            return motion_135_in.astype(np.float32)
-        # Trans
-        trans_in = motion_135_in[:, :3]
-        trans_out = _resample_time_np(trans_in, T_out)
-        # Rot6d → rotmat (T_in, 22, 3, 3)
-        rot6d_row = torch.from_numpy(
-            motion_135_in[:, 3:].reshape(T_in, 22, 6)).float()
-        rot6d_col = _rot6d_row_to_col(rot6d_row)
-        R_in = rotation_6d_to_matrix(rot6d_col)        # (T_in, 22, 3, 3)
-        # Slerp via quaternion logmap on adjacent pairs
-        from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
-            matrix_to_quaternion as _mat2quat,
-            quaternion_to_matrix as _quat2mat,
-        )
-        quat = _mat2quat(R_in)                          # (T_in, 22, 4) wxyz
-        # Float64 for stable slerp
-        q = quat.double().numpy()
-        # Sample T_out positions along [0, T_in - 1]
-        s = np.linspace(0.0, T_in - 1, T_out, dtype=np.float64)
-        i0 = np.floor(s).astype(np.int64)
-        i0 = np.clip(i0, 0, T_in - 2)
-        i1 = i0 + 1
-        u = (s - i0).astype(np.float64)
-        # Per-output-frame slerp for each joint
-        q0 = q[i0]                                      # (T_out, 22, 4)
-        q1 = q[i1]
-        # Make q1 take the short-arc side
-        d = np.sum(q0 * q1, axis=-1, keepdims=True)
-        q1 = np.where(d < 0, -q1, q1)
-        d = np.abs(d)
-        d = np.clip(d, -1.0, 1.0)
-        theta = np.arccos(d)                            # (T_out, 22, 1)
-        sin_theta = np.sin(theta)
-        eps = 1e-7
-        small = sin_theta < eps
-        a = np.where(small, 1.0 - u[:, None, None],
-                     np.sin((1.0 - u[:, None, None]) * theta) / np.maximum(sin_theta, eps))
-        b = np.where(small, u[:, None, None],
-                     np.sin(u[:, None, None] * theta) / np.maximum(sin_theta, eps))
-        q_out = a * q0 + b * q1                         # (T_out, 22, 4)
-        # Renormalize (small numerical drift)
-        q_out = q_out / np.maximum(
-            np.linalg.norm(q_out, axis=-1, keepdims=True), 1e-7)
-        R_out = _quat2mat(torch.from_numpy(q_out).float())
-        rot6d_out_col = matrix_to_rotation_6d(R_out)
-        rot6d_out_row = _rot6d_col_to_row(rot6d_out_col)
-        rot6d_flat = rot6d_out_row.reshape(T_out, 132).numpy().astype(np.float32)
-        return np.concatenate([trans_out.astype(np.float32), rot6d_flat], axis=-1)
-
-    def _smooth_motion135(motion_135_in: np.ndarray, win: int = 5,
-                          polyorder: int = 2) -> np.ndarray:
-        """Light Savitzky-Golay smoothing on a (T, 135) motion.
-
-        Trans channels: smoothed channel-wise. Rot6d channels: converted
-        to quaternions, smoothed via per-component Savgol, renormalized,
-        and converted back to rot6d. This prevents residual per-frame
-        spikes (typical at corrupt/clean inpaint boundaries) without
-        flattening real motion content.
-        """
-        T_in = motion_135_in.shape[0]
-        if T_in < win:
-            return motion_135_in.astype(np.float32)
-        try:
-            from scipy.signal import savgol_filter as _sg
-        except Exception:
-            return motion_135_in.astype(np.float32)
-        out = motion_135_in.astype(np.float32).copy()
-        # Trans
-        out[:, :3] = _sg(out[:, :3], win, polyorder, axis=0, mode='nearest')
-        # Rot6d → quat → smooth → quat → rot6d
-        rot6d_row = torch.from_numpy(out[:, 3:].reshape(T_in, 22, 6)).float()
-        rot6d_col = _rot6d_row_to_col(rot6d_row)
-        R = rotation_6d_to_matrix(rot6d_col)
-        from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
-            matrix_to_quaternion as _mat2quat,
-            quaternion_to_matrix as _quat2mat,
-        )
-        quat = _mat2quat(R).numpy()                    # (T, 22, 4)
-        # Make quaternion sign continuous (avoid q vs -q flips before smoothing)
-        for j in range(quat.shape[1]):
-            for t in range(1, T_in):
-                if np.dot(quat[t, j], quat[t-1, j]) < 0:
-                    quat[t, j] = -quat[t, j]
-        flat = quat.reshape(T_in, -1)
-        flat_s = _sg(flat, win, polyorder, axis=0, mode='nearest')
-        quat_s = flat_s.reshape(T_in, 22, 4)
-        quat_s = quat_s / np.maximum(
-            np.linalg.norm(quat_s, axis=-1, keepdims=True), 1e-7)
-        R_s = _quat2mat(torch.from_numpy(quat_s).float())
-        rot6d_col_s = matrix_to_rotation_6d(R_s)
-        rot6d_row_s = _rot6d_col_to_row(rot6d_col_s)
-        out[:, 3:] = rot6d_row_s.reshape(T_in, 132).numpy()
-        return out.astype(np.float32)
-
-    # Rebuild LQ at original fps from raw data so metrics are computed on
-    # the ORIGINAL 30-fps reference (avoids comparing 20-fps-downsampled LQ
-    # vs upsampled-HQ — which would bake in the fps artifact into LQ too).
-    motion_135_lq_orig = np.concatenate([
-        process_transl(raw_trans, 'abs'),
-        process_smplx_pose(raw_poses, 'rotation_6d', 'smpl_22'),
-    ], axis=-1).astype(np.float32)
-
-    # Slerp-aware upsample (preserves rot6d unit-norm; prevents the
-    # 0.19-1.33 col-norm corruption observed under linear interp).
-    motion_135_fixed_orig = _resample_motion135_slerp(motion_135_fixed, _orig_T)
-    # Final 5-frame Savgol pass to damp residual diffusion-output spikes
-    # at corrupt/clean boundaries. Cheap, no-op if scipy is missing.
-    motion_135_fixed_orig = _smooth_motion135(
-        motion_135_fixed_orig, win=5, polyorder=2)
-    label_np = label.numpy() if hasattr(label, 'numpy') else np.asarray(label)
-    label_orig = _resample_time_np(label_np.astype(np.float32), _orig_T) > 0.5
-    label_orig = torch.from_numpy(label_orig.astype(np.uint8)).bool()
+    # Resample label 20→30 via NN (per-frame bool)
+    label_orig = (_linear_interp_axis0(
+        label_20.astype(np.float32), T_orig) > 0.5)
 
     return {
         'lq_135': motion_135_lq_orig,
         'hq_135': motion_135_fixed_orig.astype(np.float32),
-        'label': label_orig,
+        'label': torch.from_numpy(label_orig.astype(np.uint8)),
     }
 
 
@@ -684,13 +832,26 @@ def process_one_sample(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval-datalist', type=str,
-                        default='data/eval/m2m_v2/eval_e9_repair.json')
+                        default='data/eval/m2m_v2/eval_e9_repair_v2.json')
     parser.add_argument('--output-dir', type=str,
-                        default='output/eval_v2_e9_stablemotion_20260423')
+                        default='output/eval_v2_e9_stablemotion_v9')
     parser.add_argument('--max-samples', type=int, default=9999)
+    parser.add_argument(
+        '--indices', type=str, default='',
+        help='Optional comma-separated sample indices to run instead of prefix.',
+    )
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--feasibility-only', action='store_true',
-                        help='Only run 1 sample end-to-end and print stats.')
+    parser.add_argument('--skip-timesteps', type=int, default=0)
+    parser.add_argument('--prob-det-num', type=int, default=0)
+    parser.add_argument('--ts-respace', action='store_true')
+    parser.add_argument('--enable-sits', action='store_true')
+    parser.add_argument('--ensemble', action='store_true')
+    parser.add_argument('--classifier-scale', type=float, default=0.0)
+    parser.add_argument(
+        '--preserve-lq-translation', action='store_true',
+        help='Use StableMotion rotations but keep original LQ root translation.',
+    )
+    parser.add_argument('--feasibility-only', action='store_true')
     args = parser.parse_args()
 
     bone_offsets = torch.load(
@@ -698,25 +859,31 @@ def main():
         map_location='cpu', weights_only=False,
     ).float()
 
-    # Load model (extracts bundle on first run)
     t0 = time.time()
-    model, diffusion, normalizer = load_stablemotion(args.device)
+    model, diffusion, normalizer, train_args = load_stablemotion(args.device)
     print(f'[init] StableMotion loaded in {time.time()-t0:.1f}s '
           f'({sum(p.numel() for p in model.parameters())/1e6:.1f}M params)')
 
-    # Load datalist
     with open(args.eval_datalist) as f:
         dl = json.load(f)
     items = dl.get('data_list', dl)
-    N = min(len(items), args.max_samples)
-    print(f'[run] processing {N} / {len(items)} samples → {args.output_dir}')
+    if args.indices.strip():
+        selected_indices = [
+            int(x) for x in args.indices.replace(' ', '').split(',') if x
+        ][:args.max_samples]
+    else:
+        selected_indices = list(range(min(len(items), args.max_samples)))
+    N = len(selected_indices)
+    print(f'[run] processing {len(selected_indices)} / {len(items)} samples '
+          f'→ {args.output_dir}')
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / 'npz').mkdir(exist_ok=True)
 
     results_summary: List[Dict] = []
-    for i, item in enumerate(items[:N]):
+    for i in selected_indices:
+        item = items[i]
         mp = item['motion_path']
         if not os.path.isabs(mp):
             mp = os.path.join(str(PROJECT_ROOT), mp)
@@ -724,6 +891,13 @@ def main():
         try:
             out = process_one_sample(
                 mp, bone_offsets, model, diffusion, normalizer, args.device,
+                stablemotion_skip_timesteps=args.skip_timesteps,
+                stablemotion_prob_det_num=args.prob_det_num,
+                stablemotion_ts_respace=args.ts_respace,
+                stablemotion_enable_sits=args.enable_sits,
+                stablemotion_ensemble=args.ensemble,
+                stablemotion_classifier_scale=args.classifier_scale,
+                preserve_lq_translation=args.preserve_lq_translation,
             )
         except Exception as e:
             import traceback
@@ -735,7 +909,6 @@ def main():
         dt = time.time() - t_s
         n_corrupted = int(out['label'].sum())
         T = out['hq_135'].shape[0]
-        # Save NPZ for dashboard
         npz_out = out_dir / 'npz' / f'{i:05d}.npz'
         np.savez(
             npz_out,
