@@ -11,7 +11,9 @@ ckpts/
 *.bin
 *.safetensors
 .cache/
+# 默认忽略各模块内的 CLAUDE.md（供本地/Agent 使用）；README 需在线可读的文档解除忽略并纳入版本库
 CLAUDE.md
+!hftrainer/models/motion/CLAUDE.md
 tools/taiji_dist_train.sh
 thesis/
 ref_paper/

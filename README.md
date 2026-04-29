@@ -17,7 +17,7 @@
 
 <p>
   <a href="hftrainer/models/motion/CLAUDE.md"><strong>M2M 技术栈文档</strong></a> •
-  <a href="motion_annot_web/CLAUDE.md"><strong>标注与 Web 基建</strong></a> •
+  <a href="docs/zh-cn/motion_annot_web_overview.md"><strong>标注与 Web 基建</strong></a> •
   <a href="docs/zh-cn/index.md"><strong>框架文档（中文）</strong></a> •
   <a href="docs/en/index.md"><strong>框架文档（英文）</strong></a>
 </p>
@@ -80,7 +80,7 @@ bash tools/dist_train.sh configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_0
 python3 tools/taiji_submit.py <任务名> configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py --host_num 2
 ```
 
-说明见根目录 **`CLAUDE.md`** 中「太极集群训练提交」一节。
+说明见 **`tools/taiji_submit.py`**（用法与参数）及项目根目录 **`CLAUDE.md`**（本地可见；在线浏览以本 README 与 `docs/zh-cn/` 为准）。
 
 ### 数据与质量（重要）
 
@@ -108,7 +108,7 @@ python3 tools/infer.py \
 python3 tools/eval_m2m_v2_all_tasks.py --help
 ```
 
-**对接 motion_annot_web 评估看板**时：用于入库的 eval 跑批请 **`--save-npz`** 保存 NPZ，否则三维预览与部分回溯会缺文件；文本条件任务还需按看板约定带上 **`--use-rewritten`** 等参数（见 **`motion_annot_web/eval_dashboard/CLAUDE.md`**）。
+**对接 motion_annot_web 评估看板**时：用于入库的 eval 跑批请 **`--save-npz`** 保存 NPZ，否则三维预览与部分回溯会缺文件；文本条件任务还需按看板约定带上 **`--use-rewritten`** 等参数（详见 **`docs/zh-cn/motion_eval_dashboard.md`**）。
 
 ### 过渡 / 拼接类任务（E14、E15、E9 等）
 
@@ -133,7 +133,7 @@ python3 tools/eval_m2m_v2_all_tasks.py --help
 
 ## 配套基建：`motion_annot_web`
 
-`motion_annot_web/` 为 M2M 项目配套的 **Flask Web 工具集**，覆盖 **质量标注 → 修复调度 → 人工评分 → 推理展示 → Keypose 评估 → 评估看板** 的数据闭环。总览与端口如下（详情 **`motion_annot_web/CLAUDE.md`**）。
+`motion_annot_web/` 为 M2M 项目配套的 **Flask Web 工具集**，覆盖 **质量标注 → 修复调度 → 人工评分 → 推理展示 → Keypose 评估 → 评估看板** 的数据闭环。总览与端口如下（在线可读文档：**`docs/zh-cn/motion_annot_web_overview.md`**；本地完整说明见子目录 `CLAUDE.md`）。
 
 | 应用 | 默认端口 | 作用 |
 |------|-----------|------|
@@ -148,10 +148,10 @@ python3 tools/eval_m2m_v2_all_tasks.py --help
 ```bash
 cd motion_annot_web/m2m_database && python m2m_db_web.py --port 8085
 cd motion_annot_web/completion_apps && python app.py --port 8090
-# 其余子应用见 motion_annot_web/CLAUDE.md「快速启动」
+# 其余子应用见 docs/zh-cn/motion_annot_web_overview.md
 ```
 
-质量列表与 `data/hymotion_*` 目录约定亦见该文档。
+质量列表与 `data/hymotion_*` 目录约定亦见 **`docs/zh-cn/motion_annot_web_overview.md`**。
 
 ---
 
