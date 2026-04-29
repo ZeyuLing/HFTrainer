@@ -1,0 +1,185 @@
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<div class="container-fluid mt-3" style="max-width: 1650px; margin: 0 auto;">
+    <!-- 3D可视化区域 -->
+    <div class="visualization-container" style="position: relative; width: 100%; height: 80vh; /* 适配高度 */">
+        <div class="d-flex justify-content-center" id="vis3d" style="width: 100%; height: 100%; position: relative;">
+            <!-- Canvas画布 -->
+            <canvas id="scene-canvas" style="width: 100%; height: 100%; border-radius: 8px;"></canvas>
+
+            <!-- 动捕启停按钮（嵌入Canvas内，左上角） -->
+            <button class="control-btn mocap-switch-btn" id="mocapSwitchBtn" onclick="switchMocapState()"
+                title="启动/停止动捕" style="position: absolute; top: 20px; left: 20px; z-index: 100;">
+                <i class="fas fa-play"></i>
+                <span class="btn-text">启动动捕</span>
+            </button>
+
+            <!-- 视角切换按钮（嵌入Canvas内，右上角） -->
+            <button class="control-btn camera-btn" id="cameraSwitchBtn" onclick="toggleCameraMode()" title="切换正交/透视视角"
+                style="position: absolute; top: 20px; right: 20px; z-index: 100;">
+                <i class="fas fa-cube"></i>
+            </button>
+        </div>
+
+        <!-- 播放控制区域（保留原有） -->
+        <div class="controls-container">
+            <div class="controls-row">
+                <div class="playback-controls">
+                    <!-- 移除原有视角按钮，已嵌入Canvas内 -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 引入Font Awesome图标（按钮图标依赖） -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "/static/three/three.module.js",
+            "three/addons/": "/static/three/jsm/"
+        }
+    }
+</script>
+
+<!-- 新增：引入SocketIO客户端（必须在你的自定义JS之前） -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<!-- 场景初始化 -->
+<script src="/static/scripts3d/scene_init_mocap.js" type="module"></script>
+
+<style>
+    /* 基础样式 */
+    body {
+        background-color: #f5f7fa;
+        color: #333;
+        font-family: 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    }
+
+    .container-fluid {
+        padding: 0 20px;
+    }
+
+    /* 3D可视化区域 */
+    .visualization-container {
+        margin: 20px auto;
+        max-width: 1600px;
+        width: 95%;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        padding: 20px;
+        overflow: hidden;
+        position: relative;
+        /* 新增：为按钮绝对定位提供基础 */
+    }
+
+    #vis3d {
+        width: 100%;
+        min-height: 500px;
+        border-radius: 8px;
+        overflow: hidden;
+        background-color: #f9f9f9;
+        border: 1px solid #eee;
+        position: relative;
+        /* 核心：按钮绝对定位的父容器 */
+    }
+
+    /* 通用控制按钮基础样式（合并重复定义，保留核心） */
+    .control-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        transition: all 0.3s ease;
+        padding: 0 12px;
+        position: absolute;
+        z-index: 100;
+        /* 确保按钮在Canvas上层 */
+        top: 20px;
+        /* 统一顶部间距 */
+    }
+
+    /* 动捕启停按钮样式 */
+    .mocap-switch-btn {
+        width: 120px;
+        height: 40px;
+        background: linear-gradient(135deg, #d775eb, #dd7ecd);
+        left: 20px;
+        /* 左上角 */
+    }
+
+    /* 动捕按钮-停止状态 */
+    .mocap-switch-btn.active {
+        background: linear-gradient(135deg, #f37878, #f04343);
+    }
+
+    /* 视角切换按钮样式 */
+    .camera-btn {
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, #2196F3, #42A5F5);
+        right: 20px;
+        /* 右上角 */
+        border-radius: 50%;
+        /* 圆形按钮 */
+    }
+
+    /* 按钮交互效果 */
+    .control-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .control-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    }
+
+    /* 按钮禁用状态 */
+    .control-btn:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    /* 按钮文本/图标适配 */
+    .control-btn .btn-text {
+        white-space: nowrap;
+    }
+
+    .control-btn i {
+        font-size: 16px;
+    }
+
+    /* 响应式适配（小屏幕） */
+    @media (max-width: 768px) {
+        .mocap-switch-btn {
+            width: 100px;
+            height: 36px;
+            font-size: 12px;
+        }
+
+        .camera-btn {
+            width: 36px;
+            height: 36px;
+        }
+
+        .visualization-container {
+            padding: 15px;
+        }
+
+        #vis3d {
+            min-height: 300px;
+        }
+    }
+</style>

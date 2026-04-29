@@ -1,0 +1,331 @@
+================================================================================
+MoGenDIT COMPLETE ARCHITECTURE AUDIT - EXECUTIVE SUMMARY
+================================================================================
+
+Comprehensive analysis of OLD MoGenDIT codebase at:
+/apdcephfs_cq10/share_1467498/home/chengxuzuo/projects/MoGenDIT/
+
+Generated: 2026-03-25
+Full Document: mogendit_architecture_analysis.md (1,434 lines, 49KB)
+
+================================================================================
+1. MOTION REPRESENTATION (201-DIM)
+================================================================================
+
+OccamMotionRep (motion_representation.py:649-1048)
+- 22 SMPL joints (no hands)
+- Rotation: 6D format (column-major), 132 dims = 22 joints × 6
+- Joint positions: 3D global, 66 dims = 22 joints × 3
+- Root translation: 3 dims
+- Total: 132 + 66 + 3 = 201-dim flattened vector
+
+Key Operations:
+- encode(): rotation_matrix → 6D, flatten → [pose|joint|trans]
+- decode(): extract components, convert 6D → matrices, IK if needed
+- normalization(): egocentric alignment (root at origin, facing Z-axis)
+- kinematic_loss(): enforces skeleton rigidity (constant joint offsets)
+
+⚠️ ROTATION 6D CONVENTION: COLUMN-MAJOR
+Layout: [R00, R10, R20, R01, R11, R21] ← First two COLUMNS
+Differs from HyMotion M2M which uses ROW-MAJOR (incompatible!)
+
+================================================================================
+2. MODEL ARCHITECTURE - MoreDiff (Diffusion Transformer)
+================================================================================
+
+Model Sizes:
+- 0.03B: d_model=512,  n_head=8,  n_stack=8   (minimal)
+- 0.1B:  d_model=768,  n_head=12, n_stack=12  (recommended)
+- 0.3B:  d_model=1024, n_head=16, n_stack=18  (large)
+
+Architecture (more_diff.py:253-504):
+Input:
+  - x_t: [batch, seq_len, 201] (noisy motion)
+  - mask: [batch, seq_len, 201] (observed regions)
+  - cond: [batch, 1, 66] or None (skeleton structure)
+  - t: [batch] (diffusion timestep)
+
+Process:
+  1. Concatenate motion + mask: [batch, seq, 402]
+  2. Embed to d_model: [batch, seq, d_model]
+  3. Pass through n_stack DiT blocks with:
+     - RoPE (Rotary Position Embedding) for position awareness
+     - Sliding window attention (window_size=90 frames)
+     - AdaLN (Adaptive LayerNorm) for timestep conditioning
+  4. Decode to motion: [batch, seq, 201]
+
+Output: Predicted x_0 (clean motion)
+
+Key Components:
+
+a) RoPE (Rotary Position Embedding) - more_diff.py:9-79
+   - Encodes position into Q/K projections
+   - Enables length extrapolation without learnable parameters
+   - Seq-first format: [seq_len, batch, n_head, head_dim]
+
+b) DiT Block - more_diff.py:98-249
+   - Self-attention with RoPE + sliding window mask
+   - Feed-forward network (2× hidden dim)
+   - AdaLN for adaptive normalization per layer
+   - Timestep + condition fusion
+
+c) AdaLN (Adaptive LayerNorm) - more_diff.py:438-462
+   - Projects (cond + timestep_emb) → 6 modulation parameters
+   - gate_msa, shift_msa, scale_msa (attention block)
+   - gate_ffn, shift_ffn, scale_ffn (FFN block)
+
+d) TimestepEmbedder - more_diff.py:355-409
+   - Sinusoidal encoding of timestep (similar to Transformer PE)
+   - MLP to project to d_model dimension
+
+e) Sliding Window Attention - more_diff.py:83-95
+   - Each position attends to ±45 neighbors (window_size=90)
+   - Outside window: attention = -1e9 (blocked)
+   - Reduces complexity from O(seq²) to O(seq × window)
+
+================================================================================
+3. DIFFUSION FRAMEWORK
+================================================================================
+
+GaussianDiffusion (base_diffusion.py:38-300)
+
+Schedule:
+- num_timesteps: 1000
+- beta_schedule: COSINE (smooth, better for small steps)
+- Model mean type: START_X (predict x_0 directly, not epsilon)
+
+Key Equations:
+- Forward: x_t = √ᾱ_t * x_0 + √(1-ᾱ_t) * ε
+- Backward: x_{t-1} ~ N(μ(x_t, pred_x_0), Σ_t)
+- Posterior variance: Σ_t = (1-ᾱ_{t-1})/(1-ᾱ_t) * β_t
+
+q_sample() - forward process (lines 129-169):
+  - Applies noise ONLY to unobserved regions (keyframes kept clean)
+  - Supports length masking for variable-length sequences
+
+p_sample() - reverse step (lines 171-197):
+  - Uses model prediction to compute posterior mean/variance
+  - Adds noise during reverse (except at t=0)
+
+p_mean_variance() - posterior computation (lines 199-238):
+  - From model prediction (x_0 or epsilon) → infer x_0
+  - Compute posterior parameters using diffusion schedule
+
+================================================================================
+4. TRAINING PIPELINE
+================================================================================
+
+Distributed Trainer (my_trainer.py:27-400)
+
+Architecture:
+- DDP (DistributedDataParallel) for multi-GPU
+- Producer-consumer threading for data prefetch
+- EMA (Exponential Moving Average) model for stability
+- TensorBoard logging
+
+Data Preparation (lines 127-197):
+  1. Load batch: [batch, seq_len, 201]
+  2. Generate keyframe_mask: which regions are "observed" (fixed)
+  3. Generate padding_mask: which frames are valid (not padding)
+  4. Motion degradation (~50% of data):
+     - Clear observed regions with noise
+     - Keep first N frames as reference
+  5. Forward diffusion: x_0 → x_t + noise
+  6. Wrap for model: [x_t | mask], conditioning, masks
+
+Forward-Backward (lines 274-336):
+  - Model predicts: pred_x0 = model(x_wrapped, t)
+  - Extract components: pose, joint, trans
+  - Loss = L_denoise + L_rigid + L_drift (weighted)
+  - Backward, clip gradients, optimizer step
+  - EMA update
+
+Loss Functions (geometric_loss.py:99-176):
+  1. Denoising loss: smooth_l1(pred_x0, gt_x0)
+  2. Rigid body loss: MSE(skeleton_offsets, init_offsets)
+     - Enforces constant joint distances
+  3. Drift loss: MSE(global_joint_delta, velocity)
+     - Enforces velocity consistency
+
+Training Hyperparameters:
+- Batch size: 64-256 (distributed)
+- LR: 1e-4, AdamW optimizer
+- Gradient clipping: 1.0 (typical)
+- EMA decay: 0.999, start_step: 2000
+- Schedule sampler: importance-weighted timesteps (more weight to hard steps)
+
+================================================================================
+5. REFINEMENT PIPELINE
+================================================================================
+
+MoreDiffRefiner (motion_refiner.py:19-330)
+
+Three Refinement Modes:
+
+a) DENOISE (lines 36-72)
+   - Steps: 10-50
+   - eta: 1.0 (full noise)
+   - Use: Light touch-up, artifact removal
+   - Speed: Fast (~0.3s per 100 frames)
+
+b) ADA_DENOISE
+   - Steps: 10-50, eta varies adaptively
+   - Adaptive approach (details in refiner code)
+
+c) TRANS_REGEN (lines 74-117)
+   - Steps: 50-999 (or fewer with fast_sampling)
+   - eta: 0.0 (deterministic)
+   - Use: Full regeneration of problematic regions
+   - Speed: Slow (~3s per 100 frames)
+
+Fast Sampling (lines 5-16):
+  custom_timesteps = [999, 750, 500, 250, 100, 50, 25, 10, 5, 0]
+  Only 10 steps instead of 1000 → ~90% speedup with minor quality loss
+
+Windowed Refinement (lines 182-263):
+  - For long sequences (>224 frames)
+  - Window = 224 frames, overlap = 20 frames
+  - Automatic cutoff: if character walks >4m, truncate window
+  - Pre-stitch each window to original motion
+
+refine() interface:
+  - Inputs: motion, cond, step, eta, mode, window_size, use_windowed
+  - Outputs: refined motion (same shape as input)
+  - Handles normalization/denormalization automatically
+
+================================================================================
+6. PHYSICS SIMULATION
+================================================================================
+
+FlatGroundSimulator (simulator.py:17-300)
+
+Purpose: Enforce physics constraints (ground contact, friction)
+
+Dual-Level PD Control:
+  1. Angular level: control joint rotations → PD on pose
+  2. Linear level: control root translation → PD on position + friction
+
+Key Physics:
+  - Gravity: G = 9.8 m/s²
+  - Friction coeff: μ = 0.8
+  - PD gains: Kp = fps², Kd = fps (adaptive to frame rate)
+  - QP solver weight: w_qp = 0.5 * min(1.0, fps/60)
+
+update_state() (lines 115-250):
+  1. Get target configuration q_ref from pose
+  2. Compute angular error: des_qddot = Kp(q_ref - q) - Kd*qdot
+  3. Compute linear error: des_pddot = Kp(p_ref - p) - Kd*pdot
+  4. Solve QP: minimize ||Js @ qdot - des_pdot||²
+     (Jacobian mapping joint velocities to end-effector velocities)
+  5. Blend QP result with desired velocity: qdot = w_qp * qdot_qp + (1-w_qp) * des_qdot
+  6. Integrate: q += qdot * dt
+  7. Apply friction constraints:
+     - If grounded: |a_xz| ≤ μ * (|a_y + g|) (static friction)
+     - If airborne: reduce horizontal control authority
+
+Contact handling:
+  - Detect grounded: minimal_height ≤ ground_level
+  - Identify contact joints: ankles and toes
+  - Static friction: limit acceleration by normal force
+  - Jump detection: if vertical momentum > gravity, allow airborne
+
+================================================================================
+7. KEY NUMERICAL VALUES
+================================================================================
+
+Dimensions:
+- Motion: 201-dim (pose:132 + joint:66 + trans:3)
+- Condition: 66-dim (skeleton structure, 22 joints × 3)
+- Hidden: 512/768/1024 (model size dependent)
+- Window attention: 90 frames (~3 seconds @ 30fps)
+
+Diffusion:
+- Timesteps: 1000
+- Beta range: 0.0001 - 0.02 (COSINE schedule)
+
+Training:
+- Batch size: 64-256
+- Learning rate: 1e-4
+- Gradient clip: 1.0
+- EMA decay: 0.999
+
+Physics:
+- FPS: 30 (default)
+- Gravity: 9.8 m/s²
+- Friction: 0.8
+- Cutoff distance: 4.0m (walking distance to trigger window truncation)
+
+================================================================================
+8. CRITICAL WARNINGS
+================================================================================
+
+⚠️ Rotation 6D Convention:
+  - MoGenDIT: COLUMN-MAJOR [R00, R10, R20, R01, R11, R21]
+  - HyMotion M2M: ROW-MAJOR [R00, R01, R10, R11, R20, R21]
+  - Direct mixing WILL produce incorrect rotations (~3 radian error)
+  - Solution: Reorder indices [0, 2, 4, 1, 3, 5] to convert
+
+⚠️ Normalization:
+  - OccamMotionRep.normalization() does egocentric alignment
+  - Both training and inference MUST use same normalization
+  - Skipping normalization causes 100× training loss increase
+
+⚠️ Mask semantics:
+  - obs_mask ≥ 0.99999 → keep clean (don't noise)
+  - obs_mask < 0.99999 → noise and regenerate
+  - Inverse semantics in some functions → careful when combining
+
+⚠️ Sliding window attention:
+  - window_size=90 means ±45 neighbors
+  - Each position attends to 91 total positions (including self)
+  - At sequence boundaries, window shrinks
+
+================================================================================
+9. FILE STRUCTURE (MoGenDIT)
+================================================================================
+
+Core:
+  model/more_diff.py - MoreDiff architecture + RoPE + DiT blocks
+  motion_process/motion_representation.py - OccamMotionRep (201-dim)
+  EasyDiffusion/base_diffusion.py - GaussianDiffusion framework
+  trainer/my_trainer.py - Distributed training loop
+  trainer/geometric_loss.py - Loss functions
+
+Refinement & Simulation:
+  motion_process/motion_refiner.py - MoreDiffRefiner (3 modes)
+  animo/simulator.py - FlatGroundSimulator (physics)
+
+Utilities:
+  trainer/mask_scheduler.py - Keyframe mask generation
+  trainer/load_args.py - Argument parsing
+  trainer/data_loader.py - Data pipeline
+
+================================================================================
+10. COMPARISON: MoGenDIT vs HyMotion M2M
+================================================================================
+
+                    MoGenDIT        HyMotion M2M
+─────────────────────────────────────────────────
+Motion Dim          201             135
+Transl Type         abs             abs (both!)
+Rot Convention      column-major    row-major ⚠️
+Model Arch          DiT + RoPE      HunyuanMotion MMDiT
+Attn Style          Sliding window  Sliding window
+Context Win         90 frames       Not specified
+Diffusion Steps     1000 (default)  1000 (default)
+Schedule            COSINE          Unknown
+Model Predict       x_0 (START_X)   Unknown
+Refinement          3 modes         Not in M2M
+Physics Sim         Yes (detailed)  Not visible
+Checkpoint Format   EMA weights     Unknown
+Training DDP        Yes, full       Not visible
+
+Key Difference: Rotation representation incompatibility!
+- Cannot directly load M2M rot6d into MoGenDIT (wrong interpretation)
+- Must convert: MoGenDIT indices [0,2,4,1,3,5] ↔ M2M indices
+
+================================================================================
+
+For full implementation details, code snippets, and equation references,
+see: mogendit_architecture_analysis.md
+

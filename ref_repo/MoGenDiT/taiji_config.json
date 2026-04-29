@@ -1,0 +1,13 @@
+{
+    "Token": "k3s94WZ7NFjAG2ZYwqMS9A",
+    "business_flag": "AILab_DHA",
+    "mount_ceph_business_flag": "AILab_DHA",
+    "model_local_file_path": "/apdcephfs_cq10/share_1467498/home/chengxuzuo/projects/diffusion-motion-inbetweening/start.sh",
+    "host_num": 1,
+    "host_gpu_num": 1,
+    "keep_alive": true,
+    "GPUName": "V100",
+    "image_full_name": "mirrors.tencent.com/zcx_motion/condmdi:latest",
+    "task_flag": "MIB_id5_1GPU",
+    "enable_fault_tolerance": true
+}

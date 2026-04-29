@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D骨架可视化系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid rgba(0, 150, 255, 0.3);
+        }
+
+        h1 {
+            font-size: 2.8rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00dbde, #fc00ff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            text-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            color: #a0a0a0;
+            margin-bottom: 15px;
+        }
+
+        .main-content {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .visualization-panel {
+            flex: 3;
+            min-width: 300px;
+            background: rgba(30, 30, 46, 0.8);
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(0, 150, 255, 0.2);
+        }
+
+        .controls-panel {
+            flex: 1;
+            min-width: 280px;
+            background: rgba(30, 30, 46, 0.8);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(0, 150, 255, 0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        #skeletonCanvas {
+            width: 100%;
+            height: 600px;
+            border-radius: 10px;
+            display: block;
+            background: rgba(10, 10, 20, 0.9);
+        }
+
+        .panel-title {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #4dabf7;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(77, 171, 247, 0.3);
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-title {
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            color: #a0d8ff;
+        }
+
+        .slider-container {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #cccccc;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: rgba(100, 100, 120, 0.5);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4dabf7;
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+        }
+
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(90deg, #4dabf7, #339af0);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            flex: 1;
+            min-width: 120px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(77, 171, 247, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.reset {
+            background: linear-gradient(90deg, #ff6b6b, #fa5252);
+        }
+
+        button.export {
+            background: linear-gradient(90deg, #51cf66, #40c057);
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .joint-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(20, 20, 35, 0.7);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .joint-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            background: rgba(40, 40, 60, 0.7);
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .joint-id {
+            font-weight: bold;
+            color: #4dabf7;
+        }
+
+        .joint-coords {
+            font-size: 0.9rem;
+            color: #cccccc;
+        }
+
+        .info-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(20, 20, 35, 0.7);
+            border-radius: 10px;
+            font-size: 0.9rem;
+        }
+
+        .info-panel h3 {
+            color: #4dabf7;
+            margin-bottom: 10px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>3D 骨架可视化系统</h1>
+            <p class="subtitle">通用骨架结构可视化工具 - 支持任意骨架定义</p>
+        </header>
+
+        <div class="main-content">
+            <div class="visualization-panel">
+                <h2 class="panel-title">3D 骨架视图</h2>
+                <canvas id="skeletonCanvas"></canvas>
+            </div>
+
+            <div class="controls-panel">
+                <div class="control-group">
+                    <h3 class="panel-title">显示控制</h3>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showJoints" checked>
+                            <label for="showJoints">显示关节</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showBones" checked>
+                            <label for="showBones">显示骨骼</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showLabels" checked>
+                            <label for="showLabels">显示标签</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="showAxes" checked>
+                            <label for="showAxes">显示坐标轴</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3 class="control-title">视图控制</h3>
+                    <div class="slider-container">
+                        <label for="jointSize">关节大小: <span id="jointSizeValue">0.5</span></label>
+                        <input type="range" id="jointSize" min="0.1" max="2" step="0.1" value="0.5">
+                    </div>
+                    <div class="slider-container">
+                        <label for="boneThickness">骨骼粗细: <span id="boneThicknessValue">0.3</span></label>
+                        <input type="range" id="boneThickness" min="0.1" max="1" step="0.05" value="0.3">
+                    </div>
+                    <div class="slider-container">
+                        <label for="rotationSpeed">旋转速度: <span id="rotationSpeedValue">0.5</span></label>
+                        <input type="range" id="rotationSpeed" min="0" max="2" step="0.1" value="0.5">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3 class="control-title">骨架操作</h3>
+                    <div class="button-group">
+                        <button id="resetView">重置视图</button>
+                        <button id="toggleRotation" class="reset">暂停旋转</button>
+                        <button id="exportView" class="export">导出截图</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3 class="control-title">关节信息</h3>
+                    <div id="jointInfo" class="joint-list">
+                        <!-- 关节信息将在这里动态显示 -->
+                    </div>
+                </div>
+
+                <div class="info-panel">
+                    <h3>使用说明</h3>
+                    <p>• 鼠标左键拖拽：旋转视图</p>
+                    <p>• 鼠标右键拖拽：平移视图</p>
+                    <p>• 鼠标滚轮：缩放视图</p>
+                    <p>• 双击关节：聚焦到该关节</p>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>3D骨架可视化系统 | 支持任意骨架结构定义 | 使用Three.js构建</p>
+        </footer>
+    </div>
+
+    <!-- Three.js 库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+
+    <script>
+        // 通用骨架可视化类
+        class SkeletonVisualizer {
+            constructor(canvasId, skeletonData) {
+                this.canvas = document.getElementById(canvasId);
+                this.skeletonData = skeletonData;
+
+                // 渲染器
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: this.canvas,
+                    antialias: true,
+                    alpha: true
+                });
+                this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.setClearColor(0x0a0a1a, 1);
+
+                // 场景
+                this.scene = new THREE.Scene();
+
+                // 相机
+                const aspect = this.canvas.clientWidth / this.canvas.clientHeight;
+                this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+                this.camera.position.set(5, 5, 5);
+
+                // 轨道控制器
+                this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+
+                // 光照
+                this.setupLights();
+
+                // 坐标系
+                this.axesHelper = new THREE.AxesHelper(3);
+                this.scene.add(this.axesHelper);
+
+                // 骨架对象
+                this.joints = [];
+                this.bones = [];
+                this.jointLabels = [];
+
+                // 动画状态
+                this.animateRotation = true;
+                this.rotationSpeed = 0.002;
+
+                // 初始化
+                this.createSkeleton();
+                this.setupEventListeners();
+                this.animate();
+            }
+
+            setupLights() {
+                // 环境光
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+                this.scene.add(ambientLight);
+
+                // 平行光1
+                const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+                directionalLight1.position.set(5, 5, 5);
+                this.scene.add(directionalLight1);
+
+                // 平行光2
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+                directionalLight2.position.set(-5, 3, -5);
+                this.scene.add(directionalLight2);
+
+                // 点光源
+                const pointLight = new THREE.PointLight(0x4dabf7, 0.5, 20);
+                pointLight.position.set(0, 3, 0);
+                this.scene.add(pointLight);
+            }
+
+            createSkeleton() {
+                // 清理现有骨架
+                this.clearSkeleton();
+
+                // 获取骨架数据
+                const jointOffsets = this.skeletonData.jointOffsets || [];
+                const kinematicTree = this.skeletonData.kinematicTree || {};
+                const boneDensity = this.skeletonData.boneDensity || {};
+
+                // 计算关节的世界坐标
+                const jointPositions = this.calculateJointPositions(jointOffsets, kinematicTree);
+
+                // 创建关节
+                this.createJoints(jointPositions);
+
+                // 创建骨骼
+                this.createBones(jointPositions, kinematicTree, boneDensity);
+
+                // 创建关节标签
+                this.createJointLabels(jointPositions);
+
+                // 更新关节信息显示
+                this.updateJointInfo(jointPositions);
+            }
+
+            calculateJointPositions(jointOffsets, kinematicTree) {
+                const positions = [];
+
+                // 初始化所有关节位置
+                for (let i = 0; i < jointOffsets.length; i++) {
+                    positions.push(new THREE.Vector3(0, 0, 0));
+                }
+
+                // 如果关节偏移是相对位置，我们需要遍历运动树来计算绝对位置
+                // 这里我们假设关节0是根节点
+                if (jointOffsets.length > 0) {
+                    positions[0].copy(jointOffsets[0]);
+                }
+
+                // 使用广度优先搜索遍历运动树
+                const queue = [0];
+                const visited = new Set([0]);
+
+                while (queue.length > 0) {
+                    const current = queue.shift();
+
+                    // 查找当前节点的子节点
+                    for (const [level, edges] of Object.entries(kinematicTree)) {
+                        for (const [parent, child] of edges) {
+                            if (parent === current && !visited.has(child)) {
+                                // 计算子节点位置：父节点位置 + 偏移量
+                                positions[child].copy(positions[parent]).add(jointOffsets[child]);
+                                visited.add(child);
+                                queue.push(child);
+                            }
+                        }
+                    }
+                }
+
+                return positions;
+            }
+
+            createJoints(jointPositions) {
+                const jointSize = parseFloat(document.getElementById('jointSize').value);
+
+                for (let i = 0; i < jointPositions.length; i++) {
+                    const position = jointPositions[i];
+
+                    // 根据关节索引选择颜色
+                    let color;
+                    if (i === 0) {
+                        color = 0xff0000; // 根节点 - 红色
+                    } else if (i % 2 === 0) {
+                        color = 0x00ff00; // 偶数节点 - 绿色
+                    } else {
+                        color = 0x0000ff; // 奇数节点 - 蓝色
+                    }
+
+                    // 创建关节球体
+                    const geometry = new THREE.SphereGeometry(jointSize, 16, 16);
+                    const material = new THREE.MeshPhongMaterial({
+                        color: color,
+                        shininess: 100,
+                        transparent: true,
+                        opacity: 0.8
+                    });
+
+                    const joint = new THREE.Mesh(geometry, material);
+                    joint.position.copy(position);
+                    joint.userData = { jointId: i };
+
+                    this.scene.add(joint);
+                    this.joints.push(joint);
+                }
+            }
+
+            createBones(jointPositions, kinematicTree, boneDensity) {
+                const boneThickness = parseFloat(document.getElementById('boneThickness').value);
+
+                // 从运动树中提取所有骨骼连接
+                const boneEdges = [];
+                for (const [level, edges] of Object.entries(kinematicTree)) {
+                    for (const [parent, child] of edges) {
+                        boneEdges.push([parent, child]);
+                    }
+                }
+
+                for (const [parentIdx, childIdx] of boneEdges) {
+                    const parentPos = jointPositions[parentIdx];
+                    const childPos = jointPositions[childIdx];
+
+                    // 计算骨骼方向向量
+                    const direction = new THREE.Vector3().subVectors(childPos, parentPos);
+                    const length = direction.length();
+
+                    if (length === 0) continue;
+
+                    // 标准化方向向量
+                    direction.normalize();
+
+                    // 创建骨骼圆柱体
+                    const geometry = new THREE.CylinderGeometry(
+                        boneThickness,
+                        boneThickness,
+                        length,
+                        8
+                    );
+                    geometry.rotateZ(Math.PI / 2);
+
+                    // 根据骨骼密度选择颜色
+                    const densityKey = `(${parentIdx}, ${childIdx})`;
+                    const density = boneDensity[densityKey] || boneDensity[`${parentIdx},${childIdx}`] || 0.5;
+
+                    let boneColor;
+                    if (density > 0.7) {
+                        boneColor = 0xffaa00; // 高密度 - 橙色
+                    } else if (density > 0.3) {
+                        boneColor = 0xffff00; // 中密度 - 黄色
+                    } else {
+                        boneColor = 0x00aaff; // 低密度 - 蓝色
+                    }
+
+                    const material = new THREE.MeshPhongMaterial({
+                        color: boneColor,
+                        shininess: 30,
+                        transparent: true,
+                        opacity: 0.7
+                    });
+
+                    const bone = new THREE.Mesh(geometry, material);
+
+                    // 将骨骼放置在父节点和子节点中间
+                    const center = new THREE.Vector3().addVectors(parentPos, childPos).multiplyScalar(0.5);
+                    bone.position.copy(center);
+
+                    // 设置骨骼方向
+                    bone.lookAt(childPos);
+                    bone.rotateX(Math.PI / 2);
+
+                    this.scene.add(bone);
+                    this.bones.push(bone);
+                }
+            }
+
+            createJointLabels(jointPositions) {
+                for (let i = 0; i < jointPositions.length; i++) {
+                    const position = jointPositions[i];
+
+                    // 创建Canvas用于文本渲染
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.width = 64;
+                    canvas.height = 32;
+
+                    // 绘制文本背景
+                    context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+
+                    // 绘制文本
+                    context.font = 'bold 16px Arial';
+                    context.fillStyle = '#ffffff';
+                    context.textAlign = 'center';
+                    context.textBaseline = 'middle';
+                    context.fillText(`J${i}`, canvas.width / 2, canvas.height / 2);
+
+                    // 创建纹理
+                    const texture = new THREE.CanvasTexture(canvas);
+                    const spriteMaterial = new THREE.SpriteMaterial({
+                        map: texture,
+                        transparent: true
+                    });
+                    const sprite = new THREE.Sprite(spriteMaterial);
+
+                    // 设置精灵位置（在关节上方）
+                    sprite.position.copy(position);
+                    sprite.position.y += 0.3;
+                    sprite.scale.set(1, 0.5, 1);
+
+                    sprite.userData = { jointId: i };
+                    this.scene.add(sprite);
+                    this.jointLabels.push(sprite);
+                }
+            }
+
+            updateJointInfo(jointPositions) {
+                const jointInfoDiv = document.getElementById('jointInfo');
+                jointInfoDiv.innerHTML = '';
+
+                for (let i = 0; i < jointPositions.length; i++) {
+                    const pos = jointPositions[i];
+                    const jointItem = document.createElement('div');
+                    jointItem.className = 'joint-item';
+                    jointItem.innerHTML = `
+                        <span class="joint-id">关节 ${i}</span>
+                        <span class="joint-coords">(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})</span>
+                    `;
+
+                    // 添加点击事件
+                    jointItem.addEventListener('click', () => {
+                        this.focusOnJoint(i);
+                    });
+
+                    jointInfoDiv.appendChild(jointItem);
+                }
+            }
+
+            focusOnJoint(jointId) {
+                if (jointId >= 0 && jointId < this.joints.length) {
+                    const joint = this.joints[jointId];
+                    this.controls.target.copy(joint.position);
+                    this.camera.position.set(
+                        joint.position.x + 3,
+                        joint.position.y + 3,
+                        joint.position.z + 3
+                    );
+                    this.controls.update();
+                }
+            }
+
+            clearSkeleton() {
+                // 移除所有关节
+                for (const joint of this.joints) {
+                    this.scene.remove(joint);
+                    if (joint.geometry) joint.geometry.dispose();
+                    if (joint.material) joint.material.dispose();
+                }
+                this.joints = [];
+
+                // 移除所有骨骼
+                for (const bone of this.bones) {
+                    this.scene.remove(bone);
+                    if (bone.geometry) bone.geometry.dispose();
+                    if (bone.material) bone.material.dispose();
+                }
+                this.bones = [];
+
+                // 移除所有标签
+                for (const label of this.jointLabels) {
+                    this.scene.remove(label);
+                    if (label.material.map) label.material.map.dispose();
+                    if (label.material) label.material.dispose();
+                }
+                this.jointLabels = [];
+            }
+
+            setupEventListeners() {
+                // 窗口大小调整
+                window.addEventListener('resize', () => {
+                    this.onWindowResize();
+                });
+
+                // 显示/隐藏控制
+                document.getElementById('showJoints').addEventListener('change', (e) => {
+                    this.toggleJointsVisibility(e.target.checked);
+                });
+
+                document.getElementById('showBones').addEventListener('change', (e) => {
+                    this.toggleBonesVisibility(e.target.checked);
+                });
+
+                document.getElementById('showLabels').addEventListener('change', (e) => {
+                    this.toggleLabelsVisibility(e.target.checked);
+                });
+
+                document.getElementById('showAxes').addEventListener('change', (e) => {
+                    this.axesHelper.visible = e.target.checked;
+                });
+
+                // 滑块控制
+                document.getElementById('jointSize').addEventListener('input', (e) => {
+                    document.getElementById('jointSizeValue').textContent = e.target.value;
+                    this.updateJointSize(parseFloat(e.target.value));
+                });
+
+                document.getElementById('boneThickness').addEventListener('input', (e) => {
+                    document.getElementById('boneThicknessValue').textContent = e.target.value;
+                    this.updateBoneThickness(parseFloat(e.target.value));
+                });
+
+                document.getElementById('rotationSpeed').addEventListener('input', (e) => {
+                    document.getElementById('rotationSpeedValue').textContent = e.target.value;
+                    this.rotationSpeed = parseFloat(e.target.value) * 0.004;
+                });
+
+                // 按钮控制
+                document.getElementById('resetView').addEventListener('click', () => {
+                    this.resetView();
+                });
+
+                document.getElementById('toggleRotation').addEventListener('click', (e) => {
+                    this.animateRotation = !this.animateRotation;
+                    e.target.textContent = this.animateRotation ? '暂停旋转' : '开始旋转';
+                    e.target.classList.toggle('reset');
+                });
+
+                document.getElementById('exportView').addEventListener('click', () => {
+                    this.exportScreenshot();
+                });
+
+                // 关节点击事件
+                this.canvas.addEventListener('dblclick', (event) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                    const raycaster = new THREE.Raycaster();
+                    raycaster.setFromCamera(new THREE.Vector2(x, y), this.camera);
+
+                    const intersects = raycaster.intersectObjects(this.joints);
+                    if (intersects.length > 0) {
+                        const jointId = intersects[0].object.userData.jointId;
+                        this.focusOnJoint(jointId);
+                    }
+                });
+            }
+
+            toggleJointsVisibility(visible) {
+                for (const joint of this.joints) {
+                    joint.visible = visible;
+                }
+            }
+
+            toggleBonesVisibility(visible) {
+                for (const bone of this.bones) {
+                    bone.visible = visible;
+                }
+            }
+
+            toggleLabelsVisibility(visible) {
+                for (const label of this.jointLabels) {
+                    label.visible = visible;
+                }
+            }
+
+            updateJointSize(size) {
+                for (let i = 0; i < this.joints.length; i++) {
+                    const joint = this.joints[i];
+                    const oldGeometry = joint.geometry;
+
+                    // 创建新几何体
+                    joint.geometry = new THREE.SphereGeometry(size, 16, 16);
+
+                    // 清理旧几何体
+                    if (oldGeometry) oldGeometry.dispose();
+                }
+            }
+
+            updateBoneThickness(thickness) {
+                for (let i = 0; i < this.bones.length; i++) {
+                    const bone = this.bones[i];
+                    const oldGeometry = bone.geometry;
+
+                    // 计算骨骼长度
+                    const length = bone.geometry.parameters.height;
+
+                    // 创建新几何体
+                    bone.geometry = new THREE.CylinderGeometry(thickness, thickness, length, 8);
+                    bone.geometry.rotateZ(Math.PI / 2);
+
+                    // 清理旧几何体
+                    if (oldGeometry) oldGeometry.dispose();
+                }
+            }
+
+            resetView() {
+                this.controls.reset();
+                this.camera.position.set(5, 5, 5);
+                this.controls.target.set(0, 0, 0);
+                this.controls.update();
+            }
+
+            exportScreenshot() {
+                // 创建临时链接下载截图
+                const link = document.createElement('a');
+                link.download = 'skeleton_visualization.png';
+                this.renderer.render(this.scene, this.camera);
+                link.href = this.renderer.domElement.toDataURL('image/png');
+                link.click();
+            }
+
+            onWindowResize() {
+                const width = this.canvas.clientWidth;
+                const height = this.canvas.clientHeight;
+
+                this.camera.aspect = width / height;
+                this.camera.updateProjectionMatrix();
+
+                this.renderer.setSize(width, height, false);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                // 自动旋转
+                if (this.animateRotation) {
+                    this.scene.rotation.y += this.rotationSpeed;
+                }
+
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // 页面加载完成后初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            // SMPL骨架数据（使用您提供的示例数据）
+            const smplSkeletonData = {
+                jointOffsets: [
+                    [0.0000, 0.0000, 0.0000],
+                    [0.0585813, -0.0822800, -0.0176641],
+                    [-0.0603097, -0.0905133, -0.0135425],
+                    [0.0044394, 0.1244036, -0.0383852],
+                    [0.0434514, -0.3864695, 0.0080370],
+                    [-0.0432566, -0.3836879, -0.0048430],
+                    [0.0044884, 0.1379564, 0.0268203],
+                    [-0.0147903, -0.4268745, -0.0374280],
+                    [0.0190555, -0.4200456, -0.0345617],
+                    [-0.0022646, 0.0560324, 0.0028550],
+                    [0.0410544, -0.0602859, 0.1220424],
+                    [-0.0348399, -0.0621055, 0.1303233],
+                    [-0.0133902, 0.2116355, -0.0334676],
+                    [0.0717025, 0.1139997, -0.0188982],
+                    [-0.0829537, 0.1124724, -0.0237074],
+                    [0.0101132, 0.0889373, 0.0504099],
+                    [0.1229214, 0.0452051, -0.0190460],
+                    [-0.1132283, 0.0468532, -0.0084721],
+                    [0.2553319, -0.0156490, -0.0229465],
+                    [-0.2601275, -0.0143692, -0.0312687],
+                    [0.2657092, 0.0126981, -0.0073747],
+                    [-0.2691084, 0.0067937, -0.0060268],
+                    [0.0866905, -0.0106360, -0.0155943],
+                    [-0.0887537, -0.0086516, -0.0101071]
+                ].map(arr => new THREE.Vector3(arr[0], arr[1], arr[2])),
+
+                kinematicTree: {
+                    1: [[0, 1], [0, 2], [0, 3]],
+                    2: [[1, 4], [2, 5], [3, 6]],
+                    3: [[4, 7], [5, 8], [6, 9]],
+                    4: [[7, 10], [8, 11], [9, 12], [9, 13], [9, 14]],
+                    5: [[12, 15], [13, 16], [14, 17]],
+                    6: [[16, 18], [17, 19]],
+                    7: [[18, 20], [19, 21]],
+                    8: [[20, 22], [21, 23]]
+                },
+
+                boneDensity: {
+                    "(0, 3)": 1.0,
+                    "(3, 6)": 0.64,
+                    "(6, 9)": 0.49,
+                    "(9, 12)": 0.16,
+                    "(12, 15)": 0.04,
+                    "(0, 1)": 0.09,
+                    "(1, 4)": 0.16,
+                    "(4, 7)": 0.04,
+                    "(7, 10)": 0.0,
+                    "(0, 2)": 0.09,
+                    "(2, 5)": 0.16,
+                    "(5, 8)": 0.04,
+                    "(8, 11)": 0.0,
+                    "(9, 13)": 0.04,
+                    "(13, 16)": 0.04,
+                    "(16, 18)": 0.0225,
+                    "(18, 20)": 0.01,
+                    "(20, 22)": 0.0,
+                    "(9, 14)": 0.04,
+                    "(14, 17)": 0.04,
+                    "(17, 19)": 0.0225,
+                    "(19, 21)": 0.01,
+                    "(21, 23)": 0.0
+                }
+            };
+
+            // 创建可视化器实例
+            const visualizer = new SkeletonVisualizer('skeletonCanvas', smplSkeletonData);
+
+            // 添加示例骨架切换功能
+            document.getElementById('exportView').insertAdjacentHTML('afterend',
+                '<button id="loadCustomSkeleton" style="margin-top: 10px;">加载自定义骨架</button>'
+            );
+
+            document.getElementById('loadCustomSkeleton').addEventListener('click', () => {
+                // 这里可以添加代码来加载自定义骨架数据
+                alert('自定义骨架加载功能需要根据您的具体骨架数据结构实现。\n\n您可以在SkeletonVisualizer构造函数中传入不同的骨架数据对象。\n\n骨架数据需要包含：jointOffsets, kinematicTree, boneDensity');
+            });
+        });
+    </script>
+</body>
+
+</html>

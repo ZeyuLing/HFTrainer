@@ -1,0 +1,29 @@
+{
+    "degradation_settings": {
+        "input_root": "/apdcephfs_cq10/share_1467498/datasets/motion_gen_arena/evaluation_m2m/real_noisy_data/Academic_high_sliding",
+        "output_root": "/apdcephfs_cq10/share_1467498/datasets/motion_gen_arena/evaluation_m2m",
+        "dataset_name": "synthetic_noisy_data",
+        "degradation_parameters": {
+            "min_segment_length": 10,
+            "max_segment_length": 30,
+            "strength_multiplier": 1.0,
+            "seed": 42
+        },
+        "file_handling": {
+            "overwrite_existing": false,
+            "keep_original_structure": true
+        },
+        "system": {
+            "device": "auto",
+            "use_vel": true,
+            "keep_hand": false,
+            "global_pose": true
+        },
+        "description": "动作退化批处理配置",
+        "notes": [
+            "1. input_root: 输入动作文件的根目录，将递归查找所有子文件夹中的.npz文件",
+            "2. degradation_parameters: 控制随机退化的参数",
+            "3. 可以通过命令行参数覆盖这些配置，命令行参数的优先级更高"
+        ]
+    }
+}

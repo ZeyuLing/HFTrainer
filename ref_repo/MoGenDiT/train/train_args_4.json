@@ -1,0 +1,29 @@
+{
+    "model_name": "MoreDiff-0.1B-A1",
+    "model_version": "0.1B",
+    "save_dir": "./save/ckpt",
+    "log_dir": "./save/log",
+    "batch_size": 128,
+    "lr": 1e-4,
+    "weight_decay": 1e-4,
+    "save_interval": 40000,
+    "log_interval": 50,
+    "schedule_sampler_type": "uniform",
+    "scale_beta": 1.0,
+    "degrade_rate": 0.5,
+    "seed": 10,
+    "consis_loss": false,
+    "motion_degradation": true,
+    "global_pose": true,
+    "train_data": [
+        "academic",
+        "amass"
+    ],
+    "l1_weight_x0": 1.0,
+    "l1_weight_consis": 1.0,
+    "l2_weight_x0": 0.0,
+    "l2_weight_consis": 0.0,
+    "ema_decay": 0.999,
+    "ema_start_step": 1000,
+    "consis_start_step": 10000
+}

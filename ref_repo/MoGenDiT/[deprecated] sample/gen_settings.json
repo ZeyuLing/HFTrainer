@@ -1,0 +1,11 @@
+{
+    "data_source_path": "hunyuan_motion_data/bad_motions",
+    "model_name": "MoreDiff-0.1B-global-pose-xloss",
+    "global_pose": true,
+    "model_version": "0.1B",
+    "restore_iter": 1060000,
+    "fast_sampling": true,
+    "caption": "251202_Hunyuan_l1_bad",
+    "denoise_steps": 10,
+    "mask_window": 90
+}
