@@ -27,6 +27,74 @@ KIMODO_MODEL = "kimodo-soma-rp"
 DIFFUSION_STEPS = 100
 MOTION_DATA_DIR = str(PROJECT_ROOT / "data" / "hymotion_data")
 
+# 2026-04-27 sliding-window inference cap.
+# Empirical scan over 720 KIMODO_uncond E3 samples: pj_vmax≥0.5m/frame jump
+# rate is 0% at T<300, 59% at T 300-350, 100% at T 350+. Last 25% of frames
+# explode — classic train-distribution extrapolation. Cap each segment to
+# KIMODO_SAFE_LEN=240 (8s @ 30fps) and let KIMODO's built-in multi-prompt
+# stitching glue them with 5-frame transitions (`num_transition_frames=5`,
+# `share_transition=True`).  Empirically T<240 had 0% jumps in our scan;
+# 240 is conservative.  Total emitted length still equals num_frames (the
+# transition frames are blended in-place at segment boundaries, not added
+# on top — see KimodoModel._multiprompt at kimodo_model.py:267-311).
+KIMODO_SAFE_LEN = 240
+
+
+def _split_num_frames(n: int, safe_len: int = KIMODO_SAFE_LEN) -> list:
+    """Split total `n` frames into K balanced segments each ≤ safe_len.
+
+    Returns a list of segment lengths whose sum equals n.  K=1 when
+    n <= safe_len.  Uses balanced split so the worst segment is as short
+    as possible: e.g. 360 -> [180,180], 320 -> [160,160], 270 -> [270],
+    241 -> [121,120].
+    """
+    if n <= safe_len:
+        return [n]
+    K = (n + safe_len - 1) // safe_len  # ceil
+    base = n // K
+    rem = n - base * K
+    return [base + (1 if i < rem else 0) for i in range(K)]
+
+
+def _make_fullbody_with_rot_constraint_set():
+    """Return a full-body constraint class that actually observes rotations."""
+    from kimodo.constraints import FullBodyConstraintSet, create_pairs
+    import torch
+
+    class FullBodyWithRotConstraintSet(FullBodyConstraintSet):
+        """Full-body keyframe constraint that also pins global rotations.
+
+        KIMODO's upstream FullBodyConstraintSet stores `global_joints_rots`
+        and writes them to saved JSON, but its update_constraints() does not
+        append them to the observed-motion mask. For M2M condition frames this
+        means positions are fixed while wrists/hands can freely rotate, which
+        creates visible condition/generated boundary jumps.
+        """
+
+        def update_constraints(self, data_dict: dict, index_dict: dict) -> None:
+            super().update_constraints(data_dict, index_dict)
+            joints = torch.arange(
+                self.skeleton.nbjoints,
+                device=self.frame_indices.device,
+            )
+            indices = create_pairs(self.frame_indices, joints)
+            data_dict["global_joints_rots"].append(
+                self.global_joints_rots.reshape(-1, 3, 3)
+            )
+            index_dict["global_joints_rots"].append(indices)
+
+        def crop_move(self, start: int, end: int) -> "FullBodyWithRotConstraintSet":
+            mask = (self.frame_indices >= start) & (self.frame_indices < end)
+            return FullBodyWithRotConstraintSet(
+                self.skeleton,
+                self.frame_indices[mask] - start,
+                self.global_joints_positions[mask],
+                self.global_joints_rots[mask],
+                self.smooth_root_2d[mask],
+            )
+
+    return FullBodyWithRotConstraintSet
+
 # ============================================================================
 # Skeleton mapping: SMPL-22 <-> SOMA-30/77
 # ============================================================================
@@ -238,25 +306,31 @@ def smpl22_to_soma30_retarget(motion_135, bone_offsets):
     # Step 5: SOMA30 FK -> posed joints with correct SOMA30 proportions
     soma_global_rots_fk, soma_joints, _ = soma30.fk(soma_local_rots, soma_root_pos)
 
-    # Step 6: Dynamic per-clip Y alignment — anchor SOMA frame-0 feet to the
-    # SMPL frame-0 feet height. The static `foot_offset_y` from step 4 is
-    # computed from neutral T-pose, but the actual frame-0 pose may have bent
-    # legs, one-foot-up, or otherwise non-T-pose configuration. Without this
-    # correction the SOMA condition frames floated 5–15 cm above the SMPL
-    # ground truth (root cause of "bouncy" KIMODO output reported on E3
-    # dashboard 2026-04-26), because KIMODO's diffusion saw constraints
-    # outside its grounded-motion training prior and pushed the rest of the
-    # generated motion up to "match".
-    smpl_min_y_f0 = smplx_world_pos[0, smplx_foot_indices, 1].min()
-    soma_min_y_f0 = soma_joints[0, soma_foot_indices, 1].min()
-    y_delta = (soma_min_y_f0 - smpl_min_y_f0).item()
-    if abs(y_delta) > 1e-4:
-        soma_joints = soma_joints.clone()
-        soma_joints[..., 1] -= y_delta
-        # Global rotations are unaffected by a pure Y translation; only joint
-        # positions need updating. The downstream FullBodyConstraintSet uses
-        # `soma_joints` (positions) and `soma_global_rots_fk` (rotations) so
-        # this consistent shift keeps the constraint physically grounded.
+    # Step 6: Dynamic per-frame foot-floor alignment.
+    #
+    # A single clip-level Y correction is not enough: once the source pose
+    # bends/unbends, SOMA's different leg/foot proportions can make condition
+    # frames drift upward again. That is visible as "floating gray context" and
+    # also perturbs KIMODO's positional constraints during inference.
+    smpl_foot_min_y = smplx_world_pos[:, smplx_foot_indices, 1].min(dim=1).values
+    soma_foot_min_y = soma_joints[:, soma_foot_indices, 1].min(dim=1).values
+    y_delta = soma_foot_min_y - smpl_foot_min_y
+    if torch.max(torch.abs(y_delta)) > 1e-4:
+        soma_root_pos = soma_root_pos.clone()
+        soma_root_pos[:, 1] -= y_delta
+        soma_global_rots_fk, soma_joints, _ = soma30.fk(soma_local_rots, soma_root_pos)
+
+    # Step 7: Root trajectory lock in XZ only.
+    #
+    # Keep horizontal trajectory exactly aligned to the source translation, but
+    # preserve the Y solved above from foot-floor alignment. Locking Y back to
+    # the raw translation reintroduces floating for grounded clips.
+    root_delta_xz = translation[:, [0, 2]] - soma_joints[:, soma30.root_idx, :][:, [0, 2]]
+    if torch.max(torch.abs(root_delta_xz)) > 1e-6:
+        soma_root_pos = soma_root_pos.clone()
+        soma_root_pos[:, 0] += root_delta_xz[:, 0]
+        soma_root_pos[:, 2] += root_delta_xz[:, 1]
+        soma_global_rots_fk, soma_joints, _ = soma30.fk(soma_local_rots, soma_root_pos)
 
     return soma_global_rots_fk, soma_joints
 
@@ -298,18 +372,19 @@ def _rot_y(theta):
     ], dim=-2)
 
 
-def kimodo_compute_canon_transform(soma30_pos, skeleton):
-    """Compute the rigid (yaw, XZ-translation) transform that maps frame 0
-    of the retargeted SOMA30 motion into KIMODO's canonical frame.
+def kimodo_compute_canon_transform(soma30_pos, skeleton, anchor_frame: int = 0):
+    """Compute the rigid (yaw, XZ-translation) transform that maps one anchor
+    frame of the retargeted SOMA30 motion into KIMODO's canonical frame.
 
     The canonical frame is defined by:
-      - frame-0 root (pelvis) X, Z = 0
-      - frame-0 heading angle = 0 (R-hip minus L-hip lying along the axis
+      - anchor-frame root (pelvis) X, Z = 0
+      - anchor-frame heading angle = 0 (R-hip minus L-hip lying along the axis
         where atan2(dz, -dx) == 0, i.e. dx = -1 so the subject faces +Z)
 
     Args:
         soma30_pos: (T, 30, 3) retargeted SOMA30 world joint positions.
         skeleton: SOMASkeleton30 instance (for hip_joint_idx).
+        anchor_frame: frame index used as the canonical anchor.
 
     Returns:
         (R_yaw, t_xz, heading0) where:
@@ -319,11 +394,12 @@ def kimodo_compute_canon_transform(soma30_pos, skeleton):
           heading0: scalar heading angle of frame 0 (radians), for logging.
     """
     import torch
+    anchor_frame = int(anchor_frame)
     r_hip_idx, l_hip_idx = skeleton.hip_joint_idx
-    diff = soma30_pos[0, r_hip_idx] - soma30_pos[0, l_hip_idx]
+    diff = soma30_pos[anchor_frame, r_hip_idx] - soma30_pos[anchor_frame, l_hip_idx]
     heading0 = torch.atan2(diff[2], -diff[0])
     R_yaw = _rot_y(-heading0)  # canonical = world rotated by -heading0
-    root_xz0 = soma30_pos[0, 0]  # pelvis at frame 0 (3,) world
+    root_xz0 = soma30_pos[anchor_frame, 0]  # pelvis at anchor frame (3,) world
     root_xz0_rot = R_yaw @ root_xz0
     # After rotation we want (x, y_any, z) = (0, y_any, 0) → translate by
     # -root_xz0_rot in X, Z only (Y preserved).
@@ -377,7 +453,7 @@ def build_constraints_e2(skeleton, soma30_rots, soma30_pos, T, setting, caption=
     (FullBodyConstraintSet on those frame indices); KIMODO then solves
     for the rest of the frames.
     """
-    from kimodo.constraints import FullBodyConstraintSet
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
     import math
     import torch
 
@@ -432,28 +508,73 @@ def build_constraints_e2(skeleton, soma30_rots, soma30_pos, T, setting, caption=
     return [constraint]
 
 
-def build_constraints_e3(skeleton, soma30_rots, soma30_pos, T, setting, caption=""):
-    """E3 Keyframe interpolation: keep every K-th frame.
+def build_constraints_e3(skeleton, soma30_rots, soma30_pos, T, setting,
+                         caption="", motion_135=None, bone_offsets=None):
+    """E3 Keyframe interpolation: keep selected anchor frames.
 
-    2026-04-26: aligned with backend m2m_eval_tasks.py E3 v2 settings.
-      every_5f  -> K=5    every_10f -> K=10
-      A         -> K=30   B          -> K=60
-      C         -> K=15   D          -> adaptive (fallback to K=30 here;
-                                       KIMODO doesn't support adaptive
-                                       so we approximate with uniform K).
-    Old (incorrect) mapping had B=15, C=5, D=60.
+    2026-04-26 (unified naming): mirrors backend m2m_eval_tasks.py E3 v2.
+      every_5f -> K=5      every_10f -> K=10     every_15f -> K=15
+      every_30f -> K=30    every_60f -> K=60
+      adaptive -> top-K acceleration-peak frames (sparse mode), exactly
+                  matching the M2M backend's `detect_keyframes_from_motion`
+                  semantics. Requires `motion_135` + `bone_offsets`; if
+                  unavailable we fall back to K=30 uniform with a warning.
+    Legacy A/B/C/D names are accepted for backward compatibility but should
+    be migrated by callers ASAP.
     """
-    from kimodo.constraints import FullBodyConstraintSet
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
     import torch
 
+    legacy_alias = {'A': 'every_30f', 'B': 'every_60f',
+                    'C': 'every_15f', 'D': 'adaptive'}
+    setting = legacy_alias.get(setting, setting)
+
     intervals = {
-        'every_5f': 5, 'every_10f': 10,
-        'A': 30, 'B': 60, 'C': 15, 'D': 30,
+        'every_5f': 5, 'every_10f': 10, 'every_15f': 15,
+        'every_30f': 30, 'every_60f': 60,
     }
-    K = intervals.get(setting, 30)
-    frames = list(range(0, T, K))
-    if frames[-1] != T - 1:
-        frames.append(T - 1)
+
+    if setting == 'adaptive':
+        if motion_135 is not None and bone_offsets is not None:
+            try:
+                from hftrainer.evaluation.motion.m2m_eval_tasks import (
+                    detect_keyframes_from_motion,
+                )
+                m135_np = (motion_135.detach().cpu().numpy()
+                           if hasattr(motion_135, 'detach') else motion_135)
+                bo_np = (bone_offsets.detach().cpu().numpy()
+                         if hasattr(bone_offsets, 'detach') else bone_offsets)
+                kf_idx = detect_keyframes_from_motion(
+                    m135_np, bo_np,
+                    sparse=True,
+                    target_density=1.0 / 30.0,
+                    peak_distance=10,
+                )
+                # Clamp to valid frame range and dedupe.
+                kf_idx = sorted({int(f) for f in kf_idx if 0 <= int(f) < T})
+                if len(kf_idx) == 0:
+                    kf_idx = [0, T - 1]
+                frames = kf_idx
+                print(f"    [KIMODO E3-adaptive] {len(frames)} keyframes "
+                      f"from acc peaks (T={T}): {frames[:8]}"
+                      + ("..." if len(frames) > 8 else ""))
+            except Exception as e:
+                print(f"    [KIMODO E3-adaptive] detect failed ({e}); "
+                      f"fallback to K=30")
+                frames = list(range(0, T, 30))
+                if frames[-1] != T - 1:
+                    frames.append(T - 1)
+        else:
+            print("    [KIMODO E3-adaptive] motion_135/bone_offsets not "
+                  "supplied; fallback to K=30 uniform")
+            frames = list(range(0, T, 30))
+            if frames[-1] != T - 1:
+                frames.append(T - 1)
+    else:
+        K = intervals.get(setting, 30)
+        frames = list(range(0, T, K))
+        if frames[-1] != T - 1:
+            frames.append(T - 1)
 
     frame_idx = torch.tensor(frames, dtype=torch.long)
 
@@ -584,20 +705,32 @@ def build_constraints_e7(skeleton, soma30_rots, soma30_pos, T, setting, caption=
 
 
 def build_constraints_e8(skeleton, soma30_rots, soma30_pos, T, setting, caption=""):
-    """E8 Loop animation.
+    """E8 Loop animation (v2 redesign 2026-04-26).
 
-    Setting A: first = last frame (classic loop).
-    Settings B/C/D: loop completion — given full GT, constrain all GT frames
-    + last frame = first frame pose.
+    Setting A — pure loop, caption-aware. Frame 0 and frame T-1 both anchor on
+        the GT's first-frame pose. T = sample.num_frames passed by caller; the
+        model has to fill the (T-2) intermediate frames and close the loop.
+
+    Setting D — loop completion, uncond. The CALLER has already sliced
+        ``soma30_rots`` / ``soma30_pos`` to the GT-tail-as-condition window
+        (length T_gt_eff = soma30_rots.shape[0]), and passes
+        ``T = T_gt_eff + N_append`` (the resolved adaptive append length).
+        We therefore constrain frame indices [0..T_gt_eff-1] with the sliced
+        GT data and frame [T-1] with the GT's first-frame pose (the loop
+        target), letting the model fill the (N_append-1) gap frames.
+
+    The legacy hardcoded ``append_map={'B':30,'C':60,'D':90}`` from the
+    pre-2026-04-26 cohort is gone — the only D variant in m2m_eval_tasks.py is
+    now ``_loop_append='auto'`` and the value is resolved upstream by
+    ``compute_transition_length``.
     """
-    from kimodo.constraints import FullBodyConstraintSet
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
     import torch
 
     if setting == 'A':
-        # Classic loop: constrain first and last frame, both with frame-0 pose
+        # Pure loop: frame 0 and frame T-1 both = soma30[0]
         frames = [0, T - 1]
         frame_idx = torch.tensor(frames, dtype=torch.long)
-        # Use frame 0 data for both constraint frames (loop)
         loop_rots = torch.stack([soma30_rots[0], soma30_rots[0]], dim=0)
         loop_pos = torch.stack([soma30_pos[0], soma30_pos[0]], dim=0)
 
@@ -609,27 +742,36 @@ def build_constraints_e8(skeleton, soma30_rots, soma30_pos, T, setting, caption=
             to_crop=False,
         )
         return [constraint]
+
+    # Setting D (loop completion). soma30_* already trimmed to GT-tail length.
+    T_gt_eff = int(soma30_rots.shape[0])
+    if T <= T_gt_eff:
+        # Caller forgot to add N_append — fall back to "lock everything,
+        # generate nothing" rather than crash.
+        frames = list(range(T_gt_eff))
+        constraint_rots = soma30_rots
+        constraint_pos = soma30_pos
     else:
-        # Loop completion (B/C/D): constrain all GT frames + last frame = first
-        append_map = {'B': 30, 'C': 60, 'D': 90}
-        N_append = append_map.get(setting, 30)
-        T_total = T + N_append
+        # Lock the GT tail at frames [0..T_gt_eff-1] and the loop-back pose at
+        # frame [T-1]; frames [T_gt_eff..T-2] are unconstrained (generated).
+        frames = list(range(T_gt_eff)) + [T - 1]
+        loop_target_rots = getattr(build_constraints_e8, "_loop_target_rots", None)
+        loop_target_pos = getattr(build_constraints_e8, "_loop_target_pos", None)
+        if loop_target_rots is None or loop_target_pos is None:
+            loop_target_rots = soma30_rots[0:1]
+            loop_target_pos = soma30_pos[0:1]
+        constraint_rots = torch.cat([soma30_rots, loop_target_rots], dim=0)
+        constraint_pos = torch.cat([soma30_pos, loop_target_pos], dim=0)
+    frame_idx = torch.tensor(frames, dtype=torch.long)
 
-        # All GT frames + the last frame (= first frame pose)
-        frames = list(range(T)) + [T_total - 1]
-        frame_idx = torch.tensor(frames, dtype=torch.long)
-        # Concat GT SOMA30 data + frame-0 data for the loop-back frame
-        constraint_rots = torch.cat([soma30_rots[:T], soma30_rots[0:1]], dim=0)
-        constraint_pos = torch.cat([soma30_pos[:T], soma30_pos[0:1]], dim=0)
-
-        constraint = FullBodyConstraintSet(
-            skeleton,
-            frame_indices=frame_idx,
-            global_joints_positions=constraint_pos,
-            global_joints_rots=constraint_rots,
-            to_crop=False,
-        )
-        return [constraint]
+    constraint = FullBodyConstraintSet(
+        skeleton,
+        frame_indices=frame_idx,
+        global_joints_positions=constraint_pos,
+        global_joints_rots=constraint_rots,
+        to_crop=False,
+    )
+    return [constraint]
 
 
 def build_constraints_e10(skeleton, soma30_rots, soma30_pos, T, setting, caption=""):
@@ -675,7 +817,7 @@ def build_constraints_e14(skeleton, soma30_rots_a, soma30_pos_a,
     v5 adaptive context policy (compute_cond_length per side). Falls
     back to legacy symmetric N_cond if the new args aren't provided.
     """
-    from kimodo.constraints import FullBodyConstraintSet
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
     import torch
 
     if N_cond_a is None:
@@ -690,11 +832,54 @@ def build_constraints_e14(skeleton, soma30_rots_a, soma30_pos_a,
 
     frames_a = list(range(N_cond_a))
     frames_b = list(range(N_cond_a + N_transition, T))
-    frames = frames_a + frames_b
+
+    # Do not hard-constrain frames inside the generated transition span.
+    # Earlier versions pinned the first/last generated frames to boundary
+    # targets, but KIMODO's hard-paste step then turned those generated
+    # frames into condition frames. The adjacent generated frames stayed on
+    # the model trajectory, producing exactly the visible one-frame snap.
+    # Keep hard constraints limited to true condition frames only.
+    endpoint_frames = []
+    endpoint_rots = []
+    endpoint_pos = []
+    if False and N_transition >= 2:
+        def _extrapolate_next_pos(pos_seq):
+            if pos_seq.shape[0] >= 2:
+                return pos_seq[-1:] + (pos_seq[-1:] - pos_seq[-2:-1])
+            return pos_seq[-1:]
+
+        def _extrapolate_prev_pos(pos_seq):
+            if pos_seq.shape[0] >= 2:
+                return pos_seq[:1] - (pos_seq[1:2] - pos_seq[:1])
+            return pos_seq[:1]
+
+        def _extrapolate_next_rot(rot_seq):
+            if rot_seq.shape[0] >= 2:
+                delta = torch.matmul(rot_seq[-1:], rot_seq[-2:-1].transpose(-1, -2))
+                return torch.matmul(delta, rot_seq[-1:])
+            return rot_seq[-1:]
+
+        def _extrapolate_prev_rot(rot_seq):
+            if rot_seq.shape[0] >= 2:
+                delta = torch.matmul(rot_seq[1:2], rot_seq[:1].transpose(-1, -2))
+                return torch.matmul(delta.transpose(-1, -2), rot_seq[:1])
+            return rot_seq[:1]
+
+        endpoint_frames = [N_cond_a, N_cond_a + N_transition - 1]
+        endpoint_rots = [
+            _extrapolate_next_rot(soma30_rots_a),
+            _extrapolate_prev_rot(soma30_rots_b),
+        ]
+        endpoint_pos = [
+            _extrapolate_next_pos(soma30_pos_a),
+            _extrapolate_prev_pos(soma30_pos_b),
+        ]
+
+    frames = frames_a + endpoint_frames + frames_b
 
     frame_idx = torch.tensor(frames, dtype=torch.long)
-    constraint_rots = torch.cat([a_tail_rots, b_head_rots], dim=0)
-    constraint_pos = torch.cat([a_tail_pos, b_head_pos], dim=0)
+    constraint_rots = torch.cat([a_tail_rots, *endpoint_rots, b_head_rots], dim=0)
+    constraint_pos = torch.cat([a_tail_pos, *endpoint_pos, b_head_pos], dim=0)
 
     constraint = FullBodyConstraintSet(
         skeleton,
@@ -713,7 +898,7 @@ def build_constraints_e15(skeleton, soma30_rots, soma30_pos,
 
     Sequence: [motion_tail(N_cond_tail) | transition(N_transition) | target_first(1)]
     """
-    from kimodo.constraints import FullBodyConstraintSet
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
     import torch
 
     # Motion tail + target first frame SOMA30 data
@@ -737,6 +922,49 @@ def build_constraints_e15(skeleton, soma30_rots, soma30_pos,
     return [constraint]
 
 
+def build_constraints_e15_prepend(skeleton, soma30_rots_P, soma30_pos_P,
+                                   soma30_rots_A, soma30_pos_A,
+                                   T_total, N_transition, N_cond_A_used,
+                                   caption=""):
+    """E15 prepend (2026-04-27 v2): constrain frame 0 (= P, target start pose)
+    and frames [N_transition..T_total-1] (= the K_used head frames of motion A).
+
+    Sequence layout (T_total = N_transition + N_cond_A_used):
+        frame 0           : P = target_motion[0]            (mask=0, condition)
+        frames 1..N-1     : transition (generated)          (mask=1)
+        frames N..T-1     : A[:N_cond_A_used] (condition)   (mask=0)
+
+    Args:
+        skeleton: SOMA30 skeleton instance.
+        soma30_rots_P : (1, 30, 3, 3)  target's first frame in canonical space.
+        soma30_pos_P  : (1, 30, 3)
+        soma30_rots_A : (N_cond_A_used, 30, 3, 3) head of A in canonical space.
+        soma30_pos_A  : (N_cond_A_used, 30, 3)
+        T_total       : total frames = N_transition + N_cond_A_used.
+        N_transition  : number of prepended frames (frame 0 = P, frames
+                        1..N_transition-1 are generated).
+        N_cond_A_used : number of A frames fed to the model.
+    """
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
+    import torch
+
+    frames_P = [0]
+    frames_A = list(range(N_transition, T_total))
+    frame_idx = torch.tensor(frames_P + frames_A, dtype=torch.long)
+
+    constraint_rots = torch.cat([soma30_rots_P[:1], soma30_rots_A], dim=0)
+    constraint_pos = torch.cat([soma30_pos_P[:1], soma30_pos_A], dim=0)
+
+    constraint = FullBodyConstraintSet(
+        skeleton,
+        frame_indices=frame_idx,
+        global_joints_positions=constraint_pos,
+        global_joints_rots=constraint_rots,
+        to_crop=False,
+    )
+    return [constraint]
+
+
 def build_constraints_e16(skeleton, soma30_rots_target, soma30_pos_target,
                            soma30_rots, soma30_pos,
                            T, setting, N_cond_head, N_transition, caption=""):
@@ -744,7 +972,7 @@ def build_constraints_e16(skeleton, soma30_rots_target, soma30_pos_target,
 
     Sequence: [target_last(1) | transition(N_transition) | motion_head(N_cond_head)]
     """
-    from kimodo.constraints import FullBodyConstraintSet
+    FullBodyConstraintSet = _make_fullbody_with_rot_constraint_set()
     import torch
 
     # Target last + motion head SOMA30 data
@@ -786,7 +1014,10 @@ CONSTRAINT_BUILDERS = {
 # ============================================================================
 
 def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
-                    caption, T, task_id, setting, fps=30):
+                    caption, T, task_id, setting, fps=30,
+                    motion_135=None, bone_offsets=None,
+                    canon_anchor_frame: int = 0,
+                    loop_target_rots=None, loop_target_pos=None):
     """Run KIMODO on one sample and return predicted SMPL-22 positions.
 
     Args:
@@ -798,8 +1029,12 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
         caption: text prompt.
         T: number of frames.
         task_id: e.g. 'E2', 'E6'.
-        setting: e.g. 'A', 'B'.
+        setting: e.g. 'every_30f', 'adaptive'.
         fps: frame rate.
+        motion_135: optional (T, 135) raw SMPL-22 motion for builders that
+            need motion-aware constraints (E3 `adaptive` calls
+            `detect_keyframes_from_motion`).
+        bone_offsets: optional (22, 3) bone offsets, paired with motion_135.
     """
     import torch
 
@@ -810,23 +1045,52 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
     # trained on, so constraint tasks generalize the same way T2M does.
     # See kimodo_compute_canon_transform / kimodo_apply_canon above.
     # ------------------------------------------------------------------
-    R_yaw, t_xz, _heading0 = kimodo_compute_canon_transform(soma30_pos, skeleton)
+    R_yaw, t_xz, _heading0 = kimodo_compute_canon_transform(
+        soma30_pos, skeleton, anchor_frame=canon_anchor_frame)
     soma30_rots_c, soma30_pos_c = kimodo_apply_canon(
         soma30_rots, soma30_pos, R_yaw, t_xz)
 
+    # E8-D needs the loop target to stay tied to the ORIGINAL motion's first
+    # frame even when the GT condition is clipped to a tail window. Build the
+    # target in world space, then canonicalize it with the SAME transform as
+    # the main sequence so the final constraint lives in the correct frame.
+    prev_loop_rots = getattr(build_constraints_e8, "_loop_target_rots", None)
+    prev_loop_pos = getattr(build_constraints_e8, "_loop_target_pos", None)
+    if task_id == 'E8' and setting == 'D' and loop_target_rots is not None and loop_target_pos is not None:
+        loop_target_rots_c, loop_target_pos_c = kimodo_apply_canon(
+            loop_target_rots, loop_target_pos, R_yaw, t_xz)
+        build_constraints_e8._loop_target_rots = loop_target_rots_c
+        build_constraints_e8._loop_target_pos = loop_target_pos_c
+    else:
+        build_constraints_e8._loop_target_rots = None
+        build_constraints_e8._loop_target_pos = None
+
     builder = CONSTRAINT_BUILDERS.get(task_id)
     if builder is None and task_id != 'E6':
+        build_constraints_e8._loop_target_rots = prev_loop_rots
+        build_constraints_e8._loop_target_pos = prev_loop_pos
         return None, {}, {}
 
-    if task_id == 'E6':
-        # E6 needs gt_pos_22 for foot contact detection; the detection
-        # itself is per-frame local (ankle Y), so canonicalization doesn't
-        # shift which frames are contact frames — but the constraint
-        # positions fed to KIMODO must be in canonical world.
-        constraints = build_constraints_e6(
-            skeleton, soma30_rots_c, soma30_pos_c, gt_pos_22, T, setting, caption)
-    else:
-        constraints = builder(skeleton, soma30_rots_c, soma30_pos_c, T, setting, caption)
+    try:
+        if task_id == 'E6':
+            # E6 needs gt_pos_22 for foot contact detection; the detection
+            # itself is per-frame local (ankle Y), so canonicalization doesn't
+            # shift which frames are contact frames — but the constraint
+            # positions fed to KIMODO must be in canonical world.
+            constraints = build_constraints_e6(
+                skeleton, soma30_rots_c, soma30_pos_c, gt_pos_22, T, setting, caption)
+        elif task_id == 'E3':
+            # E3 uses motion-aware logic in `adaptive` setting; pass through
+            # the raw motion_135 + bone_offsets so the builder can call
+            # `detect_keyframes_from_motion`.
+            constraints = build_constraints_e3(
+                skeleton, soma30_rots_c, soma30_pos_c, T, setting, caption,
+                motion_135=motion_135, bone_offsets=bone_offsets)
+        else:
+            constraints = builder(skeleton, soma30_rots_c, soma30_pos_c, T, setting, caption)
+    finally:
+        build_constraints_e8._loop_target_rots = prev_loop_rots
+        build_constraints_e8._loop_target_pos = prev_loop_pos
 
     # KIMODO works at its own fps (typically 30)
     model_fps = model.fps
@@ -847,21 +1111,40 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
         if hasattr(c, 'frame_indices') and isinstance(c.frame_indices, torch.Tensor):
             c.frame_indices = c.frame_indices.clamp(max=num_frames - 1)
 
+    # Sliding-window split: cap each segment ≤ KIMODO_SAFE_LEN to stay inside
+    # the model's training distribution (~10s).  See _split_num_frames docstring.
+    seg_lens = _split_num_frames(num_frames)
+    is_multi = len(seg_lens) > 1
+    seg_prompts = ([caption] if caption else [""]) * len(seg_lens)
+    # KIMODO API quirk: __call__'s single-prompt branch wants
+    #   constraint_lst: list[list[Constraint]]   # per-sample → batch=[constraints]
+    # while _multiprompt wants
+    #   constraint_lst: list[Constraint]         # one shared list, segments are
+    #                                              cropped via constraint.crop_move
+    # See ref_repo/KIMODO/kimodo/kimodo/model/kimodo_model.py:178 vs :483.
+    constraint_arg = constraints if is_multi else [constraints]
     t0 = time.time()
     try:
         output = model(
-            [caption] if caption else [""],
-            [num_frames],
+            seg_prompts,
+            seg_lens,
             num_denoising_steps=DIFFUSION_STEPS,
-            constraint_lst=[constraints],
+            constraint_lst=constraint_arg,
             cfg_weight=[2.0, 2.0],
             num_samples=1,
             return_numpy=True,
-            multi_prompt=False,
+            multi_prompt=is_multi,
+            # post_processing=False: KIMODO's correct_motion (cm-level
+            # foot-skate / root-margin cleanup) requires the C++
+            # motion_correction extension which is not installed on every
+            # GPU host.  The real fix for the long-rollout joint explosion
+            # is the sliding-window split above (T>=300 jumped 59-100%
+            # before; split keeps every segment <=240).  post_processing
+            # is purely cosmetic and not worth the dependency.
             post_processing=False,
         )
     except Exception as e:
-        print(f"    KIMODO inference error: {e}")
+        print(f"    KIMODO inference error: {e}  (seg_lens={seg_lens})")
         return None, {"inference_time": round(time.time() - t0, 2)}, {}
 
     elapsed = time.time() - t0
@@ -924,6 +1207,14 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
     # / E5 traj …), and only does a rigid Y shift otherwise. The same
     # offset is applied to posed_joints / global_rot_mats so the SOMA mesh
     # stays in lockstep with the SMPL-22 skeleton.
+    #
+    # 2026-04-26 follow-up: After the canonical-anchor fix (anchoring at
+    # A_tail's first frame == model frame 0 instead of A's absolute frame
+    # 0) plus the foot-floor alignment in `_place_b_custom`, this fallback
+    # is *empirically zero* on all 200 E14 samples. Kept here as a
+    # defensive guard and as a regression-detection signal: if you ever
+    # see large `y_anchor_delta` values reappear in the per-sample
+    # metrics, the canonicalization upstream has likely regressed.
     y_anchor_delta = 0.0
     try:
         if gt_pos_22 is not None and pred_pos_22.shape[0] >= 1:
@@ -945,10 +1236,17 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
     metrics = {"inference_time": round(elapsed, 2),
                "y_anchor_delta": round(y_anchor_delta, 4)}
 
-    # MPJPE between predicted and GT (only for generated frames)
+    # MPJPE between predicted and GT (only for generated frames).
+    # 2026-04-26: pred can be longer than gt for E8-D (T = T_gt_eff +
+    # N_append, gt = T_gt_eff). Only score the overlapping prefix to avoid
+    # broadcasting against missing GT frames.
     if gt_pos_22 is not None:
-        diff = np.sqrt(np.sum((pred_pos_22 - gt_pos_22[:T]) ** 2, axis=-1))
-        metrics["mpjpe_pos"] = float(diff.mean())
+        n_overlap = min(pred_pos_22.shape[0], gt_pos_22.shape[0], T)
+        if n_overlap > 0:
+            diff = np.sqrt(np.sum(
+                (pred_pos_22[:n_overlap] - gt_pos_22[:n_overlap]) ** 2,
+                axis=-1))
+            metrics["mpjpe_pos"] = float(diff.mean())
 
     # Jitter (acceleration-based)
     if pred_pos_22.shape[0] > 2:
@@ -1010,21 +1308,26 @@ def _run_kimodo_with_constraints(model, skeleton, constraints, caption, T,
         if hasattr(c, 'frame_indices') and isinstance(c.frame_indices, torch.Tensor):
             c.frame_indices = c.frame_indices.clamp(max=num_frames - 1)
 
+    # Sliding-window split (see _split_num_frames + constraint_arg note above).
+    seg_lens = _split_num_frames(num_frames)
+    is_multi = len(seg_lens) > 1
+    seg_prompts = ([caption] if caption else [""]) * len(seg_lens)
+    constraint_arg = constraints if is_multi else [constraints]
     t0 = time.time()
     try:
         output = model(
-            [caption] if caption else [""],
-            [num_frames],
+            seg_prompts,
+            seg_lens,
             num_denoising_steps=DIFFUSION_STEPS,
-            constraint_lst=[constraints],
+            constraint_lst=constraint_arg,
             cfg_weight=[2.0, 2.0],
             num_samples=1,
             return_numpy=True,
-            multi_prompt=False,
+            multi_prompt=is_multi,
             post_processing=False,
         )
     except Exception as e:
-        print(f"    KIMODO inference error: {e}")
+        print(f"    KIMODO inference error: {e}  (seg_lens={seg_lens})")
         return None, {"inference_time": round(time.time() - t0, 2)}, {}
 
     elapsed = time.time() - t0
@@ -1110,6 +1413,20 @@ def main():
     parser.add_argument('--all-tasks', action='store_true')
     parser.add_argument('--settings', nargs='+')
     parser.add_argument('--max-samples', type=int, default=50)
+    # 2026-04-27 (KIMODO_uncond every_10f gap-fill): allow resuming a partial
+    # run by skipping the first ``--start-idx`` samples. The loop still
+    # enumerates 0..max_samples (so prompt indices stay aligned with the
+    # full datalist + the existing NPZ filenames), but only computes /
+    # writes outputs for ``i >= start_idx``. result.json is merged with any
+    # pre-existing one in the same output dir so the final json contains
+    # all per_sample entries (old + newly computed).
+    parser.add_argument('--start-idx', type=int, default=0,
+                        help='Skip prompt indices < start-idx (resume mode). '
+                             'Existing NPZ + result.json entries < start-idx are '
+                             'preserved as-is.')
+    parser.add_argument('--end-idx', type=int, default=None,
+                        help='Stop before this prompt index. Used with '
+                             '--start-idx for parallel sharded evaluation.')
     parser.add_argument('--output-dir', type=str,
                         default='work_dirs/m2m_v2_eval_latest/kimodo')
     parser.add_argument('--device', type=str, default='cuda')
@@ -1120,6 +1437,20 @@ def main():
                              'unconditional (empty-string prompt). Run both '
                              'in separate invocations to produce the two '
                              'KIMODO variants the website expects.')
+    # 2026-04-26: align with eval_m2m_v2_all_tasks.py — when set, prefer
+    # `<base>_rewritten.json` so KIMODO sees the same standardized
+    # ("A person ...", 12-20 word) captions HyMotion is fed. Without this
+    # flag, KIMODO eats the raw `caption_en` field which for E8 v2 contains
+    # 1-2 word stubs ("cleave", "slash") and mixed-language strings — i.e.
+    # KIMODO_caption was effectively running unconditioned.
+    parser.add_argument('--use-rewritten', action='store_true',
+                        help='If set, load the rewritten datalist '
+                             '(eval_e*_rewritten.json) for caption-carrying '
+                             'tasks (caption-aware models only).')
+    parser.add_argument('--data-file-override', type=str, default=None,
+                        help='Override task.data_file for ALL tasks. Used '
+                             'for ablation runs that want to point KIMODO at '
+                             'a custom datalist without editing the registry.')
     args = parser.parse_args()
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -1193,7 +1524,23 @@ def main():
             # overrides the task-level default if present.
             _per_setting_data_file = task.settings[setting_name].mask_kwargs.get(
                 '_data_file', None)
-            _data_file_name = _per_setting_data_file or task.data_file
+            if getattr(args, 'data_file_override', None):
+                _data_file_name = args.data_file_override
+            else:
+                _data_file_name = _per_setting_data_file or task.data_file
+            # 2026-04-26: prefer `<base>_rewritten.json` when --use-rewritten
+            # is set, mirroring eval_m2m_v2_all_tasks.py. Caption-aware
+            # KIMODO runs MUST use the rewritten captions to be a fair
+            # comparison against caption_local_phase2 / caption_global_phase2.
+            if args.use_rewritten and args.use_caption == 'yes':
+                base_no_ext = os.path.splitext(_data_file_name)[0]
+                _rewritten_name = base_no_ext + '_rewritten.json'
+                _rewritten_path = PROJECT_ROOT / "data" / "eval" / "m2m_v2" / _rewritten_name
+                if _rewritten_path.is_file():
+                    _data_file_name = _rewritten_name
+                else:
+                    print(f"  [note] no rewritten datalist for {_data_file_name}, "
+                          f"falling back to raw")
             data_file = str(PROJECT_ROOT / "data" / "eval" / "m2m_v2" / _data_file_name)
             if not os.path.exists(data_file):
                 print(f"  Data file not found: {data_file}")
@@ -1209,8 +1556,30 @@ def main():
             npz_dir = os.path.join(args.output_dir, task_key, 'npz')
             os.makedirs(npz_dir, exist_ok=True)
 
+            # Resume mode: when start_idx > 0 and an existing result.json
+            # exists, load its per_sample list and keep entries with
+            # _sample_idx < start_idx untouched. This way the final json
+            # written below covers the union (old < start_idx) ∪ (newly
+            # generated >= start_idx).
             per_sample = []
+            _existing_result_path = os.path.join(args.output_dir, task_key, 'result.json')
+            if args.start_idx > 0 and os.path.exists(_existing_result_path):
+                try:
+                    with open(_existing_result_path) as _rf:
+                        _existing_data = json.load(_rf)
+                    for _s in _existing_data.get('per_sample', []):
+                        _idx = _s.get('_sample_idx')
+                        if isinstance(_idx, int) and _idx < args.start_idx:
+                            per_sample.append(_s)
+                    print(f"  Resume mode: loaded {len(per_sample)} existing "
+                          f"per_sample entries with _sample_idx < {args.start_idx}")
+                except Exception as _e:
+                    print(f"  Resume warning: failed to load existing result.json: {_e}")
             for i, sample in enumerate(samples):
+                if i < args.start_idx:
+                    continue
+                if args.end_idx is not None and i >= args.end_idx:
+                    continue
                 motion = sample['motion']   # (T, 135) denormalized
                 T = sample['T']
                 caption = sample.get('caption', '')
@@ -1240,13 +1609,63 @@ def main():
                 try:
                     setting_kwargs = task.settings[setting_name].mask_kwargs
 
-                    # ---- E8 loop completion (B/C/D): adjust T for KIMODO ----
+                    # ---- E8 loop completion (D): adjust T for KIMODO ----
                     if task_id == 'E8' and '_loop_append' in setting_kwargs:
-                        N_append = setting_kwargs['_loop_append']
-                        T_total = T + N_append
+                        # 2026-04-26 v2 alignment: mirror the M2M backend's
+                        # E8-D handling (eval_m2m_v2_all_tasks.py around
+                        # line ~1580). We need to (1) resolve N_append the
+                        # same way (auto -> compute_transition_length on
+                        # motion[-1]<->motion[0] using root + joint-pos +
+                        # joint-angle 3-term rule), and (2) clip the GT
+                        # condition to T_gt_eff = T_PAD_MAX - N_append so
+                        # KIMODO solves the same problem M2M does.
+                        N_append_raw = setting_kwargs['_loop_append']
+                        if (isinstance(N_append_raw, str) and
+                                N_append_raw == 'auto') or \
+                           (isinstance(N_append_raw, int) and N_append_raw <= 0):
+                            joints_first = gt_pos[0]   # (22, 3)
+                            joints_last = gt_pos[-1]
+                            N_append = compute_transition_length(
+                                joints_last[0], joints_first[0],
+                                speed_per_frame=float(setting_kwargs.get(
+                                    '_transition_speed', 0.015)),
+                                min_frames=int(setting_kwargs.get(
+                                    '_transition_min', 30)),
+                                max_frames=int(setting_kwargs.get(
+                                    '_transition_max', 150)),
+                                joints_a_end=joints_last,
+                                joints_b_start=joints_first,
+                                pose_speed_per_frame=float(setting_kwargs.get(
+                                    '_pose_speed', 0.015)),
+                                motion_a_end_135=motion[-1],
+                                motion_b_start_135=motion[0],
+                                joint_angle_speed_per_frame=float(setting_kwargs.get(
+                                    '_joint_angle_speed', 0.20)),
+                            )
+                        else:
+                            N_append = int(N_append_raw)
+
+                        # Clip GT-tail condition the same way M2M does.
+                        T_PAD_MAX = 360
+                        T_gt_full = int(soma30_rots.shape[0])
+                        T_gt_eff = max(1, min(T_gt_full,
+                                              T_PAD_MAX - N_append))
+                        soma30_rots_d = soma30_rots[-T_gt_eff:]
+                        soma30_pos_d = soma30_pos[-T_gt_eff:]
+                        loop_target_rots = soma30_rots[:1]
+                        loop_target_pos = soma30_pos[:1]
+                        T_total = T_gt_eff + N_append
+                        print(f"    [E8-D KIMODO] N_append={N_append} "
+                              f"T_gt_full={T_gt_full} T_gt_eff={T_gt_eff} "
+                              f"T_total={T_total}")
                         pred_pos, metrics, soma_data = evaluate_sample(
-                            model, skeleton, soma30_rots, soma30_pos, gt_pos,
+                            model, skeleton, soma30_rots_d, soma30_pos_d,
+                            gt_pos[-T_gt_eff:],
                             caption, T_total, task_id, setting_name, fps_val,
+                            motion_135=motion, bone_offsets=bone_offsets,
+                            canon_anchor_frame=0,
+                            loop_target_rots=loop_target_rots,
+                            loop_target_pos=loop_target_pos,
                         )
 
                     # ---- E14: transition stitching ----
@@ -1300,7 +1719,8 @@ def main():
                         # placement circularity).
                         motion_b_world_overlap = _place_b_custom(
                             motion_a, motion_b, placement='overlap',
-                            N_transition=1, yaw_offset_deg=yaw_offset_deg)
+                            N_transition=1, yaw_offset_deg=yaw_offset_deg,
+                            bone_offsets=bone_offsets)
                         pos_a_full = motion135_to_positions_np(
                             motion_a, bone_offsets)
                         pos_b_overlap_full = motion135_to_positions_np(
@@ -1325,12 +1745,17 @@ def main():
                         )
 
                         # Step 2: place B with the chosen strategy.
+                        # 2026-04-26: pass bone_offsets so _place_b_custom
+                        # can foot-floor align B against A (was floating
+                        # in setting M because B's pelvis Y was preserved
+                        # raw from B's own clip, ignoring A's floor).
                         motion_b_world = _place_b_custom(
                             motion_a, motion_b,
                             placement=placement,
                             N_transition=N_transition,
                             forward_step=forward_step,
-                            yaw_offset_deg=yaw_offset_deg)
+                            yaw_offset_deg=yaw_offset_deg,
+                            bone_offsets=bone_offsets)
 
                         # Step 3: pick N_cond per side. v5 uses adaptive
                         # rule (3-10 frames per side based on quality &
@@ -1365,12 +1790,19 @@ def main():
                         soma30_rots_b, soma30_pos_b = smpl22_to_soma30_retarget(
                             motion_b_world, bone_offsets)
 
-                        # Canonicalize around A's frame 0 so the whole
-                        # (A, B) segment sits in KIMODO's training frame.
-                        # Both A and B must share the same transform to
-                        # preserve their relative world geometry.
+                        # Canonicalize around the FIRST frame of A_tail
+                        # (= the model's output frame 0). Previously this
+                        # used A's frame 0 (pre-tail), which placed A_tail
+                        # at an arbitrary XZ + heading inside the model's
+                        # input window — OOD relative to KIMODO's training
+                        # distribution where every clip starts at (0, *,
+                        # 0) facing +Z.
+                        # 2026-04-26 fix: anchor at soma30_pos_a[-N_cond_a]
+                        # so model frame 0 lives at the canonical origin.
+                        # Both A and B share the same transform to preserve
+                        # their relative world geometry post-canonicalization.
                         R_yaw, t_xz, _ = kimodo_compute_canon_transform(
-                            soma30_pos_a, skeleton)
+                            soma30_pos_a[-N_cond_a:], skeleton)
                         soma30_rots_a, soma30_pos_a = kimodo_apply_canon(
                             soma30_rots_a, soma30_pos_a, R_yaw, t_xz)
                         soma30_rots_b, soma30_pos_b = kimodo_apply_canon(
@@ -1391,7 +1823,158 @@ def main():
                         metrics['n_cond_a'] = N_cond_a
                         metrics['n_cond_b'] = N_cond_b
 
-                    # ---- E15: transition to target first frame ----
+                    # ---- E15: prepend to start pose (2026-04-27 v2) ----
+                    # Mirrors the M2M pipeline's `_use_start_pose` branch
+                    # in tools/eval_m2m_v2_all_tasks.py so KIMODO and
+                    # HyMotion solve the same problem geometry.
+                    elif task_id == 'E15' and '_use_start_pose' in setting_kwargs:
+                        target_path = sample.get('target_motion_path', '')
+                        if target_path and not os.path.isabs(target_path) and \
+                                not os.path.exists(target_path):
+                            target_path = os.path.join(args.motion_data_dir,
+                                                       target_path)
+                        target_motion = load_motion_135d(target_path)
+                        if target_motion is None:
+                            per_sample.append({"_sample_idx": i,
+                                               "_error": "target load failed"})
+                            continue
+
+                        import torch as _torch
+                        from hftrainer.pipelines.motion.transition_utils import (
+                            canonicalize_segment,
+                        )
+                        from tools.eval_m2m_v2_all_tasks import _place_b_custom
+                        from hftrainer.evaluation.motion.m2m_eval_tasks import (
+                            compute_cond_length,
+                        )
+
+                        motion_a_full = motion  # (len_A, 135), world coords
+
+                        # ── Step 1: P = target[0] in canonical (origin) space ──
+                        P_single = target_motion[0:1].copy()
+                        P_canon_t, _Rp, _Op = canonicalize_segment(
+                            _torch.from_numpy(P_single).float(),
+                            anchor_frame=0,
+                            rotation_space='local',
+                        )
+                        P_canon = P_canon_t.numpy()  # (1, 135)
+
+                        # ── Step 2: place A so A[0] sits at P's xz=(0,0) ──
+                        yaw_offset_deg = float(setting_kwargs.get(
+                            '_yaw_offset_deg', 0.0))
+                        motion_a_placed_full = _place_b_custom(
+                            P_canon, motion_a_full,
+                            placement='overlap',
+                            N_transition=1,
+                            yaw_offset_deg=yaw_offset_deg,
+                            y_align='preserve_b',
+                        )
+
+                        # ── Step 3: adaptive N_transition ──
+                        P_joints = motion135_to_positions_np(
+                            P_canon, bone_offsets)[0]              # (22, 3)
+                        A0_joints = motion135_to_positions_np(
+                            motion_a_placed_full[0:1], bone_offsets)[0]
+                        if '_prepend_N' in setting_kwargs:
+                            N_transition = int(setting_kwargs['_prepend_N'])
+                        else:
+                            N_transition = compute_transition_length(
+                                P_joints[0], A0_joints[0],
+                                speed_per_frame=float(setting_kwargs.get(
+                                    '_transition_speed', 0.015)),
+                                min_frames=int(setting_kwargs.get(
+                                    '_transition_min', 15)),
+                                max_frames=int(setting_kwargs.get(
+                                    '_transition_max', 90)),
+                                joints_a_end=P_joints,
+                                joints_b_start=A0_joints,
+                                pose_speed_per_frame=float(setting_kwargs.get(
+                                    '_pose_speed', 0.015)),
+                                motion_a_end_135=P_canon[0],
+                                motion_b_start_135=motion_a_placed_full[0],
+                                joint_angle_speed_per_frame=float(setting_kwargs.get(
+                                    '_joint_angle_speed', 0.20)),
+                            )
+
+                        # ── Step 4: N_cond_A truncation ──
+                        n_cond_a_policy = setting_kwargs.get(
+                            '_n_cond_a_policy', None)
+                        n_cond_a_frames = setting_kwargs.get(
+                            '_n_cond_a_frames', None)
+                        if n_cond_a_policy == 'adaptive':
+                            model_K = compute_cond_length(
+                                motion_a_placed_full,
+                                T_src=int(motion_a_placed_full.shape[0]),
+                                N_transition=N_transition,
+                                side='head',
+                            )
+                        elif n_cond_a_frames is not None:
+                            model_K = int(min(int(n_cond_a_frames),
+                                              motion_a_placed_full.shape[0]))
+                        else:
+                            model_K = int(motion_a_placed_full.shape[0])
+                        motion_a_placed = motion_a_placed_full[:model_K]
+
+                        # 360-frame ceiling guard (same as M2M)
+                        T_total = N_transition + motion_a_placed.shape[0]
+                        MAX_FRAMES = 360
+                        if T_total > MAX_FRAMES:
+                            keep_A = MAX_FRAMES - N_transition
+                            if keep_A <= 1:
+                                per_sample.append({
+                                    "_sample_idx": i,
+                                    "_error": f"E15 N_transition={N_transition} "
+                                              f"leaves no room for A under "
+                                              f"{MAX_FRAMES}-frame window",
+                                })
+                                continue
+                            motion_a_placed = motion_a_placed[:keep_A]
+                            T_total = N_transition + motion_a_placed.shape[0]
+
+                        # ── Step 5: assemble + final canonicalize (near-id) ──
+                        transition_pad = (
+                            np.zeros((N_transition - 1, 135), dtype=np.float32)
+                            if N_transition > 1 else
+                            np.zeros((0, 135), dtype=np.float32))
+                        world_segment = np.concatenate(
+                            [P_canon, transition_pad, motion_a_placed], axis=0)
+                        world_segment_t = _torch.from_numpy(
+                            world_segment).float()
+                        canon_segment_t, _Rc, _Oc = canonicalize_segment(
+                            world_segment_t, anchor_frame=0,
+                            rotation_space='local',
+                        )
+                        canon_segment = canon_segment_t.numpy()
+
+                        # ── Step 6: retarget to SOMA30 ──
+                        # P slice (single frame) and A_placed slice
+                        # (model_K frames after the pad).
+                        canon_P = canon_segment[0:1]
+                        canon_A = canon_segment[N_transition:]
+                        rots_P, pos_P = smpl22_to_soma30_retarget(
+                            canon_P, bone_offsets)
+                        rots_A, pos_A = smpl22_to_soma30_retarget(
+                            canon_A, bone_offsets)
+
+                        # Update gt_pos for metric eval to the canonical
+                        # full segment (so ee/jitter/etc are computed in
+                        # the same frame KIMODO solves in).
+                        gt_pos_canon = motion135_to_positions_np(
+                            canon_segment, bone_offsets)
+
+                        N_cond_tail = int(canon_A.shape[0])
+
+                        constraints = build_constraints_e15_prepend(
+                            skeleton, rots_P, pos_P, rots_A, pos_A,
+                            T_total, N_transition, N_cond_tail, caption)
+
+                        pred_pos, metrics, soma_data = _run_kimodo_with_constraints(
+                            model, skeleton, constraints, caption, T_total,
+                            gt_pos_canon, fps_val)
+                        metrics['transition_length'] = N_transition
+                        metrics['n_cond_a_used'] = N_cond_tail
+
+                    # ---- E15 (legacy): transition to target first frame ----
                     elif task_id == 'E15' and '_use_target_first' in setting_kwargs:
                         N_cond_tail = setting_kwargs.get('_cond_tail_frames', 15)
 
@@ -1460,6 +2043,7 @@ def main():
                         pred_pos, metrics, soma_data = evaluate_sample(
                             model, skeleton, soma30_rots, soma30_pos, gt_pos,
                             caption, T, task_id, setting_name, fps_val,
+                            motion_135=motion, bone_offsets=bone_offsets,
                         )
 
                     # E4 EE-specific metric parity with M2M eval pipeline.
@@ -1525,6 +2109,64 @@ def main():
                         save_fields['posed_joints'] = soma_data['posed_joints']
                     if soma_data.get('global_rot_mats') is not None:
                         save_fields['global_rot_mats'] = soma_data['global_rot_mats']
+
+                    # ── 2026-04-27 viz-bug fix: write layout_json ──────
+                    # The dashboard's stitchSourceMotionsGeneric() needs
+                    # layout.N_cond_a / N_cond_b / N_transition to slice
+                    # the gray prefix/suffix at the correct frames. The
+                    # M2M v2 pipeline already writes this (see
+                    # tools/eval_m2m_v2_all_tasks.py L3261-3293), but
+                    # KIMODO had been silently dropping it — so the
+                    # dashboard fell back to the legacy 5/15/30 estimate
+                    # for KIMODO, which now (post v5 dynamic budgets,
+                    # actual N_cond_a/b ≈ 3-10, N_transition ≈ 30-120)
+                    # cuts the gray context at the WRONG frame and
+                    # produces a visible "jump" between blue
+                    # (network output) and gray (motion B suffix).
+                    # Mirror the M2M v2 layout schema so the dashboard
+                    # treats both models identically.
+                    _layout = None
+                    if task_id == 'E14':
+                        _actual_t = int(
+                            save_fields['posed_joints'].shape[0]
+                            if 'posed_joints' in save_fields else pred_pos.shape[0]
+                        )
+                        _n_cond_b = int(N_cond_b)
+                        _expected_t = int(N_cond_a) + int(N_transition) + _n_cond_b
+                        if _actual_t != _expected_t:
+                            _n_cond_b = max(0, min(_n_cond_b, _actual_t - int(N_cond_a) - int(N_transition)))
+                        _layout = {
+                            'task': 'E14',
+                            'N_cond_a': int(N_cond_a),
+                            'N_transition': int(N_transition),
+                            'N_cond_b': int(_n_cond_b),
+                        }
+                    elif task_id == 'E15':
+                        # Prepend layout: [P(1) | gen(N_trans-1) | A_used]
+                        # N_cond_A = number of A frames fed; len_A_full and
+                        # len_A are equal here because KIMODO doesn't viz
+                        # the full A separately. For dashboard parity with
+                        # M2M v2's _e15_len_A_full / _e15_len_A pair, we
+                        # emit both.
+                        _layout = {
+                            'task': 'E15',
+                            'N_transition': int(N_transition),
+                            'N_cond_A': int(N_cond_tail),
+                            'len_A': int(N_cond_tail),
+                            'len_A_full': int(N_cond_tail),
+                        }
+                    elif task_id == 'E16':
+                        _layout = {
+                            'task': 'E16',
+                            'N_transition': int(N_transition),
+                            'N_cond_head': int(N_cond_head),
+                        }
+                    if _layout is not None:
+                        import json as _json
+                        save_fields['layout_json'] = np.frombuffer(
+                            _json.dumps(_layout).encode('utf-8'),
+                            dtype=np.uint8)
+
                     np.savez_compressed(npz_path, **save_fields)
                     metrics['_npz_path'] = npz_path
 

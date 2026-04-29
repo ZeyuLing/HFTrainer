@@ -388,10 +388,12 @@ def build_task_registry() -> List[TaskRow]:
     rows.append(('E2', 'post20', make_e2_suffix_checker(0.2)))
     rows.append(('E2', 'mid60', make_e2_inbetween_checker(0.2, 0.2)))
 
-    # E3
-    rows.append(('E3', 'A_every30', make_e3_keyframe_checker(30)))
-    rows.append(('E3', 'B_every60', make_e3_keyframe_checker(60)))
-    rows.append(('E3', 'C_every15', make_e3_keyframe_checker(15)))
+    # E3 (eval_dashboard names: every_5f / every_10f / every_15f / every_30f / every_60f)
+    rows.append(('E3', 'every_5f',  make_e3_keyframe_checker(5)))
+    rows.append(('E3', 'every_10f', make_e3_keyframe_checker(10)))
+    rows.append(('E3', 'every_15f', make_e3_keyframe_checker(15)))
+    rows.append(('E3', 'every_30f', make_e3_keyframe_checker(30)))
+    rows.append(('E3', 'every_60f', make_e3_keyframe_checker(60)))
 
     # E4
     rows.append(('E4', 'A_rhand_sparse', make_e4_checker(('r_wrist',), 10)))
@@ -416,9 +418,18 @@ def build_task_registry() -> List[TaskRow]:
     rows.append(('E10', 'B_lower', make_e10_part_rot_checker('lower_body')))
     rows.append(('E10', 'C_spine', make_e10_part_rot_checker('spine_chain')))
 
-    # E13/14/15 — approximate by "multi-interval" pattern; we use E2-ish checkers
-    # as proxies since the real semantics (multi-prompt autoregression, stitching)
-    # are beyond single-mask scope.
+    # E14 — Transition Stitching: prefix-locked A_cond (60f) + suffix-locked
+    # B_cond (60f) + middle is generated. L = postural transition only,
+    # M = locomotion-aware. Both are inbetween-style mask at the **mask
+    # geometry** level. Use ratio = 60/360 ≈ 0.167.
+    rows.append(('E14', 'L_60_60', make_e2_inbetween_checker(60.0/T_DEFAULT, 60.0/T_DEFAULT)))
+    rows.append(('E14', 'L_30_30', make_e2_inbetween_checker(30.0/T_DEFAULT, 30.0/T_DEFAULT)))
+
+    # E15 — Prepend to Start Pose: lock the first ~60 frames (N_cond_A=60),
+    # generate everything after. This is exactly a 60/360 ≈ 16.7% prefix lock.
+    rows.append(('E15', 'prefix_60f', make_e2_prefix_checker(60.0/T_DEFAULT)))
+    rows.append(('E15', 'prefix_30f', make_e2_prefix_checker(30.0/T_DEFAULT)))
+    rows.append(('E15', 'prefix_5f',  make_e2_prefix_checker(5.0/T_DEFAULT)))
     rows.append(('E15', 'prefix_15pct', make_e2_prefix_checker(0.15)))
     rows.append(('E15', 'prefix_30pct', make_e2_prefix_checker(0.30)))
 

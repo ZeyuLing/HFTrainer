@@ -35,7 +35,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -84,29 +84,127 @@ def load_npz_safe(p: str) -> Optional[Dict[str, np.ndarray]]:
         return None
 
 
-def collect_candidates() -> Dict[str, List[Dict]]:
+def _dedup_key(rel_path: str) -> Tuple[str, str]:
+    """Canonical identifier for a motion clip that collapses
+    mirror/non-mirror duplicates of the same source.
+
+    The motionhub data layout exposes most clips twice: once under
+    ``<group>/<dir>/<file>.npz`` (original) and once under
+    ``<group>/M_<dir>/<file>.npz`` (mirrored). The two are kinematically
+    redundant — they mirror around the YZ plane and any defect detected
+    on one nearly always re-appears on the other. Treating them as
+    distinct test cases doubles the eval budget and (worse) lets the
+    same source action appear multiple times in the dashboard.
+
+    Key = (parent_dir_with_M_prefix_stripped, file_stem). Different time
+    crops of the same source (``foo_originalframes_A_B`` vs
+    ``foo_originalframes_C_D``) DO get different stems and stay
+    separate — that is intentional, sequential clips are genuinely
+    different motions.
+    """
+    parts = Path(rel_path).parts
+    if not parts:
+        return ('', '')
+    stem = Path(parts[-1]).stem
+    parent = parts[-2] if len(parts) >= 2 else ''
+    parent_norm = parent[2:] if parent.startswith('M_') else parent
+    # Include the higher-level group too so e.g. Game/Walk and Taobao/Walk
+    # are not collapsed (paths only collide accidentally if the relative
+    # group is shared).
+    group = '/'.join(parts[:-2]) if len(parts) > 2 else ''
+    return (f'{group}/{parent_norm}', stem)
+
+
+def _load_excluded_keys(exclude_datalist: Optional[str]) -> Set[Tuple[str, str]]:
+    if not exclude_datalist:
+        return set()
+    p = Path(exclude_datalist)
+    if not p.is_absolute():
+        p = REPO_ROOT / p
+    if not p.exists():
+        raise SystemExit(f'exclude datalist not found: {p}')
+    data = json.load(open(p))
+    items = data.get('data_list') or []
+    out: Set[Tuple[str, str]] = set()
+    for it in items:
+        motion_path = str(it.get('motion_path') or '').strip()
+        if not motion_path:
+            continue
+        rel = motion_path
+        for prefix in ('data/hymotion_data/', 'data/hymotion_data\\'):
+            if rel.startswith(prefix):
+                rel = rel[len(prefix):]
+        if os.path.isabs(rel):
+            try:
+                rel = str(Path(rel).resolve().relative_to(DATA_DIR.resolve()))
+            except Exception:
+                pass
+        out.add(_dedup_key(rel))
+    return out
+
+
+def collect_candidates(excluded_keys: Optional[Set[Tuple[str, str]]] = None) -> Dict[str, List[Dict]]:
     """Group low_quality items by defect type, keep all `failed_checks`
     occurrences (multi-label friendly: a motion failing both jitter and
-    foot_sliding lands in BOTH pools)."""
+    foot_sliding lands in BOTH pools).
+
+    Mirror/non-mirror duplicates (``M_<dir>/<file>.npz`` vs
+    ``<dir>/<file>.npz``) are collapsed up-front: only the variant
+    with the largest ``failed_checks`` count survives — ties broken by
+    lexicographic order so the choice is deterministic.
+    """
     if not LOW_QUALITY_JSON.exists():
         raise SystemExit(f'low_quality.json not found: {LOW_QUALITY_JSON}')
     data = json.load(open(LOW_QUALITY_JSON))
     base_dir = data.get('data_dir', 'data/hymotion_data')
-    out: Dict[str, List[Dict]] = defaultdict(list)
+
+    # Pass 1: collapse mirror duplicates BEFORE expanding by defect type.
+    # Tracking both raw entries lets us keep audit info on which variant
+    # survived and which one was dropped.
+    by_dedup: Dict[Tuple[str, str], Dict] = {}
+    n_collapsed = 0
     for it in data['items']:
         failed = it.get('failed_checks') or []
         if not failed:
             continue
-        full = os.path.join(base_dir, it['path'])
-        for d in failed:
+        rel = it['path']
+        key = _dedup_key(rel)
+        full = os.path.join(base_dir, rel)
+        cand = {
+            'rel_path': rel,
+            'full_path': full,
+            'failed_checks': failed,
+            'borderline_checks': it.get('borderline_checks') or [],
+            'all_checks': it.get('all_checks') or [],
+        }
+        prev = by_dedup.get(key)
+        if prev is None:
+            by_dedup[key] = cand
+            continue
+        # Same canonical motion → keep the variant with more failed_checks
+        # (more conservative w.r.t. coverage), tie-break by path string.
+        prev_score = (len(prev['failed_checks']),
+                      len(prev['borderline_checks']),
+                      prev['rel_path'])
+        cur_score = (len(cand['failed_checks']),
+                     len(cand['borderline_checks']),
+                     cand['rel_path'])
+        if cur_score > prev_score:
+            by_dedup[key] = cand
+        n_collapsed += 1
+    print(f'[dedup] {n_collapsed} mirror/duplicate motion variants collapsed; '
+          f'{len(by_dedup)} unique source clips remain.')
+
+    # Pass 2: expand each unique source clip into one entry per failed
+    # defect type (multi-label fan-out is preserved).
+    excluded_keys = excluded_keys or set()
+    out: Dict[str, List[Dict]] = defaultdict(list)
+    for cand in by_dedup.values():
+        if _dedup_key(cand['rel_path']) in excluded_keys:
+            continue
+        for d in cand['failed_checks']:
             if d in DEFECT_TYPES:
-                out[d].append({
-                    'rel_path': it['path'],
-                    'full_path': full,
-                    'failed_checks': failed,
-                    'borderline_checks': it.get('borderline_checks') or [],
-                    'all_checks': it.get('all_checks') or [],
-                })
+                out[d].append(cand)
     return dict(out)
 
 
@@ -188,9 +286,25 @@ def stratified_pick(
     checker_full = MotionQualityChecker(device=device)
     print('[init] checker ready, starting per-type evaluation...')
 
+    # Cross-defect dedup: a motion could be a top-coverage candidate for
+    # `joint_twist` AND for `ankle_x` (the failed_checks list contains
+    # both). Without this guard the same canonical clip would land in
+    # multiple defect_type buckets, re-introducing the very duplication
+    # the source-level dedup already removed.
+    seen_keys: set = set()
     selected: List[Dict] = []
     stats: Dict[str, Dict] = {}
-    for defect_type in DEFECT_TYPES:
+    # Process types in ascending pool-size order so rare defects (e.g.
+    # spine/knee_x with only 30-ish candidates) get first pick before
+    # the cross-defect dedup pass strips them out. Without this the
+    # alphabetical default starves rare defect types because their
+    # candidates are usually flagged by 3-5 defects at once and earlier
+    # types claim them first.
+    type_order = sorted(
+        DEFECT_TYPES,
+        key=lambda t: len(by_defect.get(t) or []),
+    )
+    for defect_type in type_order:
         pool = by_defect.get(defect_type) or []
         # Prior ranking: more failed checks = stronger anomaly. Tiebreak
         # by len(borderline_checks) so cases with extra warnings rise.
@@ -198,8 +312,20 @@ def stratified_pick(
             pool,
             key=lambda x: (-len(x['failed_checks']), -len(x['borderline_checks'])),
         )
-        # Trim to the cap to bound the QC work.
-        head = pool_sorted[:candidate_cap]
+        # Adaptive cap: types processed late in `type_order` lose ~80-90 %
+        # of their candidates to cross-defect dedup, so they need a much
+        # bigger head to still reach `target_per_type`. The first ~half
+        # of types get the base cap; the rest scale up to 5× to give
+        # joint_jump / foot_sliding / candy_wrapper a fighting chance.
+        # A defect with a tiny global pool (e.g. knee_x with ~31 unique
+        # clips in the whole DB) is naturally limited and is intentionally
+        # left under target.
+        idx_in_order = type_order.index(defect_type)
+        if idx_in_order >= len(type_order) // 2:
+            adaptive_cap = candidate_cap * 5
+        else:
+            adaptive_cap = candidate_cap
+        head = pool_sorted[:adaptive_cap]
         evaluated: List[Tuple[Dict, Dict]] = []
         n_skipped = 0
         for ci, cand in enumerate(head):
@@ -223,11 +349,26 @@ def stratified_pick(
         evaluated.sort(
             key=lambda x: (-x[1]['mask_coverage'], -x[1]['mask_frames']),
         )
-        keep = evaluated[:target_per_type]
+        # Cross-defect dedup: walk in coverage order and skip any clip
+        # whose canonical key has already been claimed by an earlier
+        # defect type. Earlier defects in DEFECT_TYPES list win — order
+        # is the alphabetical default, which is stable and reproducible.
+        keep: List[Tuple[Dict, Dict]] = []
+        n_dup = 0
+        for cand, metrics in evaluated:
+            key = _dedup_key(cand['rel_path'])
+            if key in seen_keys:
+                n_dup += 1
+                continue
+            keep.append((cand, metrics))
+            seen_keys.add(key)
+            if len(keep) >= target_per_type:
+                break
         stats[defect_type] = {
             'pool_total': len(pool),
             'pool_after_prior': len(head),
             'qualified': len(evaluated),
+            'cross_defect_dup_skipped': n_dup,
             'kept': len(keep),
         }
         for cand, metrics in keep:
@@ -260,8 +401,12 @@ def main():
                     help='Target cases kept per defect type. '
                     'User contract is >=20; we keep an extra cushion '
                     'for manual deletion.')
-    ap.add_argument('--candidate-cap', type=int, default=60,
-                    help='Max # candidates per type to evaluate with QC.')
+    ap.add_argument('--candidate-cap', type=int, default=120,
+                    help='Max # candidates per type to evaluate with QC. '
+                    'Bumped from 60 to 120 (2026-04-27) so that even '
+                    'after mirror-pair + cross-defect dedup we still '
+                    'have enough qualified items to fill target_per_type '
+                    'for each defect_type.')
     ap.add_argument('--min-frames', type=int, default=60)
     ap.add_argument('--max-frames', type=int, default=300)
     ap.add_argument('--min-mask-frames', type=int, default=2,
@@ -269,9 +414,20 @@ def main():
                          'this — too ambiguous to be a "real defect".')
     ap.add_argument('--device', default='cuda')
     ap.add_argument('--out', default='data/eval/m2m_v2/eval_e9_repair_v2.json')
+    ap.add_argument(
+        '--exclude-datalist',
+        default='',
+        help='Optional existing eval datalist whose motions should be excluded '
+             'from the new selection (dedup-aware).',
+    )
     args = ap.parse_args()
 
-    by_defect = collect_candidates()
+    excluded_keys = _load_excluded_keys(args.exclude_datalist)
+    if excluded_keys:
+        print(f'[exclude] loaded {len(excluded_keys)} prior motion keys from '
+              f'{args.exclude_datalist}')
+
+    by_defect = collect_candidates(excluded_keys)
     pool_summary = {k: len(v) for k, v in by_defect.items()}
     print('[stats] candidate pool by defect type:')
     for k in DEFECT_TYPES:
@@ -312,6 +468,8 @@ def main():
             'min_mask_frames': args.min_mask_frames,
             'target_per_type': args.target_per_type,
             'candidate_cap': args.candidate_cap,
+            'excluded_prior_items': len(excluded_keys),
+            'excluded_prior_datalist': args.exclude_datalist or None,
             'pool_summary': pool_summary,
             'selection_stats': stats,
         },

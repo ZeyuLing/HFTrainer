@@ -246,6 +246,20 @@ def _estimate_a_end_velocity(motion_a: np.ndarray, window: int = 5) -> np.ndarra
     return vel.astype(np.float32)
 
 
+_PLACE_B_FOOT_JOINTS = (7, 8, 10, 11)  # SMPL-22: ankles + feet
+_PLACE_B_FLOOR_WIN = 5                 # frames averaged for floor estimation
+
+
+def _foot_floor_y(pos: np.ndarray, side: str = 'tail',
+                  win: int = _PLACE_B_FLOOR_WIN) -> float:
+    """Return min foot Y over a `win`-frame window at `side` of (T, 22, 3)."""
+    feet = list(_PLACE_B_FOOT_JOINTS)
+    n = min(win, pos.shape[0])
+    if side == 'head':
+        return float(pos[:n, feet, 1].min())
+    return float(pos[-n:, feet, 1].min())
+
+
 def _place_b_custom(
     motion_a: np.ndarray,
     motion_b: np.ndarray,
@@ -254,6 +268,8 @@ def _place_b_custom(
     forward_step: float = 1.0,
     yaw_offset_deg: float = 0.0,
     rotation_space: str = "local",
+    bone_offsets: Optional[np.ndarray] = None,
+    y_align: str = "floor",
 ) -> np.ndarray:
     """Place motion B in world using one of three strategies.
 
@@ -263,9 +279,20 @@ def _place_b_custom(
                    (i.e. "if A kept moving at its current speed for
                     N_transition frames, B should land where A would be")
 
-    In all cases B's yaw is aligned to A's end yaw (+ yaw_offset_deg) and
-    B's y (pelvis height) is preserved to avoid floating/ground-penetration
-    when stitching across different postures (stand/sit/crouch).
+    Y-alignment between A and B (2026-04-26, ``y_align`` parameter):
+
+      * ``'foot'`` / ``'floor'``  → align B so its first-frame **lowest
+        foot joint Y** matches A's last-frame lowest foot joint Y. This
+        is the floor-plane match: stand-on-stand, crouch-on-crouch,
+        sit-on-sit all stay grounded regardless of the absolute pelvis
+        height baseline of either clip. **Default.**
+      * ``'pelvis'``              → match A_end pelvis Y to B_start
+        pelvis Y. Cleaner for locomotion (similar postures), but
+        teleports the foot through the floor when A and B differ in
+        posture.
+      * ``'preserve_b'``          → legacy behaviour (≤ 2026-04-26):
+        keep B's own pelvis Y. Causes visible floating in M-setting on
+        clips with mismatched floor baselines.
 
     Args:
         motion_a: (T_a, 135) world-coords motion A.
@@ -283,6 +310,10 @@ def _place_b_custom(
             would incorrectly yaw-rotate body joints that are still local,
             which then gets compounded by `local_to_global_rot6d_torch`
             and completely destroys the pose.
+        bone_offsets: (22, 3) SMPL-22 bone offsets, REQUIRED for
+            ``y_align='foot'``. When ``None`` we silently fall back to
+            ``y_align='preserve_b'`` (legacy).
+        y_align: 'foot' (default) | 'pelvis' | 'preserve_b'. See above.
 
     Returns:
         (T_b, 135) motion B placed in world coords.
@@ -326,21 +357,42 @@ def _place_b_custom(
         ])
         target_b0_xz = a_end_pos + forward_step * forward_dir
 
-    # Preserve B's own pelvis height (y). Force XZ = target_b0_xz.
+    # ── Preliminary B placement: only pelvis XZ is fixed, Y still B's own.
+    # We need this intermediate motion to do the foot-floor / pelvis Y
+    # alignment in world coords AFTER the yaw rotation has been applied
+    # (since the post-rotation foot heights reflect what the renderer /
+    # network actually sees).
     b0_pos = motion_b_t[0, 0:3]
-    target_b0 = _torch.stack([target_b0_xz[0], b0_pos[1], target_b0_xz[2]])
+    target_b0_xy0 = _torch.stack([target_b0_xz[0], b0_pos[1], target_b0_xz[2]])
+    offset_xy0 = target_b0_xy0 - _torch.einsum('ij,j->i', R_B, b0_pos)
+    motion_b_xy0 = apply_rigid_transform_to_motion(
+        motion_b_t, R_B, offset_xy0, rotation_space='local')
 
-    # offset: R_B @ motion_b[0] + offset = target_b0
-    offset = target_b0 - _torch.einsum('ij,j->i', R_B, b0_pos)
+    # ── Y alignment ──────────────────────────────────────────────────
+    if y_align in ('foot', 'floor') and bone_offsets is not None:
+        try:
+            from hftrainer.evaluation.motion.m2m_eval_metrics import (
+                motion135_to_positions_np as _m2p_np,
+            )
+            mb_xy0_np = motion_b_xy0.numpy()
+            pos_a = _m2p_np(motion_a, bone_offsets)
+            pos_b = _m2p_np(mb_xy0_np, bone_offsets)
+            a_floor = _foot_floor_y(pos_a, side='tail')
+            b_floor = _foot_floor_y(pos_b, side='head')
+            delta_y = a_floor - b_floor
+        except Exception:
+            delta_y = 0.0
+    elif y_align == 'pelvis':
+        delta_y = float((a_end_pos[1] - b0_pos[1]).item())
+    else:  # 'preserve_b' or fallback when bone_offsets missing
+        delta_y = 0.0
 
-    # ROTATION SPACE: motion_a/b come from the raw NPZ and are ALWAYS stored
-    # as local rot6d (parent-relative). The local→global conversion only
-    # happens later, just before feeding the model. So here we must rotate
-    # the motion as LOCAL, i.e. body joints stay put and only pelvis/root
-    # is yaw-rotated — regardless of the model's native rotation space.
-    motion_b_world = apply_rigid_transform_to_motion(
-        motion_b_t, R_B, offset, rotation_space='local')
-    return motion_b_world.numpy()
+    if abs(delta_y) > 1e-5:
+        motion_b_world = motion_b_xy0.clone()
+        motion_b_world[:, 1] = motion_b_world[:, 1] + delta_y
+        return motion_b_world.numpy()
+
+    return motion_b_xy0.numpy()
 
 
 def _load_adaptive_mask_for_motion(
@@ -847,29 +899,45 @@ def _compute_qc_defect_mask(
         'translation_velocity',
         'rotation_velocity',     # often spikes on root
     }
+    # 2026-04-27: anatomical defects whose geometric trigger is intermittent
+    # but whose underlying joint configuration is wrong on every frame. When
+    # any of these fail we OR the full kinematic chain across all T frames,
+    # not just the per-frame invalid_mask. This was driven by case 00181
+    # (arm_penetration): the shoulder root was misposed throughout, but the
+    # line-segment distance only crossed threshold on ~30% of frames.
+    _GLOBAL_TAINT_CHAIN_PER_CHECKER = {
+        # arm_penetration → bilateral shoulder chain (collar→shoulder→
+        # elbow→wrist) on ALL frames. Includes pelvis-spine-neck because
+        # arm-torso interactions implicate spine/torso pose too.
+        'arm_penetration': [3, 6, 9, 12, 13, 14, 16, 17, 18, 19, 20, 21],
+    }
     pelvis_globally_tainted = False
+    global_taint_joints: set = set()
     for name in failed_names:
         res = r.all_results.get(name, {})
         im = res.get('invalid_mask', None)
         if im is None:
-            # No per-frame-per-joint mask — broadcast to ALL frames +
-            # ALL joints.  This is a conservative fallback that catches
-            # global/anatomical defects (neck, ankle_x, spine) whose
-            # checker only reports a boolean verdict without mask.
             defect_joints[:, :] = True
             continue
         im_arr = np.asarray(im)
         if im_arr.ndim != 2 or im_arr.shape[0] == 0:
             defect_joints[:, :] = True
             continue
-        # Some checkers return (T-1, 22) or (T-K, 22). Pad or crop to T.
         tcap = min(T, im_arr.shape[0])
         defect_joints[:tcap] |= im_arr[:tcap, :22].astype(bool)
         if name in _ROOT_TAINT_CHECKERS:
             pelvis_globally_tainted = True
+        if name in _GLOBAL_TAINT_CHAIN_PER_CHECKER:
+            global_taint_joints.update(_GLOBAL_TAINT_CHAIN_PER_CHECKER[name])
 
     if pelvis_globally_tainted:
         defect_joints[:, 0] = True
+    if global_taint_joints:
+        # OR full-frame coverage for the kinematic chain implicated by
+        # checkers like arm_penetration (every frame's shoulder is wrong
+        # even when only a subset of frames triggers the geometric test).
+        for j in global_taint_joints:
+            defect_joints[:, j] = True
 
     # Spatial dilation: SMPL22 kinematic neighbors
     if dilate_spatial:
@@ -906,8 +974,27 @@ def _compute_qc_defect_mask(
 # Data loading
 # ============================================================================
 
-def load_motion_135d(npz_path: str) -> Optional[np.ndarray]:
-    """Load npz -> 135-dim motion (abs transl + rot6d)."""
+def load_motion_135d(
+    npz_path: str,
+    bone_offsets: Optional[np.ndarray] = None,
+    canonical: bool = True,
+) -> Optional[np.ndarray]:
+    """Load npz -> 135-dim motion (abs transl + rot6d).
+
+    Args:
+        npz_path: path to a SMPL-X NPZ file with ``trans``/``poses`` keys.
+        bone_offsets: optional (22, 3) SMPL-22 bone offsets used by FK to
+            ground-anchor the motion. Required when ``canonical=True``.
+        canonical: if True (default) and ``bone_offsets`` is provided, run
+            :func:`canonicalize_motion_135d_np` to enforce the training-data
+            input distribution (frame-0 ``tx=tz=0`` + all-frame
+            ``y_min=0``). Audited 2026-04-27 as the actual training
+            distribution; the default test set floats ~14.6cm above ground
+            without this step (~4σ OOD vs training).
+
+    Returns:
+        (T, 135) motion array, or None on load failure.
+    """
     try:
         from hftrainer.datasets.motion.motionhub.transforms.load_smplx import (
             process_transl, process_smplx_pose,
@@ -919,9 +1006,16 @@ def load_motion_135d(npz_path: str) -> Optional[np.ndarray]:
         poses = data[poses_key].astype(np.float32)
         transl = process_transl(abs_trans, 'abs')
         pose = process_smplx_pose(poses, 'rotation_6d', 'smpl_22')
-        motion = np.concatenate([transl, pose], axis=-1)
-        return motion.astype(np.float32)
-    except Exception as e:
+        motion = np.concatenate([transl, pose], axis=-1).astype(np.float32)
+
+        if canonical and bone_offsets is not None and motion.shape[0] > 0:
+            from hftrainer.evaluation.motion.m2m_eval_metrics import (
+                canonicalize_motion_135d_np,
+            )
+            motion = canonicalize_motion_135d_np(motion, bone_offsets)
+
+        return motion
+    except Exception:
         return None
 
 
@@ -1052,7 +1146,7 @@ def load_eval_samples(
         if not os.path.exists(full_path):
             continue
 
-        motion = load_motion_135d(full_path)
+        motion = load_motion_135d(full_path, bone_offsets=bone_offsets)
         if motion is None or motion.shape[0] < min_frames:
             continue
 
@@ -1116,6 +1210,32 @@ def load_eval_samples(
                 s['_caption_pool'] = caption_pool
                 s['_length_pool'] = length_pool
                 s['_caption_base_idx'] = k % len(caption_pool)
+
+    if samples and bone_offsets is not None:
+        from hftrainer.evaluation.motion.m2m_eval_metrics import (
+            motion135_to_positions_np,
+        )
+        tx0_list, tz0_list, ymin_list = [], [], []
+        for s in samples[: min(50, len(samples))]:
+            m = s.get('motion')
+            if m is None or m.shape[0] == 0:
+                continue
+            try:
+                pos = motion135_to_positions_np(m, bone_offsets)
+                tx0_list.append(float(m[0, 0]))
+                tz0_list.append(float(m[0, 2]))
+                ymin_list.append(float(pos[..., 1].min()))
+            except Exception:
+                continue
+        if tx0_list:
+            tx_arr = np.array(tx0_list); tz_arr = np.array(tz0_list); y_arr = np.array(ymin_list)
+            print(
+                f'  [canonical-check] task={task_id} n={len(tx_arr)} '
+                f'tx0=[{tx_arr.mean():+.4f}±{tx_arr.std():.4f}] '
+                f'tz0=[{tz_arr.mean():+.4f}±{tz_arr.std():.4f}] '
+                f'y_min=[{y_arr.mean():+.4f}±{y_arr.std():.4f}] '
+                f'(target: ~0,0,0)'
+            )
 
     return samples
 
@@ -1567,10 +1687,11 @@ def evaluate_sample(
         #   (i)   Clip condition to at most (360 - N_append) frames from GT
         #         tail. Dropped GT prefix surfaces later as a gray context
         #         on the dashboard (see /api/source_motions/E8).
-        #   (ii)  Canonicalize the built segment with anchor = last GT frame
-        #         (so the GT→transition boundary has pelvis at origin,
-        #         heading +Z — the exact distribution the model was trained
-        #         to continue from).
+        #   (ii)  Canonicalize the built segment using the NETWORK INPUT's
+        #         frame 0 as anchor. This matches the training distribution:
+        #         every clip fed to the model starts at origin facing +Z,
+        #         regardless of where that frame came from in the original
+        #         source motion.
         #   (iii) Leave the target anchor as GT[0] in world coords; after
         #         canonicalization it sits wherever the loop has to close
         #         to. The model generates ``N_append`` frames to reach it.
@@ -1657,16 +1778,16 @@ def evaluate_sample(
             [gt_tail_135, pad_frames_135, first_frame_135], axis=0)
         T_total = segment_world.shape[0]            # = T_gt_eff + N_append
 
-        # Canonicalize with anchor = last GT frame (index T_gt_eff - 1).
-        # This makes the condition→transition handoff happen at origin with
-        # heading +Z, matching the v2 training distribution.
+        # Canonicalize with anchor = network-input frame 0 (the start of the
+        # fed GT tail). The canonical frame should depend only on what is sent
+        # into the network, not on this segment's index in the original motion.
         import torch as _torch
         from hftrainer.pipelines.motion.transition_utils import (
             canonicalize_segment,
         )
         segment_world_t = _torch.from_numpy(segment_world).float()
         canon_segment_t, R_canon, offset_canon = canonicalize_segment(
-            segment_world_t, anchor_frame=T_gt_eff - 1)
+            segment_world_t, anchor_frame=0)
         motion_135 = canon_segment_t.numpy()
         T = T_total
         gt_motion_135 = motion_135                  # looped-anchor GT in canon
@@ -1755,8 +1876,8 @@ def evaluate_sample(
         motion_a_path = _resolve_motion_path(motion_a_path)
         motion_b_path = _resolve_motion_path(motion_b_path)
 
-        motion_a = load_motion_135d(motion_a_path)
-        motion_b = load_motion_135d(motion_b_path)
+        motion_a = load_motion_135d(motion_a_path, bone_offsets=bone_offsets)
+        motion_b = load_motion_135d(motion_b_path, bone_offsets=bone_offsets)
         if motion_a is None or motion_b is None:
             return {}, None
 
@@ -1795,7 +1916,8 @@ def evaluate_sample(
         # (B_xz = A_end_xz), then re-placing with 'velocity' if needed.
         motion_b_world_overlap = _place_b_custom(
             motion_a, motion_b, placement='overlap',
-            N_transition=1, yaw_offset_deg=yaw_offset_deg)
+            N_transition=1, yaw_offset_deg=yaw_offset_deg,
+            bone_offsets=bone_offsets)
 
         from hftrainer.evaluation.motion.m2m_eval_metrics import motion135_to_positions_np
         pos_a = motion135_to_positions_np(motion_a, bone_offsets)
@@ -1827,7 +1949,8 @@ def evaluate_sample(
             motion_a, motion_b, placement=placement,
             N_transition=N_transition,
             forward_step=forward_step,
-            yaw_offset_deg=yaw_offset_deg)
+            yaw_offset_deg=yaw_offset_deg,
+            bone_offsets=bone_offsets)
         pos_b_world = motion135_to_positions_np(motion_b_world_np, bone_offsets)
         pos_b_start = pos_b_world[0, 0]
 
@@ -1924,14 +2047,19 @@ def evaluate_sample(
         world_segment = np.concatenate([a_tail, transition_pad, b_head], axis=0)
         T = world_segment.shape[0]
 
-        # Step 2: canonicalize so the LAST frame of A_tail (= the frame
-        # right before the transition region starts) sits at origin facing
-        # +Z. This matches training data: stitched clips were canonicalized
-        # so that the transition boundary lives at the origin. When N_cond_a
-        # is large (balanced / max), anchoring at A_tail[0] shifted the
-        # transition boundary far from origin and caused the model to emit
-        # huge discontinuities at frame N_cond_a → N_cond_a+1.
-        anchor_idx = N_cond_a - 1  # last condition frame before transition
+        # Step 2 (2026-04-26): canonicalize so the FIRST frame of the
+        # network input (= A_tail[0]) sits at origin facing +Z. This
+        # exactly matches the training distribution where every clip is
+        # canonicalized at frame 0. The previous "boundary anchor" (last
+        # frame of A_tail at origin) put A_tail[0..N_cond_a-2] in the
+        # -Z half-plane, which is OOD: the v3 mask sampler trains on
+        # clips where every conditioned frame sits in +Z. Empirically
+        # this caused the cond→gen boundary to receive less attention
+        # than expected because the model "saw" a partially-rotated
+        # input. Anchoring at frame 0 instead of N_cond_a-1 brings the
+        # eval segment into the same canonical pose distribution as
+        # training.
+        anchor_idx = 0
         world_segment_t = _torch.from_numpy(world_segment).float()
         # ROTATION SPACE: world_segment is built from raw NPZ 135-d tensors,
         # i.e. LOCAL rot6d (parent-relative). local→global conversion happens
@@ -2052,6 +2180,9 @@ def evaluate_sample(
             placement='overlap',
             N_transition=1,  # unused by overlap
             yaw_offset_deg=yaw_offset_deg,
+            # E15 explicitly wants P.Y ≠ A[0].Y (T-pose vs crouch). Skip
+            # foot-floor alignment here so the postural Y-gap is preserved.
+            y_align='preserve_b',
         )
 
         # ── Step 3: adaptive N_transition (root dist + pose diff) ───────
@@ -2337,10 +2468,10 @@ def evaluate_sample(
     # ---- Standard mask building ----
     else:
         D = motion_dim
-        if task.task_id == 'E3' and setting_name == 'D':
-            # E3-D: SPARSE adaptive keyframe — keep only the strongest
-            # acceleration peaks, no uniform filler. Approximately 1
-            # keyframe per second of motion at 30 fps.
+        if task.task_id == 'E3' and setting_name in ('adaptive', 'D'):
+            # E3 'adaptive' (legacy alias 'D'): SPARSE adaptive keyframe —
+            # keep only the strongest acceleration peaks, no uniform filler.
+            # Approximately 1 keyframe per second of motion at 30 fps.
             keyframe_indices = detect_keyframes_from_motion(
                 motion_135, bone_offsets,
                 sparse=True,
@@ -2372,13 +2503,12 @@ def evaluate_sample(
                 sample_mp, T, D=motion_dim,
             )
             if adaptive is None:
-                # No cached adaptive mask — fall back to full mask so eval
-                # never silently diverges from expected behavior.
-                print(f'    [warn] No adaptive mask cached for '
-                      f'{sample_mp[-60:]}, using full mask')
-                mask = np.ones((T, motion_dim), dtype=np.float32)
-            else:
-                mask = adaptive
+                raise FileNotFoundError(
+                    'No adaptive mask cached for E9 adaptive setting: '
+                    f'{sample_mp}. Run scripts/compute_adaptive_masks_for_eval.py '
+                    'with the same eval datalist before inference.'
+                )
+            mask = adaptive
         elif task.task_id == 'E9' and setting_kwargs.get('_qc_defect_mask'):
             # D_qc_mask_*: run the motion Quality Checker on the LQ motion
             # itself, OR all failing checkers' invalid_masks into a
@@ -2452,16 +2582,17 @@ def evaluate_sample(
                 sample_mp, T, D=motion_dim, temporal_dilate=0,
             )
             if adaptive_raw is None:
-                print(f'    [warn] No adaptive mask cached for '
-                      f'{sample_mp[-60:]}, using full mask')
-                mask = np.ones((T, motion_dim), dtype=np.float32)
-            else:
-                mask = _compute_strict_adaptive_mask(
-                    adaptive_raw,
-                    dilate=int(setting_kwargs.get('_strict_dilate', 2)),
-                    min_blob=int(setting_kwargs.get('_strict_min_blob', 3)),
-                    motion_dim=motion_dim,
+                raise FileNotFoundError(
+                    'No adaptive mask cached for E9 strict adaptive setting: '
+                    f'{sample_mp}. Run scripts/compute_adaptive_masks_for_eval.py '
+                    'with the same eval datalist before inference.'
                 )
+            mask = _compute_strict_adaptive_mask(
+                adaptive_raw,
+                dilate=int(setting_kwargs.get('_strict_dilate', 2)),
+                min_blob=int(setting_kwargs.get('_strict_min_blob', 3)),
+                motion_dim=motion_dim,
+            )
         elif task.task_id == 'E9' and setting_kwargs.get('_ada_denoise'):
             # D_ada_denoise_*: two-stage MoGenDIT ada_denoise.
             # Stage 1 needs mask=all-1 (full regeneration) — build that
@@ -2514,26 +2645,28 @@ def evaluate_sample(
     T_PAD = 360
     if T < T_PAD:
         pad_len = T_PAD - T
-        # Training uses `RandomCropPadding(pad_mode='replicate')` — right-
-        # pad by repeating the last frame. Inference had been using
-        # constant=0 padding, which is train/infer OOD and was causing E5
-        # (among others) to FREEZE in the second half of motions with
-        # T<360 — the zero-valued pelvis condition past frame T told the
-        # model "pelvis must be at origin and static"; that signal
-        # propagated back through the bi-directional attention and killed
-        # pose dynamics well before the real end of the clip.
+        # ── train/infer parity (2026-04-26 fix) ─────────────────────────
+        # Although the dataset transform is `RandomCropPadding(pad_mode=
+        # 'replicate')`, the *trainer* unconditionally OVERWRITES the pad
+        # region with zeros AFTER normalization (see
+        # `HyMotionM2MTrainer._prepare_and_forward`, L116-121):
         #
-        # Replicate-pad manually because torch.nn.functional.pad only
-        # accepts 'replicate' for >=4D / convolution-style tensors (ours
-        # is (B, T, D)).
-        last_frame = motion_norm[:, -1:, :]                     # (B, 1, D)
-        motion_norm = torch.cat(
-            [motion_norm, last_frame.expand(-1, pad_len, -1).contiguous()],
-            dim=1)
-        # For the mask we keep the existing convention (pad frames are
-        # treated as condition → mask=0). With replicate motion + mask=0
-        # on pad, the model receives "hold the last-frame pose" which is
-        # exactly what training saw.
+        #     if src_len < L_src:
+        #         src_motion[i, src_len:] = 0.0
+        #         src_mask[i, src_len:]   = 0.0
+        #
+        # i.e. the value the model actually sees in the pad region is
+        # `0` in normalized space, which equals the unnormalized MEAN
+        # POSE — *not* the replicated last frame. So inference must
+        # match: zero-pad both motion and mask in normalized space.
+        #
+        # In practice the difference is tiny because the attention mask
+        # is hard `-inf` (see hymotion_mmdit._canonical_mask), so pad
+        # tokens are completely invisible to valid tokens. But matching
+        # training distribution exactly is cheap and removes one OOD
+        # variable when debugging boundary artifacts.
+        motion_norm = torch.nn.functional.pad(
+            motion_norm, (0, 0, 0, pad_len), mode='constant', value=0.0)
         src_mask = torch.nn.functional.pad(
             src_mask, (0, 0, 0, pad_len), mode='constant', value=0.0)
 
@@ -3483,6 +3616,12 @@ def main():
     parser.add_argument('--save-npz', action='store_true',
                         help='Save output NPZ files for visualization')
     parser.add_argument('--motion-data-dir', type=str, default=MOTION_DATA_DIR)
+    parser.add_argument('--data-file-override', type=str, default=None,
+                        help='If set, replaces task.data_file for ALL tasks '
+                             'with this filename (still resolved under '
+                             'EVAL_DATA_DIR / EVAL_DATA_DIR_LEGACY). Used '
+                             'for ablation runs where you want to point eval '
+                             'at a custom datalist without editing m2m_eval_tasks.py.')
     parser.add_argument('--use-rewritten', action='store_true',
                         help='Prefer the rewritten datalist variant '
                              '(eval_e*_rewritten.json) for caption-carrying '
@@ -3621,7 +3760,9 @@ def main():
                 #   4. {EVAL_DATA_DIR_LEGACY}/{data_file}
                 _setting_obj = task.settings[setting_name]
                 _per_setting_df = _setting_obj.mask_kwargs.get('_data_file')
-                if _per_setting_df:
+                if args.data_file_override:
+                    effective_data_file = args.data_file_override
+                elif _per_setting_df:
                     effective_data_file = _per_setting_df
                 else:
                     effective_data_file = task.data_file
