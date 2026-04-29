@@ -79,6 +79,8 @@ ref_repo/**/*.zip
 ref_repo/**/*.rar
 ref_repo/**/*.7z
 ref_repo/**/*.tar
+ref_repo/**/*.tar.xz
+ref_repo/**/*.xz
 ref_repo/**/*.tgz
 ref_repo/**/*.tar.gz
 # 模型与数值大文件（根级已有 *.pt / *.bin / *.safetensors；ref 里常见扩展再显式列一次）
