@@ -18,3 +18,63 @@ tools/taiji_dist_train.sh
 thesis/
 ref_paper/
 .claude/skills/taiji/.token
+
+# ---------------------------------------------------------------------------
+# ref_repo：外部 baseline / 对照仓库的镜像。纳入版本控制时只保留源码与说明文档，
+# 通过忽略权重、压缩包、训练与推理产物控制体积（clone 后大文件请走网盘 / 环境变量路径）。
+# ---------------------------------------------------------------------------
+ref_repo/**/__pycache__/
+ref_repo/**/*.py[cod]
+ref_repo/**/.eggs/
+ref_repo/**/build/
+ref_repo/**/dist/
+ref_repo/**/.mypy_cache/
+ref_repo/**/wandb/
+ref_repo/**/mlruns/
+ref_repo/**/outputs/
+ref_repo/**/output/
+ref_repo/**/runs/
+ref_repo/**/logs/
+ref_repo/**/log/
+ref_repo/**/results/
+ref_repo/**/tmp/
+ref_repo/**/temp/
+ref_repo/**/.cache/
+ref_repo/**/cache/
+ref_repo/**/checkpoints/
+ref_repo/**/checkpoint*/
+ref_repo/**/ckpt/
+ref_repo/**/ckpts/
+ref_repo/**/save/
+ref_repo/**/saved/
+ref_repo/**/pretrained/
+ref_repo/**/weights/
+# 数据与中间件（各子项目若需小样本，用 ! 规则白名单，或放 data/ 外单独说明）
+ref_repo/**/data/
+ref_repo/**/datasets/
+ref_repo/**/body_models/
+ref_repo/**/smpl/
+ref_repo/**/SMPL*/
+# 压缩与镜像
+ref_repo/**/*.zip
+ref_repo/**/*.rar
+ref_repo/**/*.7z
+ref_repo/**/*.tar
+ref_repo/**/*.tgz
+ref_repo/**/*.tar.gz
+# 模型与数值大文件（根级已有 *.pt / *.bin / *.safetensors；ref 里常见扩展再显式列一次）
+ref_repo/**/*.pth
+ref_repo/**/*.ckpt
+ref_repo/**/*.pkl
+ref_repo/**/*.onnx
+ref_repo/**/*.index
+ref_repo/**/*.npz
+ref_repo/**/*.npy
+ref_repo/**/*.h5
+ref_repo/**/*.hdf5
+ref_repo/**/node_modules/
+ref_repo/**/.pytest_cache/
+# 子仓 .git 若用「整目录 add」方式合并，可删子目录 .git 后提交；若暂保留子仓，不要 track 其 .git 对象
+ref_repo/**/.git/
+# 基准代码旁的 CLAUDE 说明仍希望随 ref_repo 一并入库（需写在全局 CLAUDE.md 规则之后）
+!ref_repo/**/CLAUDE.md
