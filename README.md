@@ -1,243 +1,190 @@
 <div align="center">
 
-<img src="assets/hftrainer_logo.png" alt="HFTrainer logo" width="420" />
+<img src="assets/hftrainer_logo.png" alt="HF-Trainer" width="420" />
 
-# HF-Trainer
+# HF-Trainer · HyMotion M2M
 
-**Config-driven training for HuggingFace-native models, built on `accelerate`.**
+**基于 HuggingFace 生态的配置驱动训练框架；本仓库当前主线为 HyMotion M2M（动作到动作通用补全 / 修复）。**
 
-One shared task core for training and inference, native `transformers` / `diffusers` / `peft` integration, and per-module control from config.
-
-<p>
-  <a href="docs/en/index.md"><strong>Documentation</strong></a> •
-  <a href="docs/en/quickstart.md"><strong>Quick Start</strong></a> •
-  <a href="docs/en/integration.md"><strong>Integration</strong></a> •
-  <a href="docs/en/api_reference.md"><strong>API Reference</strong></a> •
-  <a href="docs/en/tasks.md"><strong>Task Matrix</strong></a> •
-  <a href="https://github.com/ZeyuLing/HFTrainer/issues"><strong>Issues</strong></a>
-</p>
-
-<p>
-  <a href="docs/en/index.md">English Docs</a> |
-  <a href="docs/zh-cn/index.md">简体中文文档</a>
-</p>
+配置使用 MMEngine 风格 `.py`，运行时由 `accelerate` 统一分布式、混合精度与梯度累积；任务侧通过共享 **`ModelBundle`** 对齐训练与推理。
 
 <p>
   <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c?logo=pytorch&logoColor=white">
   <img alt="Accelerate" src="https://img.shields.io/badge/Accelerate-native-4f46e5">
   <img alt="HuggingFace" src="https://img.shields.io/badge/HuggingFace-transformers%20%7C%20diffusers-facc15?logo=huggingface&logoColor=black">
-  <img alt="Config System" src="https://img.shields.io/badge/MMEngine-config%20%2B%20registry-0ea5e9">
+  <img alt="MMEngine" src="https://img.shields.io/badge/MMEngine-config%20%2B%20registry-0ea5e9">
+</p>
+
+<p>
+  <a href="hftrainer/models/motion/CLAUDE.md"><strong>M2M 技术栈文档</strong></a> •
+  <a href="motion_annot_web/CLAUDE.md"><strong>标注与 Web 基建</strong></a> •
+  <a href="docs/zh-cn/index.md"><strong>框架文档（中文）</strong></a> •
+  <a href="docs/en/index.md"><strong>框架文档（英文）</strong></a>
 </p>
 
 </div>
 
-## Why HF-Trainer
+---
 
-HF-Trainer is for teams that like MMEngine-style `.py` configs, but want the runtime behavior, model ecosystem, and export path of HuggingFace instead of another custom engine.
+## HyMotion M2M 是什么
 
-It is built for a specific workflow:
+**HyMotion M2M（Motion-to-Motion）** 是基于 HunyuanMotion MMDiT 的 **通用动作补全** 模型：给定任意帧 × 任意关节上的条件掩码 `src_mask`（0=已知，1=生成），在 **归一化动作空间** 中做 **Flow Matching**，通过 **VACE 风格条件**（inactive / reactive / mask 与 `x_t` 拼接）注入已知运动与文本。
 
-- keep experiment configuration declarative
-- keep model classes and inference artifacts HuggingFace-native
-- avoid writing one copy of task logic for training and another for inference
-- fine-tune large models with per-module freeze, LoRA, dtype, and checkpoint control
+- **主线版本**：**M2M v2**，表示为 **198 维**（根平移 + SMPL-22 的 rot6d + FK 关节位置等；详见 `configs/hymotion_m2m_v2/_base_hymotion_m2m_v2_046b.py`）。
+- **预训练**：文本编码与 DiT 主干多从 **HY-Motion T2M 1.0-Lite（0.46B）** 加载，输入/输出层按维度重初始化。
+- **任务形态**：补全、预测、插帧、关节级编辑、轨迹约束、过渡拼接等，均由 **掩码采样策略（训练）+ 同一套 Pipeline（推理）** 覆盖。
 
-## What You Get
+完整约定（VACE、135/198 维、rot6d 行主序、transition 任务的规范坐标系、已知区域与训练分布等）见 **`hftrainer/models/motion/CLAUDE.md`**（必读，篇幅较长）。
 
-| You want | HF-Trainer gives you |
-| --- | --- |
-| reproducible experiments instead of ad-hoc scripts | MMEngine-style `.py` configs and registry-based construction |
-| native large-model runtime behavior | `accelerate` for DDP, FSDP, DeepSpeed, mixed precision, logging, and state save/load |
-| direct use of HuggingFace components | native `transformers`, `diffusers`, and `peft` classes without framework-specific wrapper semantics |
-| one place to implement task logic | `ModelBundle` shared by `Trainer` and `Pipeline` |
-| less framework glue for HF-native tasks | parent-level `from_config` / `from_pretrained` plus declarative bundle specs instead of per-bundle boilerplate |
-| memory-aware fine-tuning | config-driven freeze, LoRA, per-module dtype, gradient checkpointing, and accumulation |
-| reliable restart and export | `auto_resume`, model-only load, full accelerator resume, and task-native `save_pretrained(...)` |
+---
 
-## Runnable Today
+## 训练（HyMotion M2M）
 
-| Task | Core Stack | Example Config | Status |
-| --- | --- | --- | --- |
-| Classification | `ViTBundle` + `ClassificationTrainer` + `ClassificationPipeline` | `configs/classification/vit_base_demo.py` | verified |
-| Text-to-image | `SD15Bundle` + `SD15Trainer` + `SD15Pipeline` | `configs/text2image/sd15_demo.py` | verified |
-| Causal LM SFT | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_sft_demo.py` | verified |
-| Causal LM LoRA | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_lora_demo.py` | verified |
-| Text-to-video | `WanBundle` + `WanTrainer` + `WanPipeline` | `configs/text2video/wan_demo.py` | verified |
-| Motion generation (PRISM) | `PrismBundle` + `PrismTrainer` + `PrismPipeline` | `configs/prism/prism_1b_tp2m_motionhub.py` | verified reference |
-| Motion generation / understanding (VerMo) | `VermoBundle` + `VermoTrainer` + `VermoPipeline` | `configs/vermo/vermo_pretrain_4k_llama1b_wavtokenizer.py` | verified reference |
-| GAN | `StyleGAN2Bundle` + `GANTrainer` + `StyleGAN2Pipeline` | `configs/gan/gan_demo.py` | verified reference |
-| DMD | `DMDBundle` + `DMDTrainer` + `DMDPipeline` | `configs/distillation/dmd_demo.py` | verified reference |
-
-`verified reference` means the training / inference path is smoke-validated and runnable, but the default project is positioned as a framework reference implementation rather than a benchmark-tuned reproduction.
-
-## Installation
+### 环境与安装
 
 ```bash
 pip install -e .
-```
-
-Prepare local demo assets:
-
-```bash
+# 演示用 checkpoint / 小数据（按需）
 bash tools/download_checkpoints.sh
 python3 tools/download_demo_data.py --task all
 ```
 
-## Get Started
+### 单卡 / 本地启动
 
-Run the simplest verified training path:
+入口统一为 **`tools/train.py`**，传入 **配置路径**（MMEngine `Config`，支持 `_base_` 继承）：
 
 ```bash
-python3 tools/train.py configs/classification/vit_base_demo.py
+python3 tools/train.py configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py
 ```
 
-Run the verified LoRA path:
+多卡（示例 8 卡）：
 
 ```bash
-python3 tools/train.py configs/llm/llama_lora_demo.py
+bash tools/dist_train.sh configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_046b.py 8
+```
+
+### 配置入口（v2 · 0.46B）
+
+| 用途 | 配置示例 |
+|------|-----------|
+| v2 公共基座 | `configs/hymotion_m2m_v2/_base_hymotion_m2m_v2_046b.py` |
+| 无条件 · 局部 / 全局旋转 | `hymotion_m2m_v2_uncond_local_046b.py`、`hymotion_m2m_v2_uncond_global_046b.py` |
+| 文本条件 · caption | `hymotion_m2m_v2_caption_local_046b.py`、`hymotion_m2m_v2_caption_global_046b.py` |
+| Caption 两阶段（phase1 / phase2） | `hymotion_m2m_v2_caption_*_phase1.py`、`*_phase2.py` |
+| SOAR 后训练 | `configs/hymotion_m2m_v2/soar/hymotion_m2m_v2_*_046b_soar.py` |
+| 冒烟 / 快速验证 | `hymotion_m2m_v2_smoke.py`、`hymotion_m2m_v2_smoke_soar.py` |
+
+**太极集群**：请使用仓库提供的提交脚本（勿手写易错、不完整的 `taiji_client` 参数），例如：
+
+```bash
+python3 tools/taiji_submit.py <任务名> configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py --host_num 2
+```
+
+说明见根目录 **`CLAUDE.md`** 中「太极集群训练提交」一节。
+
+### 数据与质量（重要）
+
+- 默认训练清单常为 **`data/annotation/train_hymotion_400h.json`**（样本量大但未做质量过滤）。
+- **推荐**：使用基于 **`motion_annot_web`** 质量管线导出的 **高质量子集**（如 `data/hymotion_m2m_refine_data/data_quality_list/high_quality.json`），否则低质量样本会明显拉低效果上限。详见 **`hftrainer/models/motion/CLAUDE.md`** 中「训练数据质量问题」相关章节。
+
+---
+
+## 推理与评测
+
+### 通用推理入口
+
+与训练共享配置，使用 **`tools/infer.py`**（具体参数以配置中的 `pipeline` / `load_from` 为准）：
+
+```bash
 python3 tools/infer.py \
-  --config configs/llm/llama_lora_demo.py \
-  --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
-  --merge-lora \
-  --prompt "Name one primary color."
+  --config configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py \
+  --checkpoint <work_dirs/.../checkpoint-xxx> \
+  ...
 ```
 
-Run distributed training:
+业务侧批评估、多任务协议（E1–E15 等）集中在：
 
 ```bash
-bash tools/dist_train.sh configs/text2video/wan_demo.py 8
+python3 tools/eval_m2m_v2_all_tasks.py --help
 ```
 
-Run the startup smoke suite:
+**对接 motion_annot_web 评估看板**时：用于入库的 eval 跑批请 **`--save-npz`** 保存 NPZ，否则三维预览与部分回溯会缺文件；文本条件任务还需按看板约定带上 **`--use-rewritten`** 等参数（见 **`motion_annot_web/eval_dashboard/CLAUDE.md`**）。
+
+### 过渡 / 拼接类任务（E14、E15、E9 等）
+
+对两段运动拼接、大位姿差场景，推理前往往需要对构造段做 **规范坐标变换（canonicalize）**（锚点置原点 + 朝向对齐），再在输出后 **逆变换（decanonicalize）**；工具函数在 **`hftrainer/pipelines/motion/transition_utils.py`**。请勿跳过，否则易出现脚滑、跳变等伪影。
+
+---
+
+## 当前训练方案（概要）
+
+以下为本仓库 **文档与代码的共识摘要**，细节仍以 **`hftrainer/models/motion/CLAUDE.md`** 为准。
+
+| 维度 | 内容 |
+|------|------|
+| **条件形式** | VACE：`x_t` + inactive/reactive + mask；补全时 mask 区域在归一化后须 **置零** 再喂入，避免 reactive 泄露真值。 |
+| **掩码训练** | **M1–M7** 七种采样策略（随机格点 / 块 / 时序连续 / 关节连续 / 全掩码 / 关键帧 / 稀疏关节等），覆盖 T2M、插帧、关节编辑、修复分布。 |
+| **采样器版本** | `PrepareM2Mv2Condition` 支持 `sampler_version='v2'`（默认）与 **`v3`**（Rank-K 布尔先验，覆盖更广；在配置中切换）。 |
+| **损失** | Flow Matching 速度场为主；v2 含 **FK 一致性 / KIMODO 风格辅助损失** 等可配置项（见 `_base_hymotion_m2m_v2_046b.py` 内 `losses_cfg` / `kimodo_aux_loss_cfg`）。 |
+| **后训练** | **SOAR**（`HyMotionM2MSoarTrainer`）用于缓解 flow 模型的 exposure bias，配置在 `configs/hymotion_m2m_v2/soar/`。 |
+| **修复对照** | **MoGenDIT** 通过 `hftrainer/pipelines/motion/mogendit_pipeline.py` 接入，用于 repair 基线及与 M2M 对比（与 M2M 的 mask、坐标约定不同，勿混用统计量）。 |
+
+---
+
+## 配套基建：`motion_annot_web`
+
+`motion_annot_web/` 为 M2M 项目配套的 **Flask Web 工具集**，覆盖 **质量标注 → 修复调度 → 人工评分 → 推理展示 → Keypose 评估 → 评估看板** 的数据闭环。总览与端口如下（详情 **`motion_annot_web/CLAUDE.md`**）。
+
+| 应用 | 默认端口 | 作用 |
+|------|-----------|------|
+| **m2m_database** | 8085 | 大规模运动浏览、**高 / 边界 / 低质量** 标注、规则质检、损坏器、异步修复调度 |
+| **score_m2m_refine** | 8080 | 修复结果 **多人评分**（原始高质量 / 修复成功 / 修复失败） |
+| **completion_apps** | 8090 | 离线批量结果浏览 + **实时补全推理**（多任务、多模型变体） |
+| **keypose_eval** | 8080 | Keypose 编辑 **前后对比**、最优变体、MP4 导出 |
+| **eval_dashboard** | 8081 | M2M v2 **评估指标、雷达图、多模型对比、NPZ→SMPL 三维查看** |
+
+典型启动（单机）：
+
+```bash
+cd motion_annot_web/m2m_database && python m2m_db_web.py --port 8085
+cd motion_annot_web/completion_apps && python app.py --port 8090
+# 其余子应用见 motion_annot_web/CLAUDE.md「快速启动」
+```
+
+质量列表与 `data/hymotion_*` 目录约定亦见该文档。
+
+---
+
+## 仓库结构（与本项目相关部分）
+
+```text
+configs/hymotion_m2m_v2/              # M2M v2 可运行配置（含 SOAR、caption 分阶段）
+hftrainer/models/motion/hymotion_m2m/ # Bundle、MMDiT、损失
+hftrainer/trainers/motion/            # HyMotionM2MTrainer / SoarTrainer
+hftrainer/pipelines/motion/         # HyMotionM2MPipeline、transition_utils、MoGenDIT 封装
+hftrainer/datasets/motion/          # MotionHub、条件变换、掩码采样
+tools/                              # train.py、infer.py、eval_m2m_v2_all_tasks.py、太极提交等
+motion_annot_web/                   # 标注 / 修复 / 评测 Web 基建
+docs/temp/                          # 临时方案、实验记录、评测计划（草案默认放此目录）
+```
+
+---
+
+## HF-Trainer 通用框架
+
+本仓库同时包含 ViT 分类、SD15、LLM SFT/LoRA、Wan 视频等 **其它任务栈**，入口仍为 `tools/train.py`、`tools/infer.py`，说明见：
+
+- [框架文档（英文）](docs/en/index.md)、[框架文档（中文）](docs/zh-cn/index.md)
+- [API 参考](docs/zh-cn/api_reference.md)、[任务矩阵](docs/zh-cn/tasks.md)
+
+快速自检：
 
 ```bash
 python3 -m pytest -m smoke tests/smoke/test_task_startup.py
 ```
 
-The smoke suite uses reduced temporary configs to verify that each task stack can start training and inference through the real CLI entry points.
+---
 
-## Core Design
+## 致谢
 
-HF-Trainer keeps the framework surface small:
-
-- `AccelerateRunner` builds the full runtime from one config and owns the loop
-- `ModelBundle` holds task sub-modules and shared atomic forward functions
-- `Trainer` assembles training-time control flow and optimization
-- `Pipeline` assembles inference-time control flow without duplicating task internals
-
-This is the main reason the project exists: training and inference stay aligned without forcing users into a non-HuggingFace inference API.
-
-## Memory Control From Config
-
-Supported today:
-
-- global AMP via `accelerator.mixed_precision='no'|'fp16'|'bf16'`
-- per-module loader dtype via `from_pretrained.torch_dtype` or `dtype`
-- per-module post-load cast via `module_dtype='fp32'|'fp16'|'bf16'`
-- activation memory reduction via `gradient_checkpointing=True`
-- optimizer/state reduction via `trainable=False`, `trainable='lora'`, and `accelerator.gradient_accumulation_steps`
-
-Important caveat:
-
-- if you need a strict policy like `vae=fp32` and `transformer=bf16`, prefer per-module dtype settings and keep `accelerator.mixed_precision='no'`
-- global AMP can still autocast eligible ops on top of module weights
-
-See:
-
-- [English Memory and Precision Guide](docs/en/memory.md)
-- [简体中文 显存与精度指南](docs/zh-cn/memory.md)
-
-## Integration Paths
-
-HF-Trainer exposes two clear ways to adopt the framework:
-
-| Starting point | What you implement | What stays HuggingFace-native |
-| --- | --- | --- |
-| an existing `transformers` / `diffusers` model | a task bundle plus task training logic | `from_pretrained`, official component classes, tokenizer / processor, and exported inference artifact |
-| a custom or self-developed model | your own `nn.Module` plus a task bundle | config-driven construction, checkpointing, hooks, runner, and optional custom `save_pretrained` |
-
-Rule of thumb:
-
-- if HuggingFace already has the model class, keep the official class inside the bundle and only add training wiring
-- if HuggingFace already has the artifact layout, declare `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC` on the bundle instead of hand-writing loader/export methods
-- if HuggingFace does not have the model class, use `ModelBundle.from_config(...)` and add custom `from_pretrained/save_pretrained` logic only when you need a stable exported artifact
-
-## Documentation
-
-| Topic | English | 简体中文 |
-| --- | --- | --- |
-| Docs Home | [Home](docs/en/index.md) | [首页](docs/zh-cn/index.md) |
-| Installation | [Installation](docs/en/installation.md) | [安装说明](docs/zh-cn/installation.md) |
-| Quick Start | [Quick Start](docs/en/quickstart.md) | [快速开始](docs/zh-cn/quickstart.md) |
-| Integration Guide | [Integration](docs/en/integration.md) | [模型接入](docs/zh-cn/integration.md) |
-| API Reference | [API Reference](docs/en/api_reference.md) | [API 参考](docs/zh-cn/api_reference.md) |
-| Memory and Precision | [Memory](docs/en/memory.md) | [显存与精度](docs/zh-cn/memory.md) |
-| LoRA | [LoRA](docs/en/lora.md) | [LoRA](docs/zh-cn/lora.md) |
-| Architecture | [Architecture](docs/en/architecture.md) | [架构设计](docs/zh-cn/architecture.md) |
-| Hook System | [Hook System](docs/en/design/hooks.md) | [Hook 系统](docs/zh-cn/design/hooks.md) |
-| Distributed Training | [Distributed](docs/en/distributed.md) | [分布式训练](docs/zh-cn/distributed.md) |
-| Experiment Directory | [Experiment Dir](docs/en/experiment_dir.md) | [实验目录](docs/zh-cn/experiment_dir.md) |
-| Task Matrix | [Tasks](docs/en/tasks.md) | [任务矩阵](docs/zh-cn/tasks.md) |
-| Design Docs | [Design Index](docs/en/design/index.md) | [设计文档](docs/zh-cn/design/index.md) |
-
-## Public API Surface
-
-The public API reference covers the user-facing framework surface:
-
-- runner: `AccelerateRunner`
-- model core: `ModelBundle`
-- training / inference base classes: `BaseTrainer`, `BasePipeline`
-- runtime helpers: hooks, evaluators, visualizers, checkpoint utils
-- CLI entry points: `tools/train.py`, `tools/infer.py`
-
-Start here:
-
-- [English API Reference](docs/en/api_reference.md)
-- [简体中文 API 参考](docs/zh-cn/api_reference.md)
-
-## Repository Layout
-
-```text
-configs/      runnable experiment configs
-hftrainer/    framework package
-tools/        train / infer / utility entry points
-docs/         English + Chinese documentation
-data/         demo datasets
-checkpoints/  local pretrained checkpoints for demos
-tests/        startup smoke tests and focused unit tests
-```
-
-Model code, task runtime, and data code are intentionally separated:
-
-```text
-hftrainer/models/<model_name>/
-  bundle.py
-  ...
-hftrainer/trainers/<task_name>/
-  ...
-hftrainer/pipelines/<task_name>/
-  ...
-hftrainer/datasets/<task_name>/
-  ...
-```
-
-Datasets follow an MMEngine-style split:
-
-```text
-dataset.load_data_list()  -> raw records
-dataset.pipeline          -> decoding / tokenize / resize / pack transforms
-collate_fn                -> batch assembly
-```
-
-## Scope Notes
-
-- `docs/en/` and `docs/zh-cn/` are the source-of-truth public docs
-- root-level `docs/*.md` pages are compatibility entry pages
-- the GAN and DMD stacks are runnable framework references, not benchmark-tuned reproductions out of the box
-
-## Acknowledgements
-
-HF-Trainer is heavily inspired by two ecosystems:
-
-- MMEngine for config-driven experiment construction and registry ergonomics
-- HuggingFace for model classes, inference artifacts, and runtime interoperability
+HF-Trainer 借鉴 MMEngine 的配置与注册表模式，以及 HuggingFace / Accelerate 的模型与分布式运行时；HyMotion M2M 实现与 HyMotion / HunyuanMotion 预训练生态对齐。
