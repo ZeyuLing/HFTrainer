@@ -19,9 +19,14 @@ thesis/
 ref_paper/
 .claude/skills/taiji/.token
 
+# docs/temp：草稿为主；以下常为二进制大包或演示素材，入库体积大且非源码必选项
+docs/temp/demo_videos/
+docs/temp/m2m_v2_ppt/
+
 # ---------------------------------------------------------------------------
 # ref_repo：外部 baseline / 对照仓库的镜像。纳入版本控制时只保留源码与说明文档，
 # 通过忽略权重、压缩包、训练与推理产物控制体积（clone 后大文件请走网盘 / 环境变量路径）。
+# 哪些该推、哪些不该推的人类可读说明：docs/temp/ref_repo_push_policy.md
 # ---------------------------------------------------------------------------
 ref_repo/**/__pycache__/
 ref_repo/**/*.py[cod]
@@ -49,12 +54,26 @@ ref_repo/**/save/
 ref_repo/**/saved/
 ref_repo/**/pretrained/
 ref_repo/**/weights/
+# 训练实验目录命名各异，一律排除生成物（仅保留源码 add）
+ref_repo/**/work_dirs/
+ref_repo/**/exp/
+ref_repo/**/exps/
+ref_repo/**/experiments/
+ref_repo/**/tensorboard/
+ref_repo/**/tb_logs/
+ref_repo/**/tensorflow_log/
 # 数据与中间件（各子项目若需小样本，用 ! 规则白名单，或放 data/ 外单独说明）
 ref_repo/**/data/
 ref_repo/**/datasets/
 ref_repo/**/body_models/
+# MoGenDiT 等使用单数目录名 body_model/（SMPL 网格与 pickle，体积可达数百 MB）
+ref_repo/**/body_model/
+ref_repo/**/human_body_prior/
 ref_repo/**/smpl/
 ref_repo/**/SMPL*/
+# Python 虚拟环境（baseline 目录内常残留）
+ref_repo/**/.venv/
+ref_repo/**/venv/
 # 压缩与镜像
 ref_repo/**/*.zip
 ref_repo/**/*.rar
