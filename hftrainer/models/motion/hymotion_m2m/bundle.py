@@ -79,6 +79,8 @@ class HyMotionM2MBundle(ModelBundle):
         body_model_path: Optional[str] = None,
         # ----- rotation space -----
         rotation_space: str = 'local',
+        # ----- KIMODO-style auxiliary losses (j_p / j_v / fk_consistency) -----
+        kimodo_aux_loss_cfg: Optional[dict] = None,
     ):
         super().__init__()
 
@@ -117,6 +119,14 @@ class HyMotionM2MBundle(ModelBundle):
         # ---- M2M loss ----
         from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
         self.m2m_loss = M2MLoss(**(losses_cfg or {}))
+
+        # ---- KIMODO-style auxiliary loss (optional, post-hoc) ----
+        # Computed by the trainer in addition to M2MLoss; constructed here so
+        # weights/config travel with the bundle and survive checkpoint reload.
+        from hftrainer.models.motion.hymotion_m2m.network.kimodo_aux_loss import (
+            KimodoStyleAuxLoss,
+        )
+        self.kimodo_aux_loss = KimodoStyleAuxLoss(**(kimodo_aux_loss_cfg or {}))
 
         # ---- SMPL body model (optional for FK losses / decode) ----
         self._body_model_path = body_model_path

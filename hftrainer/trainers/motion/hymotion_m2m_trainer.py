@@ -304,10 +304,13 @@ class HyMotionM2MTrainer(BaseTrainer):
             # pred_x1 = x_t + (1 - t) * pred_vel
             pred_x1_for_smooth = None
             gt_x1_for_smooth = None
+            kimodo_aux = getattr(self.bundle, 'kimodo_aux_loss', None)
+            kimodo_enabled = bool(kimodo_aux is not None and kimodo_aux.enabled)
             need_x1 = (
                 self.bundle.m2m_loss.motion_smoothness_weight > 0.0
                 or self.bundle.m2m_loss.keypoints3d_weight > 0.0
                 or self.bundle.m2m_loss.fk_consistency_weight > 0.0
+                or kimodo_enabled
             )
             if need_x1:
                 pred_x1_for_smooth = x_t + (1 - t) * pred_velocity
@@ -342,6 +345,16 @@ class HyMotionM2MTrainer(BaseTrainer):
                 generation_mask=generation_mask,
                 fk_consistency_loss=fk_loss,
             )
+
+            # ---- KIMODO-style auxiliary losses ----
+            # Operate on (pred_x1, gt_x1) in normalised space; computed via
+            # FK on rotation+translation channels.  Padding-aware; ignores
+            # generation_mask by design (KIMODO supervises every frame).
+            aux_losses = self._compute_kimodo_aux_loss(
+                pred_x1_for_smooth, x1, timesteps, tgt_padding_mask
+            )
+            if aux_losses:
+                losses.update(aux_losses)
         elif self.bundle.pred_type == 'x1':
             t_eps = 0.05
             gt_velocity = (x1 - x_t) / (1 - t).clamp_min(t_eps)
@@ -364,6 +377,13 @@ class HyMotionM2MTrainer(BaseTrainer):
                 global_step=self.get_global_step(),
                 generation_mask=generation_mask,
             )
+
+            # KIMODO-style auxiliary losses (also for x1 pred_type)
+            aux_losses = self._compute_kimodo_aux_loss(
+                pred, x1, timesteps, tgt_padding_mask
+            )
+            if aux_losses:
+                losses.update(aux_losses)
         else:
             raise ValueError(f'Unsupported pred_type: {self.bundle.pred_type}')
         return losses
@@ -420,6 +440,45 @@ class HyMotionM2MTrainer(BaseTrainer):
         pred_kp3d = _fk(pred_x1)
         gt_kp3d = _fk(gt_x1)
         return pred_kp3d, gt_kp3d
+
+    def _compute_kimodo_aux_loss(
+        self,
+        pred_x1_norm: Optional[Tensor],
+        gt_x1_norm: Optional[Tensor],
+        timesteps: Optional[Tensor],
+        tgt_padding_mask: Optional[Tensor],
+    ) -> Dict[str, Tensor]:
+        """Compute KIMODO-style auxiliary losses (j_p / j_v / fk_consistency).
+
+        Returns an empty dict when:
+        - the bundle does not own a ``kimodo_aux_loss`` attribute, or
+        - no aux weight is enabled, or
+        - the model is not 198-dim, or
+        - ``pred_x1_norm`` is None (e.g. velocity pred without smoothness).
+        """
+        aux = getattr(self.bundle, 'kimodo_aux_loss', None)
+        if aux is None or not aux.enabled:
+            return {}
+        if pred_x1_norm is None or gt_x1_norm is None:
+            return {}
+        if self.bundle.mean.shape[0] < 198:
+            return {}
+        try:
+            bone_offsets = self.bundle.get_bone_offsets()
+        except Exception:
+            return {}
+        rotation_space = getattr(self.bundle, 'rotation_space', 'local')
+        return aux(
+            pred_x1_norm=pred_x1_norm,
+            gt_x1_norm=gt_x1_norm,
+            mean=self.bundle.mean,
+            std=self.bundle.std,
+            bone_offsets=bone_offsets,
+            rotation_space=rotation_space,
+            data_mask_temporal=tgt_padding_mask,
+            timesteps=timesteps,
+            global_step=self.get_global_step(),
+        )
 
     def _compute_fk_consistency_loss(
         self,

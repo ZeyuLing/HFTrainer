@@ -20,6 +20,61 @@ class TestFKConsistencyLossIntegration:
         assert loss_fn.fk_consistency_weight == 0.1
         assert loss_fn.fk_consistency_warmup_steps == 1000
 
+    def test_m2m_loss_component_mean_velocity_reduction(self):
+        """Component reduction should average semantic groups, not raw dims."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 1, 198)
+        gt = torch.zeros(1, 1, 198)
+        gt[..., 0:3] = 1.0
+        gt[..., 3:9] = 2.0
+        gt[..., 9:135] = 3.0
+        gt[..., 135:198] = 4.0
+
+        loss_fn = M2MLoss(
+            loss_type='mse',
+            velocity_weight=1.0,
+            velocity_loss_reduction='component_mean',
+            trans_dim_weight=1.0,
+        )
+        result = loss_fn(
+            pred_vel=pred,
+            gt_vel=gt,
+            data_mask_temporal=torch.ones(1, 1),
+        )
+
+        # MSE per component: trans=1, root_rot=4, body_rot=9, pos=16.
+        assert torch.allclose(result['velocity'], torch.tensor(7.5))
+
+    def test_m2m_loss_component_mean_skips_empty_generation_groups(self):
+        """A fully known component should not dilute active component means."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 1, 198)
+        gt = torch.zeros(1, 1, 198)
+        gt[..., 0:3] = 1.0
+        gt[..., 3:9] = 2.0
+        gt[..., 9:135] = 3.0
+        gt[..., 135:198] = 4.0
+        generation_mask = torch.ones(1, 1, 198)
+        generation_mask[..., 135:198] = 0.0
+
+        loss_fn = M2MLoss(
+            loss_type='mse',
+            velocity_weight=1.0,
+            velocity_loss_reduction='component_mean',
+            trans_dim_weight=1.0,
+        )
+        result = loss_fn(
+            pred_vel=pred,
+            gt_vel=gt,
+            data_mask_temporal=torch.ones(1, 1),
+            generation_mask=generation_mask,
+        )
+
+        # Pos has no generated cells, so active components are 1, 4, and 9.
+        assert torch.allclose(result['velocity'], torch.tensor((1.0 + 4.0 + 9.0) / 3.0))
+
     def test_m2m_loss_fk_consistency_in_forward(self):
         """M2MLoss should include fk_consistency in loss dict when provided."""
         from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss

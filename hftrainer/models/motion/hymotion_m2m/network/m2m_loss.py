@@ -17,6 +17,7 @@ class M2MLoss(nn.Module):
         fk_loss_start_step: int = 0,
         trans_dim_weight: float = 1.0,
         trans_dims: int = 3,
+        velocity_loss_reduction: str = "element_mean",
         fk_consistency_weight: float = 0.0,
         fk_consistency_warmup_steps: int = 1000,
     ):
@@ -29,8 +30,15 @@ class M2MLoss(nn.Module):
         self.fk_loss_start_step = fk_loss_start_step
         self.trans_dim_weight = trans_dim_weight
         self.trans_dims = trans_dims
+        self.velocity_loss_reduction = velocity_loss_reduction
         self.fk_consistency_weight = fk_consistency_weight
         self.fk_consistency_warmup_steps = fk_consistency_warmup_steps
+
+        if velocity_loss_reduction not in ("element_mean", "component_mean"):
+            raise ValueError(
+                "velocity_loss_reduction must be 'element_mean' or "
+                f"'component_mean', got {velocity_loss_reduction!r}"
+            )
 
         if loss_type == "smooth_l1":
             self.loss_fn = F.smooth_l1_loss
@@ -42,6 +50,58 @@ class M2MLoss(nn.Module):
             self.loss_fn = F.mse_loss
         else:
             raise ValueError(f"Unsupported loss type: {loss_type}")
+
+    @staticmethod
+    def _motion_components(dim: int):
+        if dim >= 198:
+            return ((0, 3), (3, 9), (9, 135), (135, 198))
+        if dim >= 135:
+            return ((0, 3), (3, 9), (9, 135))
+        return ((0, dim),)
+
+    def _masked_motion_loss(
+        self,
+        per_dim: Tensor,
+        data_mask_temporal: Tensor,
+        generation_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Reduce (B, L, D) losses with optional semantic component means."""
+        data_mask = data_mask_temporal.to(per_dim.device).to(per_dim.dtype)
+
+        if self.velocity_loss_reduction == "element_mean":
+            if generation_mask is not None:
+                gen_mask = generation_mask.to(per_dim.device).to(per_dim.dtype)
+                combined = gen_mask * data_mask.unsqueeze(-1)
+                mask_sum = torch.clamp(combined.sum(), min=1.0)
+                return (per_dim * combined).sum() / mask_sum
+
+            per_frame = per_dim.mean(dim=-1)
+            mask_sum = torch.clamp(data_mask.sum(), min=1.0)
+            return (per_frame * data_mask).sum() / mask_sum
+
+        # KIMODO-style semantic reduction: each representation component
+        # first gets its own valid-cell mean, then active components are
+        # averaged.  This prevents large components (e.g. body rot6d) from
+        # swallowing small but important ones such as translation/root.
+        comp_losses = []
+        for start, end in self._motion_components(per_dim.shape[-1]):
+            comp = per_dim[..., start:end]
+            if generation_mask is not None:
+                comp_mask = (
+                    generation_mask[..., start:end]
+                    .to(per_dim.device)
+                    .to(per_dim.dtype)
+                    * data_mask.unsqueeze(-1)
+                )
+            else:
+                comp_mask = data_mask.unsqueeze(-1).expand_as(comp)
+            denom = comp_mask.sum()
+            if torch.gt(denom.detach(), 0):
+                comp_losses.append((comp * comp_mask).sum() / denom)
+
+        if not comp_losses:
+            return per_dim.sum() * 0.0
+        return torch.stack(comp_losses).mean()
 
     def forward(
         self,
@@ -76,7 +136,7 @@ class M2MLoss(nn.Module):
         assert data_mask_temporal is not None, "data_mask_temporal is required"
 
         if pred_vel is not None and gt_vel is not None:
-            # velocity loss: (B, L, D) -> (B, L) -> scalar
+            # velocity loss: (B, L, D) -> scalar
             # Apply per-dimension weighting: upweight translation dims (first trans_dims)
             # to compensate for the 3/135 dimension ratio imbalance
             vel_per_dim = self.loss_fn(pred_vel, gt_vel, reduction="none")  # (B, L, D)
@@ -84,40 +144,21 @@ class M2MLoss(nn.Module):
                 dim_weights = torch.ones(vel_per_dim.shape[-1], device=vel_per_dim.device)
                 dim_weights[:self.trans_dims] = self.trans_dim_weight
                 vel_per_dim = vel_per_dim * dim_weights
-            # When generation_mask is provided (mask-aware noise), only compute
-            # loss on generation regions. Otherwise fall back to per-frame mean.
-            if generation_mask is not None:
-                gen_mask = generation_mask.to(vel_per_dim.device)  # (B, L, D)
-                # Combine with temporal padding mask
-                combined = gen_mask * data_mask_temporal.unsqueeze(-1).to(vel_per_dim.device)
-                mask_sum = torch.clamp(combined.sum(), min=1.0)
-                loss_dict["velocity"] = self.velocity_weight * (vel_per_dim * combined).sum() / mask_sum
-            else:
-                loss_dict["velocity"] = self.velocity_weight * vel_per_dim.mean(dim=-1)
-                # 确保 data_mask_temporal 与 loss_dict["velocity"] 在同一设备上
-                data_mask_temporal_vel = data_mask_temporal.to(loss_dict["velocity"].device)
-                mask_sum_vel = torch.clamp(data_mask_temporal_vel.sum(), min=1.0)
-                loss_dict["velocity"] = (loss_dict["velocity"] * data_mask_temporal_vel).sum() / mask_sum_vel
+            loss_dict["velocity"] = self.velocity_weight * self._masked_motion_loss(
+                vel_per_dim, data_mask_temporal, generation_mask
+            )
 
         if pred_x1 is not None and gt_x1 is not None:
-            # x1 loss: (B, L, D) -> (B, L) -> scalar
+            # x1 loss: (B, L, D) -> scalar
             # Apply same per-dimension weighting as velocity loss
             x1_per_dim = self.loss_fn(pred_x1, gt_x1, reduction="none")  # (B, L, D)
             if self.trans_dim_weight != 1.0:
                 dim_weights = torch.ones(x1_per_dim.shape[-1], device=x1_per_dim.device)
                 dim_weights[:self.trans_dims] = self.trans_dim_weight
                 x1_per_dim = x1_per_dim * dim_weights
-            if generation_mask is not None:
-                gen_mask = generation_mask.to(x1_per_dim.device)
-                combined = gen_mask * data_mask_temporal.unsqueeze(-1).to(x1_per_dim.device)
-                mask_sum = torch.clamp(combined.sum(), min=1.0)
-                loss_dict["x1"] = self.x1_weight * (x1_per_dim * combined).sum() / mask_sum
-            else:
-                loss_dict["x1"] = self.x1_weight * x1_per_dim.mean(dim=-1)
-                # 确保 data_mask_temporal 与 loss_dict["x1"] 在同一设备上
-                data_mask_temporal_x1 = data_mask_temporal.to(loss_dict["x1"].device)
-                mask_sum_x1 = torch.clamp(data_mask_temporal_x1.sum(), min=1.0)
-                loss_dict["x1"] = (loss_dict["x1"] * data_mask_temporal_x1).sum() / mask_sum_x1
+            loss_dict["x1"] = self.x1_weight * self._masked_motion_loss(
+                x1_per_dim, data_mask_temporal, generation_mask
+            )
 
         if (global_step is None and self.fk_loss_start_step == 0) or (
             global_step is not None and global_step >= self.fk_loss_start_step
