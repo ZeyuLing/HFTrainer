@@ -79,6 +79,52 @@ canonicalization or truncation bug rather than model capacity:
 If jitter_pos > 1000 or foot_skating > 0.40 → open `docs/temp/m2m_canonical_ood_solution.md`
 and audit the eval branch against checklist items 1-6 above.
 
+### Post-Processing Inventory For M2M / KIMODO Eval
+
+Treat post-processing as part of the evaluated method unless it is explicitly
+visualization-only. Current code has three different classes:
+
+| Scope | Entry Point | What It Changes | Notes |
+|---|---|---|---|
+| HyMotion M2M output | `tools/eval_m2m_v2_all_tasks.py` | Hard-pastes condition frames from GT after denormalization; optional boundary Gaussian blending, accel-spike median filter, Savitzky-Golay smoothing, E9 adaptive post-hoc replacement, long-window overlap blending | These change `motion_135` before metrics/import. They can hide binary-mask boundary discontinuities. |
+| MoGenDIT repair | `scripts/postprocess_hymotion_with_mogendit.py` | Converts HyM `motion_135` ↔ SMPL-H, runs MoGenDIT `denoise` / `ada_denoise` / `trans_regen` / `impute`, then recomputes positions + QC metrics | `trans_regen` regenerates root translation only; `impute` may hard-preserve obs frames after MoGenDIT to avoid normalization drift. |
+| Official KIMODO postprocess | `ref_repo/KIMODO/kimodo/kimodo/postprocess.py` | Runs foot/contact cleanup and constraint cleanup through `motion_correction.correct_motion`, using contacts, root margin, and original constraint frames as targets | This is part of upstream KIMODO's default SOMA CLI path. `tools/run_kimodo_all_tasks.py` should keep it enabled by default; use `KIMODO_POST_PROCESSING=0` only for ablations. |
+| KIMODO E14/E15 visualization | `tools/append_kimodo_context_soma77.py`, `tools/append_kimodo_e15_context_soma77.py` | Appends SOMA-77 prefix/suffix mesh data and writes `layout_json`; E14 can replace main condition frames with exact source-condition SOMA; E14 blends prefix/suffix seams over 30 frames; E15 blends the first suffix frames over up to 15 frames | This is display metadata for full-timeline rendering, but it can visually smooth KIMODO context seams. It must not be used as evidence that raw KIMODO generated boundaries are continuous. |
+| score_m2m web stitching | `motion_annot_web/score_m2m/score_m2m_web.py` | For SMPL-frame methods, stitches E14/E15 source context around main output and ground-aligns stitched frames | Web-only timeline alignment so pair A/B have the same frame count. KIMODO mesh-sequence files are expected to be pre-stitched offline. |
+| eval_dashboard source overlay | `motion_annot_web/eval_dashboard/app.py` | Rebuilds E14/E15 source motion overlays with the same placement / mesh type as eval output | Visualization-only; useful for debugging, but not a substitute for checking saved NPZ metrics. |
+
+Debug rule: if a case looks smooth on E15 but not E14, first check whether
+`append_kimodo_e15_context_soma77.py` suffix blending or web stitching is
+hiding the seam. If the artifact occurs inside the generated red segment
+(for example leg twist in E15 frame 40-50), suspect KIMODO inference /
+SMPL→SOMA retarget / canonicalization rather than suffix post-processing.
+
+KIMODO conditioning rule: match the official `FullBodyConstraintSet`
+semantics unless running an explicit ablation. The official full-body
+constraint observes joint positions, root planar trajectory, and heading,
+but does **not** pin every condition-frame global rotation. Pinning
+`global_joints_rots` and then hard-pasting the condition features can create
+large one-frame wrist / knee snaps at E14/E15 condition boundaries: the
+condition frame is exact, while the adjacent generated frame remains on the
+model trajectory. `KIMODO_PIN_COND_ROT=1` is therefore ablation-only; the
+default eval path should keep it disabled and validate saved NPZ boundary
+deltas numerically before relying on the web visualization.
+
+KIMODO full-body rotation continuity depends on MotionCorrection, not on the
+denoiser mask alone. `FullBodyConstraintSet.update_constraints()` does not
+feed `global_joints_rots` to the denoiser; it stores them so
+`post_process_motion()` can correct constrained keyframes through the official
+`motion_correction` IK pass. If `motion_correction` is missing or
+`KIMODO_POST_PROCESSING=0`, boundary palms/knees can visibly jump even when
+canonicalization and root height are correct.
+
+SMPL↔KIMODO SOMA conversion reference: the eval bridge lives in
+`tools/run_kimodo_all_tasks.py` (`smpl22_to_soma30_retarget`,
+`soma30_to_soma77`, `soma77_to_smpl22`). It is documented in
+`ref_repo/KIMODO/CLAUDE.md` §“SMPL ↔ SOMA 转换逻辑（我方评测桥接）”. The
+E14/E15 visualization appenders reuse the same chain to write SOMA-77
+`posed_joints` / `global_rot_mats` for source context frames.
+
 ---
 
 ## Overview

@@ -45,6 +45,36 @@
 - fps：实验用 20fps，正式 release 用 30fps
 - 向量总维度视 J 而定（27 joints: `3+2+27×3+27×6+27×3+4 = 3+2+81+162+81+4 = 333 dims`）
 
+### SMPL ↔ SOMA 转换逻辑（我方评测桥接）
+
+我方 M2M 评测数据是 SMPL-22 的 `motion_135 = [abs_trans(3), rot6d(22×6)]`，KIMODO official release 使用 SOMA-30/SOMA-77。桥接入口在 `tools/run_kimodo_all_tasks.py`，不是 KIMODO 原仓训练数据转换脚本。
+
+**SMPL-22 → SOMA-30（约束构建 / KIMODO 输入）**
+
+1. `smpl22_to_soma30_retarget(motion_135, bone_offsets)` 解析 135 维 motion：前 3 维是世界系 root translation，后 132 维按 row-major rot6d 还原成 SMPL-22 local rotation matrix。
+2. 用 `hftrainer.pipelines.motion.differentiable_fk.differentiable_fk()` 在 SMPL-22 骨架上做 FK，得到 SMPL-22 global rotations 和 world joint positions。
+3. 通过 `SMPLX_TO_SOMA_NAME` / `SMPLX22_TO_SOMA30` 把 22 个同名/对应关节的 **global rotations** 拷贝到 SOMA-30；SOMA 额外关节用简单规则补齐：`Neck2` 在 `Neck1` 与 `Head` 间 SLERP，jaw/eyes 跟随 head，hand/thumb/middle end 跟随 hand。
+4. `kimodo.skeleton.transforms.global_rots_to_local_rots()` 将 SOMA-30 global rotations 转为 SOMA-30 local rotations，再用 `SOMASkeleton30.fk()` 以 SOMA 自身骨长重建 positions。
+5. 做两类对齐：先按 SMPL/SOMA 脚底高度差修正 root Y，再逐帧用 SMPL 与 SOMA 的脚底 min-Y 做动态 floor alignment；最后锁定 root XZ，使 SOMA root 水平轨迹与原 SMPL translation 一致。
+
+这个过程是 rotation-based retarget：保留 SMPL 的世界系姿态方向，但 positions 由 SOMA-30 骨架 FK 重新生成，所以骨长/手脚端点会遵循 SOMA rig。
+
+**SOMA-30 → SOMA-77（mesh 可视化）**
+
+- `soma30_to_soma77()` / `SOMASkeleton30.to_SOMASkeleton77()` 先把 SOMA-30 global rotations 转 local rotations，再扩展到 SOMA-77。
+- 额外 47 个手指/脸部关节用 `SOMASkeleton77.relaxed_hands_rest_pose` 填充；随后 `SOMASkeleton77.fk()` 生成 `posed_joints (T,77,3)` 和 `global_rot_mats (T,77,3,3)`。
+- `tools/append_kimodo_context_soma77.py` 和 `tools/append_kimodo_e15_context_soma77.py` 离线复用这条链路，把 E14/E15 的 SMPL source context 补成 SOMA-77 LBS 数据，供 dashboard 渲染完整 SOMA mesh。
+
+**KIMODO SOMA 输出 → SMPL-22 指标空间**
+
+- KIMODO 推理输出通常保存 SOMA-77 `posed_joints` / `global_rot_mats`。
+- `soma77_to_smpl22(posed_joints_77)` 只按 `SOMA77_TO_SMPL22` 抽取 22 个对应 joint positions，用于和 SMPL-22 GT 计算 MPJPE、jitter、foot skating 等 position-space 指标。
+- 这里不是完整 SOMA→SMPL 参数反求：不会恢复 SMPL local rotations / betas / mesh，只是把 SOMA joint positions 投影到 SMPL-22 评测关节集合。
+
+**Canonicalization**
+
+E14/E15/E8-D 等 transition/loop 任务会先把 retarget 后的 SOMA-30 motion 送入 KIMODO canonical frame：`kimodo_compute_canon_transform()` 以 anchor frame 的 root XZ 和 heading 求 yaw+XZ 刚体变换，`kimodo_apply_canon()` 同时变换 positions 与 global rotations。推理结束后用 `kimodo_invert_canon_positions()` 和 `R_yaw^T @ global_rot_mats` 回到原 SMPL world frame。漏掉这一步会导致 KIMODO 约束落在训练分布外，常见症状是漂移、浮空或边界跳变。
+
 ### 网络架构（代码验证）
 
 见 `kimodo/model/twostage_denoiser.py` 和 `kimodo/model/backbone.py`：
