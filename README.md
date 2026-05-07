@@ -172,12 +172,14 @@ docs/temp/                          # 临时方案、实验记录、评测计划
 
 ## HF-Trainer 通用框架
 
-本仓库同时包含 ViT 分类、SD15、LLM SFT/LoRA、Wan 视频等 **其它任务栈**，入口仍为 `tools/train.py`、`tools/infer.py`，说明见：
+本分支（`motion`）专注于 motion 任务栈：HyMotion M2M / T2M / UMO、PRISM、VerMo。
+ViT 分类、SD15 / Wan 视频、LLM SFT/LoRA、StyleGAN2、DMD 等通用任务栈实现保留在 **`main` 分支**，入口仍为 `tools/train.py` / `tools/infer.py`。框架核心层（runner、ModelBundle、hooks、registry、accelerate 集成）两侧保持一致，差异只在 task-specific 子目录。
 
 - [框架文档（英文）](docs/en/index.md)、[框架文档（中文）](docs/zh-cn/index.md)
 - [API 参考](docs/zh-cn/api_reference.md)、[任务矩阵](docs/zh-cn/tasks.md)
+- [Accelerate 集成与按模块隔离](docs/zh-cn/design/accelerate_integration.md)（per-submodule prepare 与 bundle-level orphan tensor 设计原理）
 
-快速自检：
+快速自检（motion 分支收录 6 个 motion smoke case）：
 
 ```bash
 python3 -m pytest -m smoke tests/smoke/test_task_startup.py
