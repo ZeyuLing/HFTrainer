@@ -128,6 +128,11 @@ def _import_task_modules():
         'hftrainer.datasets.motion.hymotion_t2m_dataset',
         'hftrainer.datasets.motion.motionhub.transforms',
         'hftrainer.datasets.motion.motionhub',
+        # MotionCLIP evaluator
+        'hftrainer.models.motion.motion_clip',
+        'hftrainer.trainers.motion.motion_clip_trainer',
+        'hftrainer.pipelines.motion.motion_clip_pipeline',
+        'hftrainer.datasets.motion.motionclip_synthetic_dataset',
     ]
 
     for mod_name in modules_to_import:

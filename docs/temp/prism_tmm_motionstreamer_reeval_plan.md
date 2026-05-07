@@ -1,6 +1,10 @@
 # PRISM TMM — MotionStreamer-Evaluator Re-evaluation Plan
 
-**Status (2026-05-07)**: setup complete, sanity verified, baseline-conversion + inference still TODO.
+**Status (2026-05-08)**: MotionCLIP evaluator ported into hftrainer with numerical
+parity vs the original versatilemotion implementation
+(`text_emb` diff = 1.9e-6, `motion_emb` diff = 0). Both evaluators pass GT-only
+sanity (FID ≈ 0) on HumanML3D and (for MotionCLIP) on MotionHub. Baseline-side
+inference + 272-dim conversion for non-GT comparisons still TODO.
 
 ---
 
@@ -44,33 +48,93 @@ concerns motivate redoing the evaluation:
 | 272-dim conversion utilities | `ref_repo/MotionStreamer/272-dim-Motion-Representation/` | ~5MB | git clone HEAD |
 | **Standalone eval script** | `ref_repo/MotionStreamer/MotionStreamer/eval_with_motionstreamer_evaluator.py` | — | new in this commit |
 
-### Sanity check (already passed)
+### MotionCLIP (ours, SMPL-22, 135-dim) — port + parity check
+
+The "our evaluator" referenced in the TMM paper is **MotionCLIP**
+(originally trained in `versatilemotion/` on the MotionHub HQ caption split).
+For TMM submission we reproduced training and inference inside
+`hftrainer/`:
+
+* `hftrainer/models/motion/motion_clip/` — model code (CLIP ViT-B/32-aligned
+  text + motion encoders, 512-dim shared embedding, contrastive CLIP loss).
+  Stripped of `mmotion`/`mmengine` deps; only `transformers + torch`.
+* `MotionCLIPBundle` (HF `ModelBundle` pattern) wraps tokenizer + 135-dim
+  SMPLPoseProcessor + the contrastive model.
+* `MotionCLIPTrainer` / `MotionCLIPPipeline` — Accelerate-native train/infer.
+* `tools/convert_motionclip_checkpoint.py` — converts the original mmengine
+  `.pth` (`work_dirs/motionclip_base_1p_aug_hq/best_r_precision_top_3_epoch_840.pth`)
+  to `checkpoints/motion_clip/motionclip_base_1p_aug_hq/{motionclip_model.safetensors, bundle_config.json}`.
+* `tools/test_motionclip_parity.py` — bit-level parity check between the
+  ported model and the original versatilemotion model on identical inputs.
+  Loaded from the same converted checkpoint:
+    * `motion_norm` diff = 0
+    * `motion_emb` diff = 0 (exact)
+    * `text_emb` diff = 1.9e-6 (FP32 noise from `padding=True` vs `'max_length'`)
+
+### Standalone evaluators
+
+Both evaluators expose the same protocol — chunk size 32, 20-repeat
+shuffle, FID over the full set, R-P / MM-Dist averaged over chunks:
+
+* `ref_repo/MotionStreamer/eval_with_motionstreamer_evaluator.py`
+  for HumanML3D-272 motions.
+* `tools/eval_with_motionclip_evaluator.py`
+  for SMPL-22 (135-dim) motions; supports `--gt_only`,
+  `--pred_dir`, `--pred_npz`, and HumanML3D *or* MotionHub anno files.
+
+### GT-only sanity table (real-vs-real)
 
 ```bash
-# On lzy_debug_machine_1 (or any V100 node), from MotionStreamer/ root:
-export HF_ENDPOINT=https://hf-mirror.com
-python3 eval_with_motionstreamer_evaluator.py \
-    --evaluator_ckpt MotionStreamer_HF/Evaluator_272/epoch=99.ckpt \
-    --data_root humanml3d_272 \
+# MotionStreamer-272 evaluator
+python3 ref_repo/MotionStreamer/eval_with_motionstreamer_evaluator.py \
+    --evaluator_ckpt ref_repo/MotionStreamer/MotionStreamer/MotionStreamer_HF/Evaluator_272/epoch=99.ckpt \
+    --data_root ref_repo/MotionStreamer/MotionStreamer/humanml3d_272 \
     --gt_only --n_repeats 20 \
-    --out_json /tmp/gt_sanity.json
+    --out_json work_dirs/ms_eval/gt_sanity20.json
+
+# MotionCLIP-135 evaluator (HumanML3D)
+python3 tools/eval_with_motionclip_evaluator.py \
+    --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq \
+    --anno_file data/annotation/test_hml3d.json \
+    --data_dir data/motionhub --gt_only --n_repeats 20 \
+    --out_json work_dirs/mc_eval/full_gt_h3d.json
+
+# MotionCLIP-135 evaluator (MotionHub)
+python3 tools/eval_with_motionclip_evaluator.py \
+    --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq \
+    --anno_file data/annotation/test_motionhub_t2m.json \
+    --data_dir data/motionhub --gt_only --n_repeats 20 \
+    --out_json work_dirs/mc_eval/full_gt_motionhub_t2m.json
 ```
 
-Result on the 272-dim HumanML3D test split (7392 paired captions, 20 repeats):
+Results (real-vs-real, FID ≈ 0 verifies pipeline consistency):
 
-| Metric | Real-vs-Real |
-|---|---|
-| FID | ${-3.1\!\times\!10^{-8}} \pm 3.8\!\times\!10^{-8}$ ≈ 0 ✓ |
-| R-P (T1/T2/T3) | 0.706 / 0.857 / 0.911 |
-| Diversity (real / pred) | 27.34 / 27.28 |
-| MM-Dist | 15.01 |
+| Evaluator | Dataset | Rep | n pairs | FID | R-P T1/T2/T3 | MM-Dist | Diversity |
+|---|---|---|---|---|---|---|---|
+| MotionStreamer-272 | HumanML3D test | 272-dim | 7392 | ${-3.1{\times}10^{-8}}$ | 0.706 / 0.857 / 0.911 | 15.01 | 27.34 |
+| MotionCLIP-135 (ours) | HumanML3D test | SMPL-22 | 4269 | ${-2.1{\times}10^{-7}}$ | **0.918 / 0.962 / 0.971** | 37.57 | 45.43 |
+| MotionCLIP-135 (ours) | MotionHub-T2M test | SMPL-22 | 1513 | ${-1.9{\times}10^{-7}}$ | **0.958 / 0.996 / 0.999** | 38.69 | 46.09 |
 
-`FID ≈ 0` confirms the evaluator pipeline is internally consistent. Note the
-**absolute** R-P / Diversity / MM-Dist numbers differ from the MotionStreamer
-paper's "Real" row (T1=0.491, Div=9.50, MM-Dist=2.97); the discrepancy is
-likely an embedding-norm convention difference. **What matters for the paper
-revision is the relative ranking of methods under this single, fixed
-evaluator**, which is meaningful regardless of the absolute scale.
+Reading the table:
+
+* `FID ≈ 0` on every row confirms each evaluator's internal pipeline is
+  self-consistent — necessary for any comparison vs predicted motions to be
+  meaningful.
+* The two evaluators sit on **incomparable absolute scales**: MotionStreamer's
+  TMR latent is the VAE μ (low magnitude, ‖μ‖₂ ≈ 4–6), MotionCLIP's "embedding"
+  is the un-normalized projection of a contrastive model (‖z‖₂ ≈ 30–50).
+  Therefore MM-Dist and Diversity values are **not** comparable across
+  evaluators; **only relative rankings of methods under a single, fixed
+  evaluator are meaningful**.
+* On HumanML3D, MotionCLIP gives a higher real-vs-real R-Precision ceiling
+  (0.918) than MotionStreamer (0.706). This suggests the SMPL-22 body
+  representation + contrastive CLIP-style training yields a tighter
+  text-motion alignment than the 272-dim TMR-VAE on the same captions.
+* On MotionHub the MotionCLIP ceiling is even higher (0.958 T1) — expected
+  because the model was trained on MotionHub's HQ training split.
+* The MotionStreamer evaluator can only see the HumanML3D-272 representation,
+  so a direct evaluator-vs-evaluator comparison on MotionHub requires
+  re-encoding MotionHub motions into 272-dim (Stage 4 below).
 
 ---
 
@@ -139,10 +203,34 @@ standard deviations across 20 random shuffles.
     new MoMask numbers were obtained under MotionStreamer's TMR-272
     evaluator using the official `ericguo5513/momask-codes` checkpoint
     without retraining.
-  - Keep the SMPL-22 TMR numbers for the other baselines as the primary
-    comparison, OR provide both columns if space allows.
+  - Keep the MotionCLIP numbers (now reproducibly trained inside
+    `hftrainer/`) as the primary comparison; use MotionStreamer's TMR-272 as
+    a "sanity column" for HumanML3D.
 * Remove the `[TODO~--~MoMask re-evaluation]` paragraph in `sec:t2m`
   once the new numbers are in.
+
+### Stage 4 — MotionStreamer-eval on MotionHub (extra cross-check)
+
+To enable a same-evaluator MotionHub comparison, convert MotionHub
+SMPL-22 motions into HumanML3D-272 features:
+
+```bash
+python3 ref_repo/MotionStreamer/272-dim-Motion-Representation/representation_272.py \
+    --src data/motionhub/<subset>/smplx_55/<id>.npz \
+    --joints_dir <work>/smpl_85_face_z_transform_joints \
+    --params_dir <work>/smpl_85_face_z_transform \
+    --out_dir <work>/motionhub_272/<subset>/<id>.npy
+```
+
+then run `eval_with_motionstreamer_evaluator.py --pred_dir <work>/motionhub_272`
+together with MotionHub's caption `.txt` files (one caption per line, same
+`#`-delimited format as HumanML3D). Both evaluators on MotionHub +
+HumanML3D would give the cleanest 2-evaluator x 2-dataset comparison
+matrix.
+
+This stage is **not** required for the camera-ready (MotionCLIP is the
+declared "our evaluator" of the paper), but is the cleanest way to answer
+"do the two evaluators agree on the *ranking* of methods?".
 
 ---
 
