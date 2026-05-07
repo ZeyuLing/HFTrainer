@@ -10,6 +10,7 @@ HF-Trainer 围绕几条核心原则展开：
 ## 设计页面
 
 - [ModelBundle](model_bundle.md)
+- [Accelerate 集成与按模块隔离](accelerate_integration.md)
 - [Checkpoint](checkpoint.md)
 - [Hooks](hooks.md)
 - [LoRA](../lora.md)

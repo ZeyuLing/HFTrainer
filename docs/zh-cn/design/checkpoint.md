@@ -19,6 +19,12 @@ Accelerate state 文件：
 - `optimizer.bin`
 - `scheduler.bin`
 - `random_states_0.pkl`
+- `custom_checkpoint_0.pkl`：bundle-level orphan tensor 适配器（详见 [Accelerate 集成](accelerate_integration.md) §4.C）。
+  bundle 直接持有的 `nn.Parameter` / `register_buffer`（如 HyMotion 的 `null_vtxt_feat`）通过
+  `_BundleOrphanCheckpoint` + `register_for_checkpointing` 进入这个文件，与
+  `accelerator.save_state` / `load_state` 完全打通。
+  legacy ckpt（commit `9a67a3d` 之前产生）若缺这个文件，runner 会一次性从
+  `model.pt::__bundle_params__` 合成迁移。
 
 `meta.pt`
 

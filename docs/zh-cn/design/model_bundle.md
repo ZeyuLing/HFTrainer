@@ -114,6 +114,12 @@ class MyBundle(ModelBundle):
 
 如果底层 HF loader 已经支持目标 dtype，优先用 `from_pretrained.torch_dtype`；如果你希望在 load 之后由 HF-Trainer 统一 cast，就用 `module_dtype`。具体示例和 AMP 注意事项见 [显存与精度](../memory.md)。
 
+> **Why per-submodule？**
+> HF-Trainer 故意 **不** 把 bundle 整体传给 `accelerator.prepare`，而是逐个 prepare 子模块，
+> 这样才能给每个子模块独立配 dtype / gradient_checkpointing / trainable / FSDP-wrap 策略。
+> 这个取舍以及随之而来的 "bundle-level orphan tensor" 处理方式参见
+> [Accelerate 集成与按模块隔离](accelerate_integration.md)。
+
 ## LoRA
 
 推荐配置方式：

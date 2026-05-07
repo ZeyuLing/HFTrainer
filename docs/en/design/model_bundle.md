@@ -114,6 +114,14 @@ That lets checkpoints skip frozen modules and lets optimizers only see trainable
 
 Use `from_pretrained.torch_dtype` when the underlying HF loader already supports the target dtype, and `module_dtype` when you want HF-Trainer to cast the constructed module after load. See [Memory and Precision](../memory.md) for examples and caveats.
 
+> **Why per-submodule?**
+> HF-Trainer intentionally does **not** pass the bundle as a whole to
+> `accelerator.prepare`; instead it prepares trainable sub-modules
+> individually so each can carry its own dtype / gradient_checkpointing /
+> trainable / FSDP-wrap policy. The trade-off and the resulting
+> "bundle-level orphan tensor" handling are documented in
+> [Accelerate Integration & Per-Module Isolation](accelerate_integration.md).
+
 ## LoRA
 
 Recommended config pattern:

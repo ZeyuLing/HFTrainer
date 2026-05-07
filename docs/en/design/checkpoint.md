@@ -19,6 +19,13 @@ Accelerate state files:
 - `optimizer.bin`
 - `scheduler.bin`
 - `random_states_0.pkl`
+- `custom_checkpoint_0.pkl`: bundle-level orphan tensor adapter (see
+  [Accelerate Integration](accelerate_integration.md) §4.C).  Tensors declared
+  directly on the bundle (e.g. HyMotion's `null_vtxt_feat`) round-trip through
+  this file via `_BundleOrphanCheckpoint` + `register_for_checkpointing`,
+  fully integrated with `accelerator.save_state` / `load_state`.  Legacy
+  checkpoints predating commit `9a67a3d` are migrated on first load by
+  synthesising this file from `model.pt::__bundle_params__`.
 
 `meta.pt`
 

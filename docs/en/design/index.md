@@ -10,6 +10,7 @@ HF-Trainer is built around a small set of ideas:
 ## Design Pages
 
 - [ModelBundle](model_bundle.md)
+- [Accelerate Integration & Per-Module Isolation](accelerate_integration.md)
 - [Checkpointing](checkpoint.md)
 - [Hooks](hooks.md)
 - [LoRA](../lora.md)
