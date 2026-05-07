@@ -97,5 +97,13 @@ ref_repo/**/node_modules/
 ref_repo/**/.pytest_cache/
 # 子仓 .git 若用「整目录 add」方式合并，可删子目录 .git 后提交；若暂保留子仓，不要 track 其 .git 对象
 ref_repo/**/.git/
+# Stage logs of one-shot setup scripts (downloads / unzips). Keep the .sh, drop the logs.
+ref_repo/_eval_setup_logs/
+# Embedded git clones used as local references. Track only our own glue scripts + paper PDFs
+# inside these dirs via explicit unignore rules below.
+ref_repo/Momask/momask-codes/
+ref_repo/MotionStreamer/MotionStreamer/
+ref_repo/MotionStreamer/272-dim-Motion-Representation/
+!ref_repo/MotionStreamer/MotionStreamer/eval_with_motionstreamer_evaluator.py
 # 基准代码旁的 CLAUDE 说明仍希望随 ref_repo 一并入库（需写在全局 CLAUDE.md 规则之后）
 !ref_repo/**/CLAUDE.md

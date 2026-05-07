@@ -28,6 +28,8 @@
 | **LODGE** | CVPR 2024：**Lodge** 长序列舞蹈生成，由粗到细的扩散与音乐引导。 |
 | **MDM** | 经典 **Human Motion Diffusion Model**（HumanML3D 等基准常用基线）。 |
 | **MoGenDiT** | 内部 **MoreDiff** 路线：基于 DiT 的 3D 动作修复/去噪（与 `hftrainer` 内 MoGenDIT 管线对接）。 |
+| **Momask** | CVPR 2024 **MoMask**：RVQ + masked-modeling T2M。`momask-codes/`（GitHub）+ `paper/MoMask_CVPR2024.pdf` + `weights/{t2m,kit}/`（预训练权重，~460MB）。供 PRISM TMM 重新评测使用。 |
+| **MotionStreamer** | ICCV 2025 **MotionStreamer**：因果 TAE + 自回归扩散流式生成。`MotionStreamer/`（GitHub）+ `MotionStreamer_HF/{Causal_TAE,Causal_TAE_t2m_babel,Evaluator_272,Experiments}/` + `humanml3d_272/`（272-dim HumanML3D 数据集）+ `272-dim-Motion-Representation/`（SMPL ↔ 272-dim 转换工具）。**为 PRISM TMM 用 MotionStreamer 的 TMR-272 evaluator 重评所需的全部资产**。 |
 | **MotionLCM** | **MotionLCM**：潜在一致性模型，强调实时与可控的人体运动生成。 |
 | **OmniControl** | **OmniControl**：任意关节、任意时刻的空间/轨迹控制生成。 |
 | **OmniH2O** | 人形 **H2O / OmniH2O** 全身遥操作与学习（人→人形）。 |
