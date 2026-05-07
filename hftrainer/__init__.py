@@ -1,6 +1,10 @@
 """
-hftrainer full package init.
-Imports all sub-modules to trigger registry registrations.
+hftrainer full package init (motion branch).
+
+Imports all motion sub-modules to trigger registry registrations.
+Non-motion task stacks (classification / GAN / LLM / SD15 / Wan / DMD)
+have been removed from this branch; the corresponding loaders live
+on the main branch.
 """
 
 # Core infrastructure
@@ -20,10 +24,9 @@ def _register_hf_classes():
     """Register common HF classes so they're available in HF_MODELS registry."""
     _classes_to_register = []
 
-    # transformers
+    # transformers — only motion-relevant text encoders / language backbones
     try:
         from transformers import (
-            ViTForImageClassification,
             CLIPTextModel,
             CLIPTokenizer,
             AutoModelForCausalLM,
@@ -32,7 +35,6 @@ def _register_hf_classes():
             T5EncoderModel,
         )
         _classes_to_register.extend([
-            ('ViTForImageClassification', ViTForImageClassification),
             ('CLIPTextModel', CLIPTextModel),
             ('AutoModelForCausalLM', AutoModelForCausalLM),
             ('UMT5EncoderModel', UMT5EncoderModel),
@@ -41,33 +43,19 @@ def _register_hf_classes():
     except ImportError:
         pass
 
-    # diffusers
+    # diffusers — only the schedulers used by motion flow-matching pipelines
     try:
         from diffusers import (
-            AutoencoderKL,
-            UNet2DConditionModel,
             DDPMScheduler,
             DDIMScheduler,
             PNDMScheduler,
             FlowMatchEulerDiscreteScheduler,
         )
         _classes_to_register.extend([
-            ('AutoencoderKL', AutoencoderKL),
-            ('UNet2DConditionModel', UNet2DConditionModel),
             ('DDPMScheduler', DDPMScheduler),
             ('DDIMScheduler', DDIMScheduler),
             ('PNDMScheduler', PNDMScheduler),
             ('FlowMatchEulerDiscreteScheduler', FlowMatchEulerDiscreteScheduler),
-        ])
-    except ImportError:
-        pass
-
-    # WAN-specific
-    try:
-        from diffusers import AutoencoderKLWan, WanTransformer3DModel
-        _classes_to_register.extend([
-            ('AutoencoderKLWan', AutoencoderKLWan),
-            ('WanTransformer3DModel', WanTransformer3DModel),
         ])
     except ImportError:
         pass
@@ -79,7 +67,7 @@ def _register_hf_classes():
 
 _register_hf_classes()
 
-# ── Import task-specific modules to trigger @register_module decorators ──
+# ── Import motion task modules to trigger @register_module decorators ──
 def _import_task_modules():
     import importlib, warnings
 
@@ -89,47 +77,16 @@ def _import_task_modules():
         'hftrainer.hooks.logger_hook',
         'hftrainer.hooks.ema_hook',
         'hftrainer.hooks.lr_scheduler_hook',
-        # Evaluation
-        'hftrainer.evaluation.classification.accuracy_evaluator',
         # Visualization
         'hftrainer.visualization.tensorboard_visualizer',
         'hftrainer.visualization.file_visualizer',
         # Generic dataset transforms
         'hftrainer.datasets.transforms',
-        # ViT
-        'hftrainer.models.vit.bundle',
-        'hftrainer.trainers.classification.classification_trainer',
-        'hftrainer.pipelines.classification.classification_pipeline',
-        'hftrainer.datasets.classification.hf_image_classification_dataset',
-        'hftrainer.datasets.classification.imagefolder_dataset',
     ]
 
-    # Conditionally import task modules (may not all exist yet)
+    # Motion-specific task modules.  Wrapped in optional-import so that
+    # missing optional deps in some sub-trees do not break package import.
     optional_modules = [
-        'hftrainer.models.sd15.bundle',
-        'hftrainer.trainers.text2image.sd15_trainer',
-        'hftrainer.pipelines.text2image.sd15_pipeline',
-        'hftrainer.pipelines.text2image.dmd_pipeline',
-        'hftrainer.datasets.text2image.hf_imagefolder_dataset',
-        'hftrainer.models.causal_lm.bundle',
-        'hftrainer.trainers.llm.causal_lm_trainer',
-        'hftrainer.pipelines.llm.causal_lm_pipeline',
-        'hftrainer.datasets.llm.alpaca_dataset',
-        'hftrainer.evaluation.llm.perplexity_evaluator',
-        'hftrainer.models.wan.bundle',
-        'hftrainer.trainers.text2video.wan_trainer',
-        'hftrainer.pipelines.text2video.wan_pipeline',
-        'hftrainer.datasets.text2video.hf_video_dataset',
-        # StyleGAN2
-        'hftrainer.models.stylegan2.model',
-        'hftrainer.models.stylegan2.bundle',
-        'hftrainer.trainers.gan.gan_trainer',
-        'hftrainer.pipelines.gan.stylegan2_pipeline',
-        'hftrainer.datasets.gan.image_folder_gan_dataset',
-        # DMD
-        'hftrainer.models.dmd.bundle',
-        'hftrainer.trainers.distillation.dmd_trainer',
-        'hftrainer.datasets.distillation.dmd_image_pair_dataset',
         # Motion
         'hftrainer.models.motion.prism.autoencoder_kl_2d',
         'hftrainer.models.motion.prism.autoencoder_kl_1d',

@@ -1,33 +1,35 @@
 """
-tools/infer.py — Inference entry point for hftrainer pipelines.
+tools/infer.py — Inference entry point for hftrainer motion pipelines.
 
 Usage:
-    # WAN text-to-video
+    # PRISM text-to-motion
     python tools/infer.py \\
-        --config configs/text2video/wan_demo.py \\
-        --checkpoint work_dirs/wan_smoke/checkpoint-iter_5 \\
-        --prompt "a cat running in the park" \\
-        --output output/video.mp4
+        --config configs/prism/prism_smoke.py \\
+        --checkpoint work_dirs/prism_smoke/checkpoint-iter_10 \\
+        --prompt "a person walks forward" \\
+        --output output/motion.npz
 
-    # SD1.5 text-to-image
+    # HyMotion T2M
     python tools/infer.py \\
-        --config configs/text2image/sd15_demo.py \\
-        --checkpoint work_dirs/sd15_smoke/checkpoint-iter_10 \\
-        --prompt "a beautiful sunset" \\
-        --output output/image.png
+        --config configs/hymotion_t2m/hymotion_t2m_smoke.py \\
+        --checkpoint work_dirs/hymotion_t2m_smoke/checkpoint-iter_10 \\
+        --prompt "a person waves their hand" \\
+        --output output/motion.npz
 
-    # Classification
+    # HyMotion M2M (motion editing / completion)
     python tools/infer.py \\
-        --config configs/classification/vit_base_demo.py \\
-        --checkpoint work_dirs/vit_smoke/checkpoint-iter_10 \\
-        --input data/classification/demo/images/class_0/0000.jpg
+        --config configs/hymotion_m2m_v2/hymotion_m2m_v2_smoke.py \\
+        --checkpoint work_dirs/hymotion_m2m_smoke/checkpoint-iter_10 \\
+        --input src_motion.npz \\
+        --output output/edited.npz
 
-    # LLM
+    # VerMo (multi-task motion-language)
     python tools/infer.py \\
-        --config configs/llm/llama_lora_demo.py \\
-        --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \\
-        --merge-lora \\
-        --prompt "What is the capital of France?"
+        --config configs/vermo/vermo_smoke.py \\
+        --checkpoint work_dirs/vermo_smoke/checkpoint-iter_10 \\
+        --task t2m \\
+        --prompt "a person sits down" \\
+        --output output/motion.npz
 """
 
 import argparse
@@ -103,144 +105,6 @@ def load_bundle_from_checkpoint(cfg, checkpoint_path: str, device: str):
 
     bundle = bundle.to(device)
     return bundle
-
-
-def infer_text2video(bundle, args):
-    """Run WAN text-to-video inference."""
-    import torch
-    from hftrainer.pipelines.text2video.wan_pipeline import WanPipeline
-
-    pipeline = WanPipeline(
-        bundle=bundle,
-        num_inference_steps=args.num_steps or 20,
-        num_frames=args.num_frames or 16,
-        height=args.height or 256,
-        width=args.width or 256,
-    )
-
-    prompt = args.prompt or 'a cat walking in the park'
-    print(f'Generating video for prompt: "{prompt}"')
-
-    videos = pipeline(prompt)  # [B, T, C, H, W] in [0, 1]
-
-    output = args.output or 'output_video.mp4'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-
-    try:
-        import torchvision.io as io
-        # Convert to [T, C, H, W] uint8
-        video = videos[0]  # [T, C, H, W]
-        video_uint8 = (video * 255).clamp(0, 255).byte()
-        io.write_video(output, video_uint8, fps=8)
-        print(f'Saved video to: {output}')
-    except Exception as e:
-        print(f'Could not save as video ({e}). Saving frames instead.')
-        frames_dir = output.replace('.mp4', '_frames')
-        os.makedirs(frames_dir, exist_ok=True)
-        import torchvision.utils as vutils
-        for i, frame in enumerate(videos[0]):
-            vutils.save_image(frame, os.path.join(frames_dir, f'frame_{i:04d}.png'))
-        print(f'Saved {len(videos[0])} frames to: {frames_dir}')
-
-
-def infer_text2image(bundle, args):
-    """Run SD1.5 text-to-image inference."""
-    from hftrainer.pipelines.text2image.sd15_pipeline import SD15Pipeline
-    from hftrainer.utils.image import save_tensor_image
-
-    pipeline = SD15Pipeline(
-        bundle=bundle,
-        num_inference_steps=args.num_steps or 20,
-        height=args.height or 512,
-        width=args.width or 512,
-    )
-
-    prompt = args.prompt or 'a beautiful landscape'
-    print(f'Generating image for prompt: "{prompt}"')
-
-    images = pipeline(prompt)  # [B, C, H, W] in [0, 1]
-
-    output = args.output or 'output_image.png'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-
-    try:
-        import torchvision.utils as vutils
-        vutils.save_image(images[0], output)
-    except Exception:
-        save_tensor_image(images[0], output)
-    print(f'Saved image to: {output}')
-
-
-def infer_dmd(bundle, args):
-    """Run DMD one-step text-to-image inference."""
-    from hftrainer.pipelines.text2image.dmd_pipeline import DMDPipeline
-    from hftrainer.utils.image import save_tensor_image
-
-    pipeline = DMDPipeline(bundle=bundle)
-    prompt = args.prompt or 'a beautiful landscape'
-    print(f'Generating image for prompt: "{prompt}"')
-    images = pipeline(prompt)
-
-    output = args.output or 'output_dmd.png'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-    try:
-        import torchvision.utils as vutils
-        vutils.save_image(images[0], output)
-    except Exception:
-        save_tensor_image(images[0], output)
-    print(f'Saved image to: {output}')
-
-
-def infer_gan(bundle, args):
-    """Run StyleGAN2 inference."""
-    from hftrainer.pipelines.gan.stylegan2_pipeline import StyleGAN2Pipeline
-    from hftrainer.utils.image import save_tensor_image
-
-    pipeline = StyleGAN2Pipeline(bundle=bundle)
-    images = pipeline(num_samples=args.num_samples or 1)
-    output = args.output or 'output_gan.png'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-    try:
-        import torchvision.utils as vutils
-        if images.shape[0] == 1:
-            vutils.save_image(images[0], output)
-        else:
-            vutils.save_image(images, output, nrow=min(4, images.shape[0]))
-    except Exception:
-        save_tensor_image(images[0], output)
-    print(f'Saved image to: {output}')
-
-
-def infer_classification(bundle, args):
-    """Run ViT classification inference."""
-    from hftrainer.pipelines.classification.classification_pipeline import ClassificationPipeline
-
-    pipeline = ClassificationPipeline(bundle=bundle)
-
-    if args.input:
-        from PIL import Image
-        img = Image.open(args.input).convert('RGB')
-        result = pipeline(img, return_scores=True)
-        pred_ids = result['preds']
-        scores = result['scores']
-        pred_id = pred_ids if isinstance(pred_ids, int) else pred_ids[0]
-        score = scores.max().item() if scores.ndim == 1 else scores[0].max().item()
-        print(f'Predicted class: {pred_id}, score: {score:.4f}')
-    else:
-        print('Please provide --input path to an image for classification.')
-
-
-def infer_llm(bundle, args):
-    """Run LLM text generation inference."""
-    from hftrainer.pipelines.llm.causal_lm_pipeline import CausalLMPipeline
-
-    pipeline = CausalLMPipeline(bundle=bundle)
-
-    prompt = args.prompt or 'What is artificial intelligence?'
-    print(f'Prompt: {prompt}')
-
-    outputs = pipeline([prompt], max_new_tokens=args.max_new_tokens)
-    print(f'Generated: {outputs[0]}')
 
 
 def infer_prism(bundle, args):
@@ -379,7 +243,12 @@ def infer_hymotion_m2m(bundle, args):
         L = src_motion.shape[1]
     else:
         L = args.num_frames or 64
-        D = 135
+        if bundle.mean.numel() > 1:
+            D = int(bundle.mean.numel())
+        elif hasattr(bundle.motion_transformer, 'output_dim'):
+            D = int(bundle.motion_transformer.output_dim)
+        else:
+            D = 135
         src_motion = torch.randn(1, L, D, device=device)
         src_mask = torch.ones(1, L, D, device=device)
 
@@ -470,17 +339,7 @@ def main():
         bundle.merge_lora_weights()
         print('Merged LoRA adapters into base weights.')
 
-    if 'Wan' in trainer_type:
-        infer_text2video(bundle, args)
-    elif 'DMD' in trainer_type:
-        infer_dmd(bundle, args)
-    elif 'SD15' in trainer_type or 'Text2Image' in trainer_type:
-        infer_text2image(bundle, args)
-    elif 'GAN' in trainer_type:
-        infer_gan(bundle, args)
-    elif 'Classification' in trainer_type:
-        infer_classification(bundle, args)
-    elif 'PrismMCM' in trainer_type:
+    if 'PrismMCM' in trainer_type:
         infer_prism_mcm(bundle, args)
     elif 'Prism' in trainer_type:
         infer_prism(bundle, args)
@@ -490,11 +349,9 @@ def main():
         infer_hymotion_m2m(bundle, args)
     elif 'HyMotionT2M' in trainer_type:
         infer_hymotion_t2m(bundle, args)
-    elif 'CausalLM' in trainer_type or 'LLM' in trainer_type:
-        infer_llm(bundle, args)
     else:
         print(f'Unknown trainer type: {trainer_type}. Cannot auto-detect pipeline.')
-        print('Supported: WanTrainer, SD15Trainer, DMDTrainer, GANTrainer, ClassificationTrainer, CausalLMTrainer, PrismTrainer, PrismMCMTrainer, VermoTrainer, HyMotionM2MTrainer')
+        print('Supported (motion only on this branch): PrismTrainer, PrismMCMTrainer, VermoTrainer, HyMotionM2MTrainer, HyMotionT2MTrainer')
 
 
 if __name__ == '__main__':
