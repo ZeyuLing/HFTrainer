@@ -286,11 +286,24 @@ def _r_precision(text_emb: np.ndarray, motion_emb: np.ndarray, top_k: int = 3):
     return top.sum(0), matching
 
 
-def _diversity(emb: np.ndarray, n: int = 300) -> float:
+def _diversity(emb: np.ndarray, n: int = 300, ord: int = 1, l2_normalize: bool = True) -> float:
+    """Diversity, matching versatilemotion's cal_diversity:
+    L2-normalize, then take L1 distance between two random samples, average.
+
+    Args:
+        emb: (N, D) features.
+        n: number of random pair samples (default 300, TMRMetric default).
+        ord: norm order (TMRMetric uses L1=ord=1).
+        l2_normalize: if True, apply F.normalize before distance computation
+            (TMRMetric does this regardless of input).
+    """
     n = min(n, len(emb))
-    a = emb[np.random.choice(len(emb), n, replace=False)]
-    b = emb[np.random.choice(len(emb), n, replace=False)]
-    return float(np.linalg.norm(a - b, axis=1).mean())
+    a = emb[np.random.choice(len(emb), n, replace=False)].astype(np.float32)
+    b = emb[np.random.choice(len(emb), n, replace=False)].astype(np.float32)
+    if l2_normalize:
+        a = a / (np.linalg.norm(a, axis=-1, keepdims=True) + 1e-12)
+        b = b / (np.linalg.norm(b, axis=-1, keepdims=True) + 1e-12)
+    return float(np.linalg.norm(a - b, ord=ord, axis=1).mean())
 
 
 def _frechet(mu1, c1, mu2, c2, eps=1e-6) -> float:
@@ -315,19 +328,21 @@ def _activation_stats(x: np.ndarray):
 
 def encode_dataset(bundle, captions: List[str], motions: List[np.ndarray],
                    lengths: List[int], device: torch.device,
-                   batch_size: int = 32, max_frames: int = 360):
-    """Run MotionCLIP over the dataset, return (text_emb, motion_emb, [unnorm_text/motion]).
+                   forward_batch_size: int = 32, max_frames: int = 360,
+                   l2_normalize: bool = True):
+    """Run MotionCLIP over the dataset, return (text_emb, motion_emb).
 
-    Note: we return the *projected, non-normalized* embeddings — matching
-    the convention used by MotionStreamer's TMR latent for FID computation.
+    By default returns **L2-normalized** projections, matching versatilemotion's
+    ``TMRMetric`` convention (see :file:`mmotion/evaluation/metrics/tmr_metric.py`),
+    which computes R-Precision / MM-Dist / Diversity on ``F.normalize``-d features.
+    Set ``l2_normalize=False`` to inspect raw projections (e.g. for FID-on-raw).
     """
     n = len(captions)
     text_embs, motion_embs = [], []
-    real_text_norm, real_motion_norm = [], []
 
     with torch.no_grad():
-        for i in range(0, n, batch_size):
-            j = min(i + batch_size, n)
+        for i in range(0, n, forward_batch_size):
+            j = min(i + forward_batch_size, n)
             cap_b = captions[i:j]
             mot_b = motions[i:j]
             len_b = lengths[i:j]
@@ -353,8 +368,10 @@ def encode_dataset(bundle, captions: List[str], motions: List[np.ndarray],
             for k, ml in enumerate(len_b):
                 attn[k, : min(int(ml), T)] = 1.0
 
-            # ---- motion embedding (raw projection, used for FID) ----
+            # ---- motion embedding ----
             mot_feat = bundle.encode_motion(mot_n, attn)
+            if l2_normalize:
+                mot_feat = torch.nn.functional.normalize(mot_feat, dim=-1)
             motion_embs.append(mot_feat.cpu().numpy())
 
             # ---- text embedding ----
@@ -363,6 +380,8 @@ def encode_dataset(bundle, captions: List[str], motions: List[np.ndarray],
                 enc['input_ids'].to(device),
                 enc['attention_mask'].to(device),
             )
+            if l2_normalize:
+                text_feat = torch.nn.functional.normalize(text_feat, dim=-1)
             text_embs.append(text_feat.cpu().numpy())
 
     text_emb = np.concatenate(text_embs, axis=0)
@@ -398,8 +417,14 @@ def main():
     p.add_argument('--max_frames', type=int, default=360)
     p.add_argument('--min_frames', type=int, default=24)
     p.add_argument('--max_pairs', type=int, default=None)
-    p.add_argument('--batch_size', type=int, default=32,
-                   help='R-Precision/MM-Dist computed per chunk of this size.')
+    p.add_argument('--forward_batch_size', type=int, default=32,
+                   help='GPU forward batch size (memory only).')
+    p.add_argument('--chunk_size', type=int, default=256,
+                   help='R-Precision/MM-Dist chunk size. TMRMetric uses 256, '
+                        'MotionStreamer/T2M-GPT use 32.')
+    p.add_argument('--no_l2_normalize', action='store_true',
+                   help='Skip L2-normalization of embeddings before metric computation. '
+                        'TMRMetric (versatilemotion) DOES L2-normalize; default is on.')
     p.add_argument('--n_repeats', type=int, default=20,
                    help='Average metrics over this many random shuffles.')
     args = p.parse_args()
@@ -474,20 +499,24 @@ def main():
 
     print('[+] Encoding ...')
     t0 = time.time()
+    l2_norm = not args.no_l2_normalize
     text_emb_real, motion_emb_real = encode_dataset(
         bundle, captions, real_motions, lengths, device,
-        batch_size=args.batch_size, max_frames=args.max_frames,
+        forward_batch_size=args.forward_batch_size, max_frames=args.max_frames,
+        l2_normalize=l2_norm,
     )
     if args.gt_only:
         text_emb_pred, motion_emb_pred = text_emb_real, motion_emb_real
     else:
         text_emb_pred, motion_emb_pred = encode_dataset(
             bundle, captions, pred_motions, lengths, device,
-            batch_size=args.batch_size, max_frames=args.max_frames,
+            forward_batch_size=args.forward_batch_size, max_frames=args.max_frames,
+            l2_normalize=l2_norm,
         )
-    print(f'    encoding done in {time.time() - t0:.1f}s')
+    print(f'    encoding done in {time.time() - t0:.1f}s'
+          f'  (l2_normalize={l2_norm})')
 
-    chunk = args.batch_size
+    chunk = args.chunk_size
     rp_real_runs, rp_pred_runs = [], []
     ms_real_runs, ms_pred_runs = [], []
     fid_runs, div_real_runs, div_pred_runs = [], [], []

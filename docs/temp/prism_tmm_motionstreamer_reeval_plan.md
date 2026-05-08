@@ -1,10 +1,14 @@
 # PRISM TMM — MotionStreamer-Evaluator Re-evaluation Plan
 
-**Status (2026-05-08)**: MotionCLIP evaluator ported into hftrainer with numerical
-parity vs the original versatilemotion implementation
-(`text_emb` diff = 1.9e-6, `motion_emb` diff = 0). Both evaluators pass GT-only
-sanity (FID ≈ 0) on HumanML3D and (for MotionCLIP) on MotionHub. Baseline-side
-inference + 272-dim conversion for non-GT comparisons still TODO.
+**Status (2026-05-08, evening)**: MotionCLIP evaluator ported into hftrainer with
+numerical parity vs the original versatilemotion implementation (`text_emb` diff
+= 1.9e-6, `motion_emb` diff = 0). The original MotionCLIP eval script computed
+MM-Dist / Diversity on the **un-normalized projection** (‖z‖₂≈30+); fixed to
+match versatilemotion `TMRMetric` exactly: chunk=256, L2-normalize before R-P /
+MM-Dist, L1 distance for Diversity. Both evaluators now pass GT-only sanity on
+both datasets (FID ≈ 0). MotionHub→HumanML3D-272 converter built, so
+MotionStreamer's TMR-272 evaluator can be run on MotionHub (1257/1590 motions
+converted). Baseline-side inference for non-GT comparisons still TODO.
 
 ---
 
@@ -85,56 +89,90 @@ shuffle, FID over the full set, R-P / MM-Dist averaged over chunks:
 ### GT-only sanity table (real-vs-real)
 
 ```bash
-# MotionStreamer-272 evaluator
+# MotionStreamer-272 evaluator on HumanML3D test
 python3 ref_repo/MotionStreamer/eval_with_motionstreamer_evaluator.py \
     --evaluator_ckpt ref_repo/MotionStreamer/MotionStreamer/MotionStreamer_HF/Evaluator_272/epoch=99.ckpt \
     --data_root ref_repo/MotionStreamer/MotionStreamer/humanml3d_272 \
     --gt_only --n_repeats 20 \
     --out_json work_dirs/ms_eval/gt_sanity20.json
 
-# MotionCLIP-135 evaluator (HumanML3D)
+# MotionStreamer-272 evaluator on MotionHub-T2M test (Stage 4: motion conversion first)
+python3 tools/convert_motionhub_to_h3d272.py \
+    --anno_file data/annotation/test_motionhub_t2m.json \
+    --data_dir data/motionhub \
+    --out_root work_dirs/ms_eval/motionhub_272 \
+    --ms_data_root ref_repo/MotionStreamer/MotionStreamer/humanml3d_272 \
+    --smpl_model_path checkpoints/smpl_models/smplx
+python3 ref_repo/MotionStreamer/eval_with_motionstreamer_evaluator.py \
+    --evaluator_ckpt ref_repo/MotionStreamer/MotionStreamer/MotionStreamer_HF/Evaluator_272/epoch=99.ckpt \
+    --data_root work_dirs/ms_eval/motionhub_272 \
+    --gt_only --n_repeats 20 \
+    --out_json work_dirs/ms_eval/gt_motionhub_272.json
+
+# MotionCLIP-135 evaluator (versatilemotion TMRMetric protocol: chunk=256, L2-norm)
 python3 tools/eval_with_motionclip_evaluator.py \
     --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq \
     --anno_file data/annotation/test_hml3d.json \
-    --data_dir data/motionhub --gt_only --n_repeats 20 \
-    --out_json work_dirs/mc_eval/full_gt_h3d.json
+    --data_dir data/motionhub --gt_only --n_repeats 20 --chunk_size 256 \
+    --out_json work_dirs/mc_eval/full_gt_h3d_v2.json
 
-# MotionCLIP-135 evaluator (MotionHub)
 python3 tools/eval_with_motionclip_evaluator.py \
     --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq \
     --anno_file data/annotation/test_motionhub_t2m.json \
-    --data_dir data/motionhub --gt_only --n_repeats 20 \
-    --out_json work_dirs/mc_eval/full_gt_motionhub_t2m.json
+    --data_dir data/motionhub --gt_only --n_repeats 20 --chunk_size 256 \
+    --out_json work_dirs/mc_eval/full_gt_motionhub_t2m_v2.json
 ```
 
-Results (real-vs-real, FID ≈ 0 verifies pipeline consistency):
+Results (real-vs-real, FID ≈ 0 verifies internal pipeline consistency):
 
-| Evaluator | Dataset | Rep | n pairs | FID | R-P T1/T2/T3 | MM-Dist | Diversity |
-|---|---|---|---|---|---|---|---|
-| MotionStreamer-272 | HumanML3D test | 272-dim | 7392 | ${-3.1{\times}10^{-8}}$ | 0.706 / 0.857 / 0.911 | 15.01 | 27.34 |
-| MotionCLIP-135 (ours) | HumanML3D test | SMPL-22 | 4269 | ${-2.1{\times}10^{-7}}$ | **0.918 / 0.962 / 0.971** | 37.57 | 45.43 |
-| MotionCLIP-135 (ours) | MotionHub-T2M test | SMPL-22 | 1513 | ${-1.9{\times}10^{-7}}$ | **0.958 / 0.996 / 0.999** | 38.69 | 46.09 |
+| Evaluator (chunk) | Dataset | n pairs | FID | R-P T1/T2/T3 | MM-Dist | Diversity |
+|---|---|---|---|---|---|---|
+| MotionStreamer-272 (chunk=32, L2-dist diversity) | HumanML3D test | 7392 | ${-3.1{\times}10^{-8}}$ | 0.706 / 0.857 / 0.911 | 15.01 | 27.34 |
+| MotionStreamer-272 (chunk=32, L2-dist diversity) | **MotionHub-T2M test** | **10657** | ${-6.8{\times}10^{-10}}$ | **0.223 / 0.355 / 0.447** | **21.57** | **25.48** |
+| MotionCLIP-135 (chunk=256, **TMRMetric**) | HumanML3D test | 4269 | ${-1.4{\times}10^{-10}}$ | 0.785 / 0.902 / 0.937 | 0.989 | 21.64 |
+| MotionCLIP-135 (chunk=256, **TMRMetric**) | MotionHub-T2M test | 1513 | ${-2.8{\times}10^{-10}}$ | 0.815 / 0.945 / 0.979 | 0.984 | 21.33 |
 
 Reading the table:
 
 * `FID ≈ 0` on every row confirms each evaluator's internal pipeline is
   self-consistent — necessary for any comparison vs predicted motions to be
   meaningful.
-* The two evaluators sit on **incomparable absolute scales**: MotionStreamer's
-  TMR latent is the VAE μ (low magnitude, ‖μ‖₂ ≈ 4–6), MotionCLIP's "embedding"
-  is the un-normalized projection of a contrastive model (‖z‖₂ ≈ 30–50).
-  Therefore MM-Dist and Diversity values are **not** comparable across
-  evaluators; **only relative rankings of methods under a single, fixed
-  evaluator are meaningful**.
-* On HumanML3D, MotionCLIP gives a higher real-vs-real R-Precision ceiling
-  (0.918) than MotionStreamer (0.706). This suggests the SMPL-22 body
-  representation + contrastive CLIP-style training yields a tighter
-  text-motion alignment than the 272-dim TMR-VAE on the same captions.
-* On MotionHub the MotionCLIP ceiling is even higher (0.958 T1) — expected
-  because the model was trained on MotionHub's HQ training split.
-* The MotionStreamer evaluator can only see the HumanML3D-272 representation,
-  so a direct evaluator-vs-evaluator comparison on MotionHub requires
-  re-encoding MotionHub motions into 272-dim (Stage 4 below).
+* **Two evaluators use different metric protocols, so absolute values are
+  not comparable across rows.** Only relative rankings of methods *within*
+  one row are meaningful.
+  * MotionStreamer eval (default in their repo): chunk=32, **no L2-norm**
+    of the VAE-μ embedding, **L2 distance** for Diversity, **n=300**.
+  * MotionCLIP eval (matches versatilemotion `TMRMetric`): chunk=256,
+    **L2-normalize** the 512-d projection before R-P / MM-Dist, **L1 distance**
+    for Diversity, **n=300**.
+* MotionCLIP MM-Dist ≈ 1.0: distance between L2-normalized 512-d unit vectors
+  ranges in [0, √2 ≈ 1.41]. Real text-motion pairs sit at ≈ 0.99, well below
+  the random-pair baseline √2, indicating tight contrastive alignment.
+  (The earlier ${\sim}38$ value was a bug — the script returned the
+  un-normalized projection (‖z‖₂≈30); now matches versatilemotion exactly.)
+* MotionCLIP Diversity ≈ 21.6: L1 distance between two random L2-normalized
+  512-d vectors has expected value ${\sqrt{4d/\pi}\approx 25.5}$; real motion
+  embeddings come in slightly tighter (21.6) — the cluster has structure.
+* MotionStreamer Diversity ≈ 25–27: L2 distance on un-normalized 256-d VAE
+  μ (‖μ‖₂≈4–6) — different scale, can't compare directly.
+* **Cross-dataset on MotionStreamer-272 evaluator**: the same evaluator
+  trained on HumanML3D drops sharply on MotionHub (R-P T1: 0.71 → 0.22).
+  Two reasons:
+  1. **Distribution shift in motion**: MotionHub motions are more diverse
+     than HumanML3D's locomotion-heavy distribution, so the TMR latent
+     trained on HumanML3D doesn't separate them as cleanly.
+  2. **Caption distribution shift**: MotionHub's hierarchical captions
+     (macro/meso/micro) are more abstract than HumanML3D's literal action
+     descriptions; one motion has ~7 captions on average, increasing
+     same-class confusability in retrieval.
+  Importantly, FID ≈ 0 still holds for real-vs-real, so the evaluator
+  is *internally consistent* on MotionHub-272, just with a lower
+  R-Precision ceiling. Method *rankings* under this evaluator are still
+  meaningful.
+* **Same-evaluator-different-dataset reading**: under MotionCLIP, both
+  HumanML3D (0.785) and MotionHub (0.815) ceilings are healthy and similar;
+  this evaluator generalizes well across the two test sets because it
+  was trained on the union of MotionHub + HumanML3D HQ captions.
 
 ---
 
@@ -209,28 +247,33 @@ standard deviations across 20 random shuffles.
 * Remove the `[TODO~--~MoMask re-evaluation]` paragraph in `sec:t2m`
   once the new numbers are in.
 
-### Stage 4 — MotionStreamer-eval on MotionHub (extra cross-check)
+### Stage 4 — MotionStreamer-eval on MotionHub (extra cross-check) — **DONE**
 
-To enable a same-evaluator MotionHub comparison, convert MotionHub
-SMPL-22 motions into HumanML3D-272 features:
+`tools/convert_motionhub_to_h3d272.py` is a self-contained converter that
+mirrors MotionStreamer's `face_z_transform.py + infer_get_joints.py +
+representation_272.py` pipeline:
 
-```bash
-python3 ref_repo/MotionStreamer/272-dim-Motion-Representation/representation_272.py \
-    --src data/motionhub/<subset>/smplx_55/<id>.npz \
-    --joints_dir <work>/smpl_85_face_z_transform_joints \
-    --params_dir <work>/smpl_85_face_z_transform \
-    --out_dir <work>/motionhub_272/<subset>/<id>.npy
+```
+MotionHub .npz (poses[T,165], trans[T,3], mocap_framerate)
+  ↓ resample to 20 fps (slerp on quaternions, linear on translation)
+  ↓ build smpl_85 = [global_orient, body_pose, 0-pad, trans, betas=0]
+  ↓ face_z_transform : rotate so first frame's root faces +Z
+  ↓ SMPL-X FK via SmplxLite : (T, 22, 3) joint positions
+  ↓ representation_272 logic : 272-dim feature
+output: <out_root>/{motion_data,texts,split,mean_std}/  (HumanML3D-272 layout)
 ```
 
-then run `eval_with_motionstreamer_evaluator.py --pred_dir <work>/motionhub_272`
-together with MotionHub's caption `.txt` files (one caption per line, same
-`#`-delimited format as HumanML3D). Both evaluators on MotionHub +
-HumanML3D would give the cleanest 2-evaluator x 2-dataset comparison
-matrix.
+Mean/Std are symlinked from the original HumanML3D-272 release so the
+MotionStreamer evaluator sees the same input distribution it was trained on.
 
-This stage is **not** required for the camera-ready (MotionCLIP is the
-declared "our evaluator" of the paper), but is the cleanest way to answer
-"do the two evaluators agree on the *ranking* of methods?".
+Conversion result on `test_motionhub_t2m.json` (1590 entries):
+* 1257 written, 333 skipped (284 too-short after 20-fps resampling, 49 no caption).
+* The full GT-only sanity result is the row added to the table above
+  (FID ≈ 0, R-P T1 = 0.223, MM-Dist = 21.57, Diversity = 25.48 over 10657 caption-motion pairs).
+
+Note this is **only** the GT-vs-GT sanity check; running the same evaluator on
+predicted motions from each baseline still requires the per-method 272-dim
+inference described in Stage 1.
 
 ---
 
