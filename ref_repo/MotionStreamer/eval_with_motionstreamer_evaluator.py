@@ -227,26 +227,28 @@ def main():
 
     # Prepare aligned tensors for real & pred
     captions, real_motions, pred_motions, lengths = [], [], [], []
+    skipped_no_pred = 0
     for name, caption, gt, ml in pairs:
-        captions.append(caption)
-        real_motions.append(gt)
         if args.gt_only:
             pred = gt
         else:
             pred_file = pred_dir / f"{name}.npy"
             if not pred_file.exists():
+                skipped_no_pred += 1
                 continue
             pred = np.load(pred_file)
             pred_ml = (len(pred) // 4) * 4
             if pred_ml < 60:
+                skipped_no_pred += 1
                 continue
             pred = pred[:pred_ml]
-            captions[-1] = caption  # keep
+        captions.append(caption)
+        real_motions.append(gt)
         pred_motions.append(pred)
         lengths.append(min(ml, len(pred)))
 
     n = min(len(real_motions), len(pred_motions), len(lengths))
-    print(f"[+] aligned samples: {n}")
+    print(f"[+] aligned samples: {n}  (skipped {skipped_no_pred} test pairs with no pred)")
 
     def standardize_pad(arrs):
         out = np.zeros((len(arrs), args.max_motion_length, 272), dtype=np.float32)

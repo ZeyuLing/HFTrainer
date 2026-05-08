@@ -188,19 +188,66 @@ The 7392 (id, caption) pairs are produced by
 `eval_with_motionstreamer_evaluator.py::load_test_pairs()` — call it once and
 dump the prompt list to drive every baseline.
 
-#### 1a) MoMask (highest priority — fixes the blank Tab. 1 row)
+#### 1a) MoMask — **PARTIAL DONE (2026-05-08)**
 
-* Use `ref_repo/Momask/momask-codes/gen_t2m.py` with the released checkpoints
-  in `ref_repo/Momask/weights/t2m/`.
-* MoMask outputs HumanML3D-263 features. Convert HumanML3D-263 → SMPL-22
-  joint positions via the standard `recover_from_ric` helper (in MoMask repo
-  `common/skeleton.py` or our own copy).
-* Convert joint positions + recovered rotations → 272-dim using
-  `ref_repo/MotionStreamer/272-dim-Motion-Representation/representation_272.py`.
-  The conversion expects:
-  - `smpl_85_face_z_transform_joints/<name>.npy` — joint positions, shape (T, 22, 3)
-  - `smpl_85_face_z_transform/<name>.npy` — SMPL params (axis-angle 22*3 + ...)
-* Save each result as `<work_dir>/momask_pred_272/<test_id>.npy`.
+Pipeline implemented and run end-to-end. **Caveat: results are unreliable due to
+fundamental cross-evaluator domain shift; report MoMask numbers under
+MotionStreamer-272 with explicit caveats only, or fall back to MoMask's own
+HumanML3D-263 evaluator (Comp_v6_KLD005, not yet downloaded).**
+
+Steps that ran (all on `lzy_debug_machine_1`):
+
+1. `tools/momask_infer_h3d_test.py`: drives MoMask's released `gen_t2m`
+   (rvq + masked + residual + length predictor) over the 2480 unique
+   HumanML3D test ids in `humanml3d_272/split/test.txt`. For each id we use
+   the *first valid caption* (no tag-restricted sub-clips) and pass
+   `m_length = round(T_gt × 20/30)` (rounded to nearest multiple of 4) so
+   MoMask generates a motion of the correct **physical duration** at its
+   native 20 fps. Output: `work_dirs/momask_eval/momask_pred_263_v2/<id>.npy`
+   shape `(T_20, 263)`. Total: 2480 motions in ~28s on a single V100.
+2. `tools/convert_momask263_to_h3d272.py`: HumanML3D-263 (20 fps) →
+   HumanML3D-272 (30 fps). Decodes 263 → joint positions via
+   `recover_from_ric`, decodes non-root rotations via `cont6d_to_matrix`,
+   builds root rotation as `R_y(cumsum(rot_velocity))` (HumanML3D-263 only
+   carries root yaw, no body tilt — so root rotation 6D in 272 = identity
+   after heading removal). Linear-resamples positions and slerp-resamples
+   rotations from 20 → 30 fps, then re-runs MotionStreamer's
+   `representation_272` logic. Output:
+   `work_dirs/momask_eval/momask_pred_272_30fps_v2/<id>.npy` shape
+   `(T_30, 272)`.
+3. `eval_with_motionstreamer_evaluator.py` on the 30-fps converted
+   predictions over 7328 (id, caption) pairs, 20 random shuffles:
+
+| Metric | GT (real) | MoMask (paper, HumanML3D-263 eval) | MoMask (this run, MotionStreamer-272 eval, FPS-converted) |
+|---|---|---|---|
+| FID | 0 | 0.045 | **539.85 ± 9.9e-5** |
+| R-P T1 | 0.7047 | 0.521 | **0.156 ± 0.002** |
+| R-P T2 | 0.8573 | 0.713 | **0.249 ± 0.003** |
+| R-P T3 | 0.9106 | 0.807 | **0.323 ± 0.002** |
+| MM-Dist | 15.02 | 2.958 | **25.48** |
+| Diversity | 27.33 | 9.640 | **12.98** |
+
+The MotionStreamer-272 evaluator was trained on **30 fps SMPL-X-derived
+HumanML3D motions**; our MoMask outputs are **20 fps SMPL-22 motions
+upsampled** via slerp/lerp. The post-conversion motion is therefore in a
+distribution the evaluator has never seen — empirically the standardized
+predictions have per-channel std ≈ 1.7-3.3 in the rotation block (vs ≈ 1.0
+for natural 30-fps gt motions), driving the inflated FID. The R-P numbers
+are still informative *as a within-protocol ranking*, but the absolute
+gap vs GT is amplified by the protocol mismatch on top of MoMask's
+intrinsic generation quality.
+
+**Recommendation**: report MoMask under its **native** evaluator
+(HumanML3D-263 + Comp_v6_KLD005) for the canonical paper numbers, and use
+MotionStreamer-272 only for relative comparisons against other methods
+that are also re-evaluated through the same converted pipeline.
+
+Native MoMask eval requires:
+- `gdown ... humanml3d_evaluator.zip` → `Comp_v6_KLD005/` (~50MB) — TODO
+- glove embeddings (~50MB) — TODO
+- HumanML3D-263 test motions (~30MB) — needs reconstruction from
+  humanml3d_272 (downsample 30→20 fps, re-encode to 263) or a fresh
+  AMASS-based preprocessing.
 
 #### 1b) PRISM (cross-check our own model)
 
