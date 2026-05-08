@@ -31,6 +31,94 @@ from hftrainer.runner.loops import EpochBasedLoop, IterBasedLoop
 logger = get_logger()
 
 
+class _LegacyOrphanStub:
+    """Tiny stub used by ``_ensure_bundle_orphan_custom_ckpt`` to feed
+    ``accelerate.checkpointing.save_custom_state`` (which requires a
+    ``state_dict()`` method) when synthesising
+    ``custom_checkpoint_0.pkl`` from a legacy ``model.pt``.
+    """
+
+    def __init__(self, payload: Dict[str, torch.Tensor]):
+        self._payload = payload
+
+    def state_dict(self):
+        return self._payload
+
+
+class _BundleOrphanCheckpoint:
+    """Adapter that exposes a ModelBundle's orphan tensors to Accelerator's
+    standard ``save_state`` / ``load_state`` machinery.
+
+    Why this exists
+    ---------------
+    ``Accelerator.save_state`` / ``load_state`` only manage state for objects
+    explicitly registered with the accelerator — modules/optimizers passed
+    through ``accelerator.prepare`` and additional objects passed to
+    ``accelerator.register_for_checkpointing``.
+
+    A ``ModelBundle`` typically prepares only its sub-modules (e.g.
+    ``motion_transformer``, ``text_encoder``).  ``nn.Parameter`` and
+    ``register_buffer`` attributes living **directly on the bundle**
+    (e.g. HyMotion's ``null_vtxt_feat`` / ``null_ctxt_input``,
+    UMO's ``null_source_feat``) would otherwise sit in a three-way blind
+    spot — invisible to the optimizer, to DDP gradient sync, and to
+    Accelerator state machinery — and silently revert to constructor-
+    time zeros after every full-resume.
+
+    Registering an instance of this class via
+    ``accelerator.register_for_checkpointing`` makes those orphan
+    tensors round-trip cleanly through the standard
+    ``custom_checkpoint_*.pkl`` mechanism with **no patch logic on the
+    load path**.
+    """
+
+    def __init__(self, bundle: nn.Module):
+        # Stored as plain attribute (not nn.Module child) to avoid
+        # accidentally exposing the bundle through Accelerator's module tree.
+        object.__setattr__(self, '_bundle', bundle)
+
+    def state_dict(self) -> Dict[str, torch.Tensor]:
+        bundle = self._bundle
+        out: Dict[str, torch.Tensor] = {}
+        for name, p in bundle.named_parameters(recurse=False):
+            out[name] = p.data.detach().cpu().clone()
+        for name, b in bundle.named_buffers(recurse=False):
+            out[name] = b.detach().cpu().clone()
+        return out
+
+    def load_state_dict(self, state_dict: Dict[str, torch.Tensor]):
+        bundle = self._bundle
+        param_names = {n for n, _ in bundle.named_parameters(recurse=False)}
+        buffer_names = {n for n, _ in bundle.named_buffers(recurse=False)}
+        for name, value in state_dict.items():
+            if not torch.is_tensor(value):
+                continue
+            if name in param_names:
+                target = getattr(bundle, name)
+                if target.shape != value.shape:
+                    logger.warning(
+                        f"Bundle orphan param '{name}' shape mismatch "
+                        f"(ckpt {tuple(value.shape)} vs model {tuple(target.shape)}); skipped"
+                    )
+                    continue
+                with torch.no_grad():
+                    target.data.copy_(value.to(target.device, dtype=target.dtype))
+            elif name in buffer_names:
+                target = getattr(bundle, name)
+                if target.shape != value.shape:
+                    logger.warning(
+                        f"Bundle orphan buffer '{name}' shape mismatch "
+                        f"(ckpt {tuple(value.shape)} vs model {tuple(target.shape)}); skipped"
+                    )
+                    continue
+                target.copy_(value.to(target.device, dtype=target.dtype))
+            else:
+                logger.warning(
+                    f"Bundle orphan checkpoint contained '{name}' which is "
+                    f"not a current bundle attribute; skipped"
+                )
+
+
 class AccelerateRunner:
     """
     Main training runner that integrates Accelerate with the hftrainer framework.
@@ -318,6 +406,15 @@ class AccelerateRunner:
 
         prepared = accelerator.prepare(*to_prepare)
 
+        # Make Accelerator's save_state / load_state cover bundle-level orphan
+        # nn.Parameters and buffers (e.g. null_vtxt_feat / null_ctxt_input /
+        # null_source_feat / mean / std).  Without this, those tensors would
+        # be invisible to Accelerator's state machinery and silently revert
+        # to constructor-time zeros across every full-resume cycle.
+        # Index 0 is reserved for this adapter; do not register additional
+        # custom-checkpoint objects ahead of it without updating consumers.
+        accelerator.register_for_checkpointing(_BundleOrphanCheckpoint(bundle))
+
         # Unpack prepared objects back
         idx = 0
         for i, name in enumerate(bundle._trainable_modules):
@@ -539,7 +636,17 @@ class AccelerateRunner:
 
     @staticmethod
     def _log_model_summary(bundle):
-        """Log per-module parameter counts and trainable/save status."""
+        """Log per-module parameter counts and trainable/save status.
+
+        Also reports **bundle-level orphan tensors** — ``nn.Parameter`` /
+        ``register_buffer`` attached directly to the bundle (e.g.
+        ``null_vtxt_feat``, ``null_ctxt_input``, ``mean``, ``std``).  These
+        live outside any sub-module and are managed via the
+        ``_BundleOrphanCheckpoint`` adapter (see ``docs/design/
+        accelerate_integration.md``); without listing them here the summary
+        would silently hide ~5K bundle params and several MB of buffers,
+        and a missing/zero null embedding would not be visible at startup.
+        """
         rows = []
         total_params = 0
         total_trainable = 0
@@ -554,6 +661,29 @@ class AccelerateRunner:
             rows.append((name, n_params, n_trainable, is_trainable, is_save))
             total_params += n_params
             total_trainable += n_trainable
+
+        # Bundle-level orphan parameters (direct nn.Parameter children).
+        # Reported as a single "<bundle-orphan>" pseudo-row; trainable
+        # column reflects whichever orphan params have requires_grad=True.
+        # Save status is always True because they round-trip via
+        # _BundleOrphanCheckpoint -> custom_checkpoint_0.pkl AND model.pt::
+        # __bundle_params__.
+        orphan_param_pairs = list(bundle.named_parameters(recurse=False))
+        if orphan_param_pairs:
+            orphan_total = sum(p.numel() for _n, p in orphan_param_pairs)
+            orphan_trainable = sum(
+                p.numel() for _n, p in orphan_param_pairs if p.requires_grad
+            )
+            any_trainable = any(p.requires_grad for _n, p in orphan_param_pairs)
+            rows.append((
+                '<bundle-orphan>',
+                orphan_total,
+                orphan_trainable,
+                any_trainable,
+                True,
+            ))
+            total_params += orphan_total
+            total_trainable += orphan_trainable
 
         if not rows:
             return
@@ -588,6 +718,29 @@ class AccelerateRunner:
         if total_params > 0:
             ratio = total_trainable / total_params * 100
             lines.append(f"  Trainable ratio: {ratio:.2f}%")
+
+        # Bundle-level orphan params/buffers: per-tensor norms.  This is the
+        # earliest place at startup where we surface whether null embeddings
+        # carry a meaningful pretrained value (norm > 0) or are stuck at
+        # zero — the latter being the M2M caption-mode regression we fixed
+        # in 9a67a3d.  Showing it here makes that visible without grep'ing
+        # logs after EMA init.
+        orphan_lines = []
+        for n, p in bundle.named_parameters(recurse=False):
+            orphan_lines.append(
+                f"  <bundle-orphan> {n:<24s} param "
+                f"shape={tuple(p.shape)} norm={p.detach().float().norm().item():.4f} "
+                f"requires_grad={p.requires_grad}"
+            )
+        for n, b in bundle.named_buffers(recurse=False):
+            orphan_lines.append(
+                f"  <bundle-orphan> {n:<24s} buffer "
+                f"shape={tuple(b.shape)} norm={b.detach().float().norm().item():.4f}"
+            )
+        if orphan_lines:
+            lines.append('  Bundle orphan tensors:')
+            lines.extend(orphan_lines)
+
         lines.append('')
 
         logger.info('\n'.join(lines))
@@ -918,6 +1071,15 @@ class AccelerateRunner:
         if load_scope == 'full':
             logger.info(sep)
             logger.info(f"Resuming from checkpoint: {path}")
+            # Bundle-level orphan tensors (null_vtxt_feat, null_ctxt_input,
+            # mean, std, ...) round-trip through Accelerator's standard
+            # custom-checkpoint mechanism via the
+            # ``_BundleOrphanCheckpoint`` adapter that was registered in
+            # ``from_cfg``.  For ckpts that pre-date that registration we
+            # first synthesise a ``custom_checkpoint_0.pkl`` from
+            # ``model.pt::__bundle_params__`` so ``accelerator.load_state``
+            # sees a complete, count-matched state directory.
+            self._ensure_bundle_orphan_custom_ckpt(path)
             self.accelerator.load_state(path)
             # Try to restore global_step from metadata
             meta_path = os.path.join(path, 'meta.pt')
@@ -929,6 +1091,27 @@ class AccelerateRunner:
                 f"Resumed: global_step={self.global_step}, epoch={self.current_epoch}. "
                 f"Training will continue from step {self.global_step + 1}."
             )
+
+            # Post-resume verification of bundle-level orphan tensors.
+            # The Model Summary printed in from_cfg shows their values at
+            # bundle-init time (i.e. zeros), which is misleading when the
+            # ckpt actually carries patched / pretrained values.  Print the
+            # post-load norm here so a missing or unexpectedly-zero null
+            # embedding is visible at startup without grep'ing model.pt.
+            orphan_lines = []
+            for n, p in self.bundle.named_parameters(recurse=False):
+                orphan_lines.append(
+                    f"  <bundle-orphan post-load> {n:<22s} param "
+                    f"shape={tuple(p.shape)} norm={p.detach().float().norm().item():.4f} "
+                    f"requires_grad={p.requires_grad}"
+                )
+            for n, b in self.bundle.named_buffers(recurse=False):
+                orphan_lines.append(
+                    f"  <bundle-orphan post-load> {n:<22s} buffer "
+                    f"shape={tuple(b.shape)} norm={b.detach().float().norm().item():.4f}"
+                )
+            if orphan_lines:
+                logger.info('Post-resume bundle orphan tensors:\n' + '\n'.join(orphan_lines))
             logger.info(sep)
         elif load_scope == 'model':
             from hftrainer.utils.checkpoint_utils import load_checkpoint
@@ -998,6 +1181,69 @@ class AccelerateRunner:
             if os.path.isdir(oldest):
                 shutil.rmtree(oldest)
             logger.info(f"Removed old checkpoint: {oldest}")
+
+    def _ensure_bundle_orphan_custom_ckpt(self, path: str):
+        """Legacy-ckpt one-shot migration for the bundle-orphan adapter.
+
+        Background: ``_BundleOrphanCheckpoint`` is registered with
+        Accelerator in :meth:`from_cfg`, which means
+        ``accelerator.load_state`` expects a matching
+        ``custom_checkpoint_0.pkl`` file under ``path``.  Checkpoints
+        produced before this registration was added do not have that
+        file — Accelerator would then raise ``RuntimeError`` due to
+        a count mismatch on custom-objects.
+
+        This helper detects that case and synthesises the missing
+        ``custom_checkpoint_0.pkl`` from
+        ``model.pt::__bundle_params__`` (where every legacy ckpt
+        already stores those orphan tensors), so the standard load
+        path can proceed without any bespoke "post-load patch" code.
+
+        Hot-path is untouched: for any ckpt produced after this fix
+        the file already exists and this method is a single
+        ``os.path.exists`` no-op.
+        """
+        cust = os.path.join(path, 'custom_checkpoint_0.pkl')
+        if os.path.exists(cust):
+            return  # produced by the new save path; nothing to do
+
+        # Try to rebuild from legacy model.pt::__bundle_params__
+        mpt = os.path.join(path, 'model.pt')
+        if not os.path.exists(mpt):
+            logger.warning(
+                f"Full-resume from {path}: neither custom_checkpoint_0.pkl nor "
+                "model.pt is present; bundle-level orphan tensors cannot be "
+                "restored.  This will likely cause Accelerator.load_state to "
+                "fail with a custom-object count mismatch."
+            )
+            return
+        try:
+            blob = torch.load(mpt, map_location='cpu', weights_only=False)
+        except Exception as exc:
+            logger.warning(
+                f"Full-resume from {path}: failed to read legacy model.pt "
+                f"({exc}); orphan tensors may not be restored."
+            )
+            return
+        bundle_params = blob.get('__bundle_params__') if isinstance(blob, dict) else None
+        if not isinstance(bundle_params, dict):
+            bundle_params = {}
+        # Write the synthesised custom checkpoint on the main process so
+        # Accelerator.load_state finds a count-matched state directory.
+        if self.accelerator.is_main_process:
+            from accelerate.checkpointing import save_custom_state
+            save_custom_state(
+                _LegacyOrphanStub(bundle_params),
+                path,
+                index=0,
+                save_on_each_node=False,
+            )
+            logger.info(
+                f"Migrated legacy ckpt: synthesised custom_checkpoint_0.pkl "
+                f"from model.pt::__bundle_params__ at {path} "
+                f"(keys: {sorted(bundle_params.keys())})"
+            )
+        self.accelerator.wait_for_everyone()
 
     def _state_dict_to_save(self) -> Dict[str, dict]:
         """Build a nested state dict for save_ckpt=True modules.
@@ -1110,10 +1356,14 @@ class AccelerateRunner:
         by_epoch = train_cfg.get('by_epoch', False)
         val_interval = train_cfg.get('val_interval', None)
 
-        # Call before_run hooks
+        rank = self.accelerator.process_index
+        logger.info(f"[Rank {rank}] train(): entering before_run hooks")
         for hook in self.hooks:
             if hasattr(hook, 'before_run'):
+                logger.info(f"[Rank {rank}] before_run -> {type(hook).__name__}")
                 hook.before_run()
+                logger.info(f"[Rank {rank}] before_run done -> {type(hook).__name__}")
+        logger.info(f"[Rank {rank}] all before_run hooks done; entering main training loop (by_epoch={by_epoch})")
 
         if by_epoch:
             self._train_by_epoch(train_cfg, val_interval)
@@ -1201,17 +1451,25 @@ class AccelerateRunner:
     def _train_by_epoch(self, train_cfg: dict, val_interval):
         """Epoch-based training loop."""
         max_epochs = train_cfg.get('max_epochs', 100)
+        rank = self.accelerator.process_index
+        logger.info(f"[Rank {rank}] _train_by_epoch: starting from current_epoch={self.current_epoch}, max_epochs={max_epochs}")
 
         for epoch in range(self.current_epoch, max_epochs):
             self.current_epoch = epoch
+            logger.info(f"[Rank {rank}] epoch={epoch}: bundle.train()")
             self.bundle.train()
             self.trainer.train()
 
             for hook in self.hooks:
                 if hasattr(hook, 'before_train_epoch'):
+                    logger.info(f"[Rank {rank}] before_train_epoch -> {type(hook).__name__}")
                     hook.before_train_epoch(epoch)
+                    logger.info(f"[Rank {rank}] before_train_epoch done -> {type(hook).__name__}")
 
+            logger.info(f"[Rank {rank}] starting dataloader iter for epoch={epoch}")
             for batch_idx, batch in enumerate(self.train_dataloader):
+                if batch_idx == 0:
+                    logger.info(f"[Rank {rank}] first batch received for epoch={epoch}")
                 current_step = self.global_step
 
                 # Before-iter hooks
