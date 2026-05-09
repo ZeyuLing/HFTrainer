@@ -1,0 +1,898 @@
+The following values were not passed to `accelerate launch` and had defaults used instead:
+		More than one GPU was found, enabling multi-GPU training.
+		If this was unintended please pass in `--num_processes=1`.
+	`--num_machines` was set to a value of `1`
+	`--dynamo_backend` was set to a value of `'no'`
+To avoid this warning pass in values for each of the problematic parameters or run `accelerate config`.
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-04-03 12:22:31,116] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-04-03 12:22:31,326] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-04-03 12:22:31,453] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2026-04-03 12:22:31,459] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-04-03 12:22:31,491] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2026-04-03 12:22:31,549] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2026-04-03 12:22:31,559] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-04-03 12:22:31,753] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+Detected kernel version 5.4.241, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+[2026/04/03 12:22:33] hftrainer INFO: Config saved to: work_dirs/_debug_textfree_m_dist_test/20260403_122233/config.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Run dir (logs/tb): work_dirs/_debug_textfree_m_dist_test/20260403_122233
+[2026/04/03 12:22:33] hftrainer INFO: Environment info:
+Platform: Linux-5.4.241-1-tlinux4-0017.4-x86_64-with-glibc2.28
+Python: 3.10.16 (main, Mar 16 2025, 12:42:25) [GCC 8.5.0 20210514 (Tencent 8.5.0-23)]
+PyTorch: 2.5.0+cu118
+CUDA available: True
+CUDA version: 11.8
+GPU count: 8
+  GPU 0: Tesla V100-SXM2-32GB
+  GPU 1: Tesla V100-SXM2-32GB
+  GPU 2: Tesla V100-SXM2-32GB
+  GPU 3: Tesla V100-SXM2-32GB
+  GPU 4: Tesla V100-SXM2-32GB
+  GPU 5: Tesla V100-SXM2-32GB
+  GPU 6: Tesla V100-SXM2-32GB
+  GPU 7: Tesla V100-SXM2-32GB
+accelerate: 1.12.0
+transformers: 4.57.3
+diffusers: 0.36.0
+peft: 0.18.0
+mmengine: 0.10.7
+safetensors: 0.7.0
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:33] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_m.py
+[2026/04/03 12:22:33] hftrainer INFO: Work dir: work_dirs/_debug_textfree_m_dist_test
+[2026/04/03 12:22:34] hftrainer INFO: 
+Model Summary:
+  Module              Total Params  Trainable Params  Trainable  Save Ckpt
+  ------------------  ------------  ----------------  ---------  ---------
+  motion_transformer   162,288,519       162,288,519  True       True     
+  m2m_loss                       0                 0  False      False    
+  ------------------  ------------  ----------------  ---------  ---------
+  TOTAL                162,288,519       162,288,519
+  Trainable ratio: 100.00%
+
+[2026/04/03 12:22:34] hftrainer INFO: Building trainer...
+[2026/04/03 12:22:34] hftrainer INFO: Building dataloaders...
+Loading data_list:   0%|          | 0/407552 [00:00<?, ?it/s]Loading data_list:  26%|██▋       | 107994/407552 [00:00<00:00, 1079866.37it/s]Loading data_list:  56%|█████▌    | 226304/407552 [00:00<00:00, 1140552.58it/s]Loading data_list:  84%|████████▍ | 343492/407552 [00:00<00:00, 1154827.19it/s]Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Loading data_list: 100%|██████████| 407552/407552 [00:00<00:00, 1143673.28it/s]
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+[2026/04/03 12:22:37] hftrainer INFO: Building optimizers...
+[2026/04/03 12:22:37] hftrainer INFO: Starting accelerator.prepare()...
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+Get error when loading idx=292653 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00512_545_826.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=279070 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00497_2139_2283.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278157 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00464_500_695.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=285148 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00589_542_788.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=277193 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00539_509_638.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254588 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00005_5555_5751.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=275371 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00160_2433_2639.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=287972 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00401_2099_2370.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=288557 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00256_258_544.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246709 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_00892_0_298.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=244786 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00177_707_884.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=291665 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00255_1058_1330.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=286475 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00015_4187_4467.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=251689 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00195_2093_2311.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292800 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00321_460_606.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=243891 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00510_0_254.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253393 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00455_1969_2244.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235983 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00042_5976_6182.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278638 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00204_1655_1861.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=255200 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00013_1418_1586.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276108 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00121_5387_5542.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=280235 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00577_2448_2577.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=243622 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00287_5364_5650.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293841 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00097_1668_1796.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=247283 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00193_1712_1940.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278603 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00730_0_154.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=239632 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_00288_0_143.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294338 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00287_2242_2512.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246092 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00294_978_1239.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=236338 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00497_1360_1652.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=280765 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00130_1906_2112.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242893 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00174_2603_2868.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284955 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00044_3678_3969.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276849 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00266_0_284.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242970 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00446_1503_1647.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284480 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00385_1770_1944.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294711 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00089_0_259.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=290528 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00180_4475_4729.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=280811 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00021_1883_2042.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284562 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00231_1615_1845.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292890 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00193_3204_3464.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254157 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00385_144_443.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=238641 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00129_1947_2112.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284060 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00127_134_325.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=243317 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00035_0_136.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=279103 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00049_3448_3679.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292534 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00002_476_738.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=286195 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00767_0_285.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=275926 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00338_1765_1959.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250793 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00034_0_265.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:23:01] hftrainer INFO: epoch [1/1]  step [5/1062]  loss=0.8497  loss_velocity=0.8497  data_time=1.03s  train_time=1.92s  eta=1:09:31
+Get error when loading idx=291087 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00035_4939_5209.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240980 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00248_4544_4816.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=255597 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00291_2347_2604.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294923 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00032_1176_1301.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237223 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00126_3532_3713.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254924 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00066_1752_1931.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292706 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00143_868_1113.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=277938 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00228_563_843.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=236556 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00095_133_382.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299222 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00384_136_436.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278601 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00299_591_877.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=283956 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00121_1755_1984.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=289697 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00496_144_403.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294949 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00022_4941_5116.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250520 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00528_630_783.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235962 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00567_285_549.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242343 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00153_201_426.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=290234 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00666_557_751.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:23:14] hftrainer INFO: epoch [1/1]  step [10/1062]  loss=0.7744  loss_velocity=0.7744  data_time=1.05s  train_time=1.94s  eta=0:57:01
+Get error when loading idx=254249 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00432_554_852.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=243757 (refetch 2/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00215_855_1141.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278465 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00135_1679_1954.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299435 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_01011_0_150.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245273 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00176_1522_1738.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=236954 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00280_1728_1872.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293420 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00255_1688_1812.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299970 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00077_3095_3252.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=298717 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00827_383_679.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293887 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00024_0_230.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246254 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00209_5886_6164.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278393 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00284_2309_2559.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253082 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00595_250_453.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241248 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00819_141_438.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254866 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00154_2642_2805.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294038 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00353_0_155.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241004 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00654_2326_2470.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:23:28] hftrainer INFO: epoch [1/1]  step [15/1062]  loss=0.7054  loss_velocity=0.7054  data_time=1.03s  train_time=1.51s  eta=0:54:21
+Get error when loading idx=255620 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00029_4668_4964.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250971 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00097_2284_2511.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246441 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00209_2075_2200.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=255512 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00055_2859_3063.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241843 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00594_1058_1330.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253725 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00249_6470_6685.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=275666 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00387_1915_2108.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240364 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00436_176_359.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=291641 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00186_2844_3126.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293617 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00503_1640_1765.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254158 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00169_5704_5964.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=298566 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st2_00000_0_297.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:23:41] hftrainer INFO: epoch [1/1]  step [20/1062]  loss=0.6831  loss_velocity=0.6831  data_time=1.05s  train_time=1.51s  eta=0:51:35
+Get error when loading idx=283646 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00819_141_438.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235985 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00200_2158_2431.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237355 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00509_448_681.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245506 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00179_1274_1450.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278743 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00577_1954_2224.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292338 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00621_354_644.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=290006 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00166_738_879.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=277827 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00401_1899_2099.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:23:55] hftrainer INFO: epoch [1/1]  step [25/1062]  loss=0.6208  loss_velocity=0.6208  data_time=0.72s  train_time=1.83s  eta=0:50:24
+Get error when loading idx=276558 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00220_3341_3639.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293858 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00054_4940_5207.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=288711 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00140_2230_2386.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250927 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_00838_0_258.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294989 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00092_799_1046.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=252770 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00446_0_187.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276433 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00026_1249_1502.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292106 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00205_3090_3289.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299707 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00005_5555_5751.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=247189 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00115_6278_6557.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293945 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00038_1594_1856.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=236144 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00338_1765_1959.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=295014 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00014_727_864.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=283961 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00284_2048_2309.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:24:07] hftrainer INFO: epoch [1/1]  step [30/1062]  loss=0.6414  loss_velocity=0.6414  data_time=0.80s  train_time=1.29s  eta=0:49:08
+Get error when loading idx=245070 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00096_512_736.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235159 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00539_2294_2500.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=298405 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00066_1752_1931.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245539 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00596_1061_1200.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=283944 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00272_7964_8239.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=290812 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00449_171_292.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293584 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00061_129_284.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=281528 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00211_190_343.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=280589 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00260_1173_1407.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242391 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_00600_0_301.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=288615 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00577_2577_2761.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253999 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00242_668_929.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294031 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_01401_178_329.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=300021 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00281_4955_5237.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246865 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00479_939_1223.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253932 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00348_1689_1934.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293718 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00195_2093_2311.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:24:21] hftrainer INFO: epoch [1/1]  step [35/1062]  loss=0.5953  loss_velocity=0.5953  data_time=1.04s  train_time=1.92s  eta=0:48:41
+Get error when loading idx=252173 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00095_382_510.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254689 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00307_581_715.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237295 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00128_5987_6263.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=283741 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00070_421_592.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=238097 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00336_1651_1898.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276430 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_01776_0_298.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253896 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00115_7278_7483.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=243526 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00187_944_1243.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299667 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00515_1106_1274.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242951 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00488_1766_1991.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278555 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00383_556_756.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=289580 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00146_2294_2563.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235245 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00141_428_637.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276140 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00173_3248_3451.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=288210 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00270_418_604.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242235 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00298_941_1161.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292462 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00215_609_855.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=280105 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00054_0_127.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=247267 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00184_2743_3024.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253211 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00089_2524_2679.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242401 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00166_6024_6250.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284038 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00139_300_434.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:24:34] hftrainer INFO: epoch [1/1]  step [40/1062]  loss=0.4876  loss_velocity=0.4876  data_time=1.04s  train_time=1.36s  eta=0:47:48
+Get error when loading idx=280032 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00034_715_997.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253861 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00121_1753_1876.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240615 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00475_1677_1925.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=247077 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00571_360_484.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245326 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00220_5270_5522.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=222763 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00289_1564_1780.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=289823 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00115_6278_6557.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294591 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00422_0_122.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253214 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00034_421_546.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299746 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00034_1732_1916.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253122 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_01070_0_145.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276562 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_01016_0_178.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276115 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00497_1360_1652.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240111 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00111_5453_5701.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=252615 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00172_836_1107.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240646 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00171_4117_4343.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241819 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00171_968_1217.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235037 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00191_1453_1645.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299337 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00692_273_497.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:24:47] hftrainer INFO: epoch [1/1]  step [45/1062]  loss=0.5698  loss_velocity=0.5698  data_time=0.88s  train_time=1.74s  eta=0:47:02
+Get error when loading idx=255177 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00310_824_1028.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278965 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00431_2337_2635.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276853 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00438_174_421.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293073 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00215_2495_2707.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299158 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00385_2330_2566.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241011 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00053_2040_2253.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240737 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00285_2574_2715.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=300104 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00003_1544_1750.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245841 (refetch 2/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00040_150_343.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=279217 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00558_1331_1470.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=222597 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00217_949_1196.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253490 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00177_642_773.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=238603 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00428_1836_2079.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=252971 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00016_4048_4291.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=290929 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00499_2103_2305.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=280987 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00164_3056_3333.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284094 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00090_273_526.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=289809 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00338_1107_1274.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292336 (refetch 2/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00804_252_516.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276466 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00577_204_337.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=254093 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00140_0_293.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237273 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00385_2122_2330.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237378 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00130_2587_2735.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=238362 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00516_0_271.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=291939 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00010_5658_5905.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=289219 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00330_190_342.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=251801 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00164_4358_4639.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=239629 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00131_933_1196.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:24:59] hftrainer INFO: epoch [1/1]  step [50/1062]  loss=0.4183  loss_velocity=0.4183  data_time=0.82s  train_time=1.28s  eta=0:46:16
+Get error when loading idx=247725 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00031_161_431.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245980 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00120_135_409.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253056 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00085_2501_2740.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294679 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00126_1126_1423.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250423 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00219_397_654.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=240344 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00404_1531_1800.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235784 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00283_8066_8355.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276878 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00510_0_281.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246727 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00278_1655_1930.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284899 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00374_2192_2408.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=291147 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00521_634_809.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=291903 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00115_1226_1455.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=288390 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00486_2406_2577.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=279972 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00081_6273_6559.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=246716 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00362_598_758.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=284763 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00209_2470_2746.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276236 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00252_2140_2385.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=255423 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00154_0_272.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=238126 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00397_1981_2251.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=242329 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00142_1200_1352.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=283688 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00144_183_317.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=281396 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00024_3384_3621.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=292763 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00136_3632_3833.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245718 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00320_1731_2031.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=243159 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00280_4089_4319.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=281635 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00594_0_251.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=235879 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00387_1915_2108.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250845 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00286_1277_1513.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237284 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00125_6323_6596.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:25:11] hftrainer INFO: epoch [1/1]  step [55/1062]  loss=0.4350  loss_velocity=0.4350  data_time=1.02s  train_time=1.43s  eta=0:45:35
+Get error when loading idx=237234 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00516_1326_1576.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=239711 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00024_280_574.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=286886 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00287_5364_5650.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278955 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00014_1975_2148.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241494 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00142_300_447.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=241860 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00340_1129_1353.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=253807 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00186_5444_5688.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=252720 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00343_2526_2682.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=250249 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00043_4281_4505.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278998 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00217_3287_3532.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=294942 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st2_00206_243_469.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+W0403 12:25:18.438000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42128 closing signal SIGTERM
+W0403 12:25:18.440000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42129 closing signal SIGTERM
+W0403 12:25:18.441000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42130 closing signal SIGTERM
+W0403 12:25:18.441000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42131 closing signal SIGTERM
+W0403 12:25:18.442000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42132 closing signal SIGTERM
+W0403 12:25:18.443000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42133 closing signal SIGTERM
+W0403 12:25:18.444000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42134 closing signal SIGTERM
+W0403 12:25:18.445000 41990 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 42135 closing signal SIGTERM
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 696, in run
+    result = self._invoke_run(role)
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 855, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 41990 got signal: 15
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/bin/accelerate", line 7, in <module>
+    sys.exit(main())
+  File "/usr/local/lib/python3.10/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/usr/local/lib/python3.10/site-packages/accelerate/commands/launch.py", line 1272, in launch_command
+    multi_gpu_launcher(args)
+  File "/usr/local/lib/python3.10/site-packages/accelerate/commands/launch.py", line 899, in multi_gpu_launcher
+    distrib_run.run(args)
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/run.py", line 910, in run
+    elastic_launch(
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 260, in launch_agent
+    result = agent.run()
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 704, in run
+    logger.warning("Received %s death signal, shutting down workers", e.sigval)
+  File "/usr/local/lib/python3.10/logging/__init__.py", line 1489, in warning
+    self._log(WARNING, msg, args, **kwargs)
+  File "/usr/local/lib/python3.10/logging/__init__.py", line 1622, in _log
+    record = self.makeRecord(self.name, level, fn, lno, msg, args,
+  File "/usr/local/lib/python3.10/logging/__init__.py", line 1591, in makeRecord
+    rv = _logRecordFactory(name, level, fn, lno, msg, args, exc_info, func,
+  File "/usr/local/lib/python3.10/logging/__init__.py", line 309, in __init__
+    if (args and len(args) == 1 and isinstance(args[0], collections.abc.Mapping)
+  File "/usr/local/lib/python3.10/abc.py", line 119, in __instancecheck__
+    return _abc_instancecheck(cls, instance)
+  File "/usr/local/lib/python3.10/abc.py", line 123, in __subclasscheck__
+    return _abc_subclasscheck(cls, subclass)
+  File "/usr/local/lib/python3.10/abc.py", line 123, in __subclasscheck__
+    return _abc_subclasscheck(cls, subclass)
+  File "/usr/local/lib/python3.10/abc.py", line 123, in __subclasscheck__
+    return _abc_subclasscheck(cls, subclass)
+  [Previous line repeated 1 more time]
+  File "/usr/local/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 41990 got signal: 1

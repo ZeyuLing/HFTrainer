@@ -1,0 +1,950 @@
+# -*- coding: utf-8 -*-
+"""M2M v2 Eval Dashboard - Flask application.
+
+Usage:
+    python app.py --port 8095
+"""
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from flask import (
+    Flask, render_template, request, jsonify,
+    send_from_directory, redirect, url_for, abort,
+)
+
+script_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(script_dir))
+# Project root for hftrainer imports (needed by SMPL conversion)
+PROJECT_ROOT = script_dir.resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from db_manager import EvalDashboardDB
+from eval_task_registry import (
+    TASK_REGISTRY, get_all_tasks, get_task, get_metric_display,
+    METRIC_META, KEY_METRICS,
+)
+from data_importer import import_result_json, import_directory
+from utils import (
+    load_npz_positions, load_npz_smpl_params, load_source_motion_positions,
+    SMPL22_EDGES, SMPL22_JOINT_NAMES,
+    BODY_PART_COLORS, JOINT_TO_PART, format_metric,
+)
+
+# ── Flask App Setup ───────────────────────────────────────────────
+template_dir = script_dir / "templates"
+static_dir = script_dir / "static"
+app = Flask(__name__, template_folder=str(template_dir), static_folder=str(static_dir))
+
+# ── LRU cache for expensive SMPL param computation ──────────────
+from functools import lru_cache
+import hashlib
+
+@lru_cache(maxsize=128)
+def _cached_smpl_params(npz_path: str, rotation_space: str, mtime: float):
+    """Cache SMPL params keyed by path + rotation_space + file mtime."""
+    return load_npz_smpl_params(npz_path, rotation_space)
+app.secret_key = "eval-dashboard-secret-2026"
+
+# Enable gzip compression for JSON API responses to prevent proxy 502 on large payloads
+import gzip as _gzip
+from io import BytesIO as _BytesIO
+
+@app.after_request
+def compress_response(response):
+    if (response.status_code == 200
+            and response.content_type
+            and 'json' in response.content_type
+            and not response.direct_passthrough):
+        accept_enc = request.headers.get('Accept-Encoding', '')
+        if 'gzip' not in accept_enc:
+            return response
+        data = response.get_data()
+        if len(data) < 1000:
+            return response
+        buf = _BytesIO()
+        with _gzip.GzipFile(fileobj=buf, mode='wb', compresslevel=6) as gz:
+            gz.write(data)
+        compressed = buf.getvalue()
+        response.set_data(compressed)
+        response.headers['Content-Encoding'] = 'gzip'
+        response.headers['Content-Length'] = len(compressed)
+        response.headers['Vary'] = 'Accept-Encoding'
+    return response
+
+# Database
+DB_PATH = str(script_dir / "eval_dashboard.db")
+db = EvalDashboardDB(DB_PATH)
+
+# Pre-warm heavy imports so first SMPL API call doesn't take 20s
+try:
+    from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
+        rotation_6d_to_axis_angle as _warmup_r6d,
+    )
+    print("[startup] Pre-warmed rotation_convert imports")
+except Exception as e:
+    print(f"[startup] rotation_convert pre-warm failed (OK): {e}")
+
+# Jinja2 custom filters
+@app.template_filter("fmt_metric")
+def fmt_metric_filter(value, metric_name=""):
+    return format_metric(value, metric_name)
+
+
+@app.template_filter("json_dumps")
+def json_dumps_filter(value):
+    return json.dumps(value)
+
+
+# ── Template Context ──────────────────────────────────────────────
+@app.context_processor
+def inject_globals():
+    return {
+        "all_tasks": get_all_tasks(),
+        "metric_meta": METRIC_META,
+        "key_metrics": KEY_METRICS,
+        "body_part_colors": BODY_PART_COLORS,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Page Routes
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/")
+def index():
+    """Home page: task cards + model list + recent runs."""
+    stats = db.get_dashboard_stats()
+    models = db.get_all_models()
+    # Pass current-registry task IDs so frontend datalist fetch doesn't hardcode
+    # stale IDs (E11, E12, …) that were pruned.
+    all_task_ids = [t.task_id for t in get_all_tasks()]
+    return render_template("index.html", stats=stats, models=models,
+                           all_task_ids=all_task_ids)
+
+
+@app.route("/task/<task_id>")
+def task_detail(task_id: str):
+    """Single task detail page."""
+    task = get_task(task_id)
+    if not task:
+        abort(404)
+    runs = db.get_eval_runs(task_id=task_id)
+    comparison = db.get_task_comparison(task_id)
+    baselines = db.get_baselines(task_id=task_id)
+
+    # Build comparison table: {model_name: {setting: {metric: value}}}
+    # Skip runs flagged as [RERUNNING ...] in notes — those are stale results
+    # kept only so that users can see "<model> (rerunning)" badges and know
+    # fresh numbers are on the way. We do NOT want them polluting the radar /
+    # bar charts.
+    RERUN_TAG = '[RERUNNING'
+    comp_table = {}
+    rerunning_entries = []  # [(model_name, setting), ...] from skipped rows
+    seen_rerun = set()
+    for row in comparison:
+        notes = row.get('run_notes') or ''
+        if RERUN_TAG in notes:
+            pair = (row['model_name'], row['setting'])
+            if pair not in seen_rerun:
+                rerunning_entries.append({
+                    'model_name': row['model_name'],
+                    'setting': row['setting'],
+                })
+                seen_rerun.add(pair)
+            continue
+        key = f"{row['model_name']} ({row['setting']})"
+        if key not in comp_table:
+            comp_table[key] = {"run_id": row["run_id"], "model_name": row["model_name"],
+                               "setting": row["setting"], "metrics": {}}
+        comp_table[key]["metrics"][row["metric_name"]] = {
+            "mean": row["mean"], "std": row["std"],
+            "median": row["median"], "min": row["min_val"], "max": row["max_val"],
+        }
+
+    # Add baselines to comparison
+    for bl in baselines:
+        key = f"{bl['name']} ({bl['setting']})"
+        if bl.get("skeleton_type") != "smpl22":
+            key += f" [{bl['skeleton_type']}]"
+        comp_table[key] = {
+            "run_id": None, "model_name": bl["name"],
+            "setting": bl["setting"], "is_baseline": True,
+            "skeleton_type": bl.get("skeleton_type", "smpl22"),
+            "metrics": {k: {"mean": v} for k, v in bl["metrics"].items()},
+        }
+
+    # Collect all metric names that appear
+    all_metrics = set()
+    for entry in comp_table.values():
+        all_metrics.update(entry["metrics"].keys())
+    # Sort: task default metrics first, then alphabetical
+    default_m = task.default_metrics
+    sorted_metrics = [m for m in default_m if m in all_metrics]
+    sorted_metrics += sorted(m for m in all_metrics if m not in default_m)
+
+    # Hide rerunning runs from the ALL_RUNS list the viewer uses for sample
+    # browsing / compare mode — those NPZ files may be stale / from the old
+    # caption cache. Keep them in rerunning_entries for the UI badge only.
+    runs_visible = [r for r in runs
+                    if not (r.get('notes') and RERUN_TAG in (r['notes'] or ''))]
+
+    return render_template(
+        "task_detail.html",
+        task=task,
+        runs=runs_visible,
+        comp_table=comp_table,
+        sorted_metrics=sorted_metrics,
+        baselines=baselines,
+        rerunning_entries=rerunning_entries,
+    )
+
+
+@app.route("/compare")
+def model_comparison():
+    """Multi-model comparison page."""
+    models = db.get_all_models()
+    tasks = get_all_tasks()
+
+    # Build cross-task comparison data
+    all_runs = db.get_eval_runs()
+    # {model_name: {task_id: {metric: mean}}}
+    model_task_metrics = {}
+    for run in all_runs:
+        mname = run["model_name"]
+        tid = run["task_id"]
+        if mname not in model_task_metrics:
+            model_task_metrics[mname] = {}
+        metrics = db.get_agg_metrics(run["id"])
+        model_task_metrics[mname][tid] = {m["metric_name"]: m["mean"] for m in metrics}
+
+    return render_template(
+        "model_comparison.html",
+        models=models,
+        tasks=tasks,
+        tasks_json=json.dumps([t.to_dict() for t in tasks]),
+        models_json=json.dumps(models),
+        model_task_metrics=model_task_metrics,
+    )
+
+
+@app.route("/data")
+def data_browser():
+    """Test data browser."""
+    return render_template("data_browser.html")
+
+
+@app.route("/viewer")
+def motion_viewer():
+    """3D motion viewer page."""
+    npz_path = request.args.get("path", "")
+    gt_path = request.args.get("gt_path", "")
+    return render_template(
+        "motion_viewer.html",
+        npz_path=npz_path, gt_path=gt_path,
+        edges=SMPL22_EDGES, joint_names=SMPL22_JOINT_NAMES,
+    )
+
+
+@app.route("/import")
+def import_page():
+    """Import page."""
+    models = db.get_all_models()
+    return render_template("import.html", models=models)
+
+
+@app.route("/scheme")
+def scheme_comparison():
+    """Scheme comparison: v2 vs KIMODO vs MoGenDIT vs v1."""
+    tasks = get_all_tasks()
+    baselines = db.get_baselines()
+    models = db.get_all_models()
+
+    # Build per-task comparison
+    scheme_data = {}
+    for task in tasks:
+        tid = task.task_id
+        runs = db.get_eval_runs(task_id=tid)
+        task_baselines = [b for b in baselines if b["task_id"] == tid]
+
+        entries = {}
+        # Add model results
+        for run in runs:
+            key = run["model_name"]
+            if key not in entries:
+                metrics = db.get_agg_metrics(run["id"])
+                entries[key] = {
+                    "type": "model", "skeleton": "smpl22",
+                    "metrics": {m["metric_name"]: m["mean"] for m in metrics},
+                }
+        # Add baselines
+        for bl in task_baselines:
+            entries[bl["name"]] = {
+                "type": "baseline",
+                "skeleton": bl.get("skeleton_type", "smpl22"),
+                "source": bl.get("source", ""),
+                "metrics": bl["metrics"],
+            }
+
+        if entries:
+            scheme_data[tid] = {
+                "task": task,
+                "entries": entries,
+                "kimodo_comparable": task.kimodo_comparable,
+            }
+
+    return render_template(
+        "scheme_comparison.html",
+        tasks=tasks,
+        scheme_data=scheme_data,
+        baselines=baselines,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# API Routes
+# ═══════════════════════════════════════════════════════════════════
+
+def _resolve_npz_path(npz_path: str) -> str:
+    """Resolve NPZ path from Flask route capture to absolute filesystem path.
+
+    Flask's <path:> route strips the leading '/', so an absolute path like
+    /apdcephfs/.../foo.npz arrives as 'apdcephfs/.../foo.npz'.
+    We detect this by checking if '/<npz_path>' exists on disk.
+    """
+    if npz_path.startswith("/") or os.path.isabs(npz_path):
+        return os.path.abspath(npz_path)
+    # Check if it's a stripped absolute path (Flask removed leading /)
+    restored = "/" + npz_path
+    if os.path.exists(restored) or os.path.exists(os.path.dirname(restored)):
+        return os.path.abspath(restored)
+    # Otherwise treat as relative to project root
+    return os.path.abspath(str(PROJECT_ROOT / npz_path))
+
+
+@app.route("/api/npz/<path:npz_path>")
+def api_npz(npz_path: str):
+    """Load NPZ and return positions JSON for Three.js rendering."""
+    rotation_space = request.args.get("rotation_space", "local")
+    full_path = _resolve_npz_path(npz_path)
+    result = load_npz_positions(full_path, rotation_space)
+    if result is None:
+        return jsonify({"error": f"Cannot load NPZ: {full_path}"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/smpl/<path:npz_path>")
+def api_smpl(npz_path: str):
+    """Load NPZ and return SMPL per-frame params for mesh rendering."""
+    rotation_space = request.args.get("rotation_space", "local")
+    full_path = _resolve_npz_path(npz_path)
+    try:
+        mtime = os.path.getmtime(full_path) if os.path.exists(full_path) else 0
+        result = _cached_smpl_params(full_path, rotation_space, mtime)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"SMPL conversion failed: {str(e)}"}), 500
+    if result is None:
+        return jsonify({"error": f"Cannot load SMPL params: {full_path}"}), 404
+    return jsonify(result)
+
+
+# ── Source motion API for E14/E15/E16 context display ────────────
+_datalist_items_cache: Dict[str, list] = {}  # task_id -> data_list items
+
+
+def _get_datalist_items(task_id: str) -> list:
+    """Load and cache datalist items for a task."""
+    if task_id in _datalist_items_cache:
+        return _datalist_items_cache[task_id]
+    fname = _DATALIST_FILES.get(task_id)
+    if not fname:
+        return []
+    fpath = _DATALIST_DIR / fname
+    if not fpath.exists():
+        return []
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = json.load(f)
+        items = data.get("data_list", [])
+        _datalist_items_cache[task_id] = items
+        return items
+    except Exception:
+        return []
+
+
+@app.route("/api/source_motions/<task_id>/<prompt_id>")
+def api_source_motions(task_id: str, prompt_id: str):
+    """Load full source motions for E14/E15/E16 context display.
+
+    Returns JSON with source motion FK positions so the frontend can
+    display the complete original motions (grayed out) around the
+    network output.
+
+    For E14: {motion_a: {positions, num_frames}, motion_b: {positions, num_frames}}
+    For E15: {source_motion: {...}, target_motion: {...}}
+    """
+    if task_id not in ('E14', 'E15'):
+        return jsonify({"error": f"Source motions not applicable for {task_id}"}), 400
+
+    items = _get_datalist_items(task_id)
+    # Find the item by prompt_id (index-based: "00000" → index 0)
+    try:
+        idx = int(prompt_id)
+    except ValueError:
+        # Try matching by prompt_id field
+        idx = next((i for i, item in enumerate(items) if item.get("prompt_id") == prompt_id), -1)
+    if idx < 0 or idx >= len(items):
+        return jsonify({"error": f"prompt_id {prompt_id} not found in {task_id} datalist"}), 404
+
+    item = items[idx]
+    result = {"task_id": task_id, "prompt_id": prompt_id}
+
+    if task_id == 'E14':
+        # Transition stitching: load full motion_a and motion_b
+        path_a = item.get("motion_a_path", "")
+        path_b = item.get("motion_b_path", "")
+        pos_a = load_source_motion_positions(path_a) if path_a else None
+        pos_b = load_source_motion_positions(path_b) if path_b else None
+
+        # Backend eval (tools/eval_m2m_v2_all_tasks.py) places motion_b in
+        # world coords continuing A's forward direction via place_b_after_a.
+        # For the dashboard gray-context motion_b to line up with the
+        # network output, apply the same world-placement here.
+        if pos_a is not None and pos_b is not None:
+            try:
+                import torch, numpy as np
+                from hftrainer.datasets.motion.motionhub.transforms.load_smplx import (
+                    process_transl, process_smplx_pose,
+                )
+                from hftrainer.pipelines.motion.transition_utils import (
+                    place_b_after_a,
+                )
+                data_a = np.load(path_a, allow_pickle=True)
+                data_b = np.load(path_b, allow_pickle=True)
+                tk_a = 'trans' if 'trans' in data_a else 'transl'
+                tk_b = 'trans' if 'trans' in data_b else 'transl'
+                pk_a = 'poses' if 'poses' in data_a else 'body_pose'
+                pk_b = 'poses' if 'poses' in data_b else 'body_pose'
+                mA = np.concatenate([
+                    process_transl(data_a[tk_a].astype(np.float32), 'abs'),
+                    process_smplx_pose(data_a[pk_a].astype(np.float32),
+                                       'rotation_6d', 'smpl_22'),
+                ], axis=-1).astype(np.float32)
+                mB = np.concatenate([
+                    process_transl(data_b[tk_b].astype(np.float32), 'abs'),
+                    process_smplx_pose(data_b[pk_b].astype(np.float32),
+                                       'rotation_6d', 'smpl_22'),
+                ], axis=-1).astype(np.float32)
+                mA_t = torch.from_numpy(mA).float()
+                mB_t = torch.from_numpy(mB).float()
+                # Defaults match E14 settings in m2m_eval_tasks.py.
+                mB_world = place_b_after_a(
+                    mA_t, mB_t, forward_step=1.0, yaw_offset_deg=0.0,
+                ).numpy()
+
+                # Re-FK world-placed motion_b for the skeleton overlay.
+                from hftrainer.pipelines.motion.differentiable_fk import (
+                    motion135_to_fk,
+                )
+                _proj_root = os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__)))
+                bone_offsets_path = os.path.join(
+                    _proj_root, 'data', 'hymotion_m2m_data',
+                    'bone_offsets_22.pt',
+                )
+                if os.path.exists(bone_offsets_path):
+                    bone_offsets = torch.load(
+                        bone_offsets_path, map_location='cpu'
+                    ).float()
+                    mB_world_t = torch.from_numpy(mB_world).float().unsqueeze(0)
+                    with torch.no_grad():
+                        wp, _, _, _ = motion135_to_fk(
+                            mB_world_t, bone_offsets, 'local')
+                    pos_b['positions'] = wp.squeeze(0).numpy().tolist()
+                    pos_b['_world_placed'] = True
+            except Exception as _exc:
+                # Fallback: leave motion_b at origin if anything fails.
+                pos_b['_world_place_error'] = repr(_exc)
+
+        result["motion_a"] = pos_a
+        result["motion_b"] = pos_b
+        result["text_a"] = item.get("text_a", "")
+        result["text_b"] = item.get("text_b", "")
+
+    elif task_id == 'E15':
+        # Transition to target: load source + target motion
+        src_path = item.get("motion_path", "")
+        tgt_path = item.get("target_motion_path", "")
+        pos_src = load_source_motion_positions(src_path) if src_path else None
+        pos_tgt = load_source_motion_positions(tgt_path) if tgt_path else None
+        result["source_motion"] = pos_src
+        result["target_motion"] = pos_tgt
+        result["text"] = item.get("text", "")
+
+    return jsonify(result)
+
+
+@app.route("/api/e9_lq/<prompt_id>")
+def api_e9_lq(prompt_id: str):
+    """Return LQ source motion positions for an E9 sample, plus adaptive-mask
+    info if a precomputed MoGenDIT mask is available. Used by the dashboard
+    E9 viewer to overlay the original defective motion and the repair target
+    regions.
+
+    Response:
+      {
+        "lq_motion": {positions, smpl_frames, edges, num_frames, fps, ...}
+            — same schema as load_source_motion_positions
+            or null if the LQ npz could not be loaded.
+        "adaptive_mask_frames": [int, int, ...]  optional
+            — frame indices flagged by MoGenDIT as defective; sorted.
+        "defect_type": "candy_wrapper" | ... optional
+      }
+    """
+    items = _get_datalist_items("E9")
+    try:
+        idx = int(prompt_id)
+    except ValueError:
+        idx = next((i for i, item in enumerate(items)
+                    if item.get("prompt_id") == prompt_id), -1)
+    if idx < 0 or idx >= len(items):
+        return jsonify({"error": f"prompt_id {prompt_id} not found in E9 datalist"}), 404
+
+    item = items[idx]
+    lq_path = item.get("motion_path", "")
+    if lq_path and not os.path.isabs(lq_path):
+        lq_path = str(PROJECT_ROOT / lq_path)
+
+    lq_motion = load_source_motion_positions(lq_path) if lq_path else None
+    result = {
+        "prompt_id": prompt_id,
+        "lq_motion": lq_motion,
+        "defect_type": item.get("defect_type"),
+        "all_defects": item.get("all_defects", []),
+        "caption": item.get("caption_en") or item.get("caption") or item.get("text", ""),
+    }
+
+    # Adaptive mask (if precomputed by MoGenDIT). Layout: mirrors the motion
+    # relative path under `data/eval/hymotion_m2m/adaptive_masks_mogendit/`,
+    # one .npz per motion containing `joint_mask` (T, 22 bool) + `trans_mask`
+    # (T, bool). Best-effort: if missing, the viewer just shows uniform red
+    # without joint-level highlighting.
+    try:
+        adaptive_mask_root = PROJECT_ROOT / "data" / "eval" / "hymotion_m2m" / "adaptive_masks_mogendit"
+        if lq_path:
+            # Strip the data/hymotion_data/ prefix to get the relative mirror
+            # path. e.g. data/hymotion_data/Academic/... -> Academic/...
+            import numpy as _np
+            abs_lq = Path(lq_path)
+            try:
+                rel = abs_lq.relative_to(PROJECT_ROOT / "data" / "hymotion_data")
+            except ValueError:
+                # Fallback: try to locate the 'data/hymotion_data' segment
+                parts = abs_lq.parts
+                if "hymotion_data" in parts:
+                    k = parts.index("hymotion_data")
+                    rel = Path(*parts[k + 1:])
+                else:
+                    rel = Path(abs_lq.name)
+            mask_path = adaptive_mask_root / rel
+            if mask_path.is_file():
+                m = _np.load(str(mask_path), allow_pickle=True)
+                jm = None
+                if "joint_mask" in m.files:
+                    jm = _np.asarray(m["joint_mask"]).astype(bool)  # (T, 22)
+                elif "mask" in m.files:
+                    raw = _np.asarray(m["mask"])  # best-effort legacy
+                    if raw.ndim == 1:
+                        jm = _np.repeat(raw[:, None], 22, axis=1).astype(bool)
+                    elif raw.ndim == 2:
+                        jm = raw.astype(bool)
+                if jm is not None:
+                    # Return both:
+                    #   - adaptive_joint_mask: per-frame per-joint 0/1 (T, 22)
+                    #   - adaptive_mask_frames: backward-compat union along joints
+                    joint_mask_list = jm.astype(_np.uint8).tolist()
+                    defective_frames = sorted(
+                        int(i) for i in _np.where(jm.any(axis=1))[0].tolist())
+                    result["adaptive_joint_mask"] = joint_mask_list
+                    result["adaptive_mask_frames"] = defective_frames
+                    result["adaptive_mask_num_frames"] = int(jm.shape[0])
+                    result["adaptive_mask_num_joints"] = int(jm.shape[1])
+    except Exception:
+        pass
+
+    return jsonify(result)
+
+
+@app.route("/api/task/<task_id>/compare")
+def api_task_compare(task_id: str):
+    """Return all models' aggregated metrics for a task."""
+    comparison = db.get_task_comparison(task_id)
+    baselines = db.get_baselines(task_id=task_id)
+
+    result = {"task_id": task_id, "models": {}, "baselines": []}
+    for row in comparison:
+        key = f"{row['model_name']}|{row['setting']}"
+        if key not in result["models"]:
+            result["models"][key] = {
+                "model_name": row["model_name"],
+                "setting": row["setting"],
+                "run_id": row["run_id"],
+                "metrics": {},
+            }
+        result["models"][key]["metrics"][row["metric_name"]] = {
+            "mean": row["mean"], "std": row["std"],
+        }
+
+    for bl in baselines:
+        result["baselines"].append({
+            "name": bl["name"],
+            "setting": bl["setting"],
+            "skeleton_type": bl.get("skeleton_type", "smpl22"),
+            "metrics": bl["metrics"],
+        })
+
+    return jsonify(result)
+
+
+# ── Datalist category enrichment cache ────────────────────
+_datalist_category_cache: Dict[str, Dict[str, str]] = {}  # task_id -> {motion_path_suffix: category}
+
+
+def _get_datalist_categories(task_id: str) -> Dict[str, str]:
+    """Build index→category mapping from datalist JSON for a task.
+
+    Returns dict mapping sample index (as string "00000", "00001", ...) to category.
+    Falls back to motion_path basename matching.
+    """
+    if task_id in _datalist_category_cache:
+        return _datalist_category_cache[task_id]
+
+    fname = _DATALIST_FILES.get(task_id)
+    if not fname:
+        _datalist_category_cache[task_id] = {}
+        return {}
+    fpath = _DATALIST_DIR / fname
+    if not fpath.exists():
+        _datalist_category_cache[task_id] = {}
+        return {}
+
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = json.load(f)
+        items = data.get("data_list", [])
+        mapping = {}
+        for i, item in enumerate(items):
+            cat = item.get("category", "") or item.get("defect_type", "")
+            prompt_id = f"{i:05d}"
+            mapping[prompt_id] = cat
+        _datalist_category_cache[task_id] = mapping
+        return mapping
+    except Exception:
+        _datalist_category_cache[task_id] = {}
+        return {}
+
+
+@app.route("/api/runs/<int:run_id>/samples")
+def api_run_samples(run_id: int):
+    """Return per-sample results for a run (paginated).
+
+    Enriches each sample with 'category' from the datalist JSON
+    so the frontend can filter by pie chart category.
+
+    Optional query params:
+        offset: pagination offset (default 0)
+        limit: pagination limit (default 50)
+        category: filter samples by category
+    """
+    offset = request.args.get("offset", 0, type=int)
+    limit = request.args.get("limit", 50, type=int)
+    category = request.args.get("category", "", type=str).strip()
+
+    samples = db.get_sample_results(run_id, offset=0, limit=99999)
+    total_unfiltered = len(samples)
+
+    # Enrich with category from datalist
+    # Look up task_id for this run
+    runs = db.get_eval_runs()
+    run_info = next((r for r in runs if r["id"] == run_id), None)
+    if run_info:
+        cat_map = _get_datalist_categories(run_info["task_id"])
+        if cat_map:
+            for s in samples:
+                pid = s.get("prompt_id", "")
+                if pid in cat_map:
+                    s["category"] = cat_map[pid]
+
+    # Apply category filter if provided
+    if category:
+        samples = [
+            s for s in samples
+            if s.get("category", "") == category
+        ]
+
+    total = len(samples)
+    paged = samples[offset:offset + limit]
+    return jsonify({
+        "samples": paged, "total": total,
+        "total_unfiltered": total_unfiltered,
+        "offset": offset, "limit": limit,
+        "category_filter": category or None,
+    })
+
+
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    """Import result.json via POST."""
+    data = request.json or {}
+    path = data.get("path", "")
+    task_id = data.get("task_id")
+    setting = data.get("setting")
+    notes = data.get("notes", "")
+
+    if not path:
+        return jsonify({"error": "path is required"}), 400
+
+    if os.path.isdir(path):
+        results = import_directory(db, path, task_id=task_id, notes=notes)
+        return jsonify({"status": "ok", "results": results})
+    else:
+        result = import_result_json(db, path, task_id=task_id, setting=setting, notes=notes)
+        if "error" in result:
+            return jsonify(result), 400
+        return jsonify(result)
+
+
+@app.route("/api/baselines", methods=["GET", "POST", "DELETE"])
+def api_baselines():
+    """Baseline CRUD."""
+    if request.method == "GET":
+        task_id = request.args.get("task_id")
+        return jsonify(db.get_baselines(task_id))
+
+    elif request.method == "POST":
+        data = request.json or {}
+        required = ["name", "task_id", "setting", "metrics"]
+        for field in required:
+            if field not in data:
+                return jsonify({"error": f"Missing field: {field}"}), 400
+        bid = db.upsert_baseline(
+            name=data["name"], task_id=data["task_id"], setting=data["setting"],
+            metrics=data["metrics"],
+            skeleton_type=data.get("skeleton_type", "smpl22"),
+            source=data.get("source", "manual"),
+            notes=data.get("notes", ""),
+        )
+        return jsonify({"status": "ok", "id": bid})
+
+    elif request.method == "DELETE":
+        bid = request.args.get("id", type=int)
+        if not bid:
+            return jsonify({"error": "id required"}), 400
+        ok = db.delete_baseline(bid)
+        return jsonify({"status": "ok" if ok else "not_found"})
+
+
+@app.route("/api/runs/<int:run_id>", methods=["DELETE"])
+def api_delete_run(run_id: int):
+    """Delete an eval run."""
+    ok = db.delete_eval_run(run_id)
+    return jsonify({"status": "ok" if ok else "not_found"})
+
+
+@app.route("/api/models")
+def api_models():
+    """List all models."""
+    return jsonify(db.get_all_models())
+
+
+# ── Datalist distribution API ────────────────────────────────
+
+# Map task_id to datalist file
+_DATALIST_FILES = {
+    "E1": "eval_e1_t2m.json",
+    "E2": "eval_e2_inbetween.json",
+    "E3": "eval_e3_keyframe.json",
+    "E4": "eval_e4_end_effector.json",
+    "E5": "eval_e5_trajectory.json",
+    "E6": "eval_e6_foot_ground.json",
+    "E7": "eval_e7_first_frame.json",
+    "E8": "eval_e8_loop.json",
+    "E9": "eval_e9_repair.json",
+    "E10": "eval_e10_part_control.json",
+    "E11": "eval_e11_caption_completion.json",
+    "E12": "eval_e12_multi_prompt.json",
+    "E13": "eval_e13_multi_prompt.json",
+    "E14": "eval_e2_transition.json",
+    "E15": "eval_e7_target_d.json",
+    "E16": "eval_e7_target_c.json",
+}
+_DATALIST_DIR = PROJECT_ROOT / "data" / "eval" / "m2m_v2"
+
+
+def _load_datalist_meta(task_id: str) -> Optional[Dict]:
+    fname = _DATALIST_FILES.get(task_id)
+    if not fname:
+        return None
+    fpath = _DATALIST_DIR / fname
+    if not fpath.exists():
+        return None
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("meta")
+    except Exception:
+        return None
+
+
+@app.route("/api/datalist/<task_id>")
+def api_datalist(task_id: str):
+    """Return datalist metadata including category distribution for a task."""
+    meta = _load_datalist_meta(task_id)
+    if meta is None:
+        return jsonify({"error": f"No datalist found for {task_id}"}), 404
+    return jsonify(meta)
+
+
+@app.route("/api/datalist/<task_id>/samples")
+def api_datalist_samples(task_id: str):
+    """Return datalist samples for browsing."""
+    fname = _DATALIST_FILES.get(task_id)
+    if not fname:
+        return jsonify({"error": f"No datalist for {task_id}"}), 404
+    fpath = _DATALIST_DIR / fname
+    if not fpath.exists():
+        return jsonify({"error": f"Datalist file not found: {fpath}"}), 404
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = json.load(f)
+        offset = request.args.get("offset", 0, type=int)
+        limit = request.args.get("limit", 50, type=int)
+        items = data.get("data_list", [])
+        return jsonify({
+            "meta": data.get("meta", {}),
+            "samples": items[offset:offset + limit],
+            "total": len(items),
+            "offset": offset,
+            "limit": limit,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Static file serving for Three.js (symlinks)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/static/three/<path:filename>")
+def serve_three(filename):
+    three_dir = script_dir.parent / "m2m_database" / "static" / "three"
+    return send_from_directory(str(three_dir), filename)
+
+
+@app.route("/static/scripts3d/<path:filename>")
+def serve_scripts3d(filename):
+    scripts3d_dir = script_dir.parent / "m2m_database" / "static" / "scripts3d"
+    return send_from_directory(str(scripts3d_dir), filename)
+
+
+@app.route("/static/assets/<path:filename>")
+def serve_assets(filename):
+    """Serve SMPL model assets (v_template.bin, faces.bin, etc.)."""
+    assets_dir = script_dir.parent / "m2m_database" / "static" / "assets"
+    return send_from_directory(str(assets_dir), filename)
+
+
+# ── Caption Rewriter API (Text2MotionPrompter) ──────────────
+REWRITER_URL = "http://11.216.46.236:8080/v1/chat/completions"
+REWRITER_MODEL = "Qwen3-30B-A3B-GRPO"
+REWRITER_SYSTEM_PROMPT = """# Role
+You are an expert in 3D motion analysis, animation timing, and choreography.
+
+# Task
+Analyze the user-provided [Input Action] and generate a structured JSON response containing a duration estimate and a refined caption.
+
+# Instructions
+
+### 1. Duration Estimation (frame_count)
+- Estimate time for smooth, natural, realistic performance
+- Calculate duration in frames at 30 fps (frames per second)
+- Output strictly as an Integer
+
+### 2. Caption Refinement (short_caption)
+- Generate refined, grammatically correct English version
+- PRESERVE original sequence of events (chronological order)
+- RETAIN all original spatial modifiers
+- DO NOT add new sub-actions or hallucinate details
+- DO NOT delete any specific movements
+- Goal: improve clarity while maintaining 100% semantic fidelity
+
+### 3. Output Format
+Return ONLY a raw JSON object (no markdown):
+{
+    "duration": <Integer frames at 30fps>,
+    "short_caption": "<String, refined English description>"
+}"""
+
+
+@app.route("/api/rewrite_caption", methods=["POST"])
+def api_rewrite_caption():
+    """Rewrite a caption using the Text2MotionPrompter service."""
+    import requests as _req
+
+    data = request.json or {}
+    caption = data.get("caption", "").strip()
+    if not caption:
+        return jsonify({"error": "caption is required"}), 400
+
+    try:
+        resp = _req.post(REWRITER_URL, json={
+            "model": REWRITER_MODEL,
+            "messages": [
+                {"role": "system", "content": REWRITER_SYSTEM_PROMPT},
+                {"role": "user", "content": f"[Input Action]: {caption}"},
+            ],
+            "max_tokens": 200,
+            "temperature": 0.3,
+        }, timeout=30)
+
+        if resp.status_code != 200:
+            return jsonify({"error": f"Rewriter service returned {resp.status_code}"}), 502
+
+        content = resp.json()["choices"][0]["message"]["content"]
+        # Strip thinking tags if present
+        if "</think>" in content:
+            content = content.split("</think>")[-1].strip()
+
+        result = json.loads(content)
+        return jsonify({
+            "original": caption,
+            "rewritten": result.get("short_caption", caption),
+            "duration_frames": result.get("duration", 0),
+        })
+    except Exception as e:
+        return jsonify({"error": f"Rewrite failed: {str(e)}"}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════
+
+def main():
+    parser = argparse.ArgumentParser(description="M2M v2 Eval Dashboard")
+    parser.add_argument("--port", type=int, default=8095)
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
+    print(f"Starting Eval Dashboard on http://{args.host}:{args.port}/")
+    print(f"Database: {DB_PATH}")
+    app.run(host=args.host, port=args.port, debug=args.debug)
+
+
+if __name__ == "__main__":
+    main()

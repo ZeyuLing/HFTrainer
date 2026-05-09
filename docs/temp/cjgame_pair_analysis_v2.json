@@ -1,0 +1,4008 @@
+{
+  "length_changed": [
+    {
+      "name": "DAD_KuangWarrior_IdleToFight_003",
+      "frames_orig": 1467,
+      "frames_clean": 401
+    },
+    {
+      "name": "DAD_KuangWarrior_Skill04_002",
+      "frames_orig": 909,
+      "frames_clean": 276
+    },
+    {
+      "name": "DAD_KuangWarrior_Skill04_005",
+      "frames_orig": 511,
+      "frames_clean": 275
+    },
+    {
+      "name": "DAD_KuangWarrior_Skill04_008",
+      "frames_orig": 961,
+      "frames_clean": 263
+    },
+    {
+      "name": "DAD_NvGui_BodyIdle_005",
+      "frames_orig": 670,
+      "frames_clean": 138
+    },
+    {
+      "name": "DAD_ShieldGhou_Skill01_002",
+      "frames_orig": 1081,
+      "frames_clean": 176
+    },
+    {
+      "name": "DAD_ShieldGhoul_IdleToFight_001",
+      "frames_orig": 1271,
+      "frames_clean": 396
+    },
+    {
+      "name": "DAD_ShieldGhoul_Idle_002",
+      "frames_orig": 2504,
+      "frames_clean": 526
+    },
+    {
+      "name": "DAD_SpearGHou_Dead_007",
+      "frames_orig": 854,
+      "frames_clean": 283
+    },
+    {
+      "name": "DAD_SpearGHou_Skill01_002",
+      "frames_orig": 961,
+      "frames_clean": 476
+    },
+    {
+      "name": "DAD_SpearGHou_Skill02_003",
+      "frames_orig": 1049,
+      "frames_clean": 201
+    },
+    {
+      "name": "DAD_SpearGHou_Skill03_001",
+      "frames_orig": 725,
+      "frames_clean": 56
+    },
+    {
+      "name": "DAD_SpearGHou_Skill03_004",
+      "frames_orig": 562,
+      "frames_clean": 93
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Turn_001",
+      "frames_orig": 705,
+      "frames_clean": 142
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Get_001",
+      "frames_orig": 1399,
+      "frames_clean": 288
+    },
+    {
+      "name": "Tpose_AM_002",
+      "frames_orig": 177,
+      "frames_clean": 175
+    }
+  ],
+  "visible_diff": [
+    {
+      "name": "SLDF_DualBlades_Stand_Run_FR_001",
+      "max_diff_mm": 2546.7,
+      "mean_diff_mm": 310.2,
+      "max_frame": 470,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_F_001",
+      "max_diff_mm": 1500.8,
+      "mean_diff_mm": 82.9,
+      "max_frame": 405,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_R_003",
+      "max_diff_mm": 1468.9,
+      "mean_diff_mm": 117.7,
+      "max_frame": 410,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_BR_001",
+      "max_diff_mm": 1464.5,
+      "mean_diff_mm": 29.8,
+      "max_frame": 677,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Run_BL_001",
+      "max_diff_mm": 1331.0,
+      "mean_diff_mm": 64.3,
+      "max_frame": 533,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_L_002",
+      "max_diff_mm": 1253.6,
+      "mean_diff_mm": 108.9,
+      "max_frame": 361,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Sprint_F_001",
+      "max_diff_mm": 1221.3,
+      "mean_diff_mm": 52.3,
+      "max_frame": 437,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_FL_001",
+      "max_diff_mm": 1041.8,
+      "mean_diff_mm": 45.6,
+      "max_frame": 477,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Skill_02_Sprint_001",
+      "max_diff_mm": 963.4,
+      "mean_diff_mm": 85.6,
+      "max_frame": 439,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Jump_F_002",
+      "max_diff_mm": 815.3,
+      "mean_diff_mm": 31.5,
+      "max_frame": 372,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Sprint_F_002",
+      "max_diff_mm": 558.6,
+      "mean_diff_mm": 39.9,
+      "max_frame": 368,
+      "max_joint": "head"
+    },
+    {
+      "name": "DAD_NvGui_Skill01_Run_003",
+      "max_diff_mm": 536.7,
+      "mean_diff_mm": 7.5,
+      "max_frame": 561,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_F_002",
+      "max_diff_mm": 491.9,
+      "mean_diff_mm": 31.1,
+      "max_frame": 493,
+      "max_joint": "head"
+    },
+    {
+      "name": "DAD_Dagger_Stand_Sprint_F_002",
+      "max_diff_mm": 490.7,
+      "mean_diff_mm": 14.7,
+      "max_frame": 585,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Sprint_F_002",
+      "max_diff_mm": 479.3,
+      "mean_diff_mm": 48.0,
+      "max_frame": 384,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_B_002",
+      "max_diff_mm": 474.6,
+      "mean_diff_mm": 4.1,
+      "max_frame": 420,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Axe_Stand_Sprint_F_002",
+      "max_diff_mm": 454.4,
+      "mean_diff_mm": 48.9,
+      "max_frame": 435,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "DAD_Flute_Skill_Walk_F_004",
+      "max_diff_mm": 359.3,
+      "mean_diff_mm": 5.1,
+      "max_frame": 773,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_L_D_001",
+      "max_diff_mm": 304.5,
+      "mean_diff_mm": 1.6,
+      "max_frame": 788,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Sprint_F_001",
+      "max_diff_mm": 272.3,
+      "mean_diff_mm": 21.6,
+      "max_frame": 537,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "DAD_Spear_Stand_Sprint_F_001",
+      "max_diff_mm": 265.6,
+      "mean_diff_mm": 15.6,
+      "max_frame": 650,
+      "max_joint": "head"
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Run_FR_001",
+      "max_diff_mm": 188.7,
+      "mean_diff_mm": 3.2,
+      "max_frame": 659,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "CG037_NingCi_Turn_006",
+      "max_diff_mm": 187.9,
+      "mean_diff_mm": 1.4,
+      "max_frame": 149,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "DAD_BowGhoul_Dead_001",
+      "max_diff_mm": 173.1,
+      "mean_diff_mm": 4.2,
+      "max_frame": 376,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Run_FL_001",
+      "max_diff_mm": 161.5,
+      "mean_diff_mm": 2.9,
+      "max_frame": 610,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "SLDF_DualBlades_Skill_01_Attack_001",
+      "max_diff_mm": 144.2,
+      "mean_diff_mm": 1.7,
+      "max_frame": 976,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "DAD_Spear_Stand_Dead_L_001",
+      "max_diff_mm": 137.4,
+      "mean_diff_mm": 5.8,
+      "max_frame": 957,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "DAD_Dagger_Stand_Dead_L_001",
+      "max_diff_mm": 134.2,
+      "mean_diff_mm": 2.1,
+      "max_frame": 1045,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Dead_L_001",
+      "max_diff_mm": 118.1,
+      "mean_diff_mm": 2.8,
+      "max_frame": 766,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "DAD_Axe_Stand_Dead_R_002",
+      "max_diff_mm": 118.0,
+      "mean_diff_mm": 2.2,
+      "max_frame": 827,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "DAD_Axe_Stand_Dead_R_001",
+      "max_diff_mm": 108.4,
+      "mean_diff_mm": 2.9,
+      "max_frame": 817,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill06_004",
+      "max_diff_mm": 100.4,
+      "mean_diff_mm": 0.9,
+      "max_frame": 318,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "DAD_Axe_Jump_Attack_002",
+      "max_diff_mm": 85.8,
+      "mean_diff_mm": 1.5,
+      "max_frame": 271,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Axe_Stand_Dead_F_001",
+      "max_diff_mm": 84.7,
+      "mean_diff_mm": 2.4,
+      "max_frame": 757,
+      "max_joint": "l_shoulder"
+    },
+    {
+      "name": "Player_Mojiang_Lv1_Namaste_Throw_Start_002",
+      "max_diff_mm": 81.0,
+      "mean_diff_mm": 2.2,
+      "max_frame": 223,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_SpearGHoul_Run_002",
+      "max_diff_mm": 74.9,
+      "mean_diff_mm": 2.4,
+      "max_frame": 89,
+      "max_joint": "r_hip"
+    },
+    {
+      "name": "DAD_ShieldGhoul_Born01_002",
+      "max_diff_mm": 73.7,
+      "mean_diff_mm": 10.4,
+      "max_frame": 532,
+      "max_joint": "r_hip"
+    },
+    {
+      "name": "DAD_Spear_Stand_Dead_R_001",
+      "max_diff_mm": 72.7,
+      "mean_diff_mm": 1.5,
+      "max_frame": 413,
+      "max_joint": "l_elbow"
+    },
+    {
+      "name": "CG037_NingCi_Stand_002",
+      "max_diff_mm": 67.9,
+      "mean_diff_mm": 1.0,
+      "max_frame": 385,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "DAD_Boss_Commander_FightToIdle_002",
+      "max_diff_mm": 66.1,
+      "mean_diff_mm": 6.1,
+      "max_frame": 597,
+      "max_joint": "head"
+    },
+    {
+      "name": "DAD_NvGui_Combat_Run_004",
+      "max_diff_mm": 64.2,
+      "mean_diff_mm": 1.4,
+      "max_frame": 118,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "Player_Nianshou_Lv2_Predation_QTE_001",
+      "max_diff_mm": 62.9,
+      "mean_diff_mm": 4.3,
+      "max_frame": 239,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Dagger_Stand_Dead_R_001",
+      "max_diff_mm": 61.9,
+      "mean_diff_mm": 2.6,
+      "max_frame": 788,
+      "max_joint": "l_elbow"
+    },
+    {
+      "name": "DAD_ShieldGhoul_Born02_002",
+      "max_diff_mm": 61.6,
+      "mean_diff_mm": 7.8,
+      "max_frame": 541,
+      "max_joint": "r_hip"
+    },
+    {
+      "name": "Players_DAD_Boss_Commander_Skill06_001",
+      "max_diff_mm": 61.2,
+      "mean_diff_mm": 3.0,
+      "max_frame": 205,
+      "max_joint": "l_shoulder"
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Dead_R_001",
+      "max_diff_mm": 60.5,
+      "mean_diff_mm": 3.1,
+      "max_frame": 360,
+      "max_joint": "l_elbow"
+    },
+    {
+      "name": "DAD_SpearGHoul_Born_001",
+      "max_diff_mm": 59.1,
+      "mean_diff_mm": 3.6,
+      "max_frame": 269,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance01_012",
+      "max_diff_mm": 58.9,
+      "mean_diff_mm": 1.8,
+      "max_frame": 666,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Shaking_002",
+      "max_diff_mm": 57.7,
+      "mean_diff_mm": 1.3,
+      "max_frame": 468,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Flute_Skill_Walk_FL_001",
+      "max_diff_mm": 57.2,
+      "mean_diff_mm": 1.7,
+      "max_frame": 750,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_R_D_001",
+      "max_diff_mm": 56.1,
+      "mean_diff_mm": 1.1,
+      "max_frame": 654,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_RunesGhoul_Dead_001",
+      "max_diff_mm": 55.5,
+      "mean_diff_mm": 1.5,
+      "max_frame": 540,
+      "max_joint": "r_ankle"
+    },
+    {
+      "name": "SLDF_DualBlades_Skill_01_Throw_001",
+      "max_diff_mm": 55.4,
+      "mean_diff_mm": 2.7,
+      "max_frame": 326,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Run_F_001",
+      "max_diff_mm": 54.6,
+      "mean_diff_mm": 2.3,
+      "max_frame": 559,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_KuangWarrior_Skill02_001",
+      "max_diff_mm": 53.1,
+      "mean_diff_mm": 0.9,
+      "max_frame": 248,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_90_D_001",
+      "max_diff_mm": 52.7,
+      "mean_diff_mm": 1.7,
+      "max_frame": 699,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "Player_Nianshou_Lv2_Predation_Damage_001",
+      "max_diff_mm": 51.0,
+      "mean_diff_mm": 4.3,
+      "max_frame": 609,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_BR_001",
+      "max_diff_mm": 50.9,
+      "mean_diff_mm": 2.2,
+      "max_frame": 433,
+      "max_joint": "l_shoulder"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Get_002",
+      "max_diff_mm": 50.6,
+      "mean_diff_mm": 1.7,
+      "max_frame": 1005,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill01_Start_002",
+      "max_diff_mm": 50.5,
+      "mean_diff_mm": 5.3,
+      "max_frame": 449,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_L_M_005",
+      "max_diff_mm": 50.3,
+      "mean_diff_mm": 1.9,
+      "max_frame": 782,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "CG038_NingCi_End_002",
+      "max_diff_mm": 47.6,
+      "mean_diff_mm": 2.6,
+      "max_frame": 706,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "DAD_NvJinPo_Dead_002",
+      "max_diff_mm": 47.5,
+      "mean_diff_mm": 2.3,
+      "max_frame": 317,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_FL_004",
+      "max_diff_mm": 47.4,
+      "mean_diff_mm": 1.8,
+      "max_frame": 203,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_R_U_001",
+      "max_diff_mm": 46.4,
+      "mean_diff_mm": 1.8,
+      "max_frame": 637,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "CG038_NingCi_End_001",
+      "max_diff_mm": 46.1,
+      "mean_diff_mm": 1.4,
+      "max_frame": 106,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "Player_Nianshou_Lv2_Predation_Escape_003",
+      "max_diff_mm": 46.0,
+      "mean_diff_mm": 4.4,
+      "max_frame": 531,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill06_1_001",
+      "max_diff_mm": 44.9,
+      "mean_diff_mm": 1.2,
+      "max_frame": 90,
+      "max_joint": "head"
+    },
+    {
+      "name": "VH_Naruto_Toad_Run_F_005",
+      "max_diff_mm": 44.9,
+      "mean_diff_mm": 3.3,
+      "max_frame": 307,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_90_M_001",
+      "max_diff_mm": 44.8,
+      "mean_diff_mm": 1.0,
+      "max_frame": 775,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Turn_L_001",
+      "max_diff_mm": 43.9,
+      "mean_diff_mm": 3.5,
+      "max_frame": 670,
+      "max_joint": "l_hip"
+    },
+    {
+      "name": "DAD_Spear_Stand_Hit_L_002",
+      "max_diff_mm": 43.1,
+      "mean_diff_mm": 1.6,
+      "max_frame": 1008,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_B_003",
+      "max_diff_mm": 42.9,
+      "mean_diff_mm": 3.2,
+      "max_frame": 490,
+      "max_joint": "l_collar"
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Eclipse_Start_003",
+      "max_diff_mm": 42.5,
+      "mean_diff_mm": 1.5,
+      "max_frame": 272,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Axe_Stand_Dead_B_001",
+      "max_diff_mm": 42.0,
+      "mean_diff_mm": 2.5,
+      "max_frame": 718,
+      "max_joint": "l_elbow"
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_FL_001",
+      "max_diff_mm": 41.7,
+      "mean_diff_mm": 1.5,
+      "max_frame": 739,
+      "max_joint": "r_foot"
+    },
+    {
+      "name": "DAD_Sword_Skill_Defense_02_002",
+      "max_diff_mm": 41.4,
+      "mean_diff_mm": 1.4,
+      "max_frame": 292,
+      "max_joint": "head"
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Dead_F_001",
+      "max_diff_mm": 41.2,
+      "mean_diff_mm": 3.0,
+      "max_frame": 355,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_F_001",
+      "max_diff_mm": 40.8,
+      "mean_diff_mm": 2.0,
+      "max_frame": 733,
+      "max_joint": "r_collar"
+    },
+    {
+      "name": "DAD_Axe_Skill_Start_003",
+      "max_diff_mm": 40.6,
+      "mean_diff_mm": 1.5,
+      "max_frame": 201,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "DAD_ShieldGhoul_Idle_Relax_002",
+      "max_diff_mm": 40.1,
+      "mean_diff_mm": 2.6,
+      "max_frame": 410,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_L_Stop_001",
+      "max_diff_mm": 39.6,
+      "mean_diff_mm": 3.6,
+      "max_frame": 767,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "DAD_Sword_Stand_Attack_03_001",
+      "max_diff_mm": 39.4,
+      "mean_diff_mm": 1.0,
+      "max_frame": 604,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_L_006",
+      "max_diff_mm": 39.3,
+      "mean_diff_mm": 2.0,
+      "max_frame": 1010,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "DAD_Boss_Commander_Turn_L_001",
+      "max_diff_mm": 39.1,
+      "mean_diff_mm": 7.0,
+      "max_frame": 964,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_L_001",
+      "max_diff_mm": 38.1,
+      "mean_diff_mm": 4.5,
+      "max_frame": 591,
+      "max_joint": "l_hip"
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill06_2_001",
+      "max_diff_mm": 37.9,
+      "mean_diff_mm": 0.2,
+      "max_frame": 387,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Attack_F_008",
+      "max_diff_mm": 37.8,
+      "mean_diff_mm": 1.5,
+      "max_frame": 240,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_FL_001",
+      "max_diff_mm": 37.7,
+      "mean_diff_mm": 2.8,
+      "max_frame": 529,
+      "max_joint": "l_hip"
+    },
+    {
+      "name": "DAD_Boss_Commander_IdleToFight_007",
+      "max_diff_mm": 37.6,
+      "mean_diff_mm": 8.1,
+      "max_frame": 1049,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "DAD_Spear_Stand_Crouch_001",
+      "max_diff_mm": 37.1,
+      "mean_diff_mm": 4.7,
+      "max_frame": 729,
+      "max_joint": "l_hip"
+    },
+    {
+      "name": "DAD_Boss_Commander_IdleToFight_001",
+      "max_diff_mm": 36.6,
+      "mean_diff_mm": 5.6,
+      "max_frame": 1266,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "VH_Naruto_Toad_Walk_FL_001",
+      "max_diff_mm": 36.4,
+      "mean_diff_mm": 4.4,
+      "max_frame": 180,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "DAD_Boss_Commander_Idle_Relax_001",
+      "max_diff_mm": 36.3,
+      "mean_diff_mm": 6.0,
+      "max_frame": 1009,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "Vehicle_Paraglider_Jump_002",
+      "max_diff_mm": 36.3,
+      "mean_diff_mm": 3.7,
+      "max_frame": 62,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Run_BL_001",
+      "max_diff_mm": 36.2,
+      "mean_diff_mm": 3.3,
+      "max_frame": 405,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill01_Walk_F_006",
+      "max_diff_mm": 35.9,
+      "mean_diff_mm": 6.4,
+      "max_frame": 813,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "DAD_ShieldGhou_Dead_002",
+      "max_diff_mm": 35.9,
+      "mean_diff_mm": 2.3,
+      "max_frame": 328,
+      "max_joint": "l_shoulder"
+    },
+    {
+      "name": "VH_Naruto_Toad_Run_FL_001",
+      "max_diff_mm": 35.8,
+      "mean_diff_mm": 4.3,
+      "max_frame": 1226,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "VH_Naruto_Toad_Run_RL_001",
+      "max_diff_mm": 35.8,
+      "mean_diff_mm": 3.6,
+      "max_frame": 297,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill01_Start_005",
+      "max_diff_mm": 35.6,
+      "mean_diff_mm": 7.0,
+      "max_frame": 1023,
+      "max_joint": "l_knee"
+    },
+    {
+      "name": "VH_Naruto_Toad_Jump_Start_003",
+      "max_diff_mm": 35.4,
+      "mean_diff_mm": 6.0,
+      "max_frame": 689,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "Tpose_20250805_AM001",
+      "max_diff_mm": 35.1,
+      "mean_diff_mm": 7.1,
+      "max_frame": 119,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance01_035",
+      "max_diff_mm": 34.8,
+      "mean_diff_mm": 1.3,
+      "max_frame": 877,
+      "max_joint": "l_foot"
+    },
+    {
+      "name": "VH_Naruto_Toad_Jump_F_Start_002",
+      "max_diff_mm": 34.7,
+      "mean_diff_mm": 2.8,
+      "max_frame": 107,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "VH_Naruto_Toad_Walk_BR_001",
+      "max_diff_mm": 34.0,
+      "mean_diff_mm": 4.6,
+      "max_frame": 911,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Dodge_L_M_004",
+      "max_diff_mm": 33.9,
+      "mean_diff_mm": 1.2,
+      "max_frame": 712,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "DAD_Dagger_Jump_Attack_001",
+      "max_diff_mm": 33.6,
+      "mean_diff_mm": 1.3,
+      "max_frame": 285,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "DAD_Palyer_Stand_Execution_001",
+      "max_diff_mm": 33.2,
+      "mean_diff_mm": 1.4,
+      "max_frame": 336,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_B_004",
+      "max_diff_mm": 33.1,
+      "mean_diff_mm": 2.5,
+      "max_frame": 668,
+      "max_joint": "l_shoulder"
+    },
+    {
+      "name": "VH_Naruto_Toad_Walk_B_001",
+      "max_diff_mm": 33.0,
+      "mean_diff_mm": 4.0,
+      "max_frame": 538,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill01_Walk_B_003",
+      "max_diff_mm": 32.5,
+      "mean_diff_mm": 6.5,
+      "max_frame": 123,
+      "max_joint": "r_knee"
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_BL_002",
+      "max_diff_mm": 32.5,
+      "mean_diff_mm": 2.1,
+      "max_frame": 388,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "DAD_Flute_Crouch_Attack_02_001",
+      "max_diff_mm": 32.4,
+      "mean_diff_mm": 1.3,
+      "max_frame": 344,
+      "max_joint": "r_wrist"
+    },
+    {
+      "name": "VH_Naruto_Toad_Jump_Start_002",
+      "max_diff_mm": 31.9,
+      "mean_diff_mm": 6.6,
+      "max_frame": 339,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "DAD_RunesGhoul_Dead_002",
+      "max_diff_mm": 31.6,
+      "mean_diff_mm": 2.5,
+      "max_frame": 78,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_L_U_002",
+      "max_diff_mm": 31.2,
+      "mean_diff_mm": 1.6,
+      "max_frame": 685,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Dead_L_001",
+      "max_diff_mm": 31.1,
+      "mean_diff_mm": 2.3,
+      "max_frame": 666,
+      "max_joint": "r_hip"
+    },
+    {
+      "name": "VH_Naruto_Toad_Walk_F_002",
+      "max_diff_mm": 31.1,
+      "mean_diff_mm": 3.8,
+      "max_frame": 172,
+      "max_joint": "spine1"
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Dodge_L_M_003",
+      "max_diff_mm": 30.9,
+      "mean_diff_mm": 1.3,
+      "max_frame": 980,
+      "max_joint": "l_wrist"
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_F_D_001",
+      "max_diff_mm": 30.7,
+      "mean_diff_mm": 2.7,
+      "max_frame": 767,
+      "max_joint": "r_elbow"
+    },
+    {
+      "name": "DAD_Spear_Crouch_Dead_B_001",
+      "max_diff_mm": 30.5,
+      "mean_diff_mm": 3.0,
+      "max_frame": 1260,
+      "max_joint": "l_hip"
+    },
+    {
+      "name": "DAD_Mercenary01_Execution_006",
+      "max_diff_mm": 30.1,
+      "mean_diff_mm": 4.1,
+      "max_frame": 428,
+      "max_joint": "l_shoulder"
+    },
+    {
+      "name": "Vehicle_Paraglider_Run_F_003",
+      "max_diff_mm": 30.0,
+      "mean_diff_mm": 1.6,
+      "max_frame": 84,
+      "max_joint": "r_knee"
+    }
+  ],
+  "no_visible_diff": [
+    {
+      "name": "Base_Stand_Lobby_Performance01_016",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance01_023",
+      "max_diff_mm": 8.3,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance01_040",
+      "max_diff_mm": 8.1,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_006",
+      "max_diff_mm": 5.8,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_008",
+      "max_diff_mm": 8.8,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_011",
+      "max_diff_mm": 7.7,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_012",
+      "max_diff_mm": 8.2,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_013",
+      "max_diff_mm": 7.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_014",
+      "max_diff_mm": 9.5,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "Base_Stand_Lobby_Performance_Face_017",
+      "max_diff_mm": 6.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Approach_D_001",
+      "max_diff_mm": 10.2,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Approach_M_001",
+      "max_diff_mm": 27.5,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Approach_U_001",
+      "max_diff_mm": 14.2,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Attack_L_003",
+      "max_diff_mm": 18.9,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Attack_R_005",
+      "max_diff_mm": 17.0,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Buddha_Attack_004",
+      "max_diff_mm": 24.2,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Buddha_Perform_004",
+      "max_diff_mm": 16.1,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Diming_005",
+      "max_diff_mm": 20.4,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Dodge_L_D_001",
+      "max_diff_mm": 8.0,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Dodge_L_U_001",
+      "max_diff_mm": 14.5,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Dodge_R_D_001",
+      "max_diff_mm": 18.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Dodge_R_M_002",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Dodge_R_U_001",
+      "max_diff_mm": 18.4,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Move_D_001",
+      "max_diff_mm": 17.2,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Move_M_003",
+      "max_diff_mm": 14.6,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Move_U_001",
+      "max_diff_mm": 16.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Namaste_Grab_008",
+      "max_diff_mm": 17.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Namaste_Throw_004",
+      "max_diff_mm": 24.9,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Namaste_Throw_TurnL180_001",
+      "max_diff_mm": 18.1,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Namaste_Throw_TurnL_001",
+      "max_diff_mm": 14.0,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Namaste_Throw_TurnR180_001",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Namaste_Throw_TurnR_001",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Palm_005",
+      "max_diff_mm": 11.7,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Palm_011",
+      "max_diff_mm": 10.4,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Palm_012",
+      "max_diff_mm": 7.2,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Pursuit_End_003",
+      "max_diff_mm": 16.6,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Pursuit_Start02_001",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Pursuit_Start_004",
+      "max_diff_mm": 15.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Shaking_003",
+      "max_diff_mm": 20.1,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_ShowDown_L_D_001",
+      "max_diff_mm": 12.6,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_ShowDown_L_M_003",
+      "max_diff_mm": 28.0,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_ShowDown_L_U_001",
+      "max_diff_mm": 15.8,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Stand_001",
+      "max_diff_mm": 9.6,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_135_D_001",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_135_M_001",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_135_U_001",
+      "max_diff_mm": 10.9,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_180_D_001",
+      "max_diff_mm": 25.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_180_M_001",
+      "max_diff_mm": 18.7,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_180_U_001",
+      "max_diff_mm": 12.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_45_D_001",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_45_M_002",
+      "max_diff_mm": 10.1,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_45_U_001",
+      "max_diff_mm": 22.8,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Trun_90_U_001",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_B_D_001",
+      "max_diff_mm": 25.7,
+      "mean_diff_mm": 4.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_B_M_001",
+      "max_diff_mm": 7.0,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_B_U_001",
+      "max_diff_mm": 10.5,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_F_D_001",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_F_M_003",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_F_U_001",
+      "max_diff_mm": 18.7,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv1_Walk_R_M_003",
+      "max_diff_mm": 27.0,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_3Combo_003",
+      "max_diff_mm": 13.5,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_BackThrust_003",
+      "max_diff_mm": 19.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_BackThrust_009",
+      "max_diff_mm": 15.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Crack_003",
+      "max_diff_mm": 12.1,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Crack_Continue_002",
+      "max_diff_mm": 11.8,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Dodge_L_D_002",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Dodge_L_U_002",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Dodge_R_D_001",
+      "max_diff_mm": 13.7,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Dodge_R_M_003",
+      "max_diff_mm": 16.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Dodge_R_U_001",
+      "max_diff_mm": 13.2,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Eclipse_End_002",
+      "max_diff_mm": 21.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_EyeLengthways_Start_M_004",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_EyeLengthways_Start_U_007",
+      "max_diff_mm": 13.8,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_EyeTrace_Start_D_001",
+      "max_diff_mm": 8.5,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_EyeTrace_Start_M_002",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_EyeTrace_Start_U_002",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Hide_003",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_JumpSmash_003",
+      "max_diff_mm": 16.8,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_LightArrow_Start_002",
+      "max_diff_mm": 16.7,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_LightArrow_Tumble_002",
+      "max_diff_mm": 17.3,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Namaste_Fail_002",
+      "max_diff_mm": 16.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_PurgatorFire_Start_M_001",
+      "max_diff_mm": 8.1,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_PurgatorFire_Start_U_002",
+      "max_diff_mm": 9.7,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_ShowDown_L_D_007",
+      "max_diff_mm": 15.3,
+      "mean_diff_mm": 2.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_ShowDown_L_M_007",
+      "max_diff_mm": 7.5,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_ShowDown_L_U_002",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Stand_D_001",
+      "max_diff_mm": 12.7,
+      "mean_diff_mm": 0.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Stand_M_003",
+      "max_diff_mm": 13.3,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Stand_U_001",
+      "max_diff_mm": 13.6,
+      "mean_diff_mm": 0.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_135_D_001",
+      "max_diff_mm": 15.2,
+      "mean_diff_mm": 2.6
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_135_M_001",
+      "max_diff_mm": 12.7,
+      "mean_diff_mm": 2.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_135_U_001",
+      "max_diff_mm": 25.5,
+      "mean_diff_mm": 3.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_180_D_001",
+      "max_diff_mm": 16.9,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_180_M_001",
+      "max_diff_mm": 11.0,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_180_U_001",
+      "max_diff_mm": 12.7,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_45_D_001",
+      "max_diff_mm": 14.4,
+      "mean_diff_mm": 2.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_45_M_001",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_45_U_001",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_90_D_001",
+      "max_diff_mm": 22.3,
+      "mean_diff_mm": 2.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_90_M_001",
+      "max_diff_mm": 7.2,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_L_90_U_001",
+      "max_diff_mm": 10.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_135_D_001",
+      "max_diff_mm": 7.2,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_135_M_001",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_135_U_001",
+      "max_diff_mm": 9.7,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_180_D_001",
+      "max_diff_mm": 19.8,
+      "mean_diff_mm": 3.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_180_M_001",
+      "max_diff_mm": 15.8,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_180_U_001",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_45_D_001",
+      "max_diff_mm": 17.2,
+      "mean_diff_mm": 3.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_45_M_001",
+      "max_diff_mm": 7.3,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_45_U_001",
+      "max_diff_mm": 12.9,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_90_D_001",
+      "max_diff_mm": 7.7,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_90_M_001",
+      "max_diff_mm": 7.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Trun_R_90_U_001",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_B_D_001",
+      "max_diff_mm": 13.4,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_B_M_001",
+      "max_diff_mm": 7.8,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_B_U_001",
+      "max_diff_mm": 11.4,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_F_M_001",
+      "max_diff_mm": 12.0,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_F_U_001",
+      "max_diff_mm": 18.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_L_D_001",
+      "max_diff_mm": 20.7,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_L_M_001",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_L_U_001",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_R_D_001",
+      "max_diff_mm": 8.2,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_R_M_001",
+      "max_diff_mm": 10.7,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "Boss_Mojiang_Lv2_Walk_R_U_002",
+      "max_diff_mm": 10.4,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "CG037_BoFengShuiMen_Attack_002",
+      "max_diff_mm": 18.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "CG037_BoFengShuiMen_Attack_003",
+      "max_diff_mm": 16.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "CG037_BoFengShuiMen_Throw_001",
+      "max_diff_mm": 21.0,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "CG037_NingCi_Stand_007",
+      "max_diff_mm": 27.1,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "CG037_NingCi_Turn_001",
+      "max_diff_mm": 14.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "CG037_QingWa_jump_001",
+      "max_diff_mm": 20.4,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "CG037_QingWa_jump_002",
+      "max_diff_mm": 27.0,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "CG037_Tianzhao_pain1_003",
+      "max_diff_mm": 14.5,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "CG037_Tongling_stand_001",
+      "max_diff_mm": 14.1,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Crouch_Attack_01_001",
+      "max_diff_mm": 27.5,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Crouch_Attack_02_001",
+      "max_diff_mm": 12.0,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Axe_Crouch_Attack_03_002",
+      "max_diff_mm": 9.5,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_F_002",
+      "max_diff_mm": 23.6,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_R_001",
+      "max_diff_mm": 26.6,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Crouch_Dead_R_006",
+      "max_diff_mm": 24.6,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Axe_Crouch_Get_003",
+      "max_diff_mm": 14.4,
+      "mean_diff_mm": 3.9
+    },
+    {
+      "name": "DAD_Axe_Crouch_Hit_B_004",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Axe_Crouch_Hit_F_001",
+      "max_diff_mm": 10.1,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Axe_Crouch_Hit_R_001",
+      "max_diff_mm": 8.9,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Axe_Crouch_Hit_R_003",
+      "max_diff_mm": 8.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Crouch_Idle_Relax_001",
+      "max_diff_mm": 12.5,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Axe_Crouch_Idle_Still_005",
+      "max_diff_mm": 13.5,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_BL_001",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_BR_001",
+      "max_diff_mm": 16.4,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_B_003",
+      "max_diff_mm": 20.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_B_Stop_001",
+      "max_diff_mm": 7.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_FL_001",
+      "max_diff_mm": 19.4,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_FR_001",
+      "max_diff_mm": 13.6,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_F_003",
+      "max_diff_mm": 21.7,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_F_Stop_005",
+      "max_diff_mm": 15.4,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_L_001",
+      "max_diff_mm": 15.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_L_Stop_002",
+      "max_diff_mm": 17.3,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_L_Stop_003",
+      "max_diff_mm": 16.9,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_R_001",
+      "max_diff_mm": 12.3,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Axe_Crouch_Run_R_Stop_001",
+      "max_diff_mm": 15.3,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Axe_Crouch_Sprint_F_004",
+      "max_diff_mm": 20.7,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Axe_Crouch_Sprint_F_Stop_001",
+      "max_diff_mm": 10.1,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Crouch_Stand_001",
+      "max_diff_mm": 6.5,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Axe_Crouch_Stand_003",
+      "max_diff_mm": 6.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Axe_Crouch_Turn_L_001",
+      "max_diff_mm": 9.4,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_BL_002",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_BR_002",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_B_002",
+      "max_diff_mm": 8.7,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_FL_001",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_FR_002",
+      "max_diff_mm": 24.5,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_FR_003",
+      "max_diff_mm": 16.7,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_F_004",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_L_005",
+      "max_diff_mm": 18.0,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Crouch_Walk_R_005",
+      "max_diff_mm": 11.0,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Fall_Landing_Hard_003",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Axe_Jump_Attack_003",
+      "max_diff_mm": 16.2,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Axe_Jump_F_001",
+      "max_diff_mm": 14.4,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Jump_Stationary_001",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Skill_Start_005",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Stand_Attack_01_001",
+      "max_diff_mm": 14.2,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Stand_Attack_02_001",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Axe_Stand_Attack_03_004",
+      "max_diff_mm": 15.2,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Stand_Attack_03_006",
+      "max_diff_mm": 10.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Axe_Stand_Dead_L_001",
+      "max_diff_mm": 29.8,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Axe_Stand_Get_002",
+      "max_diff_mm": 12.8,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Axe_Stand_Hit_F_001",
+      "max_diff_mm": 9.7,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "DAD_Axe_Stand_Hit_F_003",
+      "max_diff_mm": 11.4,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Stand_Idle_Relax_002",
+      "max_diff_mm": 15.4,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Axe_Stand_Idle_Relax_003",
+      "max_diff_mm": 17.8,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Axe_Stand_Idle_Still_002",
+      "max_diff_mm": 13.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_BL_002",
+      "max_diff_mm": 19.8,
+      "mean_diff_mm": 2.9
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_BR_002",
+      "max_diff_mm": 11.8,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_B_003",
+      "max_diff_mm": 8.9,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_FL_001",
+      "max_diff_mm": 10.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_FR_001",
+      "max_diff_mm": 18.5,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_F_001",
+      "max_diff_mm": 25.7,
+      "mean_diff_mm": 3.3
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_L_001",
+      "max_diff_mm": 12.1,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Axe_Stand_Run_R_001",
+      "max_diff_mm": 10.2,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Stand_Sprint_F_Stop_003",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Axe_Stand_Turn_L_001",
+      "max_diff_mm": 13.2,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_BL_001",
+      "max_diff_mm": 13.9,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_B_001",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_FR_001",
+      "max_diff_mm": 11.5,
+      "mean_diff_mm": 2.9
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_F_001",
+      "max_diff_mm": 12.6,
+      "mean_diff_mm": 3.2
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_L_001",
+      "max_diff_mm": 9.2,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Axe_Stand_Walk_R_002",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 3.0
+    },
+    {
+      "name": "DAD_Boss_Commander_FightToIdle_003",
+      "max_diff_mm": 28.3,
+      "mean_diff_mm": 7.0
+    },
+    {
+      "name": "DAD_Boss_Commander_Fight_Idle_001",
+      "max_diff_mm": 18.6,
+      "mean_diff_mm": 4.6
+    },
+    {
+      "name": "DAD_Boss_Commander_Fight_Idle_004",
+      "max_diff_mm": 26.5,
+      "mean_diff_mm": 6.4
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill01_Walk_L_003",
+      "max_diff_mm": 29.5,
+      "mean_diff_mm": 5.7
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill01_Walk_R_002",
+      "max_diff_mm": 27.9,
+      "mean_diff_mm": 5.5
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill02_008",
+      "max_diff_mm": 23.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill02_014",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill03_022",
+      "max_diff_mm": 12.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill03_031",
+      "max_diff_mm": 16.8,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill04_005",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill04_006",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill04_Start_002",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill05_004",
+      "max_diff_mm": 17.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill06_009",
+      "max_diff_mm": 20.9,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill07_003",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Boss_Commander_Skill08_001",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Boss_Commander_Sprint_F_007",
+      "max_diff_mm": 27.2,
+      "mean_diff_mm": 5.3
+    },
+    {
+      "name": "DAD_Boss_Commander_Stand_Dead_009",
+      "max_diff_mm": 18.8,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Boss_Commander_Stand_Hit_F_001",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Boss_Commander_Walk_F_002",
+      "max_diff_mm": 29.7,
+      "mean_diff_mm": 5.9
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Attack01_004",
+      "max_diff_mm": 8.1,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Attack02_003",
+      "max_diff_mm": 16.4,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Attack03_003",
+      "max_diff_mm": 23.1,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Combat_Idle_002",
+      "max_diff_mm": 12.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Combat_Sprint_F_003",
+      "max_diff_mm": 14.1,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Combat_Walk_B_001",
+      "max_diff_mm": 22.4,
+      "mean_diff_mm": 3.4
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Combat_Walk_F_004",
+      "max_diff_mm": 7.9,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Combat_Walk_L_007",
+      "max_diff_mm": 24.2,
+      "mean_diff_mm": 3.7
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Combat_Walk_R_002",
+      "max_diff_mm": 7.3,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Boss_ShuLing_FightToIdle_009",
+      "max_diff_mm": 29.8,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_FightToIdle_011",
+      "max_diff_mm": 21.1,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Boss_ShuLing_IdleToFight_002",
+      "max_diff_mm": 16.0,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Idle_Relax_004",
+      "max_diff_mm": 9.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill01_001",
+      "max_diff_mm": 14.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill02_006",
+      "max_diff_mm": 8.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill03_007",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill04_006",
+      "max_diff_mm": 13.5,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill05_006",
+      "max_diff_mm": 8.2,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Skill07_001",
+      "max_diff_mm": 11.4,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Stand_Dead_003",
+      "max_diff_mm": 15.7,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Stand_Hit_F_003",
+      "max_diff_mm": 12.6,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Stand_Hit_H_001",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Turn_LR_005",
+      "max_diff_mm": 22.2,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Turn_LR_006",
+      "max_diff_mm": 8.8,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Walk_F_004",
+      "max_diff_mm": 14.0,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Boss_ShuLing_Walk_F_Stop_003",
+      "max_diff_mm": 6.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_BowGhoul_Combat_Run_001",
+      "max_diff_mm": 12.3,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_BowGhoul_Combat_Walk_F_001",
+      "max_diff_mm": 6.5,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_BowGhoul_Combat_Walk_L_001",
+      "max_diff_mm": 10.5,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_BowGhoul_Hit_F_001",
+      "max_diff_mm": 8.4,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_BowGhoul_IdleToFight_001",
+      "max_diff_mm": 10.7,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_BowGhoul_Idle_Relax_002",
+      "max_diff_mm": 8.8,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_BowGhoul_Skill01_002",
+      "max_diff_mm": 15.7,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_BowGhoul_Walk_003",
+      "max_diff_mm": 9.4,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_BoxShiGui_Player_GetUp_001",
+      "max_diff_mm": 28.7,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Attack_01_002",
+      "max_diff_mm": 10.4,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Attack_02_001",
+      "max_diff_mm": 26.5,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Attack_03_001",
+      "max_diff_mm": 13.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Dead_B_002",
+      "max_diff_mm": 28.8,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Get_001",
+      "max_diff_mm": 15.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Hit_B_001",
+      "max_diff_mm": 15.4,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Hit_F_001",
+      "max_diff_mm": 9.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Idle_Relax_001",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Idle_Still_001",
+      "max_diff_mm": 9.2,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_BL_001",
+      "max_diff_mm": 18.4,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_BR_003",
+      "max_diff_mm": 14.2,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_B_003",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_B_Stop_001",
+      "max_diff_mm": 19.8,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_FL_002",
+      "max_diff_mm": 15.1,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_FR_001",
+      "max_diff_mm": 16.3,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_F_002",
+      "max_diff_mm": 20.6,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_F_Stop_001",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_L_003",
+      "max_diff_mm": 17.0,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_L_Stop_002",
+      "max_diff_mm": 14.2,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Run_R_002",
+      "max_diff_mm": 23.4,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Sprint_F_Stop_001",
+      "max_diff_mm": 25.8,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_B_001",
+      "max_diff_mm": 18.6,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_FL_003",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_FR_001",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_F_001",
+      "max_diff_mm": 26.0,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_L_001",
+      "max_diff_mm": 16.8,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Crouch_Walk_R_002",
+      "max_diff_mm": 14.7,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Fall_Landing_Hard_002",
+      "max_diff_mm": 24.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Dagger_Jump_F_002",
+      "max_diff_mm": 21.5,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Dagger_Jump_Stationary_002",
+      "max_diff_mm": 17.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Stand_Attack_01_002",
+      "max_diff_mm": 15.0,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Dagger_Stand_Attack_02_002",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Dagger_Stand_Attack_03_001",
+      "max_diff_mm": 20.5,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Dagger_Stand_Crouch_003",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Dagger_Stand_Dead_B_002",
+      "max_diff_mm": 26.6,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "DAD_Dagger_Stand_Dead_F_001",
+      "max_diff_mm": 23.3,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Dagger_Stand_Get_001",
+      "max_diff_mm": 16.4,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Dagger_Stand_Hit_F_003",
+      "max_diff_mm": 13.8,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Dagger_Stand_Hit_L_001",
+      "max_diff_mm": 19.8,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Dagger_Stand_Idle_Relax_004",
+      "max_diff_mm": 16.7,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Dagger_Stand_Idle_Still_001",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_BL_001",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_BR_001",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_B_001",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_B_Stop_002",
+      "max_diff_mm": 15.2,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_FR_002",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_F_008",
+      "max_diff_mm": 12.8,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_F_010",
+      "max_diff_mm": 13.1,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_F_Stop_001",
+      "max_diff_mm": 19.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_L_001",
+      "max_diff_mm": 10.9,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_L_Stop_001",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_R_002",
+      "max_diff_mm": 5.8,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Dagger_Stand_Run_R_Stop_001",
+      "max_diff_mm": 24.3,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Dagger_Stand_Sprint_F_Stop_005",
+      "max_diff_mm": 20.5,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_BL_001",
+      "max_diff_mm": 8.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_BR_001",
+      "max_diff_mm": 10.9,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_B_003",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_FL_001",
+      "max_diff_mm": 15.9,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_FR_001",
+      "max_diff_mm": 23.3,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_F_003",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_L_005",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Dagger_Stand_Walk_R_001",
+      "max_diff_mm": 14.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Flute_Crouch_Attack_01_001",
+      "max_diff_mm": 11.5,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Flute_Crouch_Attack_03_001",
+      "max_diff_mm": 7.5,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Flute_Crouch_Idle_Relax_001",
+      "max_diff_mm": 13.4,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Flute_Jump_Attack_001",
+      "max_diff_mm": 16.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Flute_Skill_Start_002",
+      "max_diff_mm": 5.7,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Flute_Skill_Walk_FR_001",
+      "max_diff_mm": 15.5,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Flute_Skill_Walk_R_003",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Flute_Stand_Attack_01_003",
+      "max_diff_mm": 15.1,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Flute_Stand_Attack_02_002",
+      "max_diff_mm": 27.3,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Flute_Stand_Attack_03_001",
+      "max_diff_mm": 28.6,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Flute_Stand_Idle_Relax_001",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 0.5
+    },
+    {
+      "name": "DAD_KuangWarriorIdle_Relax_002",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "DAD_KuangWarrior_Combat_Run_002",
+      "max_diff_mm": 14.8,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_KuangWarrior_Combat_Turn_L_001",
+      "max_diff_mm": 6.9,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_KuangWarrior_Combat_Walk_B_001",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_KuangWarrior_Combat_Walk_F_001",
+      "max_diff_mm": 12.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_KuangWarrior_Combat_Walk_L_001",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_KuangWarrior_Dead_001",
+      "max_diff_mm": 18.6,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_KuangWarrior_Hit_F_001",
+      "max_diff_mm": 7.4,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_KuangWarrior_Skill01_001",
+      "max_diff_mm": 12.3,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_KuangWarrior_Skill03_009",
+      "max_diff_mm": 14.7,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_KuangWarrior_Sprint_F_001",
+      "max_diff_mm": 20.2,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_KuangWarrior_Walk_F_001",
+      "max_diff_mm": 10.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_MageGhoul_Combat_Run_002",
+      "max_diff_mm": 11.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_MageGhoul_Combat_Walk_B_001",
+      "max_diff_mm": 8.2,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_MageGhoul_Combat_Walk_F_001",
+      "max_diff_mm": 8.1,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_MageGhoul_Combat_Walk_L_001",
+      "max_diff_mm": 9.2,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_MageGhoul_Dead_001",
+      "max_diff_mm": 21.2,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_MageGhoul_Hit_F_001",
+      "max_diff_mm": 15.8,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_MageGhoul_IdleToFight_003",
+      "max_diff_mm": 13.7,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_MageGhoul_Idle_Relax_002",
+      "max_diff_mm": 8.0,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "DAD_MageGhoul_Skill01_002",
+      "max_diff_mm": 16.5,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_MageGhoul_Skill02_009",
+      "max_diff_mm": 11.7,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_MageGhoul_Walk_003",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_NvGui_BodyToIdle_001",
+      "max_diff_mm": 29.2,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "DAD_NvGui_BodyToIdle_003",
+      "max_diff_mm": 13.4,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_NvGui_Combat_Turn_L_001",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_NvGui_Combat_Walk_F_001",
+      "max_diff_mm": 13.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_NvGui_Combat_Walk_L_001",
+      "max_diff_mm": 15.3,
+      "mean_diff_mm": 2.8
+    },
+    {
+      "name": "DAD_NvGui_Dead_002",
+      "max_diff_mm": 20.2,
+      "mean_diff_mm": 2.9
+    },
+    {
+      "name": "DAD_NvGui_Dead_003",
+      "max_diff_mm": 22.9,
+      "mean_diff_mm": 2.8
+    },
+    {
+      "name": "DAD_NvGui_Hit_F_001",
+      "max_diff_mm": 7.7,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_NvGui_Idle_Relax_002",
+      "max_diff_mm": 16.3,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_NvGui_Idle_Relax_003",
+      "max_diff_mm": 14.3,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_NvGui_Idle_Relax_007",
+      "max_diff_mm": 16.6,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_NvGui_RunToBody_002",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_NvGui_Skill01_RunToIdle_001",
+      "max_diff_mm": 20.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_NvJinPo_Attack01_001",
+      "max_diff_mm": 23.0,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "DAD_NvJinPo_Attack02_001",
+      "max_diff_mm": 15.7,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_NvJinPo_Attack03_001",
+      "max_diff_mm": 13.0,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_NvJinPo_Combat_Hit_001",
+      "max_diff_mm": 24.0,
+      "mean_diff_mm": 3.8
+    },
+    {
+      "name": "DAD_NvJinPo_IdleToFight_003",
+      "max_diff_mm": 17.3,
+      "mean_diff_mm": 3.9
+    },
+    {
+      "name": "DAD_NvJinPo_Idle_Hit_001",
+      "max_diff_mm": 4.2,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "DAD_NvJinPo_Idle_Relax_001",
+      "max_diff_mm": 12.8,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "DAD_NvJinPo_Run_003",
+      "max_diff_mm": 16.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_NvJinPo_Walk_F_001",
+      "max_diff_mm": 6.9,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "DAD_RunesGhoul_Attack01_001",
+      "max_diff_mm": 7.8,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_RunesGhoul_Attack01_002",
+      "max_diff_mm": 9.4,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_RunesGhoul_Combat_Idle_001",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_RunesGhoul_Combat_Jump_007",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "DAD_RunesGhoul_Combat_Turn_L_001",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_RunesGhoul_Hit_F_001",
+      "max_diff_mm": 7.1,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_RunesGhoul_IdleToFight_001",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "DAD_RunesGhoul_Idle_001",
+      "max_diff_mm": 12.8,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_RunesGhoul_Jump_001",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_RunesGhoul_Turn_L_001",
+      "max_diff_mm": 9.6,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_ShieldGhou_Combat_Run_004",
+      "max_diff_mm": 17.2,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_ShieldGhou_Combat_Walk_F_001",
+      "max_diff_mm": 9.7,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_ShieldGhou_Combat_Walk_L_001",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_ShieldGhou_Hit_F_001",
+      "max_diff_mm": 19.8,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_ShieldGhou_Skill02_Idle_002",
+      "max_diff_mm": 8.0,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_ShieldGhoul_Born01_001",
+      "max_diff_mm": 15.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_ShieldGhoul_Walk_001",
+      "max_diff_mm": 14.5,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_SpearGHou_Hit_F_002",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_SpearGHou_Skill03_005",
+      "max_diff_mm": 20.9,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_SpearGHoul_Combat_Idle_001",
+      "max_diff_mm": 7.4,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_SpearGHoul_Combat_Run_002",
+      "max_diff_mm": 13.7,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_SpearGHoul_Combat_Walk_F_003",
+      "max_diff_mm": 7.0,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_SpearGHoul_Combat_Walk_L_003",
+      "max_diff_mm": 15.3,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_SpearGHoul_Idle_001",
+      "max_diff_mm": 14.2,
+      "mean_diff_mm": 3.1
+    },
+    {
+      "name": "DAD_Spear_Crouch_Attack_01_001",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Spear_Crouch_Attack_02_001",
+      "max_diff_mm": 16.7,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Spear_Crouch_Attack_03_001",
+      "max_diff_mm": 11.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Spear_Crouch_Dead_F_003",
+      "max_diff_mm": 14.7,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Spear_Crouch_Dead_R_001",
+      "max_diff_mm": 19.7,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Spear_Crouch_Hit_F_002",
+      "max_diff_mm": 16.5,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Spear_Crouch_Idle_Relax_001",
+      "max_diff_mm": 10.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_BL_001",
+      "max_diff_mm": 17.9,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_BR_001",
+      "max_diff_mm": 16.4,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_B_001",
+      "max_diff_mm": 8.4,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_B_Stop_001",
+      "max_diff_mm": 11.4,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_FR_001",
+      "max_diff_mm": 17.6,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_F_001",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_F_Stop_001",
+      "max_diff_mm": 13.3,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_R_001",
+      "max_diff_mm": 21.1,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Spear_Crouch_Run_R_Stop_001",
+      "max_diff_mm": 16.1,
+      "mean_diff_mm": 2.7
+    },
+    {
+      "name": "DAD_Spear_Crouch_Sprint_F_004",
+      "max_diff_mm": 15.9,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Spear_Crouch_Sprint_F_Stop_001",
+      "max_diff_mm": 18.1,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_BL_003",
+      "max_diff_mm": 19.6,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_BR_001",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_B_001",
+      "max_diff_mm": 27.6,
+      "mean_diff_mm": 2.9
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_FL_001",
+      "max_diff_mm": 7.8,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_FR_002",
+      "max_diff_mm": 27.1,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_F_001",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_L_001",
+      "max_diff_mm": 10.5,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Crouch_Walk_R_001",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Spear_Fall_Landing_Additive_002",
+      "max_diff_mm": 13.2,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Spear_Fall_Landing_Hard_003",
+      "max_diff_mm": 13.0,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Spear_Jump_Attack_003",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Spear_Jump_F_003",
+      "max_diff_mm": 12.6,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Spear_Skill_End_002",
+      "max_diff_mm": 11.9,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Spear_Skill_Start_003",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_BL_003",
+      "max_diff_mm": 20.5,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_BR_002",
+      "max_diff_mm": 7.7,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_B_001",
+      "max_diff_mm": 11.8,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_FL_002",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_FR_003",
+      "max_diff_mm": 12.6,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_F_004",
+      "max_diff_mm": 11.8,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_L_001",
+      "max_diff_mm": 11.8,
+      "mean_diff_mm": 2.6
+    },
+    {
+      "name": "DAD_Spear_Skill_Walk_R_002",
+      "max_diff_mm": 7.8,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Attack_01_001",
+      "max_diff_mm": 19.1,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Attack_02_001",
+      "max_diff_mm": 18.2,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "DAD_Spear_Stand_Attack_03_001",
+      "max_diff_mm": 21.6,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Spear_Stand_Dead_B_001",
+      "max_diff_mm": 26.3,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Stand_Dead_F_001",
+      "max_diff_mm": 19.5,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "DAD_Spear_Stand_Get_001",
+      "max_diff_mm": 7.6,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "DAD_Spear_Stand_Hit_F_001",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Spear_Stand_Idle_Relax_001",
+      "max_diff_mm": 15.4,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Spear_Stand_Remove_001",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_BL_001",
+      "max_diff_mm": 24.6,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_BR_001",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_B_002",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_B_Stop_002",
+      "max_diff_mm": 12.4,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_FL_003",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_FR_002",
+      "max_diff_mm": 19.7,
+      "mean_diff_mm": 2.6
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_F_Stop_001",
+      "max_diff_mm": 13.0,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_L_001",
+      "max_diff_mm": 9.4,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_L_Stop_001",
+      "max_diff_mm": 8.9,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_R_002",
+      "max_diff_mm": 18.2,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Run_R_Stop_001",
+      "max_diff_mm": 25.7,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Stand_Sprint_F_Stop_001",
+      "max_diff_mm": 15.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Spear_Stand_Turn_L_001",
+      "max_diff_mm": 12.3,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_BL_005",
+      "max_diff_mm": 11.4,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_BR_003",
+      "max_diff_mm": 13.7,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_B_001",
+      "max_diff_mm": 11.1,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_FL_001",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_FR_001",
+      "max_diff_mm": 9.6,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_F_002",
+      "max_diff_mm": 8.2,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_L_001",
+      "max_diff_mm": 10.1,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Spear_Stand_Walk_R_001",
+      "max_diff_mm": 7.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "DAD_Statue_Attack_001",
+      "max_diff_mm": 13.0,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Statue_Pose01_001",
+      "max_diff_mm": 7.2,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Statue_Pose02_002",
+      "max_diff_mm": 6.0,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Statue_Pose03_001",
+      "max_diff_mm": 6.2,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "DAD_Statue_Pose04_001",
+      "max_diff_mm": 10.5,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Statue_Run_002",
+      "max_diff_mm": 14.9,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Sword_Jump_Attack_001",
+      "max_diff_mm": 18.8,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "DAD_Sword_Jump_Attack_002",
+      "max_diff_mm": 22.1,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "DAD_Sword_Jump_Attack_004",
+      "max_diff_mm": 19.6,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "DAD_Sword_Skill_Defense_01_002",
+      "max_diff_mm": 13.7,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "DAD_Sword_Skill_Defense_02_003",
+      "max_diff_mm": 20.2,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "DAD_Sword_Skill_Start_001",
+      "max_diff_mm": 14.3,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "DAD_Sword_Stand_Attack_02_001",
+      "max_diff_mm": 17.8,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Sword_Stand_Attack_02_002",
+      "max_diff_mm": 13.9,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "DAD_Sword_Stand_Attack_03_002",
+      "max_diff_mm": 12.9,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "DAD_Sword_Stand_Attack_03_003",
+      "max_diff_mm": 10.5,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "DAD_Sword_Stand_Idle_Relax_001",
+      "max_diff_mm": 12.9,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "DAD_Sword_Stand_Idle_Relax_004",
+      "max_diff_mm": 4.6,
+      "mean_diff_mm": 0.4
+    },
+    {
+      "name": "Fishing_Stand_Idle_Take_005",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Fishing_Stand_Idle_Take_007",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Linglong_Crouch_Prone_003",
+      "max_diff_mm": 13.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Linglong_Crouch_Skill_Hit_002",
+      "max_diff_mm": 6.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Linglong_Stand_Crouch_007",
+      "max_diff_mm": 17.0,
+      "mean_diff_mm": 3.5
+    },
+    {
+      "name": "Linglong_Stand_Skill_Hit_002",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 0.6
+    },
+    {
+      "name": "Linglong_Stand_Skill_Turn_L_90_001",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Naruto_Toad_Jieyin_001",
+      "max_diff_mm": 23.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Player_Mojiang_Lv1_Namaste_Hit_001",
+      "max_diff_mm": 14.3,
+      "mean_diff_mm": 2.7
+    },
+    {
+      "name": "ROM_001",
+      "max_diff_mm": 23.4,
+      "mean_diff_mm": 3.8
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Get_002",
+      "max_diff_mm": 16.8,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Hit_001",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Idle_001",
+      "max_diff_mm": 10.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Run_L_001",
+      "max_diff_mm": 25.4,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Walk_BL_001",
+      "max_diff_mm": 19.2,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Walk_B_001",
+      "max_diff_mm": 10.1,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Walk_FL_001",
+      "max_diff_mm": 16.2,
+      "mean_diff_mm": 1.7
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Walk_L_001",
+      "max_diff_mm": 11.2,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "SLDF_DualBlades_Fall_Landing_Hard_002",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "SLDF_DualBlades_Jump_Attack_001",
+      "max_diff_mm": 27.1,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "SLDF_DualBlades_Jump_Attack_002",
+      "max_diff_mm": 8.5,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "SLDF_DualBlades_Jump_Stationary_003",
+      "max_diff_mm": 19.9,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "SLDF_DualBlades_KillShow_002",
+      "max_diff_mm": 17.7,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "SLDF_DualBlades_Skill_01_Attack_002",
+      "max_diff_mm": 9.6,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "SLDF_DualBlades_Skill_01_Throw_002",
+      "max_diff_mm": 18.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "SLDF_DualBlades_Skill_02_Sprint_Attack_002",
+      "max_diff_mm": 8.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Attack_01_001",
+      "max_diff_mm": 8.7,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Attack_02_002",
+      "max_diff_mm": 10.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Attack_03_002",
+      "max_diff_mm": 11.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Attack_04_001",
+      "max_diff_mm": 11.0,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Attack_04_003",
+      "max_diff_mm": 12.1,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Attack_04_004",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Crouch_003",
+      "max_diff_mm": 7.3,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Hit_002",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Idle_003",
+      "max_diff_mm": 9.0,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Idle_Relax_002",
+      "max_diff_mm": 9.2,
+      "mean_diff_mm": 2.4
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Single_Attack_002",
+      "max_diff_mm": 10.3,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Turn_001",
+      "max_diff_mm": 6.0,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Walk_BL_001",
+      "max_diff_mm": 14.1,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Walk_B_001",
+      "max_diff_mm": 13.9,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Walk_FL_001",
+      "max_diff_mm": 29.0,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "SLDF_DualBlades_Stand_Walk_L_001",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Shouyeren_Crouch_Dead_B_001",
+      "max_diff_mm": 11.0,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Shouyeren_Crouch_Dead_F_001",
+      "max_diff_mm": 26.5,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "Shouyeren_Crouch_Dead_L_002",
+      "max_diff_mm": 29.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Shouyeren_Crouch_Dead_R_002",
+      "max_diff_mm": 14.2,
+      "mean_diff_mm": 1.9
+    },
+    {
+      "name": "Shouyeren_Crouch_Hit_001",
+      "max_diff_mm": 8.9,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "Shouyeren_Crouch_Skill_Hit_001",
+      "max_diff_mm": 7.5,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Shouyeren_Crouch_Skill_Prone_001",
+      "max_diff_mm": 12.5,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Shouyeren_Crouch_Skill_Turn_L_90_002",
+      "max_diff_mm": 11.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Shouyeren_Crouch_Turn_L_90_001",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Shouyeren_Stand_Dead_B_004",
+      "max_diff_mm": 29.2,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "Shouyeren_Stand_Dead_F_001",
+      "max_diff_mm": 19.9,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "Shouyeren_Stand_Dead_L_001",
+      "max_diff_mm": 24.7,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Shouyeren_Stand_Dead_R_001",
+      "max_diff_mm": 14.8,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "Shouyeren_Stand_Hit_006",
+      "max_diff_mm": 8.6,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Shouyeren_Stand_Skill_Crouch_002",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Shouyeren_Stand_Skill_Hit_004",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 2.2
+    },
+    {
+      "name": "Shouyeren_Stand_Skill_Turn_L_90_001",
+      "max_diff_mm": 7.7,
+      "mean_diff_mm": 0.8
+    },
+    {
+      "name": "Shouyeren_Stand_Turn_L_90_001",
+      "max_diff_mm": 6.9,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Tpose_20250806_AM",
+      "max_diff_mm": 0.7,
+      "mean_diff_mm": 0.2
+    },
+    {
+      "name": "Tpose_20250806_PM",
+      "max_diff_mm": 3.4,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20250807_am001",
+      "max_diff_mm": 2.4,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20250807_am002",
+      "max_diff_mm": 4.1,
+      "mean_diff_mm": 1.0
+    },
+    {
+      "name": "Tpose_20250807_pm",
+      "max_diff_mm": 7.5,
+      "mean_diff_mm": 3.1
+    },
+    {
+      "name": "Tpose_20250808_AM",
+      "max_diff_mm": 6.5,
+      "mean_diff_mm": 2.3
+    },
+    {
+      "name": "Tpose_20250808_pm",
+      "max_diff_mm": 1.5,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20250822_AM002",
+      "max_diff_mm": 9.1,
+      "mean_diff_mm": 1.5
+    },
+    {
+      "name": "Tpose_20250822_AM005",
+      "max_diff_mm": 9.9,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Tpose_20250822_AM006",
+      "max_diff_mm": 8.7,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Tpose_20250822_AM007",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Tpose_20250822_AM008",
+      "max_diff_mm": 8.2,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Tpose_20250823_AM",
+      "max_diff_mm": 1.5,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20250823_PM",
+      "max_diff_mm": 1.5,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20250825_AM_001",
+      "max_diff_mm": 1.6,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20250825_PM_001",
+      "max_diff_mm": 5.4,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Tpose_20250825_PM_002",
+      "max_diff_mm": 6.5,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Tpose_20250827_AM_002",
+      "max_diff_mm": 1.9,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20251226_AM_001",
+      "max_diff_mm": 10.8,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Tpose_20251226_PM_001",
+      "max_diff_mm": 3.1,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_20251226_PM_002",
+      "max_diff_mm": 4.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Tpose_20251230_AM_001",
+      "max_diff_mm": 7.4,
+      "mean_diff_mm": 3.3
+    },
+    {
+      "name": "Tpose_AM_001",
+      "max_diff_mm": 7.8,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "Tpose_PM",
+      "max_diff_mm": 4.3,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "Tpose_PM_001",
+      "max_diff_mm": 1.9,
+      "mean_diff_mm": 0.3
+    },
+    {
+      "name": "Tpose_am_001",
+      "max_diff_mm": 6.1,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "Tpose_pm",
+      "max_diff_mm": 8.8,
+      "mean_diff_mm": 2.5
+    },
+    {
+      "name": "Tpose_pm_001",
+      "max_diff_mm": 8.5,
+      "mean_diff_mm": 3.0
+    },
+    {
+      "name": "VH_Naruto_Toad_Idle_001",
+      "max_diff_mm": 26.2,
+      "mean_diff_mm": 5.2
+    },
+    {
+      "name": "VH_Naruto_Toad_Walk_BL_001",
+      "max_diff_mm": 28.7,
+      "mean_diff_mm": 4.0
+    },
+    {
+      "name": "VH_Naruto_Toad_Walk_RL_002",
+      "max_diff_mm": 29.5,
+      "mean_diff_mm": 5.0
+    },
+    {
+      "name": "Vehicle_Paraglider_Fly_001",
+      "max_diff_mm": 9.0,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "Vehicle_Paraglider_Fly_002",
+      "max_diff_mm": 20.1,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "Vehicle_Paraglider_Idle_001",
+      "max_diff_mm": 7.4,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Vehicle_Paraglider_Jump_003",
+      "max_diff_mm": 12.7,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "Vehicle_Paraglider_Jump_F_001",
+      "max_diff_mm": 20.5,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "Vehicle_Paraglider_Land_004",
+      "max_diff_mm": 15.4,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "Vehicle_Paraglider_Land_006",
+      "max_diff_mm": 9.8,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "Vehicle_Paraglider_Open_003",
+      "max_diff_mm": 7.4,
+      "mean_diff_mm": 0.7
+    },
+    {
+      "name": "Vehicle_Paraglider_Run_B_001",
+      "max_diff_mm": 7.2,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "Vehicle_Paraglider_Run_B_002",
+      "max_diff_mm": 10.0,
+      "mean_diff_mm": 2.0
+    },
+    {
+      "name": "WarDog_Player_Aid_003",
+      "max_diff_mm": 18.4,
+      "mean_diff_mm": 2.1
+    },
+    {
+      "name": "cg034_Anwei_search_001",
+      "max_diff_mm": 9.7,
+      "mean_diff_mm": 1.2
+    },
+    {
+      "name": "cg034_Anwei_search_008",
+      "max_diff_mm": 7.4,
+      "mean_diff_mm": 1.4
+    },
+    {
+      "name": "cg034_Boss_hitAndShoot_001",
+      "max_diff_mm": 14.1,
+      "mean_diff_mm": 1.3
+    },
+    {
+      "name": "cg034_Boss_shootStart_002",
+      "max_diff_mm": 9.3,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "cg034_general_direct_001",
+      "max_diff_mm": 16.4,
+      "mean_diff_mm": 1.6
+    },
+    {
+      "name": "cg034_general_direct_002",
+      "max_diff_mm": 13.6,
+      "mean_diff_mm": 0.9
+    },
+    {
+      "name": "cg034_general_direct_003",
+      "max_diff_mm": 12.2,
+      "mean_diff_mm": 1.8
+    },
+    {
+      "name": "tuixueqiu_004",
+      "max_diff_mm": 27.2,
+      "mean_diff_mm": 1.1
+    },
+    {
+      "name": "tuixueqiu_008",
+      "max_diff_mm": 16.1,
+      "mean_diff_mm": 0.8
+    }
+  ],
+  "quality_issues": [
+    {
+      "name": "SLDF_DualBlades_Jump_F_002",
+      "issues": [
+        {
+          "type": "joint_glitch",
+          "joint": "r_elbow",
+          "frame": 374,
+          "max_acc_mm": 614.8,
+          "vel_at_frame_mm": 47.8
+        },
+        {
+          "type": "frozen_trailing",
+          "frozen_frames": 53,
+          "total_frames": 429
+        }
+      ]
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Sprint_F_001",
+      "issues": [
+        {
+          "type": "frozen_trailing",
+          "frozen_frames": 69,
+          "total_frames": 510
+        }
+      ]
+    },
+    {
+      "name": "SLDF_DualBlades_Crouch_Sprint_F_002",
+      "issues": [
+        {
+          "type": "frozen_trailing",
+          "frozen_frames": 129,
+          "total_frames": 516
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_pairs": 741,
+    "length_changed": 16,
+    "length_matched": 725,
+    "visible_diff": 124,
+    "no_visible_diff": 601,
+    "cleaned_has_quality_issues": 3
+  }
+}

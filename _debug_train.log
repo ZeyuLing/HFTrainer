@@ -1,0 +1,471 @@
+/usr/local/lib/python3.10/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-04-03 12:16:47,854] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2026/04/03 12:16:49] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_textfree_s.py
+[2026/04/03 12:16:49] hftrainer INFO: Work dir: work_dirs/_debug_textfree_s_test
+Detected kernel version 5.4.241, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+[2026/04/03 12:16:50] hftrainer INFO: Config saved to: work_dirs/_debug_textfree_s_test/20260403_121649/config.py
+[2026/04/03 12:16:50] hftrainer INFO: Work dir: work_dirs/_debug_textfree_s_test
+[2026/04/03 12:16:50] hftrainer INFO: Run dir (logs/tb): work_dirs/_debug_textfree_s_test/20260403_121649
+[2026/04/03 12:16:50] hftrainer INFO: Environment info:
+Platform: Linux-5.4.241-1-tlinux4-0017.4-x86_64-with-glibc2.28
+Python: 3.10.16 (main, Mar 16 2025, 12:42:25) [GCC 8.5.0 20210514 (Tencent 8.5.0-23)]
+PyTorch: 2.5.0+cu118
+CUDA available: True
+CUDA version: 11.8
+GPU count: 8
+  GPU 0: Tesla V100-SXM2-32GB
+  GPU 1: Tesla V100-SXM2-32GB
+  GPU 2: Tesla V100-SXM2-32GB
+  GPU 3: Tesla V100-SXM2-32GB
+  GPU 4: Tesla V100-SXM2-32GB
+  GPU 5: Tesla V100-SXM2-32GB
+  GPU 6: Tesla V100-SXM2-32GB
+  GPU 7: Tesla V100-SXM2-32GB
+accelerate: 1.12.0
+transformers: 4.57.3
+diffusers: 0.36.0
+peft: 0.18.0
+mmengine: 0.10.7
+safetensors: 0.7.0
+[2026/04/03 12:16:50] hftrainer INFO: 
+Model Summary:
+  Module              Total Params  Trainable Params  Trainable  Save Ckpt
+  ------------------  ------------  ----------------  ---------  ---------
+  motion_transformer    48,651,911        48,651,911  True       True     
+  m2m_loss                       0                 0  False      False    
+  ------------------  ------------  ----------------  ---------  ---------
+  TOTAL                 48,651,911        48,651,911
+  Trainable ratio: 100.00%
+
+[2026/04/03 12:16:50] hftrainer INFO: Building trainer...
+[2026/04/03 12:16:50] hftrainer INFO: Building dataloaders...
+Loading data_list:   0%|          | 0/407552 [00:00<?, ?it/s]Loading data_list:  26%|██▌       | 105542/407552 [00:00<00:00, 1055330.43it/s]Loading data_list:  54%|█████▍    | 221987/407552 [00:00<00:00, 1119468.13it/s]Loading data_list:  82%|████████▏ | 333934/407552 [00:00<00:00, 1073210.90it/s]Loading data_list: 100%|██████████| 407552/407552 [00:00<00:00, 1098415.46it/s]
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+[2026/04/03 12:16:53] hftrainer INFO: Building optimizers...
+[2026/04/03 12:16:53] hftrainer INFO: Starting accelerator.prepare()...
+[2026/04/03 12:16:58] hftrainer INFO: epoch [1/1]  step [5/50944]  loss=0.7912  loss_velocity=0.7912  data_time=0.10s  train_time=0.12s  eta=7:34:50
+[2026/04/03 12:16:59] hftrainer INFO: epoch [1/1]  step [10/50944]  loss=0.8918  loss_velocity=0.8918  data_time=0.05s  train_time=0.06s  eta=5:13:32
+[2026/04/03 12:17:00] hftrainer INFO: epoch [1/1]  step [15/50944]  loss=0.7396  loss_velocity=0.7396  data_time=0.69s  train_time=0.10s  eta=4:52:12
+[2026/04/03 12:17:01] hftrainer INFO: epoch [1/1]  step [20/50944]  loss=0.8176  loss_velocity=0.8176  data_time=0.12s  train_time=0.10s  eta=4:27:31
+[2026/04/03 12:17:02] hftrainer INFO: epoch [1/1]  step [25/50944]  loss=0.8384  loss_velocity=0.8384  data_time=0.05s  train_time=0.06s  eta=3:58:48
+Get error when loading idx=245289 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00366_673_796.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:04] hftrainer INFO: epoch [1/1]  step [30/50944]  loss=0.7433  loss_velocity=0.7433  data_time=0.11s  train_time=0.11s  eta=4:03:27
+[2026/04/03 12:17:05] hftrainer INFO: epoch [1/1]  step [35/50944]  loss=0.8130  loss_velocity=0.8130  data_time=0.10s  train_time=0.06s  eta=3:56:38
+Get error when loading idx=290716 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00310_281_557.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=276957 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00083_1202_1425.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:06] hftrainer INFO: epoch [1/1]  step [40/50944]  loss=0.7836  loss_velocity=0.7836  data_time=0.05s  train_time=0.06s  eta=3:45:46
+[2026/04/03 12:17:07] hftrainer INFO: epoch [1/1]  step [45/50944]  loss=0.7028  loss_velocity=0.7028  data_time=0.13s  train_time=0.09s  eta=3:39:51
+[2026/04/03 12:17:08] hftrainer INFO: epoch [1/1]  step [50/50944]  loss=0.9153  loss_velocity=0.9153  data_time=0.39s  train_time=0.06s  eta=3:36:39
+Get error when loading idx=241494 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00142_300_447.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:08] hftrainer INFO: epoch [1/1]  step [55/50944]  loss=0.7257  loss_velocity=0.7257  data_time=0.05s  train_time=0.06s  eta=3:29:10
+[2026/04/03 12:17:10] hftrainer INFO: epoch [1/1]  step [60/50944]  loss=0.6847  loss_velocity=0.6847  data_time=0.26s  train_time=0.08s  eta=3:34:39
+[2026/04/03 12:17:11] hftrainer INFO: epoch [1/1]  step [65/50944]  loss=0.6912  loss_velocity=0.6912  data_time=0.13s  train_time=0.09s  eta=3:32:35
+[2026/04/03 12:17:14] hftrainer INFO: epoch [1/1]  step [70/50944]  loss=0.6323  loss_velocity=0.6323  data_time=0.05s  train_time=0.06s  eta=3:46:22
+[2026/04/03 12:17:15] hftrainer INFO: epoch [1/1]  step [75/50944]  loss=0.7028  loss_velocity=0.7028  data_time=0.11s  train_time=0.11s  eta=3:45:16
+[2026/04/03 12:17:16] hftrainer INFO: epoch [1/1]  step [80/50944]  loss=0.7444  loss_velocity=0.7444  data_time=0.42s  train_time=0.07s  eta=3:42:34
+[2026/04/03 12:17:17] hftrainer INFO: epoch [1/1]  step [85/50944]  loss=0.7204  loss_velocity=0.7204  data_time=0.13s  train_time=0.10s  eta=3:42:47
+Get error when loading idx=222762 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00014_2285_2500.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:18] hftrainer INFO: epoch [1/1]  step [90/50944]  loss=0.6838  loss_velocity=0.6838  data_time=0.12s  train_time=0.11s  eta=3:41:07
+Get error when loading idx=278603 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00730_0_154.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:19] hftrainer INFO: epoch [1/1]  step [95/50944]  loss=0.6246  loss_velocity=0.6246  data_time=0.04s  train_time=0.07s  eta=3:38:30
+Get error when loading idx=291860 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00497_902_1080.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=244987 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00270_0_151.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:20] hftrainer INFO: epoch [1/1]  step [100/50944]  loss=0.5903  loss_velocity=0.5903  data_time=0.05s  train_time=0.06s  eta=3:34:10
+[2026/04/03 12:17:21] hftrainer INFO: epoch [1/1]  step [105/50944]  loss=0.6432  loss_velocity=0.6432  data_time=0.13s  train_time=0.09s  eta=3:20:11
+[2026/04/03 12:17:23] hftrainer INFO: epoch [1/1]  step [110/50944]  loss=0.6928  loss_velocity=0.6928  data_time=0.11s  train_time=0.12s  eta=3:23:41
+[2026/04/03 12:17:24] hftrainer INFO: epoch [1/1]  step [115/50944]  loss=0.5902  loss_velocity=0.5902  data_time=0.04s  train_time=0.07s  eta=3:19:08
+[2026/04/03 12:17:25] hftrainer INFO: epoch [1/1]  step [120/50944]  loss=0.6326  loss_velocity=0.6326  data_time=0.05s  train_time=0.09s  eta=3:18:11
+[2026/04/03 12:17:26] hftrainer INFO: epoch [1/1]  step [125/50944]  loss=0.6464  loss_velocity=0.6464  data_time=0.10s  train_time=0.12s  eta=3:20:12
+[2026/04/03 12:17:27] hftrainer INFO: epoch [1/1]  step [130/50944]  loss=0.5218  loss_velocity=0.5218  data_time=0.23s  train_time=0.06s  eta=3:18:34
+[2026/04/03 12:17:28] hftrainer INFO: epoch [1/1]  step [135/50944]  loss=0.5445  loss_velocity=0.5445  data_time=0.05s  train_time=0.06s  eta=3:17:32
+[2026/04/03 12:17:29] hftrainer INFO: epoch [1/1]  step [140/50944]  loss=0.5676  loss_velocity=0.5676  data_time=0.13s  train_time=0.08s  eta=3:15:40
+[2026/04/03 12:17:31] hftrainer INFO: epoch [1/1]  step [145/50944]  loss=0.5879  loss_velocity=0.5879  data_time=0.10s  train_time=0.12s  eta=3:24:20
+[2026/04/03 12:17:32] hftrainer INFO: epoch [1/1]  step [150/50944]  loss=0.6450  loss_velocity=0.6450  data_time=0.11s  train_time=0.11s  eta=3:23:21
+Get error when loading idx=275643 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00272_6867_7143.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:35] hftrainer INFO: epoch [1/1]  step [155/50944]  loss=0.6255  loss_velocity=0.6255  data_time=0.10s  train_time=0.12s  eta=3:46:28
+[2026/04/03 12:17:37] hftrainer INFO: epoch [1/1]  step [160/50944]  loss=0.6002  loss_velocity=0.6002  data_time=0.13s  train_time=0.09s  eta=3:43:27
+[2026/04/03 12:17:38] hftrainer INFO: epoch [1/1]  step [165/50944]  loss=0.5968  loss_velocity=0.5968  data_time=0.12s  train_time=0.06s  eta=3:43:09
+Get error when loading idx=237377 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00151_1005_1224.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:39] hftrainer INFO: epoch [1/1]  step [170/50944]  loss=0.5251  loss_velocity=0.5251  data_time=0.05s  train_time=0.06s  eta=3:34:47
+[2026/04/03 12:17:40] hftrainer INFO: epoch [1/1]  step [175/50944]  loss=0.6938  loss_velocity=0.6938  data_time=0.10s  train_time=0.11s  eta=3:32:48
+Get error when loading idx=255077 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00062_2616_2883.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:42] hftrainer INFO: epoch [1/1]  step [180/50944]  loss=0.5150  loss_velocity=0.5150  data_time=0.76s  train_time=0.10s  eta=3:37:39
+[2026/04/03 12:17:42] hftrainer INFO: epoch [1/1]  step [185/50944]  loss=0.7403  loss_velocity=0.7403  data_time=0.08s  train_time=0.07s  eta=3:33:45
+[2026/04/03 12:17:44] hftrainer INFO: epoch [1/1]  step [190/50944]  loss=0.4921  loss_velocity=0.4921  data_time=0.36s  train_time=0.12s  eta=3:33:46
+[2026/04/03 12:17:45] hftrainer INFO: epoch [1/1]  step [195/50944]  loss=0.5193  loss_velocity=0.5193  data_time=0.13s  train_time=0.08s  eta=3:33:15
+[2026/04/03 12:17:46] hftrainer INFO: epoch [1/1]  step [200/50944]  loss=0.5568  loss_velocity=0.5568  data_time=0.04s  train_time=0.07s  eta=3:37:10
+[2026/04/03 12:17:47] hftrainer INFO: epoch [1/1]  step [205/50944]  loss=0.6481  loss_velocity=0.6481  data_time=0.21s  train_time=0.11s  eta=3:34:56
+[2026/04/03 12:17:48] hftrainer INFO: epoch [1/1]  step [210/50944]  loss=0.5454  loss_velocity=0.5454  data_time=0.52s  train_time=0.11s  eta=3:36:04
+[2026/04/03 12:17:49] hftrainer INFO: epoch [1/1]  step [215/50944]  loss=0.4367  loss_velocity=0.4367  data_time=0.13s  train_time=0.10s  eta=3:37:24
+[2026/04/03 12:17:52] hftrainer INFO: epoch [1/1]  step [220/50944]  loss=0.5007  loss_velocity=0.5007  data_time=0.47s  train_time=0.06s  eta=3:53:31
+Get error when loading idx=247754 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00095_6794_7027.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=239055 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00480_573_717.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:17:54] hftrainer INFO: epoch [1/1]  step [225/50944]  loss=0.6343  loss_velocity=0.6343  data_time=0.15s  train_time=0.06s  eta=3:58:00
+[2026/04/03 12:17:55] hftrainer INFO: epoch [1/1]  step [230/50944]  loss=0.5355  loss_velocity=0.5355  data_time=0.10s  train_time=0.12s  eta=3:58:19
+[2026/04/03 12:17:56] hftrainer INFO: epoch [1/1]  step [235/50944]  loss=0.5934  loss_velocity=0.5934  data_time=0.11s  train_time=0.12s  eta=3:59:09
+[2026/04/03 12:17:57] hftrainer INFO: epoch [1/1]  step [240/50944]  loss=0.5256  loss_velocity=0.5256  data_time=0.08s  train_time=0.06s  eta=4:02:19
+[2026/04/03 12:17:59] hftrainer INFO: epoch [1/1]  step [245/50944]  loss=0.5516  loss_velocity=0.5516  data_time=0.11s  train_time=0.12s  eta=4:01:10
+Get error when loading idx=281515 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00499_769_992.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:01] hftrainer INFO: epoch [1/1]  step [250/50944]  loss=0.4818  loss_velocity=0.4818  data_time=0.67s  train_time=0.09s  eta=4:05:58
+Get error when loading idx=280639 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00324_161_309.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:02] hftrainer INFO: epoch [1/1]  step [255/50944]  loss=0.3691  loss_velocity=0.3691  data_time=0.12s  train_time=0.11s  eta=3:44:19
+[2026/04/03 12:18:03] hftrainer INFO: epoch [1/1]  step [260/50944]  loss=0.4664  loss_velocity=0.4664  data_time=0.13s  train_time=0.09s  eta=3:43:03
+[2026/04/03 12:18:04] hftrainer INFO: epoch [1/1]  step [265/50944]  loss=0.4120  loss_velocity=0.4120  data_time=0.14s  train_time=0.09s  eta=3:42:36
+[2026/04/03 12:18:05] hftrainer INFO: epoch [1/1]  step [270/50944]  loss=0.5239  loss_velocity=0.5239  data_time=0.12s  train_time=0.06s  eta=3:41:06
+Get error when loading idx=290249 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00152_2218_2473.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:06] hftrainer INFO: epoch [1/1]  step [275/50944]  loss=0.4443  loss_velocity=0.4443  data_time=0.10s  train_time=0.12s  eta=3:41:02
+[2026/04/03 12:18:07] hftrainer INFO: epoch [1/1]  step [280/50944]  loss=0.4664  loss_velocity=0.4664  data_time=0.36s  train_time=0.06s  eta=3:36:57
+[2026/04/03 12:18:08] hftrainer INFO: epoch [1/1]  step [285/50944]  loss=0.5389  loss_velocity=0.5389  data_time=0.10s  train_time=0.12s  eta=3:37:01
+[2026/04/03 12:18:10] hftrainer INFO: epoch [1/1]  step [290/50944]  loss=0.3996  loss_velocity=0.3996  data_time=0.07s  train_time=0.09s  eta=3:38:52
+[2026/04/03 12:18:11] hftrainer INFO: epoch [1/1]  step [295/50944]  loss=0.6558  loss_velocity=0.6558  data_time=0.14s  train_time=0.09s  eta=3:40:30
+Get error when loading idx=290585 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00179_1274_1450.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:12] hftrainer INFO: epoch [1/1]  step [300/50944]  loss=0.4392  loss_velocity=0.4392  data_time=0.05s  train_time=0.06s  eta=3:39:36
+[2026/04/03 12:18:13] hftrainer INFO: epoch [1/1]  step [305/50944]  loss=0.4993  loss_velocity=0.4993  data_time=0.12s  train_time=0.10s  eta=3:42:39
+[2026/04/03 12:18:14] hftrainer INFO: epoch [1/1]  step [310/50944]  loss=0.3883  loss_velocity=0.3883  data_time=0.11s  train_time=0.11s  eta=3:39:32
+[2026/04/03 12:18:15] hftrainer INFO: epoch [1/1]  step [315/50944]  loss=0.4957  loss_velocity=0.4957  data_time=0.14s  train_time=0.07s  eta=3:40:13
+[2026/04/03 12:18:17] hftrainer INFO: epoch [1/1]  step [320/50944]  loss=0.5445  loss_velocity=0.5445  data_time=0.08s  train_time=0.06s  eta=3:24:49
+[2026/04/03 12:18:18] hftrainer INFO: epoch [1/1]  step [325/50944]  loss=0.4139  loss_velocity=0.4139  data_time=0.05s  train_time=0.06s  eta=3:20:36
+Get error when loading idx=299743 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00136_4419_4632.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245809 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_01848_0_122.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:19] hftrainer INFO: epoch [1/1]  step [330/50944]  loss=0.4815  loss_velocity=0.4815  data_time=0.05s  train_time=0.10s  eta=3:22:27
+[2026/04/03 12:18:20] hftrainer INFO: epoch [1/1]  step [335/50944]  loss=0.4817  loss_velocity=0.4817  data_time=0.11s  train_time=0.12s  eta=3:22:52
+[2026/04/03 12:18:22] hftrainer INFO: epoch [1/1]  step [340/50944]  loss=0.3264  loss_velocity=0.3264  data_time=0.12s  train_time=0.10s  eta=3:24:51
+Get error when loading idx=285023 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00154_1850_2132.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:23] hftrainer INFO: epoch [1/1]  step [345/50944]  loss=0.3637  loss_velocity=0.3637  data_time=0.11s  train_time=0.06s  eta=3:19:58
+[2026/04/03 12:18:23] hftrainer INFO: epoch [1/1]  step [350/50944]  loss=0.5261  loss_velocity=0.5261  data_time=0.04s  train_time=0.06s  eta=3:11:23
+Get error when loading idx=255560 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_01041_213_360.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:25] hftrainer INFO: epoch [1/1]  step [355/50944]  loss=0.3382  loss_velocity=0.3382  data_time=0.05s  train_time=0.06s  eta=3:17:24
+[2026/04/03 12:18:26] hftrainer INFO: epoch [1/1]  step [360/50944]  loss=0.4830  loss_velocity=0.4830  data_time=0.12s  train_time=0.11s  eta=3:18:32
+[2026/04/03 12:18:27] hftrainer INFO: epoch [1/1]  step [365/50944]  loss=0.4212  loss_velocity=0.4212  data_time=0.14s  train_time=0.06s  eta=3:15:23
+Get error when loading idx=275511 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00197_3891_4173.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:28] hftrainer INFO: epoch [1/1]  step [370/50944]  loss=0.5305  loss_velocity=0.5305  data_time=0.05s  train_time=0.06s  eta=3:16:20
+Get error when loading idx=245175 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00526_0_273.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:29] hftrainer INFO: epoch [1/1]  step [375/50944]  loss=0.3865  loss_velocity=0.3865  data_time=0.06s  train_time=0.11s  eta=3:15:02
+[2026/04/03 12:18:31] hftrainer INFO: epoch [1/1]  step [380/50944]  loss=0.5450  loss_velocity=0.5450  data_time=0.13s  train_time=0.09s  eta=3:16:11
+Get error when loading idx=239136 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00116_4273_4445.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:32] hftrainer INFO: epoch [1/1]  step [385/50944]  loss=0.3773  loss_velocity=0.3773  data_time=0.08s  train_time=0.09s  eta=3:18:26
+Get error when loading idx=277396 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00074_900_1189.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:33] hftrainer INFO: epoch [1/1]  step [390/50944]  loss=0.5097  loss_velocity=0.5097  data_time=0.14s  train_time=0.10s  eta=3:16:52
+Get error when loading idx=238854 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00179_240_455.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:35] hftrainer INFO: epoch [1/1]  step [395/50944]  loss=0.6713  loss_velocity=0.6713  data_time=0.21s  train_time=0.06s  eta=3:22:06
+[2026/04/03 12:18:36] hftrainer INFO: epoch [1/1]  step [400/50944]  loss=0.3826  loss_velocity=0.3826  data_time=0.14s  train_time=0.07s  eta=3:21:36
+[2026/04/03 12:18:37] hftrainer INFO: epoch [1/1]  step [405/50944]  loss=0.3141  loss_velocity=0.3141  data_time=0.52s  train_time=0.11s  eta=3:24:50
+[2026/04/03 12:18:39] hftrainer INFO: epoch [1/1]  step [410/50944]  loss=0.3696  loss_velocity=0.3696  data_time=0.11s  train_time=0.12s  eta=3:25:28
+Get error when loading idx=237333 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00067_1927_2135.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:40] hftrainer INFO: epoch [1/1]  step [415/50944]  loss=0.4433  loss_velocity=0.4433  data_time=0.05s  train_time=0.06s  eta=3:27:21
+[2026/04/03 12:18:41] hftrainer INFO: epoch [1/1]  step [420/50944]  loss=0.3625  loss_velocity=0.3625  data_time=0.05s  train_time=0.06s  eta=3:24:30
+Get error when loading idx=299078 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00291_2347_2604.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:18:43] hftrainer INFO: epoch [1/1]  step [425/50944]  loss=0.4162  loss_velocity=0.4162  data_time=0.14s  train_time=0.06s  eta=3:31:29
+[2026/04/03 12:18:44] hftrainer INFO: epoch [1/1]  step [430/50944]  loss=0.4801  loss_velocity=0.4801  data_time=0.12s  train_time=0.12s  eta=3:26:28
+[2026/04/03 12:18:45] hftrainer INFO: epoch [1/1]  step [435/50944]  loss=0.5280  loss_velocity=0.5280  data_time=0.11s  train_time=0.11s  eta=3:26:00
+[2026/04/03 12:18:46] hftrainer INFO: epoch [1/1]  step [440/50944]  loss=0.3854  loss_velocity=0.3854  data_time=0.09s  train_time=0.06s  eta=3:24:52
+[2026/04/03 12:18:49] hftrainer INFO: epoch [1/1]  step [445/50944]  loss=0.4209  loss_velocity=0.4209  data_time=0.87s  train_time=0.06s  eta=3:37:42
+[2026/04/03 12:18:51] hftrainer INFO: epoch [1/1]  step [450/50944]  loss=0.3217  loss_velocity=0.3217  data_time=0.11s  train_time=0.12s  eta=3:49:09
+[2026/04/03 12:18:52] hftrainer INFO: epoch [1/1]  step [455/50944]  loss=0.4090  loss_velocity=0.4090  data_time=0.18s  train_time=0.10s  eta=3:48:24
+[2026/04/03 12:18:53] hftrainer INFO: epoch [1/1]  step [460/50944]  loss=0.2704  loss_velocity=0.2704  data_time=0.35s  train_time=0.11s  eta=3:46:36
+[2026/04/03 12:18:55] hftrainer INFO: epoch [1/1]  step [465/50944]  loss=0.3596  loss_velocity=0.3596  data_time=0.12s  train_time=0.12s  eta=3:53:56
+[2026/04/03 12:18:56] hftrainer INFO: epoch [1/1]  step [470/50944]  loss=0.4467  loss_velocity=0.4467  data_time=0.05s  train_time=0.06s  eta=3:49:25
+[2026/04/03 12:18:57] hftrainer INFO: epoch [1/1]  step [475/50944]  loss=0.6901  loss_velocity=0.6901  data_time=0.07s  train_time=0.07s  eta=3:52:08
+[2026/04/03 12:18:58] hftrainer INFO: epoch [1/1]  step [480/50944]  loss=0.3907  loss_velocity=0.3907  data_time=0.05s  train_time=0.06s  eta=3:49:35
+[2026/04/03 12:18:59] hftrainer INFO: epoch [1/1]  step [485/50944]  loss=0.3010  loss_velocity=0.3010  data_time=0.11s  train_time=0.12s  eta=3:47:22
+[2026/04/03 12:19:00] hftrainer INFO: epoch [1/1]  step [490/50944]  loss=0.6606  loss_velocity=0.6606  data_time=0.11s  train_time=0.12s  eta=3:48:16
+[2026/04/03 12:19:02] hftrainer INFO: epoch [1/1]  step [495/50944]  loss=0.2652  loss_velocity=0.2652  data_time=0.78s  train_time=0.06s  eta=3:48:00
+Get error when loading idx=291462 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00392_158_294.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=245249 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00038_5926_6084.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:03] hftrainer INFO: epoch [1/1]  step [500/50944]  loss=0.4346  loss_velocity=0.4346  data_time=0.05s  train_time=0.07s  eta=3:47:04
+[2026/04/03 12:19:05] hftrainer INFO: epoch [1/1]  step [505/50944]  loss=0.2981  loss_velocity=0.2981  data_time=0.24s  train_time=0.10s  eta=3:49:54
+[2026/04/03 12:19:07] hftrainer INFO: epoch [1/1]  step [510/50944]  loss=0.4673  loss_velocity=0.4673  data_time=0.04s  train_time=0.10s  eta=3:54:31
+[2026/04/03 12:19:08] hftrainer INFO: epoch [1/1]  step [515/50944]  loss=0.3814  loss_velocity=0.3814  data_time=0.12s  train_time=0.10s  eta=3:52:54
+[2026/04/03 12:19:09] hftrainer INFO: epoch [1/1]  step [520/50944]  loss=0.2942  loss_velocity=0.2942  data_time=0.08s  train_time=0.11s  eta=3:58:43
+[2026/04/03 12:19:10] hftrainer INFO: epoch [1/1]  step [525/50944]  loss=0.3850  loss_velocity=0.3850  data_time=0.05s  train_time=0.07s  eta=3:51:06
+[2026/04/03 12:19:11] hftrainer INFO: epoch [1/1]  step [530/50944]  loss=0.4885  loss_velocity=0.4885  data_time=0.04s  train_time=0.07s  eta=3:52:20
+Get error when loading idx=275462 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00125_6323_6596.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:12] hftrainer INFO: epoch [1/1]  step [535/50944]  loss=0.3245  loss_velocity=0.3245  data_time=0.06s  train_time=0.06s  eta=3:50:07
+Get error when loading idx=281875 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00508_0_188.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:13] hftrainer INFO: epoch [1/1]  step [540/50944]  loss=0.3477  loss_velocity=0.3477  data_time=0.13s  train_time=0.11s  eta=3:46:49
+Get error when loading idx=295025 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00400_190_355.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:14] hftrainer INFO: epoch [1/1]  step [545/50944]  loss=0.4125  loss_velocity=0.4125  data_time=0.08s  train_time=0.12s  eta=3:32:25
+Get error when loading idx=247232 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00625_2582_2844.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:15] hftrainer INFO: epoch [1/1]  step [550/50944]  loss=0.2667  loss_velocity=0.2667  data_time=0.05s  train_time=0.06s  eta=3:24:13
+[2026/04/03 12:19:16] hftrainer INFO: epoch [1/1]  step [555/50944]  loss=0.4555  loss_velocity=0.4555  data_time=0.15s  train_time=0.09s  eta=3:21:14
+Get error when loading idx=222912 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00514_1642_1824.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:19] hftrainer INFO: epoch [1/1]  step [560/50944]  loss=0.3525  loss_velocity=0.3525  data_time=0.05s  train_time=0.07s  eta=3:37:38
+[2026/04/03 12:19:20] hftrainer INFO: epoch [1/1]  step [565/50944]  loss=0.3400  loss_velocity=0.3400  data_time=0.13s  train_time=0.11s  eta=3:33:16
+Get error when loading idx=292890 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00193_3204_3464.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:22] hftrainer INFO: epoch [1/1]  step [570/50944]  loss=0.2828  loss_velocity=0.2828  data_time=0.30s  train_time=0.12s  eta=3:38:41
+[2026/04/03 12:19:23] hftrainer INFO: epoch [1/1]  step [575/50944]  loss=0.3847  loss_velocity=0.3847  data_time=0.18s  train_time=0.09s  eta=3:38:41
+[2026/04/03 12:19:25] hftrainer INFO: epoch [1/1]  step [580/50944]  loss=0.3242  loss_velocity=0.3242  data_time=0.50s  train_time=0.09s  eta=3:43:22
+[2026/04/03 12:19:26] hftrainer INFO: epoch [1/1]  step [585/50944]  loss=0.2859  loss_velocity=0.2859  data_time=0.13s  train_time=0.09s  eta=3:45:18
+[2026/04/03 12:19:27] hftrainer INFO: epoch [1/1]  step [590/50944]  loss=0.3191  loss_velocity=0.3191  data_time=0.07s  train_time=0.12s  eta=3:43:39
+[2026/04/03 12:19:28] hftrainer INFO: epoch [1/1]  step [595/50944]  loss=0.3309  loss_velocity=0.3309  data_time=0.12s  train_time=0.11s  eta=3:38:38
+[2026/04/03 12:19:29] hftrainer INFO: epoch [1/1]  step [600/50944]  loss=0.3679  loss_velocity=0.3679  data_time=0.13s  train_time=0.10s  eta=3:38:04
+[2026/04/03 12:19:31] hftrainer INFO: epoch [1/1]  step [605/50944]  loss=0.3340  loss_velocity=0.3340  data_time=0.14s  train_time=0.07s  eta=3:38:07
+[2026/04/03 12:19:32] hftrainer INFO: epoch [1/1]  step [610/50944]  loss=0.3636  loss_velocity=0.3636  data_time=0.25s  train_time=0.12s  eta=3:37:00
+[2026/04/03 12:19:35] hftrainer INFO: epoch [1/1]  step [615/50944]  loss=0.3822  loss_velocity=0.3822  data_time=0.11s  train_time=0.11s  eta=3:46:28
+[2026/04/03 12:19:36] hftrainer INFO: epoch [1/1]  step [620/50944]  loss=0.3906  loss_velocity=0.3906  data_time=0.19s  train_time=0.06s  eta=3:48:10
+[2026/04/03 12:19:37] hftrainer INFO: epoch [1/1]  step [625/50944]  loss=0.3188  loss_velocity=0.3188  data_time=0.22s  train_time=0.11s  eta=3:47:13
+Get error when loading idx=299463 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00023_1971_2177.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:38] hftrainer INFO: epoch [1/1]  step [630/50944]  loss=0.2631  loss_velocity=0.2631  data_time=0.05s  train_time=0.06s  eta=3:45:33
+[2026/04/03 12:19:39] hftrainer INFO: epoch [1/1]  step [635/50944]  loss=0.2520  loss_velocity=0.2520  data_time=0.11s  train_time=0.11s  eta=3:47:39
+[2026/04/03 12:19:41] hftrainer INFO: epoch [1/1]  step [640/50944]  loss=0.3409  loss_velocity=0.3409  data_time=0.11s  train_time=0.12s  eta=3:52:23
+Get error when loading idx=300071 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00154_1554_1850.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:42] hftrainer INFO: epoch [1/1]  step [645/50944]  loss=0.2970  loss_velocity=0.2970  data_time=0.13s  train_time=0.10s  eta=3:53:20
+Get error when loading idx=242897 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00516_2518_2727.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=239635 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00093_2355_2507.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:19:43] hftrainer INFO: epoch [1/1]  step [650/50944]  loss=0.3538  loss_velocity=0.3538  data_time=0.05s  train_time=0.06s  eta=3:53:49
+[2026/04/03 12:19:44] hftrainer INFO: epoch [1/1]  step [655/50944]  loss=0.3936  loss_velocity=0.3936  data_time=0.35s  train_time=0.08s  eta=3:55:25
+[2026/04/03 12:19:46] hftrainer INFO: epoch [1/1]  step [660/50944]  loss=0.2765  loss_velocity=0.2765  data_time=0.12s  train_time=0.11s  eta=3:46:14
+[2026/04/03 12:19:47] hftrainer INFO: epoch [1/1]  step [665/50944]  loss=0.2837  loss_velocity=0.2837  data_time=0.11s  train_time=0.11s  eta=3:46:21
+[2026/04/03 12:19:49] hftrainer INFO: epoch [1/1]  step [670/50944]  loss=0.3311  loss_velocity=0.3311  data_time=0.12s  train_time=0.11s  eta=3:51:39
+[2026/04/03 12:19:51] hftrainer INFO: epoch [1/1]  step [675/50944]  loss=0.3118  loss_velocity=0.3118  data_time=0.13s  train_time=0.10s  eta=3:54:53
+[2026/04/03 12:19:52] hftrainer INFO: epoch [1/1]  step [680/50944]  loss=0.2907  loss_velocity=0.2907  data_time=0.05s  train_time=0.06s  eta=3:52:55
+[2026/04/03 12:19:54] hftrainer INFO: epoch [1/1]  step [685/50944]  loss=0.3299  loss_velocity=0.3299  data_time=0.12s  train_time=0.11s  eta=3:57:05
+[2026/04/03 12:19:56] hftrainer INFO: epoch [1/1]  step [690/50944]  loss=0.3451  loss_velocity=0.3451  data_time=0.13s  train_time=0.08s  eta=4:06:31
+[2026/04/03 12:19:57] hftrainer INFO: epoch [1/1]  step [695/50944]  loss=0.2145  loss_velocity=0.2145  data_time=0.12s  train_time=0.10s  eta=4:03:37
+[2026/04/03 12:19:58] hftrainer INFO: epoch [1/1]  step [700/50944]  loss=0.2898  loss_velocity=0.2898  data_time=0.05s  train_time=0.06s  eta=4:02:48
+[2026/04/03 12:19:59] hftrainer INFO: epoch [1/1]  step [705/50944]  loss=0.2838  loss_velocity=0.2838  data_time=0.11s  train_time=0.11s  eta=3:58:04
+[2026/04/03 12:20:01] hftrainer INFO: epoch [1/1]  step [710/50944]  loss=0.3690  loss_velocity=0.3690  data_time=0.05s  train_time=0.07s  eta=3:57:15
+Get error when loading idx=290812 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_00449_171_292.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:03] hftrainer INFO: epoch [1/1]  step [715/50944]  loss=0.2625  loss_velocity=0.2625  data_time=0.73s  train_time=0.07s  eta=3:55:01
+Get error when loading idx=237576 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00065_7042_7255.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:04] hftrainer INFO: epoch [1/1]  step [720/50944]  loss=0.2126  loss_velocity=0.2126  data_time=0.31s  train_time=0.11s  eta=3:51:38
+Get error when loading idx=246092 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00294_978_1239.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:06] hftrainer INFO: epoch [1/1]  step [725/50944]  loss=0.2350  loss_velocity=0.2350  data_time=0.38s  train_time=0.09s  eta=3:56:23
+[2026/04/03 12:20:07] hftrainer INFO: epoch [1/1]  step [730/50944]  loss=0.2433  loss_velocity=0.2433  data_time=0.13s  train_time=0.09s  eta=4:00:16
+Get error when loading idx=290568 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00053_1649_1890.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:09] hftrainer INFO: epoch [1/1]  step [735/50944]  loss=0.2416  loss_velocity=0.2416  data_time=0.34s  train_time=0.08s  eta=4:03:27
+[2026/04/03 12:20:10] hftrainer INFO: epoch [1/1]  step [740/50944]  loss=0.3937  loss_velocity=0.3937  data_time=0.14s  train_time=0.08s  eta=4:01:41
+[2026/04/03 12:20:12] hftrainer INFO: epoch [1/1]  step [745/50944]  loss=0.3043  loss_velocity=0.3043  data_time=0.05s  train_time=0.06s  eta=4:08:16
+[2026/04/03 12:20:13] hftrainer INFO: epoch [1/1]  step [750/50944]  loss=0.3267  loss_velocity=0.3267  data_time=0.04s  train_time=0.06s  eta=4:09:13
+[2026/04/03 12:20:14] hftrainer INFO: epoch [1/1]  step [755/50944]  loss=0.4072  loss_velocity=0.4072  data_time=0.10s  train_time=0.13s  eta=4:09:48
+Get error when loading idx=285181 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00452_1381_1664.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:16] hftrainer INFO: epoch [1/1]  step [760/50944]  loss=0.2992  loss_velocity=0.2992  data_time=0.11s  train_time=0.11s  eta=4:04:04
+[2026/04/03 12:20:17] hftrainer INFO: epoch [1/1]  step [765/50944]  loss=0.3705  loss_velocity=0.3705  data_time=0.11s  train_time=0.11s  eta=4:04:46
+[2026/04/03 12:20:18] hftrainer INFO: epoch [1/1]  step [770/50944]  loss=0.2909  loss_velocity=0.2909  data_time=0.11s  train_time=0.12s  eta=3:56:44
+[2026/04/03 12:20:19] hftrainer INFO: epoch [1/1]  step [775/50944]  loss=0.2745  loss_velocity=0.2745  data_time=0.12s  train_time=0.10s  eta=3:52:24
+Get error when loading idx=292067 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00021_1278_1478.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=278377 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00130_3784_3975.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=299501 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00170_6088_6289.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:20] hftrainer INFO: epoch [1/1]  step [780/50944]  loss=0.3847  loss_velocity=0.3847  data_time=0.05s  train_time=0.10s  eta=3:52:25
+[2026/04/03 12:20:22] hftrainer INFO: epoch [1/1]  step [785/50944]  loss=0.3045  loss_velocity=0.3045  data_time=0.14s  train_time=0.06s  eta=3:52:27
+Get error when loading idx=276390 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00107_5664_5923.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:23] hftrainer INFO: epoch [1/1]  step [790/50944]  loss=0.4507  loss_velocity=0.4507  data_time=0.13s  train_time=0.10s  eta=3:43:34
+Get error when loading idx=293129 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00043_4281_4505.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:24] hftrainer INFO: epoch [1/1]  step [795/50944]  loss=0.2497  loss_velocity=0.2497  data_time=0.12s  train_time=0.11s  eta=3:46:11
+Get error when loading idx=255256 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00068_2201_2402.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:25] hftrainer INFO: epoch [1/1]  step [800/50944]  loss=0.2659  loss_velocity=0.2659  data_time=0.14s  train_time=0.10s  eta=3:46:14
+[2026/04/03 12:20:26] hftrainer INFO: epoch [1/1]  step [805/50944]  loss=0.3000  loss_velocity=0.3000  data_time=0.05s  train_time=0.06s  eta=3:42:34
+[2026/04/03 12:20:27] hftrainer INFO: epoch [1/1]  step [810/50944]  loss=0.3243  loss_velocity=0.3243  data_time=0.10s  train_time=0.12s  eta=3:38:28
+[2026/04/03 12:20:28] hftrainer INFO: epoch [1/1]  step [815/50944]  loss=0.3463  loss_velocity=0.3463  data_time=0.14s  train_time=0.08s  eta=3:32:13
+Get error when loading idx=238037 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_00730_0_154.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:30] hftrainer INFO: epoch [1/1]  step [820/50944]  loss=0.2565  loss_velocity=0.2565  data_time=0.04s  train_time=0.06s  eta=3:34:55
+[2026/04/03 12:20:31] hftrainer INFO: epoch [1/1]  step [825/50944]  loss=0.3722  loss_velocity=0.3722  data_time=0.10s  train_time=0.12s  eta=3:33:42
+[2026/04/03 12:20:32] hftrainer INFO: epoch [1/1]  step [830/50944]  loss=0.2546  loss_velocity=0.2546  data_time=0.11s  train_time=0.12s  eta=3:30:53
+[2026/04/03 12:20:33] hftrainer INFO: epoch [1/1]  step [835/50944]  loss=0.2948  loss_velocity=0.2948  data_time=0.11s  train_time=0.12s  eta=3:27:40
+Get error when loading idx=254346 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00289_712_1003.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:34] hftrainer INFO: epoch [1/1]  step [840/50944]  loss=0.2719  loss_velocity=0.2719  data_time=0.11s  train_time=0.12s  eta=3:25:02
+Get error when loading idx=240544 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st3_00697_938_1085.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:36] hftrainer INFO: epoch [1/1]  step [845/50944]  loss=0.2964  loss_velocity=0.2964  data_time=0.23s  train_time=0.11s  eta=3:20:26
+[2026/04/03 12:20:37] hftrainer INFO: epoch [1/1]  step [850/50944]  loss=0.1743  loss_velocity=0.1743  data_time=0.11s  train_time=0.11s  eta=3:23:41
+Get error when loading idx=255713 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00065_6024_6174.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:39] hftrainer INFO: epoch [1/1]  step [855/50944]  loss=0.2066  loss_velocity=0.2066  data_time=0.12s  train_time=0.11s  eta=3:26:56
+[2026/04/03 12:20:41] hftrainer INFO: epoch [1/1]  step [860/50944]  loss=0.2867  loss_velocity=0.2867  data_time=0.14s  train_time=0.10s  eta=3:30:16
+[2026/04/03 12:20:42] hftrainer INFO: epoch [1/1]  step [865/50944]  loss=0.2522  loss_velocity=0.2522  data_time=0.15s  train_time=0.09s  eta=3:32:06
+[2026/04/03 12:20:43] hftrainer INFO: epoch [1/1]  step [870/50944]  loss=0.2269  loss_velocity=0.2269  data_time=0.40s  train_time=0.06s  eta=3:31:08
+Get error when loading idx=284870 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep2_01479_0_189.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:45] hftrainer INFO: epoch [1/1]  step [875/50944]  loss=0.2946  loss_velocity=0.2946  data_time=0.11s  train_time=0.10s  eta=3:36:34
+[2026/04/03 12:20:46] hftrainer INFO: epoch [1/1]  step [880/50944]  loss=0.4148  loss_velocity=0.4148  data_time=0.06s  train_time=0.06s  eta=3:33:25
+[2026/04/03 12:20:47] hftrainer INFO: epoch [1/1]  step [885/50944]  loss=0.1977  loss_velocity=0.1977  data_time=0.13s  train_time=0.06s  eta=3:28:11
+[2026/04/03 12:20:47] hftrainer INFO: epoch [1/1]  step [890/50944]  loss=0.2270  loss_velocity=0.2270  data_time=0.08s  train_time=0.06s  eta=3:24:56
+Get error when loading idx=294199 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00036_873_1158.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:49] hftrainer INFO: epoch [1/1]  step [895/50944]  loss=0.2669  loss_velocity=0.2669  data_time=0.13s  train_time=0.10s  eta=3:24:45
+Get error when loading idx=290298 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00179_4143_4340.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:20:50] hftrainer INFO: epoch [1/1]  step [900/50944]  loss=0.3019  loss_velocity=0.3019  data_time=0.12s  train_time=0.11s  eta=3:28:27
+[2026/04/03 12:20:52] hftrainer INFO: epoch [1/1]  step [905/50944]  loss=0.1935  loss_velocity=0.1935  data_time=0.11s  train_time=0.12s  eta=3:35:24
+[2026/04/03 12:20:53] hftrainer INFO: epoch [1/1]  step [910/50944]  loss=0.1800  loss_velocity=0.1800  data_time=0.05s  train_time=0.07s  eta=3:34:28
+[2026/04/03 12:20:54] hftrainer INFO: epoch [1/1]  step [915/50944]  loss=0.2513  loss_velocity=0.2513  data_time=0.13s  train_time=0.08s  eta=3:30:53
+[2026/04/03 12:20:55] hftrainer INFO: epoch [1/1]  step [920/50944]  loss=0.2462  loss_velocity=0.2462  data_time=0.60s  train_time=0.10s  eta=3:30:31
+[2026/04/03 12:20:58] hftrainer INFO: epoch [1/1]  step [925/50944]  loss=0.1822  loss_velocity=0.1822  data_time=0.05s  train_time=0.06s  eta=3:44:36
+[2026/04/03 12:21:00] hftrainer INFO: epoch [1/1]  step [930/50944]  loss=0.2605  loss_velocity=0.2605  data_time=0.13s  train_time=0.09s  eta=3:47:51
+[2026/04/03 12:21:01] hftrainer INFO: epoch [1/1]  step [935/50944]  loss=0.2949  loss_velocity=0.2949  data_time=0.14s  train_time=0.09s  eta=3:48:10
+Get error when loading idx=281863 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00050_0_254.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:02] hftrainer INFO: epoch [1/1]  step [940/50944]  loss=0.2827  loss_velocity=0.2827  data_time=0.04s  train_time=0.09s  eta=3:49:42
+[2026/04/03 12:21:03] hftrainer INFO: epoch [1/1]  step [945/50944]  loss=0.1992  loss_velocity=0.1992  data_time=0.13s  train_time=0.10s  eta=3:48:40
+Get error when loading idx=237511 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00388_265_442.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:05] hftrainer INFO: epoch [1/1]  step [950/50944]  loss=0.3049  loss_velocity=0.3049  data_time=0.47s  train_time=0.09s  eta=3:48:24
+[2026/04/03 12:21:07] hftrainer INFO: epoch [1/1]  step [955/50944]  loss=0.2957  loss_velocity=0.2957  data_time=0.05s  train_time=0.06s  eta=3:49:07
+Get error when loading idx=250885 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep2_00158_0_153.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:08] hftrainer INFO: epoch [1/1]  step [960/50944]  loss=0.2483  loss_velocity=0.2483  data_time=0.05s  train_time=0.09s  eta=3:48:10
+[2026/04/03 12:21:10] hftrainer INFO: epoch [1/1]  step [965/50944]  loss=0.2808  loss_velocity=0.2808  data_time=0.07s  train_time=0.11s  eta=3:54:08
+[2026/04/03 12:21:12] hftrainer INFO: epoch [1/1]  step [970/50944]  loss=0.1538  loss_velocity=0.1538  data_time=0.43s  train_time=0.09s  eta=3:56:36
+[2026/04/03 12:21:12] hftrainer INFO: epoch [1/1]  step [975/50944]  loss=0.2276  loss_velocity=0.2276  data_time=0.11s  train_time=0.12s  eta=3:49:46
+[2026/04/03 12:21:14] hftrainer INFO: epoch [1/1]  step [980/50944]  loss=0.2849  loss_velocity=0.2849  data_time=0.13s  train_time=0.09s  eta=3:52:55
+[2026/04/03 12:21:15] hftrainer INFO: epoch [1/1]  step [985/50944]  loss=0.2013  loss_velocity=0.2013  data_time=0.12s  train_time=0.11s  eta=3:57:59
+[2026/04/03 12:21:16] hftrainer INFO: epoch [1/1]  step [990/50944]  loss=0.1552  loss_velocity=0.1552  data_time=0.11s  train_time=0.11s  eta=3:59:50
+Get error when loading idx=244781 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00166_484_741.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:18] hftrainer INFO: epoch [1/1]  step [995/50944]  loss=0.2844  loss_velocity=0.2844  data_time=0.08s  train_time=0.12s  eta=4:06:16
+Get error when loading idx=291954 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/st3_00009_392_653.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:19] hftrainer INFO: epoch [1/1]  step [1000/50944]  loss=0.2629  loss_velocity=0.2629  data_time=0.10s  train_time=0.12s  eta=4:03:27
+Get error when loading idx=290255 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00526_0_273.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:20] hftrainer INFO: epoch [1/1]  step [1005/50944]  loss=0.2122  loss_velocity=0.2122  data_time=0.13s  train_time=0.10s  eta=3:58:45
+Get error when loading idx=289590 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/ep1_00197_2767_3011.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=237531 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/ep1_00211_5871_6107.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:21] hftrainer INFO: epoch [1/1]  step [1010/50944]  loss=0.2018  loss_velocity=0.2018  data_time=0.13s  train_time=0.10s  eta=3:59:41
+[2026/04/03 12:21:24] hftrainer INFO: epoch [1/1]  step [1015/50944]  loss=0.2200  loss_velocity=0.2200  data_time=0.11s  train_time=0.11s  eta=4:11:14
+Get error when loading idx=235759 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/gp_00216_2300_2485.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:25] hftrainer INFO: epoch [1/1]  step [1020/50944]  loss=0.1856  loss_velocity=0.1856  data_time=0.13s  train_time=0.11s  eta=4:07:42
+[2026/04/03 12:21:26] hftrainer INFO: epoch [1/1]  step [1025/50944]  loss=0.2811  loss_velocity=0.2811  data_time=0.05s  train_time=0.06s  eta=3:49:59
+[2026/04/03 12:21:27] hftrainer INFO: epoch [1/1]  step [1030/50944]  loss=0.2157  loss_velocity=0.2157  data_time=0.13s  train_time=0.12s  eta=3:45:37
+[2026/04/03 12:21:28] hftrainer INFO: epoch [1/1]  step [1035/50944]  loss=0.2059  loss_velocity=0.2059  data_time=0.06s  train_time=0.06s  eta=3:45:10
+[2026/04/03 12:21:30] hftrainer INFO: epoch [1/1]  step [1040/50944]  loss=0.2328  loss_velocity=0.2328  data_time=0.12s  train_time=0.10s  eta=3:52:24
+[2026/04/03 12:21:31] hftrainer INFO: epoch [1/1]  step [1045/50944]  loss=0.2971  loss_velocity=0.2971  data_time=0.14s  train_time=0.09s  eta=3:50:33
+Get error when loading idx=283802 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00446_531_717.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:32] hftrainer INFO: epoch [1/1]  step [1050/50944]  loss=0.2030  loss_velocity=0.2030  data_time=0.11s  train_time=0.12s  eta=3:47:36
+Get error when loading idx=254355 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption/SnapMoGen/st2_00095_0_133.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+Get error when loading idx=293289 (refetch 1/100): fetching another instead, error: data/motionhub/../hymotion_data/AcademicRetarget/20250910/improved_simple_augmented_caption_deprecated_mirror_251215/M_SnapMoGen/gp_00094_2266_2486.json does not match either format:
+  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys
+  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'
+[2026/04/03 12:21:33] hftrainer INFO: epoch [1/1]  step [1055/50944]  loss=0.3284  loss_velocity=0.3284  data_time=0.11s  train_time=0.12s  eta=3:40:29
+[2026/04/03 12:21:34] hftrainer INFO: epoch [1/1]  step [1060/50944]  loss=0.2715  loss_velocity=0.2715  data_time=0.05s  train_time=0.06s  eta=3:33:34
+[2026/04/03 12:21:36] hftrainer INFO: epoch [1/1]  step [1065/50944]  loss=0.2219  loss_velocity=0.2219  data_time=0.33s  train_time=0.06s  eta=3:32:53
+[2026/04/03 12:21:37] hftrainer INFO: epoch [1/1]  step [1070/50944]  loss=0.1758  loss_velocity=0.1758  data_time=0.05s  train_time=0.06s  eta=3:34:08
+[2026/04/03 12:21:39] hftrainer INFO: epoch [1/1]  step [1075/50944]  loss=0.3741  loss_velocity=0.3741  data_time=0.11s  train_time=0.12s  eta=3:37:43

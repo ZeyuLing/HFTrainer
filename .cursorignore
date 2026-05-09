@@ -1,0 +1,54 @@
+# 数据 / 模型 / 日志
+data/
+datasets/
+ckpts/
+checkpoints/
+outputs/
+logs/
+wandb/
+runs/
+tmp/
+.trash/
+
+# Python 缓存
+__pycache__/
+*.pyc
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# 模型权重
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.onnx
+*.gguf
+
+# 大文件（视频/点云/动作）
+*.mp4
+*.mov
+*.avi
+*.npz
+*.npy
+*.pkl
+*.h5
+*.hdf5
+*.tar
+*.tar.gz
+*.zip
+
+# 虚拟环境
+envs/
+venv/
+.venv/
+
+# IDE / 系统
+.DS_Store
+.idea/
+.vscode/
+
+# Node
+node_modules/
