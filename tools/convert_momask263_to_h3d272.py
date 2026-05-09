@@ -71,11 +71,15 @@ def decode_263_to_pose(motion_263: np.ndarray):
     rot_block = motion_263[..., 67:193].reshape(-1, 21, 6)
     R_nonroot = cont6d_to_matrix(torch.from_numpy(rot_block).float()).numpy()  # (T, 21, 3, 3)
 
-    # Root rotation = R_y(yaw_t) where yaw_t = cumsum(rot_velocity); rot_velocity
-    # at frame t describes transition t->t+1 (cf. recover_root_rot_pos).
+    # MoMask convention: rot_velocity stores the *half-angle* of the frame-to-frame
+    # yaw rotation (it comes from arcsin(quat_y) where quat = (cos(θ/2), 0, sin(θ/2), 0)).
+    # Therefore cumsum(rot_velocity) = θ_total / 2, and the actual root yaw rotation is
+    # R_y(θ_total) = R_y(2 * cumsum(rot_velocity)).  The previous version used
+    # R_y(cumsum(rot_velocity)) which is exactly half the correct angle.
     rot_vel = motion_263[..., 0]
-    yaw_t = np.zeros_like(rot_vel)
-    yaw_t[1:] = np.cumsum(rot_vel[:-1])
+    half_yaw = np.zeros_like(rot_vel)
+    half_yaw[1:] = np.cumsum(rot_vel[:-1])
+    yaw_t = 2.0 * half_yaw  # actual rotation angle, radians
     c = np.cos(yaw_t)
     s = np.sin(yaw_t)
     R_root = np.zeros((len(yaw_t), 3, 3), dtype=np.float64)

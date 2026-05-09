@@ -115,31 +115,49 @@ def _dedup_key(rel_path: str) -> Tuple[str, str]:
     return (f'{group}/{parent_norm}', stem)
 
 
-def _load_excluded_keys(exclude_datalist: Optional[str]) -> Set[Tuple[str, str]]:
-    if not exclude_datalist:
+TEMPORAL_JUMP_DEFECT_TYPES = {
+    'first_frame_rotation_velocity',
+    'jitter',
+    'joint_jump',
+    'rotation_velocity',
+    'small_wobble',
+    'translation_velocity',
+}
+
+
+def _is_game_taobao_path(rel_path: str) -> bool:
+    parts = Path(rel_path).parts
+    return any(p in {'Game', 'Taobao'} for p in parts)
+
+
+def _load_excluded_keys(exclude_datalists: Optional[List[str]]) -> Set[Tuple[str, str]]:
+    if not exclude_datalists:
         return set()
-    p = Path(exclude_datalist)
-    if not p.is_absolute():
-        p = REPO_ROOT / p
-    if not p.exists():
-        raise SystemExit(f'exclude datalist not found: {p}')
-    data = json.load(open(p))
-    items = data.get('data_list') or []
     out: Set[Tuple[str, str]] = set()
-    for it in items:
-        motion_path = str(it.get('motion_path') or '').strip()
-        if not motion_path:
+    for exclude_datalist in exclude_datalists:
+        if not exclude_datalist:
             continue
-        rel = motion_path
-        for prefix in ('data/hymotion_data/', 'data/hymotion_data\\'):
-            if rel.startswith(prefix):
-                rel = rel[len(prefix):]
-        if os.path.isabs(rel):
-            try:
-                rel = str(Path(rel).resolve().relative_to(DATA_DIR.resolve()))
-            except Exception:
-                pass
-        out.add(_dedup_key(rel))
+        p = Path(exclude_datalist)
+        if not p.is_absolute():
+            p = REPO_ROOT / p
+        if not p.exists():
+            raise SystemExit(f'exclude datalist not found: {p}')
+        data = json.load(open(p))
+        items = data.get('data_list') or []
+        for it in items:
+            motion_path = str(it.get('motion_path') or '').strip()
+            if not motion_path:
+                continue
+            rel = motion_path
+            for prefix in ('data/hymotion_data/', 'data/hymotion_data\\'):
+                if rel.startswith(prefix):
+                    rel = rel[len(prefix):]
+            if os.path.isabs(rel):
+                try:
+                    rel = str(Path(rel).resolve().relative_to(DATA_DIR.resolve()))
+                except Exception:
+                    pass
+            out.add(_dedup_key(rel))
     return out
 
 
@@ -278,6 +296,8 @@ def stratified_pick(
     max_frames: int,
     min_mask_frames: int,
     device: str,
+    skip_game_taobao_temporal_jumps: bool = False,
+    defect_types: Optional[List[str]] = None,
 ) -> Tuple[List[Dict], Dict[str, Dict]]:
     """Walk every defect type; for each, pre-rank candidates by a cheap
     multi-fail prior, evaluate up to `candidate_cap` of them with the
@@ -300,12 +320,24 @@ def stratified_pick(
     # alphabetical default starves rare defect types because their
     # candidates are usually flagged by 3-5 defects at once and earlier
     # types claim them first.
+    active_defect_types = defect_types or DEFECT_TYPES
     type_order = sorted(
-        DEFECT_TYPES,
+        active_defect_types,
         key=lambda t: len(by_defect.get(t) or []),
     )
     for defect_type in type_order:
         pool = by_defect.get(defect_type) or []
+        n_skip_domain_temporal = 0
+        if (
+            skip_game_taobao_temporal_jumps
+            and defect_type in TEMPORAL_JUMP_DEFECT_TYPES
+        ):
+            before = len(pool)
+            pool = [
+                cand for cand in pool
+                if not _is_game_taobao_path(cand['rel_path'])
+            ]
+            n_skip_domain_temporal = before - len(pool)
         # Prior ranking: more failed checks = stronger anomaly. Tiebreak
         # by len(borderline_checks) so cases with extra warnings rise.
         pool_sorted = sorted(
@@ -366,6 +398,7 @@ def stratified_pick(
                 break
         stats[defect_type] = {
             'pool_total': len(pool),
+            'game_taobao_temporal_skipped': n_skip_domain_temporal,
             'pool_after_prior': len(head),
             'qualified': len(evaluated),
             'cross_defect_dup_skipped': n_dup,
@@ -416,11 +449,33 @@ def main():
     ap.add_argument('--out', default='data/eval/m2m_v2/eval_e9_repair_v2.json')
     ap.add_argument(
         '--exclude-datalist',
-        default='',
+        action='append',
+        default=[],
         help='Optional existing eval datalist whose motions should be excluded '
-             'from the new selection (dedup-aware).',
+             'from the new selection (dedup-aware). Can be passed multiple times.',
+    )
+    ap.add_argument(
+        '--skip-game-taobao-temporal-jumps',
+        action='store_true',
+        help='For temporal jump defect types, skip candidates under Game/Taobao '
+             'because game motions are frequently false-positive jump cases.',
+    )
+    ap.add_argument(
+        '--defect-types',
+        default='',
+        help='Comma-separated subset of defect types to sample, e.g. "jitter". '
+             'Default: all E9 defect types.',
     )
     args = ap.parse_args()
+
+    defect_types = None
+    if args.defect_types.strip():
+        defect_types = [x.strip() for x in args.defect_types.split(',') if x.strip()]
+        unknown = sorted(set(defect_types) - set(DEFECT_TYPES))
+        if unknown:
+            raise SystemExit(
+                f'unknown defect type(s): {unknown}; valid={DEFECT_TYPES}'
+            )
 
     excluded_keys = _load_excluded_keys(args.exclude_datalist)
     if excluded_keys:
@@ -441,6 +496,8 @@ def main():
         max_frames=args.max_frames,
         min_mask_frames=args.min_mask_frames,
         device=args.device,
+        skip_game_taobao_temporal_jumps=args.skip_game_taobao_temporal_jumps,
+        defect_types=defect_types,
     )
 
     # Distribution of final selection
@@ -468,8 +525,11 @@ def main():
             'min_mask_frames': args.min_mask_frames,
             'target_per_type': args.target_per_type,
             'candidate_cap': args.candidate_cap,
+            'requested_defect_types': defect_types or DEFECT_TYPES,
             'excluded_prior_items': len(excluded_keys),
             'excluded_prior_datalist': args.exclude_datalist or None,
+            'skip_game_taobao_temporal_jumps': args.skip_game_taobao_temporal_jumps,
+            'temporal_jump_defect_types': sorted(TEMPORAL_JUMP_DEFECT_TYPES),
             'pool_summary': pool_summary,
             'selection_stats': stats,
         },

@@ -50,8 +50,18 @@ def get_token():
     return token
 
 
-def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False):
-    """Submit a training task to Taiji."""
+def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False,
+           start_cmd_override=None, host_gpu_num=None):
+    """Submit a training task to Taiji.
+
+    Args:
+        start_cmd_override: when provided, replaces the rendered training
+            start_cmd entirely.  Used for inference / eval jobs that don't
+            go through ``tools/taiji_dist_train.sh`` — pass any single-host
+            shell command.  ``config_path`` is then optional and ignored
+            unless interpolated by the caller.
+        host_gpu_num: override per-host GPU count (default from template).
+    """
     token = get_token()
     if not token:
         print("ERROR: No Taiji token found. Set TOKEN env var or write to ~/.claude-dashboard/taiji_token")
@@ -66,14 +76,19 @@ def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False
     tmpl["common"]["readable_name"] = task_flag
     tmpl["designated_resource"]["host_num"] = host_num
     tmpl["designated_resource"]["is_elasticity"] = elastic
+    if host_gpu_num is not None:
+        tmpl["designated_resource"]["host_gpu_num"] = float(host_gpu_num)
 
     if business_flag:
         tmpl["common"]["business_flag"] = business_flag
 
-    # Build start_cmd
-    start_cmd = tmpl["job_config"]["start_cmd"]
-    start_cmd = start_cmd.replace("__TASK_FLAG__", task_flag)
-    start_cmd = start_cmd.replace("__CONFIG_PATH__", config_path)
+    # Build start_cmd: either custom (eval/inference) or templated (training).
+    if start_cmd_override is not None:
+        start_cmd = start_cmd_override.replace("__TASK_FLAG__", task_flag)
+    else:
+        start_cmd = tmpl["job_config"]["start_cmd"]
+        start_cmd = start_cmd.replace("__TASK_FLAG__", task_flag)
+        start_cmd = start_cmd.replace("__CONFIG_PATH__", config_path)
     tmpl["job_config"]["start_cmd"] = start_cmd
 
     headers = {
@@ -180,13 +195,23 @@ def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False
 def main():
     parser = argparse.ArgumentParser(description="Submit training task to Taiji")
     parser.add_argument("task_flag", help="Task identifier (e.g. my_train_v1)")
-    parser.add_argument("config_path", help="Config file path relative to hf_trainer (e.g. configs/xxx/yyy.py)")
+    parser.add_argument("config_path", nargs='?', default='__UNUSED__',
+                        help="Config file path relative to hf_trainer "
+                             "(omitted when --start-cmd is used)")
     parser.add_argument("--host_num", type=int, default=4, help="Number of hosts (default: 4, each with 8 GPUs)")
+    parser.add_argument("--host_gpu_num", type=int, default=None,
+                        help="Override per-host GPU count (default from template)")
     parser.add_argument("--elastic", action="store_true", help="Use elastic (preemptible) GPUs")
     parser.add_argument("--business_flag", "-b", default=None, help="Override business flag")
+    parser.add_argument("--start-cmd", default=None,
+                        help="Replace the templated training start_cmd with a "
+                             "custom one (e.g. for inference/eval jobs).  When "
+                             "set, config_path is ignored.")
     args = parser.parse_args()
 
-    submit(args.task_flag, args.config_path, args.host_num, args.business_flag, args.elastic)
+    submit(args.task_flag, args.config_path, args.host_num, args.business_flag,
+           args.elastic, start_cmd_override=args.start_cmd,
+           host_gpu_num=args.host_gpu_num)
 
 
 if __name__ == "__main__":
