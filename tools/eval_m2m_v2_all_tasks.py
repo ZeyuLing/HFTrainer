@@ -3430,21 +3430,32 @@ def evaluate_sample(
     # E14: transition stitching — boundary metrics at both A/B boundaries
     if task.task_id == 'E14':
         from hftrainer.evaluation.motion.m2m_eval_metrics import motion135_to_positions_np
+        
+        # Use dynamically computed N_cond_a and N_cond_b from setup.
+        # These were stored in _transition_canon_info (accessible via _canon_info)
+        # and differ from the static '_cond_frames' setting.
+        N_cond_a = 15  # default fallback
+        N_cond_b = 15  # default fallback
+        if _canon_info is not None:
+            N_cond_a = int(_canon_info.get('N_cond_a', _canon_info.get('N_cond', 15)))
+            N_cond_b = int(_canon_info.get('N_cond_b', _canon_info.get('N_cond', 15)))
+        
         pred_pos = motion135_to_positions_np(output_135, bone_offsets)
-        N_cond = setting_kwargs.get('_cond_frames', 15)
         fps_val = sample.get('fps', 30)
         vel = np.diff(pred_pos, axis=0) * fps_val
         acc = np.diff(vel, axis=0) * fps_val
-        # Boundary at A->transition: frame N_cond-1
-        if N_cond - 1 < acc.shape[0] and N_cond < acc.shape[0]:
-            jump_a = np.linalg.norm(acc[N_cond] - acc[N_cond - 1], axis=-1).mean()
+        
+        # Boundary at A->transition: frame N_cond_a-1
+        if N_cond_a - 1 < acc.shape[0] and N_cond_a < acc.shape[0]:
+            jump_a = np.linalg.norm(acc[N_cond_a] - acc[N_cond_a - 1], axis=-1).mean()
             metrics['boundary_accel_jump_a'] = float(jump_a)
-        # Boundary at transition->B: frame T - N_cond - 1
-        b_boundary = T - N_cond - 1
+        
+        # Boundary at transition->B: frame T - N_cond_b - 1
+        b_boundary = T - N_cond_b - 1
         if 0 < b_boundary < acc.shape[0] and b_boundary + 1 < acc.shape[0]:
             jump_b = np.linalg.norm(acc[b_boundary + 1] - acc[b_boundary], axis=-1).mean()
             metrics['boundary_accel_jump_b'] = float(jump_b)
-        metrics['transition_length'] = int(T - 2 * N_cond)
+        metrics['transition_length'] = int(T - N_cond_a - N_cond_b)
 
     # E15: new semantics (2026-04-21) — prepend transition from start pose P.
     #   frame 0 = P (locked), frame N_transition = A[0] (locked).
