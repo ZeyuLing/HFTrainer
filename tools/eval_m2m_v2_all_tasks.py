@@ -1632,6 +1632,10 @@ def evaluate_sample(
     motion_dim = model_info.get('motion_dim', MOTION_DIM_V2)
     rotation_space = model_info.get('rotation_space', 'local')
     constraint_info = None  # For E4 end-effector; set in mask building
+    keyframe_indices = None  # populated for E3 adaptive so the dashboard can
+                             # render non-uniform condition frames; persisted
+                             # via metrics['_keyframe_indices'] and the NPZ
+                             # 'keyframe_indices' array.
 
     # Get motion in the right dimension
     motion_135 = sample['motion']  # (T, 135) always available
@@ -3513,6 +3517,12 @@ def evaluate_sample(
     # and the dashboard can cut gray context at the correct frame.
     if _layout is not None:
         metrics['_layout'] = _layout
+    if keyframe_indices is not None:
+        try:
+            metrics['_keyframe_indices'] = [int(x) for x in
+                                            np.asarray(keyframe_indices).reshape(-1).tolist()]
+        except Exception:
+            pass
     return metrics, output_135
 
 
@@ -3874,6 +3884,10 @@ def main():
                                     _save_kw['layout_json'] = np.frombuffer(
                                         json.dumps(_layout).encode('utf-8'),
                                         dtype=np.uint8)
+                                _kfi = metrics.get('_keyframe_indices', None)
+                                if _kfi:
+                                    _save_kw['keyframe_indices'] = np.asarray(
+                                        _kfi, dtype=np.int32)
                                 np.savez_compressed(npz_path, **_save_kw)
                                 metrics['_npz_path'] = npz_path
                             except Exception:

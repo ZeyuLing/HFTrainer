@@ -1213,11 +1213,12 @@ def detect_keyframes_from_motion(
         inserts midpoints whenever two consecutive keyframes are more than
         ``max_gap`` apart. This guarantees dense coverage but dilutes the
         "adaptive" nature because uniform filler dominates long sequences.
-      - Sparse (``sparse=True``): ONLY returns the top-K frames with the
-        highest acceleration peaks. K is chosen as ``max(3, round(T *
-        target_density))``. No uniform filler, no midpoint insertion, first/
-        last frame not forced. This is what E3-D actually tests — whether
-        the model can recover long intermediate segments from a handful of
+      - Sparse (``sparse=True``): returns start/end plus the top motion-salient
+        interior frames selected by fused root/pose/contact saliency with
+        non-maximum suppression. K is chosen as roughly ``T * target_density``
+        plus the two endpoints. No uniform filler or midpoint insertion is
+        used. This is what E3-D actually tests — whether the model can recover
+        long intermediate segments from a handful of non-uniform,
         motion-salient keyframes.
 
     Args:
@@ -1242,36 +1243,87 @@ def detect_keyframes_from_motion(
     # FK: motion -> joint positions
     positions = motion135_to_positions_np(motion_135, bone_offsets)  # (T, 22, 3)
 
-    # Compute velocity and acceleration
+    def _robust01(x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float32)
+        if x.size == 0:
+            return x
+        lo, hi = np.percentile(x, [5, 95])
+        if hi <= lo + 1e-8:
+            return np.zeros_like(x, dtype=np.float32)
+        return np.clip((x - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+    # Motion saliency, indexed on original frames.  A good adaptive keyframe
+    # should capture turning points and contact/pose changes, not just uniform
+    # temporal coverage.  Combine several scale-normalized signals so smooth
+    # locomotion, sharp gestures, and contact transitions all contribute.
+    root = positions[:, 0]  # (T, 3)
     velocity = np.diff(positions, axis=0)      # (T-1, 22, 3)
     acceleration = np.diff(velocity, axis=0)   # (T-2, 22, 3)
+    saliency = np.zeros((T,), dtype=np.float32)
+    if acceleration.shape[0] > 0:
+        acc_norms = np.linalg.norm(acceleration, axis=-1).mean(axis=-1)
+        saliency[1:-1] += 0.45 * _robust01(acc_norms)
+    if velocity.shape[0] > 0:
+        pose_speed = np.linalg.norm(velocity[:, 1:], axis=-1).mean(axis=-1)
+        saliency[1:] += 0.20 * _robust01(pose_speed)
+    if root.shape[0] > 2:
+        root_vel = np.diff(root[:, [0, 2]], axis=0)
+        root_acc = np.diff(root_vel, axis=0)
+        saliency[1:-1] += 0.20 * _robust01(np.linalg.norm(root_acc, axis=-1))
+    if root.shape[0] > 3:
+        root_vel = np.diff(root[:, [0, 2]], axis=0)
+        heading = np.unwrap(np.arctan2(root_vel[:, 1], root_vel[:, 0] + 1e-8))
+        turn = np.abs(np.diff(heading))
+        saliency[1:-1] += 0.10 * _robust01(turn)
+    if T > 2:
+        # Contact toggles often mark foot plants / takeoffs worth preserving.
+        # SMPL-22 ankle/toe-ish indices used elsewhere in the project.
+        foot_y = positions[:, [7, 8, 10, 11], 1]
+        contact = foot_y < np.percentile(foot_y, 20, axis=0, keepdims=True)
+        contact_change = np.abs(np.diff(contact.astype(np.float32), axis=0)).mean(axis=1)
+        saliency[1:] += 0.05 * contact_change.astype(np.float32)
+    if T >= 5:
+        saliency = np.convolve(saliency, np.array([0.2, 0.6, 0.2], dtype=np.float32), mode='same')
 
-    # Per-frame acceleration norm: mean across joints of per-joint L2 norm
-    acc_norms = np.linalg.norm(acceleration, axis=-1)  # (T-2, 22)
-    acc_per_frame = np.mean(acc_norms, axis=-1)         # (T-2,)
-
-    # Find peaks in acceleration signal
+    # Find local saliency peaks.  The legacy name acc_per_frame is kept below
+    # for dense-mode compatibility, but now represents the fused saliency.
+    acc_per_frame = saliency[1:-1]
     if len(acc_per_frame) > 0:
-        peaks, properties = find_peaks(acc_per_frame, distance=peak_distance)
-        # Map peak indices back to original frame indices (+1 offset from double diff)
+        peaks, _properties = find_peaks(acc_per_frame, distance=peak_distance)
         peak_frames = peaks + 1
     else:
+        peaks = np.array([], dtype=int)
         peak_frames = np.array([], dtype=int)
 
     # ------------------------------------------------------------------
     # Sparse mode (E3-D): keep ONLY the strongest peaks, no filler.
     # ------------------------------------------------------------------
     if sparse:
-        K = max(3, int(round(T * target_density)))
-        if len(peak_frames) == 0:
-            # No peaks at all → fall back to uniformly sampling K frames
-            # across the middle of the clip (not filler on top of peaks).
-            return np.linspace(0, T - 1, K, dtype=int)
-        # Sort peaks by acceleration magnitude descending, take top K.
-        peak_vals = acc_per_frame[peaks]
-        order = np.argsort(-peak_vals)
-        top_peaks = sorted(int(peak_frames[o]) for o in order[:K])
-        return np.array(top_peaks, dtype=int)
+        K = max(4, int(round(T * target_density)) + 2)
+        K = min(K, T)
+        selected = {0, T - 1}
+        min_sep = max(peak_distance, int(round(T / max(K * 2, 1))))
+        candidates = [int(f) for f in peak_frames]
+        if not candidates:
+            candidates = list(range(1, T - 1))
+        candidates = sorted(candidates, key=lambda f: float(saliency[f]), reverse=True)
+        for f in candidates:
+            if len(selected) >= K:
+                break
+            if all(abs(f - s) >= min_sep for s in selected):
+                selected.add(f)
+        # If the saliency curve is nearly flat, fill remaining slots with the
+        # highest-scoring frames under a weaker separation constraint.  This is
+        # still saliency-ranked and avoids the old fully uniform linspace path.
+        if len(selected) < K:
+            weak_sep = max(2, min_sep // 2)
+            fallback = sorted(range(1, T - 1), key=lambda f: float(saliency[f]), reverse=True)
+            for f in fallback:
+                if len(selected) >= K:
+                    break
+                if all(abs(f - s) >= weak_sep for s in selected):
+                    selected.add(int(f))
+        return np.array(sorted(selected), dtype=int)
 
     # ------------------------------------------------------------------
     # Dense mode (legacy): peaks + first/last + uniform filler.
