@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument('--config', required=True, help='Path to config file (.py)')
     parser.add_argument('--checkpoint', required=True, help='Path to checkpoint directory')
     parser.add_argument('--prompt', help='Text prompt for generation tasks')
-    parser.add_argument('--input', help='Input file path (e.g., image for classification)')
+    parser.add_argument('--input', help='Input motion file path (e.g., src_motion.npz for M2M)')
     parser.add_argument('--output', help='Output file path (e.g., image.png, video.mp4)')
     parser.add_argument('--num-steps', type=int, default=None,
                         help='Number of denoising steps (diffusion tasks)')
@@ -65,7 +65,7 @@ def parse_args():
     parser.add_argument('--num-person', type=int, default=None, help='Number of persons for motion tasks.')
     parser.add_argument('--duration', type=float, default=None, help='Target duration in seconds for motion tasks.')
     parser.add_argument('--max-new-tokens', type=int, default=200,
-                        help='Maximum number of new tokens for LLM generation.')
+                        help='Maximum number of generated tokens for token-based motion tasks (e.g., VerMo).')
     parser.add_argument('--height', type=int, default=None, help='Output height')
     parser.add_argument('--width', type=int, default=None, help='Output width')
     parser.add_argument('--merge-lora', action='store_true',

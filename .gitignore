@@ -22,6 +22,10 @@ ref_paper/
 # docs/temp：草稿为主；以下常为二进制大包或演示素材，入库体积大且非源码必选项
 docs/temp/demo_videos/
 docs/temp/m2m_v2_ppt/
+docs/temp/**/*.npz
+docs/temp/**/*.docx
+docs/temp/**/*.png
+docs/temp/**/*.jpg
 
 # ---------------------------------------------------------------------------
 # ref_repo：外部 baseline / 对照仓库的镜像。纳入版本控制时只保留源码与说明文档，
@@ -107,3 +111,8 @@ ref_repo/MotionStreamer/272-dim-Motion-Representation/
 !ref_repo/MotionStreamer/MotionStreamer/eval_with_motionstreamer_evaluator.py
 # 基准代码旁的 CLAUDE 说明仍希望随 ref_repo 一并入库（需写在全局 CLAUDE.md 规则之后）
 !ref_repo/**/CLAUDE.md
+
+# local debug/runtime artifacts
+tools/*.so
+tools/nvml_shim/
+core.*
