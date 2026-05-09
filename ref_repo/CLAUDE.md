@@ -15,6 +15,7 @@
 | **MoGenDiT** | 内部（chengxuzuo） | 2026-3-24 补丁 | 内部代码 | 扩散修复（去噪、位移重生成、分段衔接） | [MoGenDiT/CLAUDE.md](MoGenDiT/CLAUDE.md) |
 | **SOAR** | NUS / Alibaba / Microsoft | 2026-04 | ❌ 暂未开源 | Diffusion Post-Training：Exposure Bias Correction via On-Policy Rollout + Dense Self-Correction | [SOAR/CLAUDE.md](SOAR/CLAUDE.md) |
 | **StableMotion** | SFU / Lightspeed Studios / NRC Canada | SIGGRAPH Asia 2025（2026-04 归档） | ✅ 已开源 | Motion Cleanup / Detect-and-Fix on Unpaired Corrupted Data | [StableMotion/CLAUDE.md](StableMotion/CLAUDE.md) |
+| **MotionLab** | SUTD / LIGHTSPEED Singapore | ICCV 2025（2026-05 归档） | ✅ 已开源 | Unified Gen+Edit：Text/Trajectory Generation, Text/Trajectory Editing, In-Between, Style Transfer | [MotionLab/CLAUDE.md](MotionLab/CLAUDE.md) |
 
 ---
 
@@ -71,6 +72,38 @@
 **与我方差异**：T2I vs Motion；Flow Matching 框架完全相同；SOAR 是 post-training 方案，不改训练数据或标注
 
 **参考价值**：**直接适用于 M2M v2 post-training** — M2M 使用同样的 rectified flow 框架，存在明显的 exposure bias（50 步 ODE 误差累积、边界跳变）。与 `_man` 互补：_man 解决 known regions 分布匹配，SOAR 解决 generated regions 的 exposure bias。**不需要任何额外数据标注**。
+
+---
+
+### MotionLab（SUTD / LIGHTSPEED Singapore，开源）
+
+**核心贡献**：
+- **Motion-Condition-Motion 范式**：把所有 gen+edit 任务统一为 `(source, condition, target)` 三元组（source=∅ 即生成，source 给即编辑）
+- **MotionFlow Transformer (MFT)**：MM-DiT 改造的 5 modality path（source/target/text/trajectory/style）+ Joint Attention
+- **Aligned 1D ROPE**：所有时序模态共享同一 1D RoPE，强制 source[i] / target[i] / trajectory[i] 时间对齐 — 解决 paired editing 数据稀缺导致的隐式位置编码失效
+- **Task Instruction Modulation**：CLIP 编码任务文本（如 "edit source motion by given text"）作为 task token，新任务零成本扩展
+- **Motion Curriculum Learning**：1000 ep masked pre-train + 7 阶段 fine-tune（每 200 ep 加一个新任务），FID 动态采样抗遗忘 — 消融显示**最关键 contribution**（去掉后 FID 11.7× 恶化）
+- 单统一模型在 6 任务上**全面超过专家模型**
+
+**与我方差异**：
+| | MotionLab | HyMotion M2M |
+|---|---|---|
+| 任务路由 | CLIP 文本 instruction（语言驱动） | mask pattern M1-M6（mask 驱动） |
+| Source 注入 | 独立 modality path（专属 adaLN/FFN） | VACE channel concat（4× motion_dim） |
+| 表示 | HumanML3D 263-dim（含 joint pos/vel/contact） | 135-dim（仅 transl + 22 rot_6d） |
+| Trajectory 控制 | ✅（hint 模态，trajectory error 0.0286） | ❌（无 xyz position dim） |
+| Instruction editing | ✅（"use opposite leg"） | ❌（M4 只能做 part-level 重生成） |
+| Style transfer | ✅（SRA 69.21） | ❌ |
+| 训练调度 | 7 阶段 curriculum | 单阶段固定比例 |
+
+**参考价值**：
+- **P0**：Task Instruction Modulation 可直接移植到 M2M（实现成本极低，CLIP 编码 instruction 加到 timestep emb），用于显式区分 T2M / completion / editing 任务，缓解任务边界对模型不可见的问题
+- **P0**：Aligned 1D ROPE 是未来 M2M 加 trajectory hint 模态的必备组件
+- **P1**：Curriculum Learning schedule 可替换 M2M 当前固定 M1-M6 比例，配合 FID 动态采样抗遗忘 — 实测收益巨大（FID 11.7× 差距）
+- **P1**：MotionLab 实测 Unified > Specialist，为 M2M 内部"是否要训 T2M-only 大模型"的争论提供强 evidence
+- **P2**：5 modality path 架构作为 M2M v3 备选方向，参数量翻倍但模态解耦更干净，编辑任务下不易"过度拷贝" source
+
+**重要警示**：MotionLab 自承 2025/09/17 修了一批 bug，"复现请用 Jun 26, 2025 之前的代码并重训"。
 
 ---
 

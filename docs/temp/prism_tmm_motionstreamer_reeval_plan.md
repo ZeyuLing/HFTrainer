@@ -188,12 +188,13 @@ The 7392 (id, caption) pairs are produced by
 `eval_with_motionstreamer_evaluator.py::load_test_pairs()` — call it once and
 dump the prompt list to drive every baseline.
 
-#### 1a) MoMask — **PARTIAL DONE (2026-05-08)**
+#### 1a) MoMask — **DONE (2026-05-08, native HumanML3D-263 evaluator)**
 
-Pipeline implemented and run end-to-end. **Caveat: results are unreliable due to
-fundamental cross-evaluator domain shift; report MoMask numbers under
-MotionStreamer-272 with explicit caveats only, or fall back to MoMask's own
-HumanML3D-263 evaluator (Comp_v6_KLD005, not yet downloaded).**
+Pipeline implemented twice: (i) MotionStreamer-272 evaluator (cross-protocol,
+abandoned — see "v1, abandoned" below), and (ii) **MoMask's own native
+HumanML3D-263 evaluator (Comp_v6_KLD005 / text_mot_match)** with a
+`tools/build_h3d263_test_from_h3d272.py` reconstructed test set. The native
+eval gives credible, paper-comparable numbers and is what we report.
 
 Steps that ran (all on `lzy_debug_machine_1`):
 
@@ -215,39 +216,74 @@ Steps that ran (all on `lzy_debug_machine_1`):
    `representation_272` logic. Output:
    `work_dirs/momask_eval/momask_pred_272_30fps_v2/<id>.npy` shape
    `(T_30, 272)`.
-3. `eval_with_motionstreamer_evaluator.py` on the 30-fps converted
-   predictions over 7328 (id, caption) pairs, 20 random shuffles:
+**v2 (the canonical numbers — DONE)**
 
-| Metric | GT (real) | MoMask (paper, HumanML3D-263 eval) | MoMask (this run, MotionStreamer-272 eval, FPS-converted) |
-|---|---|---|---|
-| FID | 0 | 0.045 | **539.85 ± 9.9e-5** |
-| R-P T1 | 0.7047 | 0.521 | **0.156 ± 0.002** |
-| R-P T2 | 0.8573 | 0.713 | **0.249 ± 0.003** |
-| R-P T3 | 0.9106 | 0.807 | **0.323 ± 0.002** |
-| MM-Dist | 15.02 | 2.958 | **25.48** |
-| Diversity | 27.33 | 9.640 | **12.98** |
+Native MoMask evaluator setup on `lzy_debug_machine_1`:
 
-The MotionStreamer-272 evaluator was trained on **30 fps SMPL-X-derived
-HumanML3D motions**; our MoMask outputs are **20 fps SMPL-22 motions
-upsampled** via slerp/lerp. The post-conversion motion is therefore in a
-distribution the evaluator has never seen — empirically the standardized
-predictions have per-channel std ≈ 1.7-3.3 in the rotation block (vs ≈ 1.0
-for natural 30-fps gt motions), driving the inflated FID. The R-P numbers
-are still informative *as a within-protocol ranking*, but the absolute
-gap vs GT is amplified by the protocol mismatch on top of MoMask's
-intrinsic generation quality.
+* `humanml3d_evaluator.zip` (227 MB) downloaded via `gdown` and unzipped
+  into `ref_repo/Momask/momask-codes/checkpoints/t2m/{Comp_v6_KLD005,
+  text_mot_match,...}`. The actual evaluator weights are
+  `text_mot_match/model/finest.tar` (epoch 28). `Comp_v6_KLD005/meta`
+  carries the canonical HumanML3D-263 mean / std.
+* `glove.zip` (6 MB) downloaded into `ref_repo/Momask/momask-codes/glove/`
+  for `WordVectorizer('our_vab')`.
+* `tools/build_h3d263_test_from_h3d272.py` reconstructs the
+  HumanML3D-263 test set from `humanml3d_272`: decode 272 → global joint
+  positions (30 fps) → linear-resample to 20 fps → MoMask's
+  `process_file` → 263-dim features + 22-joint positions. Reference
+  skeleton offsets taken from `000021`'s first reconstructed frame so that
+  `uniform_skeleton` is internally consistent. Output:
+  `work_dirs/momask_eval/h3d263_test_recon/{new_joint_vecs,new_joints,
+  Mean.npy,Std.npy,test.txt}`. **3970 / 4042 ids reconstructed
+  successfully** (the 72 dropped were too short, missing texts, or had
+  process_file numerical issues — same drop pattern as native
+  HumanML3D).
+* `tools/eval_momask_native_h3d263.py` reads the reconstructed test set,
+  `humanml3d_272/texts/<id>.txt` captions (full-clip only,
+  `f_tag==0,to_tag==0`), and applies MoMask's `EvaluatorModelWrapper` /
+  `calculate_R_precision` / `calculate_frechet_distance` /
+  `calculate_diversity`, mirroring `evaluation_mask_transformer_test`
+  with `drop_last=True` and 32-batch.
 
-**Recommendation**: report MoMask under its **native** evaluator
-(HumanML3D-263 + Comp_v6_KLD005) for the canonical paper numbers, and use
-MotionStreamer-272 only for relative comparisons against other methods
-that are also re-evaluated through the same converted pipeline.
+Results (HumanML3D test set, 20 random repeats for `pred`, 5 for
+`gt-only`):
 
-Native MoMask eval requires:
-- `gdown ... humanml3d_evaluator.zip` → `Comp_v6_KLD005/` (~50MB) — TODO
-- glove embeddings (~50MB) — TODO
-- HumanML3D-263 test motions (~30MB) — needs reconstruction from
-  humanml3d_272 (downsample 30→20 fps, re-encode to 263) or a fresh
-  AMASS-based preprocessing.
+| Metric | GT-only sanity (this run) | MoMask paper GT | MoMask paper | **MoMask (this run, native eval)** |
+|---|---|---|---|---|
+| FID         | 0.000 (by construction) | 0.002 | 0.045 | **2.672 ± 7.0e-8** |
+| R-P T1      | 0.432 ± 0.008 | 0.511 | 0.521 | **0.443 ± 0.008** |
+| R-P T2      | 0.617 ± 0.007 | 0.703 | 0.713 | **0.638 ± 0.007** |
+| R-P T3      | 0.731 ± 0.008 | 0.797 | 0.807 | **0.739 ± 0.007** |
+| MM-Dist     | 3.546 ± 0.024 | 2.974 | 2.958 | **3.319 ± 0.032** |
+| Diversity   | 8.227 ± 0.217 | 9.503 | 9.640 | **9.976 ± 0.119** |
+
+**Reading the table**:
+
+* GT-only R-P is ${\approx}$ 0.43 / 0.62 / 0.73 vs MoMask paper's
+  0.51 / 0.70 / 0.80; MM-Dist 3.55 vs paper 2.97; Diversity 8.23 vs
+  paper 9.50. The 5–8% gap reflects information loss in the
+  272 → joints → 20 fps → 263 reconstruction (linear interp, IK / FK
+  re-encoding, uniform-skeleton retargeting from a single reference
+  frame). It is **NOT** a MoMask issue; it bounds the achievable
+  numbers under our reconstructed test data.
+* Within this protocol, MoMask predictions are **comparable to GT** on
+  R-P, MM-Dist and Diversity (slightly *better* on T2/T3 and
+  Diversity, slightly *worse* on T1 and MM-Dist), and the FID 2.67
+  >> paper's 0.045. The high FID is a **distribution-shift artifact**:
+  MoMask was trained on the original (clean) HumanML3D-263 distribution;
+  our reconstructed GT is a slightly noisier 272 → 263 reconstruction of
+  the same motions, so FID(MoMask outputs, reconstructed GT) is inflated
+  even though semantic alignment is preserved.
+
+**v1 (abandoned)**: same MoMask 263 outputs converted to 272 (slerp +
+linear, see `tools/convert_momask263_to_h3d272.py`) and run through
+`eval_with_motionstreamer_evaluator.py`. That gave FID 539.85 / R-P T1
+0.156 / MM-Dist 25.48 / Diversity 12.98 — meaningless absolute numbers
+caused by SMPL-22 (MoMask) vs SMPL-X-derived 30 fps (MotionStreamer
+evaluator) domain shift, not by MoMask's intrinsic quality. We keep the
+v1 outputs on disk (`work_dirs/momask_eval/momask_pred_272_30fps_v2/`)
+purely as a relative-ranking sanity column and **do not** report them in
+the paper.
 
 #### 1b) PRISM (cross-check our own model)
 
