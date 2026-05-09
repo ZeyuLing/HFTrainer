@@ -75,6 +75,34 @@ class TestFKConsistencyLossIntegration:
         # Pos has no generated cells, so active components are 1, 4, and 9.
         assert torch.allclose(result['velocity'], torch.tensor((1.0 + 4.0 + 9.0) / 3.0))
 
+    def test_m2m_loss_component_mean_excludes_padding(self):
+        """Padded frames must not contribute to component-mean reduction."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 2, 198)
+        gt = torch.zeros(1, 2, 198)
+        gt[:, 0, 0:3] = 1.0
+        gt[:, 0, 3:9] = 2.0
+        gt[:, 0, 9:135] = 3.0
+        gt[:, 0, 135:198] = 4.0
+        # The padded frame is deliberately huge; the loss should be identical
+        # to the single valid frame if padding is masked correctly.
+        gt[:, 1, :] = 1000.0
+
+        loss_fn = M2MLoss(
+            loss_type='mse',
+            velocity_weight=1.0,
+            velocity_loss_reduction='component_mean',
+            trans_dim_weight=1.0,
+        )
+        result = loss_fn(
+            pred_vel=pred,
+            gt_vel=gt,
+            data_mask_temporal=torch.tensor([[1.0, 0.0]]),
+        )
+
+        assert torch.allclose(result['velocity'], torch.tensor(7.5))
+
     def test_m2m_loss_fk_consistency_in_forward(self):
         """M2MLoss should include fk_consistency in loss dict when provided."""
         from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
