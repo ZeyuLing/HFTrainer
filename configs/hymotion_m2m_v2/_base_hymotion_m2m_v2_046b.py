@@ -61,12 +61,7 @@ model = dict(
         x1_weight=0.0,
         keypoints3d_weight=0.0,
         translation_weight=0.0,
-        # KIMODO Eq.1 normalizes each semantic component before weighting.
-        # Use component_mean so translation/root/body/position channels are
-        # not diluted by raw dimensionality.  With this reduction, an extra
-        # trans_dim_weight=5 would over-amplify translation, so keep it at 1.
-        velocity_loss_reduction='component_mean',
-        trans_dim_weight=1.0,
+        trans_dim_weight=5.0,
         motion_smoothness_weight=0.5,
         # NOTE: legacy fk_consistency in M2MLoss is disabled when KIMODO-style
         # aux loss is enabled below (see kimodo_aux_loss_cfg) — they compute
