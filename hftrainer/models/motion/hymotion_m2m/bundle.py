@@ -81,6 +81,8 @@ class HyMotionM2MBundle(ModelBundle):
         rotation_space: str = 'local',
         # ----- KIMODO-style auxiliary losses (j_p / j_v / fk_consistency) -----
         kimodo_aux_loss_cfg: Optional[dict] = None,
+        # ----- CRFM v3: text attention preservation gradient scale -----
+        text_grad_scale: float = 1.0,
     ):
         super().__init__()
 
@@ -140,6 +142,12 @@ class HyMotionM2MBundle(ModelBundle):
         self.validation_steps = self._infer_noise_scheduler_cfg.get(
             'validation_steps', 50
         )
+
+        # ---- CRFM v3: CDE enable flag (mirrors motion_transformer.enable_cde) ----
+        self.enable_cde = motion_transformer.get('enable_cde', False)
+
+        # ---- CRFM v3: text gradient scale ----
+        self._text_grad_scale = text_grad_scale
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -359,6 +367,7 @@ class HyMotionM2MBundle(ModelBundle):
         timesteps: Tensor,
         x_mask_temporal: Optional[Tensor] = None,
         ctxt_mask_temporal: Optional[Tensor] = None,
+        mask_density: Optional[Tensor] = None,
     ) -> Tensor:
         """Single forward pass through the MMDiT transformer.
 
@@ -369,6 +378,7 @@ class HyMotionM2MBundle(ModelBundle):
             timesteps: diffusion timesteps, (B,).
             x_mask_temporal: (B, L) boolean mask for motion sequence.
             ctxt_mask_temporal: (B, Lc) boolean mask for text tokens.
+            mask_density: (B,) optional mask density for CDE (CRFM v3).
 
         Returns:
             Model prediction, shape (B, L, D_motion).
@@ -380,6 +390,7 @@ class HyMotionM2MBundle(ModelBundle):
             timesteps=timesteps,
             x_mask_temporal=x_mask_temporal,
             ctxt_mask_temporal=ctxt_mask_temporal,
+            mask_density=mask_density,
         )
 
     def decode_motion_from_latent(
@@ -451,6 +462,31 @@ class HyMotionM2MBundle(ModelBundle):
         """Denormalize motion."""
         std = torch.where(self.std < 1e-3, torch.ones_like(self.std), self.std)
         return motion * std + self.mean
+
+    def compute_mask_density(self, src_mask: Tensor) -> Tensor:
+        """Compute per-sample mask density for CDE (CRFM v3).
+
+        src_mask: (B, L, D), 1=generate, 0=known
+        Returns: (B,) density in [0, 1]
+        """
+        return src_mask.mean(dim=(-1, -2))
+
+    def apply_text_attention_preservation(self) -> None:
+        """Apply TAP gradient scaling to text-related transformer parameters.
+
+        Called by CRFM trainer at initialization. Uses self._text_grad_scale
+        set in __init__. Does nothing if scale >= 1.0.
+        """
+        if self._text_grad_scale >= 1.0:
+            return
+        from hftrainer.models.motion.hymotion_m2m.network.condition_routing import (
+            TextAttentionPreservation,
+        )
+        self._tap = TextAttentionPreservation(
+            text_grad_scale=self._text_grad_scale,
+            refiner_grad_scale=min(self._text_grad_scale * 10, 1.0),
+        )
+        self._tap.apply(self.motion_transformer)
 
     def get_bone_offsets(self) -> Tensor:
         """Get bone offsets for FK/IK.
