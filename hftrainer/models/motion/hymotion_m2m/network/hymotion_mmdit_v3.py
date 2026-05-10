@@ -729,11 +729,119 @@ class HunyuanMotionMMDiTv3(nn.Module):
                 new_key = f'blocks.{block_idx}.{remainder}'
                 new_state[new_key] = value
 
+        # ============ Single Block → Block Mapping (blocks 6-17) ============
+        # v1 single_blocks use a fused design:
+        #   modulation.linear (3072, D) → 3 outputs: [shift_msa, scale_msa, gate_msa]
+        #   linear1 (7168, D) → fused [QKV(3D=3072), MLP_up(4D=4096)]
+        #   linear2 (D, 5120) → fused from [attn_out(D=1024), MLP_down(4D=4096)]
+        #   q_norm, k_norm → direct
+        #
+        # v3 DualCondMMDiTBlock uses separate components:
+        #   motion_mod.linear (6144, D) → 6 outputs: [shift_msa, scale_msa, gate_msa,
+        #                                              shift_mlp, scale_mlp, gate_mlp]
+        #   motion_qkv (3072, D)
+        #   motion_mlp.fc1 (4096, D)
+        #   motion_out_proj (D, D)
+        #   motion_mlp.fc2 (D, 4096)
+        #   motion_q_norm, motion_k_norm
+        #
+        # Decomposition: duplicate modulation into both halves (shift/scale/gate
+        # applied identically to MSA and MLP paths preserves v1 behavior where
+        # a single modulation controls both paths).
+
+        num_single = 0
+        for key in state_dict:
+            if key.startswith('single_blocks.'):
+                parts = key.split('.')
+                block_idx = int(parts[1])
+                num_single = max(num_single, block_idx + 1)
+
+        feat_dim = self.feat_dim
+        for j in range(num_single):
+            target_block_idx = num_double + j  # blocks 6-17
+            prefix_src = f'single_blocks.{j}'
+            prefix_dst = f'blocks.{target_block_idx}'
+
+            # --- Modulation: 3 → 6 by duplication ---
+            mod_w_key = f'{prefix_src}.modulation.linear.weight'
+            mod_b_key = f'{prefix_src}.modulation.linear.bias'
+            if mod_w_key in state_dict:
+                mod_w = state_dict[mod_w_key]  # (3*D, D) = (3072, 1024)
+                mod_b = state_dict[mod_b_key]  # (3*D,) = (3072,)
+                # v1: [shift_msa, scale_msa, gate_msa] each of size D
+                # v3: [shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp]
+                # Duplicate: same modulation for both MSA and MLP paths
+                new_state[f'{prefix_dst}.motion_mod.linear.weight'] = torch.cat(
+                    [mod_w, mod_w], dim=0
+                )  # (6*D, D)
+                new_state[f'{prefix_dst}.motion_mod.linear.bias'] = torch.cat(
+                    [mod_b, mod_b], dim=0
+                )  # (6*D,)
+
+            # --- linear1 decomposition: QKV + MLP_up ---
+            l1_w_key = f'{prefix_src}.linear1.weight'
+            l1_b_key = f'{prefix_src}.linear1.bias'
+            if l1_w_key in state_dict:
+                l1_w = state_dict[l1_w_key]  # (3*D + 4*D, D) = (7168, 1024)
+                l1_b = state_dict[l1_b_key]  # (7168,)
+                qkv_dim = 3 * feat_dim  # 3072
+                # First 3072 rows = QKV
+                new_state[f'{prefix_dst}.motion_qkv.weight'] = l1_w[:qkv_dim]
+                new_state[f'{prefix_dst}.motion_qkv.bias'] = l1_b[:qkv_dim]
+                # Remaining 4096 rows = MLP fc1
+                new_state[f'{prefix_dst}.motion_mlp.fc1.weight'] = l1_w[qkv_dim:]
+                new_state[f'{prefix_dst}.motion_mlp.fc1.bias'] = l1_b[qkv_dim:]
+
+            # --- linear2 decomposition: attn_out + MLP_down ---
+            l2_w_key = f'{prefix_src}.linear2.weight'
+            l2_b_key = f'{prefix_src}.linear2.bias'
+            if l2_w_key in state_dict:
+                l2_w = state_dict[l2_w_key]  # (D, D + 4*D) = (1024, 5120)
+                l2_b = state_dict[l2_b_key]  # (D,) = (1024,)
+                # First D columns = attention output projection
+                new_state[f'{prefix_dst}.motion_out_proj.weight'] = l2_w[:, :feat_dim]
+                new_state[f'{prefix_dst}.motion_out_proj.bias'] = l2_b
+                # Remaining 4*D columns = MLP fc2
+                new_state[f'{prefix_dst}.motion_mlp.fc2.weight'] = l2_w[:, feat_dim:]
+                # MLP fc2 bias: set to zero (fused layer had single combined bias)
+                new_state[f'{prefix_dst}.motion_mlp.fc2.bias'] = torch.zeros(
+                    feat_dim, dtype=l2_b.dtype
+                )
+
+            # --- q_norm, k_norm: direct copy ---
+            qn_key = f'{prefix_src}.q_norm.weight'
+            kn_key = f'{prefix_src}.k_norm.weight'
+            if qn_key in state_dict:
+                new_state[f'{prefix_dst}.motion_q_norm.weight'] = state_dict[qn_key]
+            if kn_key in state_dict:
+                new_state[f'{prefix_dst}.motion_k_norm.weight'] = state_dict[kn_key]
+
         # ============ Input Encoder (handle dimension mismatch) ============
         # v1 input_encoder: Linear(594, 1024) or similar
         # v3 input_encoder: Linear(199, 1024)
         # We cannot directly map these — skip input_encoder weight mapping
         # and let it initialize randomly (it will be trained in Phase 0)
+
+        # ============ Filter Shape Mismatches ============
+        # v1→v3 may have shape mismatches (e.g. final_layer with different
+        # output_dim: 201 vs 198). Filter these out before load_state_dict
+        # since strict=False still raises on shape mismatch.
+        target_sd = self.state_dict()
+        shape_mismatched = []
+        for k in list(new_state.keys()):
+            if k in target_sd and isinstance(new_state[k], torch.Tensor):
+                if new_state[k].shape != target_sd[k].shape:
+                    shape_mismatched.append(
+                        f"{k}: ckpt {tuple(new_state[k].shape)} vs model {tuple(target_sd[k].shape)}"
+                    )
+                    del new_state[k]
+        if shape_mismatched:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"[load_pretrained_backbone] Skipped {len(shape_mismatched)} "
+                f"shape-mismatched params: {shape_mismatched[:10]}"
+            )
 
         # ============ Load What We Can ============
         missing, unexpected = self.load_state_dict(new_state, strict=False)

@@ -456,6 +456,169 @@ class HyMotionM2Mv3Bundle(ModelBundle):
         )
         self._tap.apply(self.motion_transformer)
 
+    # ------------------------------------------------------------------
+    # Override checkpoint loading for v1→v3 key remapping
+    # ------------------------------------------------------------------
+
+    def load_state_dict_selective(self, state_dict: Dict[str, Any], strict: bool = False):
+        """Override to handle v1→v3 transformer key remapping.
+
+        The base class `load_state_dict_selective` splits flat keys by the
+        first `.` and passes `{'double_blocks.0.*': ...}` to
+        `self.motion_transformer.load_state_dict(...)`. But v3's transformer
+        uses `blocks.*` naming, so all v1 keys are "unexpected" and nothing
+        loads.
+
+        This override detects v1-style keys (containing `double_blocks.` or
+        `single_blocks.`) in the motion_transformer portion and routes them
+        through `self.motion_transformer.load_pretrained_backbone()` which
+        handles the proper remapping.
+        """
+        if not state_dict:
+            return
+
+        from hftrainer.utils.logger import get_logger
+        logger = get_logger()
+
+        # Let base class handle __hftrainer_meta__ and __bundle_params__
+        # We extract those first, then handle the rest ourselves.
+        checkpoint_meta = {}
+        if '__hftrainer_meta__' in state_dict:
+            meta = state_dict.pop('__hftrainer_meta__')
+            if isinstance(meta, dict):
+                checkpoint_meta = meta.get('modules', {}) or {}
+
+        # Restore bundle-level parameters / buffers (null embeddings, mean, std)
+        bundle_params = state_dict.pop('__bundle_params__', None)
+        if bundle_params and isinstance(bundle_params, dict):
+            for pname, pval in bundle_params.items():
+                if hasattr(self, pname):
+                    attr = getattr(self, pname)
+                    if isinstance(attr, nn.Parameter):
+                        if attr.shape == pval.shape:
+                            attr.data.copy_(pval)
+                        else:
+                            logger.warning(
+                                f"Shape mismatch for bundle param '{pname}': "
+                                f"ckpt {tuple(pval.shape)} vs model {tuple(attr.shape)}, skipped"
+                            )
+                    elif isinstance(attr, Tensor):
+                        if attr.shape == pval.shape:
+                            attr.copy_(pval)
+
+        if not state_dict:
+            return
+
+        # Detect flat vs nested format
+        first_val = next(iter(state_dict.values()))
+        if isinstance(first_val, Tensor):
+            # Flat state dict — split by first '.' into nested
+            nested: Dict[str, Dict[str, Tensor]] = {}
+            for key, val in state_dict.items():
+                parts = key.split('.', 1)
+                if len(parts) == 2 and hasattr(self, parts[0]):
+                    mod_name, param_name = parts
+                    if mod_name not in nested:
+                        nested[mod_name] = {}
+                    nested[mod_name][param_name] = val
+                else:
+                    # Bundle-level tensor (mean, std, null embeddings)
+                    if hasattr(self, key):
+                        attr = getattr(self, key)
+                        if isinstance(attr, nn.Parameter):
+                            if attr.shape == val.shape:
+                                attr.data.copy_(val)
+                        elif isinstance(attr, Tensor):
+                            if attr.shape == val.shape:
+                                attr.copy_(val)
+            state_dict = nested
+
+        # Handle motion_transformer specially for v1→v3 remapping
+        transformer_sd = state_dict.pop('motion_transformer', None)
+        if transformer_sd is not None:
+            # Detect if this is a v1-style checkpoint by checking for
+            # double_blocks.* or single_blocks.* keys
+            has_v1_keys = any(
+                k.startswith('double_blocks.') or k.startswith('single_blocks.')
+                for k in transformer_sd.keys()
+            )
+            has_v3_keys = any(
+                k.startswith('blocks.') for k in transformer_sd.keys()
+            )
+
+            if has_v1_keys and not has_v3_keys:
+                # v1→v3 remapping via load_pretrained_backbone
+                logger.info(
+                    f"[HyMotionM2Mv3Bundle] Detected v1-style checkpoint "
+                    f"({len(transformer_sd)} keys). Using load_pretrained_backbone() "
+                    f"for v1→v3 key remapping."
+                )
+                missing, unexpected = self.motion_transformer.load_pretrained_backbone(
+                    transformer_sd, strict=False
+                )
+                if missing:
+                    logger.info(
+                        f"[v1→v3 remap] {len(missing)} missing keys (expected for "
+                        f"v3-specific modules: cond_encoder, role_emb, fusion_gate, "
+                        f"cross-attn, input_encoder). First 5: {missing[:5]}"
+                    )
+                if unexpected:
+                    logger.warning(
+                        f"[v1→v3 remap] {len(unexpected)} unexpected keys: {unexpected[:5]}"
+                    )
+            elif has_v3_keys:
+                # Already v3-style keys — use normal loading
+                logger.info(
+                    f"[HyMotionM2Mv3Bundle] Detected v3-style checkpoint "
+                    f"({len(transformer_sd)} keys). Using direct load_state_dict."
+                )
+                # Filter shape mismatches
+                target_sd = self.motion_transformer.state_dict()
+                for k in list(transformer_sd.keys()):
+                    if k in target_sd and isinstance(transformer_sd[k], Tensor):
+                        if transformer_sd[k].shape != target_sd[k].shape:
+                            logger.warning(
+                                f"Shape mismatch for 'motion_transformer.{k}': "
+                                f"ckpt {tuple(transformer_sd[k].shape)} vs "
+                                f"model {tuple(target_sd[k].shape)}, skipped"
+                            )
+                            del transformer_sd[k]
+                missing, unexpected = self.motion_transformer.load_state_dict(
+                    transformer_sd, strict=False
+                )
+                if missing:
+                    logger.warning(
+                        f"Missing keys in 'motion_transformer': {missing[:5]}..."
+                    )
+                if unexpected:
+                    logger.warning(
+                        f"Unexpected keys in 'motion_transformer': {unexpected[:5]}..."
+                    )
+            else:
+                logger.warning(
+                    f"[HyMotionM2Mv3Bundle] Could not detect checkpoint style "
+                    f"for motion_transformer ({len(transformer_sd)} keys). "
+                    f"Keys sample: {list(transformer_sd.keys())[:3]}. "
+                    f"Falling back to direct load_state_dict."
+                )
+                self.motion_transformer.load_state_dict(transformer_sd, strict=False)
+
+        # Handle remaining modules via standard logic (e.g. text_encoder if present)
+        for name, sd in state_dict.items():
+            if hasattr(self, name):
+                module = getattr(self, name)
+                if isinstance(module, nn.Module):
+                    load_target = module
+                    while hasattr(load_target, 'module'):
+                        load_target = load_target.module
+                    if not strict:
+                        target_sd = load_target.state_dict()
+                        for k in list(sd.keys()):
+                            if k in target_sd and isinstance(sd[k], Tensor):
+                                if sd[k].shape != target_sd[k].shape:
+                                    del sd[k]
+                    load_target.load_state_dict(sd, strict=strict)
+
     def get_bone_offsets(self) -> Tensor:
         """Get bone offsets for FK/IK.
 
