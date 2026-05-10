@@ -3105,6 +3105,12 @@ def evaluate_sample(
             output_135[cond_mask] = gt_global_135[cond_mask]
         else:
             output_135[cond_mask] = motion_135[cond_mask]
+        # ── DEBUG (2026-05-09): verify condition replacement correctness for E14
+        if task.task_id == 'E14' and os.environ.get('DEBUG_E14_DECANON'):
+            _diff_post_replace = np.abs(output_135[:mask_135.shape[0]][cond_mask] - motion_135[cond_mask]).max()
+            print(f'    [DEBUG E14] post-replace cond diff: {_diff_post_replace:.8f}')
+            print(f'    [DEBUG E14] output_135[0,:3]={output_135[0,:3]}  motion_135[0,:3]={motion_135[0,:3]}')
+            print(f'    [DEBUG E14] cond_mask.sum()={cond_mask.sum()} mask.shape={mask.shape} motion_135.shape={motion_135.shape}')
 
     # ---- Post-process boundary smoothing (2026-04-23) -------------------
     # When strict_mask has sharp 0↔1 boundaries, the imputation step
@@ -3303,6 +3309,10 @@ def evaluate_sample(
         out_world_t = decanonicalize_segment(
             out_t, R_canon, offset_canon, rotation_space=rotation_space)
         output_135 = out_world_t.numpy()
+        # ── DEBUG (2026-05-09): check decanon result
+        if os.environ.get('DEBUG_E14_DECANON'):
+            print(f'    [DEBUG E14] after decanon output_135[0,:3]={output_135[0,:3]}')
+            print(f'    [DEBUG E14] R_canon={R_canon}, offset_canon={offset_canon}')
 
         # Also decanonicalize the GT segment so metrics compare in world coords
         gt_t = _torch.from_numpy(gt_motion_135).float()

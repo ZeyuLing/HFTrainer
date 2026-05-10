@@ -11,6 +11,9 @@ from hftrainer.models.motion.hymotion_m2m.network.hymotion_mmdit import (
 from hftrainer.models.motion.hymotion_m2m.network.hymotion_dit import (
     HunyuanMotionDiT,
 )
+from hftrainer.models.motion.hymotion_m2m.network.hymotion_mmdit_v3 import (
+    HunyuanMotionMMDiTv3,
+)
 from hftrainer.registry import HF_MODELS
 
 if not HF_MODELS.get('HunyuanMotionMMDiT'):
@@ -23,4 +26,9 @@ if not HF_MODELS.get('HunyuanMotionDiT'):
         name='HunyuanMotionDiT', module=HunyuanMotionDiT, force=True,
     )
 
-__all__ = ['HunyuanMotionMMDiT', 'HunyuanMotionDiT']
+if not HF_MODELS.get('HunyuanMotionMMDiTv3'):
+    HF_MODELS.register_module(
+        name='HunyuanMotionMMDiTv3', module=HunyuanMotionMMDiTv3, force=True,
+    )
+
+__all__ = ['HunyuanMotionMMDiT', 'HunyuanMotionDiT', 'HunyuanMotionMMDiTv3']

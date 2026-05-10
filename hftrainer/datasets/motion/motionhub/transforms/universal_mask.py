@@ -597,6 +597,26 @@ class PrepareM2MUniversalMask(BaseTransform):
         if lq_tensor.shape[0] < T:
             lq_tensor = torch.nn.functional.pad(lq_tensor, (0, 0, 0, T - lq_tensor.shape[0]))
 
+        # If target dim > 135 (e.g. 198-dim with position channels + global rotation),
+        # apply the same transforms that were applied to the original motion.
+        if D > 135:
+            from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
+                motion135_to_198, _DEFAULT_BONE_OFFSETS_PATH,
+            )
+            from hftrainer.datasets.motion.motionhub.transforms.local_to_global import (
+                LocalToGlobalRotation,
+            )
+            if os.path.isfile(_DEFAULT_BONE_OFFSETS_PATH):
+                bone_offsets = torch.load(
+                    _DEFAULT_BONE_OFFSETS_PATH, map_location='cpu'
+                ).float()
+                lq_tensor = motion135_to_198(lq_tensor, bone_offsets)
+                # Convert local rotation to global rotation
+                lq_tensor = LocalToGlobalRotation._convert(lq_tensor)
+            else:
+                # Cannot compute 198-dim; fall back to original motion
+                return motion, None
+
         # Convert (T, J) joint mask to (T, D) mask via grid
         grid = np.zeros((T, NUM_JOINT_GROUPS), dtype=np.float32)
         min_t = min(T, merged_mask.shape[0])

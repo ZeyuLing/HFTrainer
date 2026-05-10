@@ -1048,6 +1048,8 @@ class AccelerateRunner:
                             f"Restored training position: global_step={self.global_step}, "
                             f"epoch={self.current_epoch}. Optimizer state was reset."
                         )
+                # After resume, patch any zero null embeddings from pretrained.
+                self._patch_zero_null_embeddings_from_pretrained()
                 return
             else:
                 logger.info("auto_resume=True but no checkpoint found. Starting from scratch.")
@@ -1244,6 +1246,87 @@ class AccelerateRunner:
                 f"(keys: {sorted(bundle_params.keys())})"
             )
         self.accelerator.wait_for_everyone()
+
+    def _patch_zero_null_embeddings_from_pretrained(self):
+        """Patch all-zero null embeddings from `load_from` pretrained ckpt.
+
+        Root cause: when ``auto_resume=True`` resumes from an existing
+        checkpoint in work_dir, ``load_from`` (the pretrained T2M ckpt that
+        carries correct null_vtxt_feat / null_ctxt_input values) is never
+        reached.  If the resumed checkpoint was saved from a run that
+        predates the bundle-orphan-param fix (2026-03-27), its
+        ``__bundle_params__`` contains zeros for these embeddings — and
+        zeros propagate forever through subsequent saves/resumes.
+
+        This method detects that condition (parameter exists, is all-zeros,
+        and load_from config provides a pretrained source) and patches the
+        live parameters in-place.  Called once after any auto_resume load.
+
+        Impact: null embeddings are only used during inference-time CFG
+        (classifier-free guidance).  Training with cond_mask_prob=0.0 is
+        unaffected by the zeros, but inference quality degrades silently.
+        """
+        if self.load_from is None:
+            return
+
+        # Identify candidate params: bundle-level nn.Parameters that are
+        # frozen (requires_grad=False) and currently all-zero.
+        zero_params = {}
+        for name, param in self.bundle.named_parameters(recurse=False):
+            if not param.requires_grad and param.detach().abs().max().item() == 0.0:
+                zero_params[name] = param
+
+        if not zero_params:
+            return
+
+        # Resolve the pretrained checkpoint path from load_from config.
+        load_cfg = self.load_from
+        if hasattr(load_cfg, 'to_dict'):
+            load_cfg = load_cfg.to_dict()
+        pretrained_path = load_cfg.get('path', load_cfg) if isinstance(load_cfg, dict) else load_cfg
+        if not pretrained_path or not isinstance(pretrained_path, str):
+            return
+
+        # Load pretrained state dict and extract matching keys.
+        try:
+            from hftrainer.utils.checkpoint_utils import load_checkpoint
+            source_sd = load_checkpoint(pretrained_path, map_location='cpu')
+        except (FileNotFoundError, RuntimeError, OSError) as exc:
+            logger.warning(
+                f"Cannot patch zero null embeddings: failed to load "
+                f"pretrained ckpt at {pretrained_path}: {exc}"
+            )
+            return
+
+        # Source may be flat (key→tensor) or have __bundle_params__.
+        patched = []
+        for name, param in zero_params.items():
+            src_tensor = None
+            # Try direct flat key first (legacy T2M checkpoint format).
+            if name in source_sd and isinstance(source_sd[name], torch.Tensor):
+                src_tensor = source_sd[name]
+            # Try __bundle_params__ dict (newer format).
+            elif '__bundle_params__' in source_sd:
+                bp = source_sd['__bundle_params__']
+                if isinstance(bp, dict) and name in bp and isinstance(bp[name], torch.Tensor):
+                    src_tensor = bp[name]
+
+            if src_tensor is not None and src_tensor.shape == param.shape:
+                if src_tensor.abs().max().item() > 0:
+                    param.data.copy_(src_tensor)
+                    patched.append(
+                        f"{name}: zeros -> norm={src_tensor.float().norm().item():.4f}"
+                    )
+
+        if patched:
+            logger.warning(
+                f"Patched {len(patched)} all-zero frozen parameter(s) from "
+                f"pretrained checkpoint ({pretrained_path}):\n"
+                + '\n'.join(f'  {p}' for p in patched)
+                + '\nThese were likely zeros due to a historical bug where '
+                'auto_resume preempted load_from. Future checkpoints will '
+                'save the corrected values.'
+            )
 
     def _state_dict_to_save(self) -> Dict[str, dict]:
         """Build a nested state dict for save_ckpt=True modules.
