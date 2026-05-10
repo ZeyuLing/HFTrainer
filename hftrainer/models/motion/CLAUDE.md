@@ -86,10 +86,10 @@ visualization-only. Current code has three different classes:
 
 | Scope | Entry Point | What It Changes | Notes |
 |---|---|---|---|
-| HyMotion M2M output | `tools/eval_m2m_v2_all_tasks.py` | Hard-pastes condition frames from GT after denormalization; optional boundary Gaussian blending, accel-spike median filter, Savitzky-Golay smoothing, E9 adaptive post-hoc replacement, long-window overlap blending | These change `motion_135` before metrics/import. They can hide binary-mask boundary discontinuities. |
-| MoGenDIT repair | `scripts/postprocess_hymotion_with_mogendit.py` | Converts HyM `motion_135` ↔ SMPL-H, runs MoGenDIT `denoise` / `ada_denoise` / `trans_regen` / `impute`, then recomputes positions + QC metrics | `trans_regen` regenerates root translation only; `impute` may hard-preserve obs frames after MoGenDIT to avoid normalization drift. |
-| Official KIMODO postprocess | `ref_repo/KIMODO/kimodo/kimodo/postprocess.py` | Runs foot/contact cleanup and constraint cleanup through `motion_correction.correct_motion`, using contacts, root margin, and original constraint frames as targets | This is part of upstream KIMODO's default SOMA CLI path. `tools/run_kimodo_all_tasks.py` should keep it enabled by default; use `KIMODO_POST_PROCESSING=0` only for ablations. |
-| KIMODO E14/E15 visualization | `tools/append_kimodo_context_soma77.py`, `tools/append_kimodo_e15_context_soma77.py` | Appends SOMA-77 prefix/suffix mesh data and writes `layout_json`; E14 can replace main condition frames with exact source-condition SOMA; E14 blends prefix/suffix seams over 30 frames; E15 blends the first suffix frames over up to 15 frames | This is display metadata for full-timeline rendering, but it can visually smooth KIMODO context seams. It must not be used as evidence that raw KIMODO generated boundaries are continuous. |
+| HyMotion M2M output | `scripts/eval/eval_m2m_v2_all_tasks.py` | Hard-pastes condition frames from GT after denormalization; optional boundary Gaussian blending, accel-spike median filter, Savitzky-Golay smoothing, E9 adaptive post-hoc replacement, long-window overlap blending | These change `motion_135` before metrics/import. They can hide binary-mask boundary discontinuities. |
+| MoGenDIT repair | `scripts/repair/postprocess_hymotion_with_mogendit.py` | Converts HyM `motion_135` ↔ SMPL-H, runs MoGenDIT `denoise` / `ada_denoise` / `trans_regen` / `impute`, then recomputes positions + QC metrics | `trans_regen` regenerates root translation only; `impute` may hard-preserve obs frames after MoGenDIT to avoid normalization drift. |
+| Official KIMODO postprocess | `ref_repo/KIMODO/kimodo/kimodo/postprocess.py` | Runs foot/contact cleanup and constraint cleanup through `motion_correction.correct_motion`, using contacts, root margin, and original constraint frames as targets | This is part of upstream KIMODO's default SOMA CLI path. `scripts/kimodo/run_kimodo_all_tasks.py` should keep it enabled by default; use `KIMODO_POST_PROCESSING=0` only for ablations. |
+| KIMODO E14/E15 visualization | `scripts/kimodo/append_kimodo_context_soma77.py`, `scripts/kimodo/append_kimodo_e15_context_soma77.py` | Appends SOMA-77 prefix/suffix mesh data and writes `layout_json`; E14 can replace main condition frames with exact source-condition SOMA; E14 blends prefix/suffix seams over 30 frames; E15 blends the first suffix frames over up to 15 frames | This is display metadata for full-timeline rendering, but it can visually smooth KIMODO context seams. It must not be used as evidence that raw KIMODO generated boundaries are continuous. |
 | score_m2m web stitching | `motion_annot_web/score_m2m/score_m2m_web.py` | For SMPL-frame methods, stitches E14/E15 source context around main output and ground-aligns stitched frames | Web-only timeline alignment so pair A/B have the same frame count. KIMODO mesh-sequence files are expected to be pre-stitched offline. |
 | eval_dashboard source overlay | `motion_annot_web/eval_dashboard/app.py` | Rebuilds E14/E15 source motion overlays with the same placement / mesh type as eval output | Visualization-only; useful for debugging, but not a substitute for checking saved NPZ metrics. |
 
@@ -119,7 +119,7 @@ feed `global_joints_rots` to the denoiser; it stores them so
 canonicalization and root height are correct.
 
 SMPL↔KIMODO SOMA conversion reference: the eval bridge lives in
-`tools/run_kimodo_all_tasks.py` (`smpl22_to_soma30_retarget`,
+`scripts/kimodo/run_kimodo_all_tasks.py` (`smpl22_to_soma30_retarget`,
 `soma30_to_soma77`, `soma77_to_smpl22`). It is documented in
 `ref_repo/KIMODO/CLAUDE.md` §“SMPL ↔ SOMA 转换逻辑（我方评测桥接）”. The
 E14/E15 visualization appenders reuse the same chain to write SOMA-77
@@ -235,7 +235,7 @@ Every eval-task signature E1-E15 lies in the support of the prior by
 construction. Design and coverage audit:
 `docs/design/mask_prior_rank_k.md`.
 
-Coverage audit (N=10k, `tools/sampler_coverage_audit.py`): v3 reaches
+Coverage audit (N=10k, `scripts/eval/sampler_coverage_audit.py`): v3 reaches
 **≥0.1% effective coverage on 21/25 eval settings** (v2 10/25). The
 remaining 4 sub-0.1% v3 settings (E4.B/C/E, E2.mid60) still see tens of
 hits per epoch at realistic dataset sizes. v2 remains the default for
@@ -376,7 +376,7 @@ aggregated over joints) is also present, the loss is double-masked:
 where `valid_frame_mask` comes from the per-sample `tgt_length` / `src_length`
 passed by the caller. Padded tail frames are therefore always **free to evolve
 during ODE integration** (never pinned to a padded value), and output
-metrics are computed on the truncated `[:T]` window. `tools/eval_m2m_v2_all_tasks.py`
+metrics are computed on the truncated `[:T]` window. `scripts/eval/eval_m2m_v2_all_tasks.py`
 passes the actual motion length `T` as both `src_length` and `tgt_length`.
 
 ### 7. Adding a new condition transform? Checklist
@@ -390,7 +390,7 @@ When you write a new `Prepare*Condition` transform that produces
       the replicated-pad tail is fine — the trainer will zero it.
 - [ ] If your transform generates `src_mask` from rules that depend on
       "valid frames", build it against `num_frames`, not the padded length.
-- [ ] Add a smoke test similar to `tools/smoke_test_m2m_padding_fix.py`
+- [ ] Add a smoke test similar to `scripts/debug/smoke_test_m2m_padding_fix.py`
       covering T ∈ {short, exactly-clip_len, long}.
 
 ---
