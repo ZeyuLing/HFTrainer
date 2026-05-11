@@ -124,3 +124,18 @@ motion_process/
 eval_dashboard.db
 papers/
 papers/
+
+# Temporary evaluation and research scripts (should go to docs/temp/research_scripts/)
+/scripts/run_*.sh
+/scripts/pick_*.py
+/scripts/eval_*.py
+
+# Evaluation output databases
+*.db
+
+# Root-level research markdown (should go to docs/temp/)
+/DEEP_DIVE_*.md
+/E3_*.md
+/GT_MOTION_*.md
+/README_E3_*.md
+/M2M_COMPREHENSIVE_*.md
