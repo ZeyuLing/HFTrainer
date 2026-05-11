@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 KIMODO_ROOT = PROJECT_ROOT / "ref_repo" / "KIMODO" / "kimodo"
 sys.path.insert(0, str(KIMODO_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -1017,7 +1017,8 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
                     caption, T, task_id, setting, fps=30,
                     motion_135=None, bone_offsets=None,
                     canon_anchor_frame: int = 0,
-                    loop_target_rots=None, loop_target_pos=None):
+                    loop_target_rots=None, loop_target_pos=None,
+                    force_single_segment: bool = False):
     """Run KIMODO on one sample and return predicted SMPL-22 positions.
 
     Args:
@@ -1113,7 +1114,12 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
 
     # Sliding-window split: cap each segment ≤ KIMODO_SAFE_LEN to stay inside
     # the model's training distribution (~10s).  See _split_num_frames docstring.
-    seg_lens = _split_num_frames(num_frames)
+    # E8-D MUST run as single segment — multi-prompt crop_move drops the
+    # loop-target constraint from the first segment, causing boundary jumps.
+    if force_single_segment:
+        seg_lens = [num_frames]
+    else:
+        seg_lens = _split_num_frames(num_frames)
     is_multi = len(seg_lens) > 1
     seg_prompts = ([caption] if caption else [""]) * len(seg_lens)
     # KIMODO API quirk: __call__'s single-prompt branch wants
@@ -1481,7 +1487,7 @@ def main():
     # Load eval tasks
     from hftrainer.evaluation.motion.m2m_eval_tasks import EVAL_TASKS, get_task
     from hftrainer.evaluation.motion.m2m_eval_tasks import compute_transition_length
-    from tools.eval_m2m_v2_all_tasks import load_eval_samples, load_motion_135d
+    from scripts.eval.eval_m2m_v2_all_tasks import load_eval_samples, load_motion_135d
     from hftrainer.evaluation.motion.m2m_eval_metrics import motion135_to_positions_np
 
     all_results = {}
@@ -1646,7 +1652,13 @@ def main():
                             N_append = int(N_append_raw)
 
                         # Clip GT-tail condition the same way M2M does.
-                        T_PAD_MAX = 360
+                        # NOTE: using M2M's T_PAD_MAX=360 here, not
+                        # KIMODO_SAFE_LEN=240, because KIMODO's sliding-window
+                        # split handles longer sequences via multi-prompt.
+                        # Capping to 240 truncates too much GT context.
+                        # However, E8-D MUST run single-segment (see below),
+                        # so we also cap T_total to avoid OOM/quality collapse.
+                        T_PAD_MAX = 300  # single-segment cap for E8-D
                         T_gt_full = int(soma30_rots.shape[0])
                         T_gt_eff = max(1, min(T_gt_full,
                                               T_PAD_MAX - N_append))
@@ -1666,6 +1678,7 @@ def main():
                             canon_anchor_frame=0,
                             loop_target_rots=loop_target_rots,
                             loop_target_pos=loop_target_pos,
+                            force_single_segment=True,  # E8-D: multi-prompt breaks loop constraint
                         )
 
                     # ---- E14: transition stitching ----
@@ -1703,7 +1716,7 @@ def main():
                             continue
 
                         import torch as _torch
-                        from tools.eval_m2m_v2_all_tasks import _place_b_custom
+                        from scripts.eval.eval_m2m_v2_all_tasks import _place_b_custom
                         from hftrainer.evaluation.motion.m2m_eval_tasks import (
                             compute_cond_length,
                         )
@@ -1843,7 +1856,7 @@ def main():
                         from hftrainer.pipelines.motion.transition_utils import (
                             canonicalize_segment,
                         )
-                        from tools.eval_m2m_v2_all_tasks import _place_b_custom
+                        from scripts.eval.eval_m2m_v2_all_tasks import _place_b_custom
                         from hftrainer.evaluation.motion.m2m_eval_tasks import (
                             compute_cond_length,
                         )

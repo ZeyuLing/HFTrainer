@@ -1259,7 +1259,12 @@ def load_model(model_name: str, device: str):
     cfg = Config.fromfile(model_info['config'])
     bundle = MODEL_BUNDLES.build(cfg.model.to_dict())
 
-    ckpt_path = find_latest_checkpoint(model_info['work_dir'])
+    # Allow overriding work_dir via env var (e.g. to use a specific checkpoint epoch)
+    _override_key = f'_EVAL_WORK_DIR__{model_name}'.upper()
+    _work_dir = os.environ.get(_override_key, model_info['work_dir'])
+    if _work_dir != model_info['work_dir']:
+        print(f'  [override] work_dir: {model_info["work_dir"]} -> {_work_dir}')
+    ckpt_path = find_latest_checkpoint(_work_dir)
     if ckpt_path is None:
         print(f'  WARNING: No checkpoint found for {model_name} at {model_info["work_dir"]}')
         return None, None, None, model_info

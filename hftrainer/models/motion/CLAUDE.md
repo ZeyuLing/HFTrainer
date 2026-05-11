@@ -121,13 +121,30 @@ score = fs_ratio + 0.3 * xz_y_ratio + 15.0 * jitter + 2.0 * y_reversal_rate
 | `jitter` | Per-joint acceleration magnitude (lower = smoother) |
 | `y_reversal_rate` | How often pelvis Y reverses direction — a clean sit-down should be mostly monotonic, oscillations indicate jitter/instability |
 
-**Multi-seed best-of-N workflow:**
-1. Run eval with N different `--seed-base` values (default: 5 seeds, base 0xE4A10000 + n*0x100000)
-2. For each sample, compute composite score across all seeds
-3. Pick the seed with the lowest score per sample
-4. Replace NPZs and update `score_tasks.gen_motion_path` in score_m2m DB
+**Weighted Skating Score (2026-05-11, replaces composite score):**
 
-Implementation: `scripts/pick_best_quality.py`, `scripts/eval/eval_m2m_v2_all_tasks.py --seed-base`
+The binary-threshold `fs_ratio` under-detects skating where feet slide slowly but
+persistently (e.g. foot at y=0.01 sliding 0.9cm/frame × 72 frames = visible 0.6m drift,
+but below the 1.5cm/frame binary threshold). The weighted score captures this:
+
+```python
+for each frame fi in generated region:
+    for each foot joint j in [L_foot, R_foot]:
+        y = joint_position[fi, j, 1]          # foot height
+        if y < 0.15:
+            w = max(0, 1.0 - y / 0.15)       # weight: 1.0 at ground, 0 at 15cm
+            xz_slide = ‖pos[fi,j,xz] - pos[fi-1,j,xz]‖
+            total += xz_slide * w
+            weight_sum += w
+
+skating_score = total / weight_sum            # weighted avg slide per frame (meters)
+```
+
+Key properties:
+- No binary threshold — every ground-contact frame contributes proportionally
+- Foot at y=0 sliding 0.5cm contributes more than foot at y=0.12 sliding 2cm
+- Score unit: meters per frame. Typical good case < 0.003, bad case > 0.010
+- Used as the sole selection criterion for multi-seed best-of-N
 
 ### Post-Processing Inventory For M2M / KIMODO Eval
 
