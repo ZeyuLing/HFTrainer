@@ -79,6 +79,56 @@ canonicalization or truncation bug rather than model capacity:
 If jitter_pos > 1000 or foot_skating > 0.40 → open `docs/temp/m2m_canonical_ood_solution.md`
 and audit the eval branch against checklist items 1-6 above.
 
+### Foot Skating Detection — Composite Metric (2026-05-11)
+
+The legacy `foot_skating_ratio` metric (feet-on-ground XZ displacement) **under-detects
+perceptually obvious skating**. The most visible form of skating is "body translates
+in XZ while legs barely move" — which the pure foot-ground metric misses entirely
+because the feet may not be near the ground.
+
+**Composite skating score** (lower = better) used for multi-seed sample selection:
+
+```
+score = fs_ratio + 0.3 * mismatch - 0.1 * foot_vel_per_frame
+```
+
+| Component | Formula | Meaning |
+|---|---|---|
+| `fs_ratio` | `bad_frames / contact_frames` where bad = (foot Y < 0.08m AND foot XZ velocity > 0.015 m/frame) | Classic ground-contact skating: foot touches ground but slides |
+| `mismatch` | `pelvis_xz_displacement / (leg_rot_velocity / N_frames)` | Body-leg coordination: high when pelvis moves far but legs rotate little. `leg_rot_velocity` = total frame-to-frame rot6d L1 over joints [1,2,4,5,7,8,10,11] (hip, knee, ankle, foot) |
+| `foot_vel_per_frame` | `sum(‖foot[t] - foot[t-1]‖) / N_frames` for foot joints [10,11] | Penalizes static feet (natural walking has non-zero foot velocity). Subtracted to prefer samples with active leg motion |
+
+**Thresholds for joint definitions:**
+- Ground contact: foot joint Y < 0.08m (standing/walking cases)
+- Ground contact: foot joint Y < 0.12m (sit/lie/crouch cases — feet higher due to bent knees)
+- Ground sliding: foot joint XZ velocity > 0.015 m/frame (at 30fps = 0.45 m/s)
+- Ground sliding: foot joint XZ velocity > 0.012 m/frame (sit/lie — tighter, since feet should be more static)
+- Foot joints: indices [7,8,10,11] (L_Ankle, R_Ankle, L_Foot, R_Foot) in SMPL-22
+- Leg rotation joints: indices [1,2,4,5,7,8,10,11] (L_Hip, R_Hip, L_Knee, R_Knee + ankles + feet)
+
+**Height-change transitions (stand→sit/lie/crouch):** When pelvis Y changes by >0.2m
+between cond_a and cond_b, the standard composite score is not appropriate. Use
+`scripts/pick_best_height_change.py` which scores:
+
+```
+score = fs_ratio + 0.3 * xz_y_ratio + 15.0 * jitter + 2.0 * y_reversal_rate
+```
+
+| Component | Meaning |
+|---|---|
+| `fs_ratio` | Foot skating (same as above, but with Y<0.12 threshold) |
+| `xz_y_ratio` | pelvis XZ drift / pelvis Y change — low means clean vertical motion, high means unwanted horizontal drift during sit-down |
+| `jitter` | Per-joint acceleration magnitude (lower = smoother) |
+| `y_reversal_rate` | How often pelvis Y reverses direction — a clean sit-down should be mostly monotonic, oscillations indicate jitter/instability |
+
+**Multi-seed best-of-N workflow:**
+1. Run eval with N different `--seed-base` values (default: 5 seeds, base 0xE4A10000 + n*0x100000)
+2. For each sample, compute composite score across all seeds
+3. Pick the seed with the lowest score per sample
+4. Replace NPZs and update `score_tasks.gen_motion_path` in score_m2m DB
+
+Implementation: `scripts/pick_best_quality.py`, `scripts/eval/eval_m2m_v2_all_tasks.py --seed-base`
+
 ### Post-Processing Inventory For M2M / KIMODO Eval
 
 Treat post-processing as part of the evaluated method unless it is explicitly

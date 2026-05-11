@@ -3657,6 +3657,11 @@ def main():
                         help='Prefer the rewritten datalist variant '
                              '(eval_e*_rewritten.json) for caption-carrying '
                              'tasks. Produced by scripts/rewrite_eval_captions.py.')
+    parser.add_argument('--seed-base', type=lambda x: int(x, 0),
+                        default=0xE4A10000,
+                        help='Base seed for per-sample random state '
+                             '(seed = seed_base + sample_idx). '
+                             'Default: 0xE4A10000. Change to get different samples.')
     args = parser.parse_args()
 
     from hftrainer.evaluation.motion.m2m_eval_tasks import EVAL_TASKS, get_task
@@ -3864,7 +3869,7 @@ def main():
                         # every rerun produced a different motion, which broke
                         # cross-model comparison in the dashboard (switching
                         # models on the same case showed different generations).
-                        seed = 0xE4A10000 + i  # arbitrary but stable per-i
+                        seed = args.seed_base + i
                         torch.manual_seed(seed)
                         if torch.cuda.is_available():
                             torch.cuda.manual_seed_all(seed)
