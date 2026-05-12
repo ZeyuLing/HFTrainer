@@ -628,7 +628,7 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 - ✅ 随机稀疏: `renewal` + `markov`
 - ⚠️ **Gap**: 没有显式的 "multi-segment" primitive（如 [帧0-10] + [帧50-60]），但 K≥2 时两个 `interval` atom 的 OR 可以近似
 
-#### 8.2.2 空间/维度分布 (πD: 5 kinds)
+#### 7.2.2 空间/维度分布 (πD: 5 kinds)
 
 | Kind | 权重 | 覆盖的评估场景 | 锁定的维度 |
 |------|------|---------------|-----------|
@@ -646,7 +646,7 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 - ✅ **混合模态**: `mixed` — 组合 rot + pos + trans
 - ℹ️ **设计说明**: `pos_only` 覆盖 joints 1-21 的 position（维度 [135:198]），不含 pelvis；`trans_only` 覆盖 pelvis translation（维度 [0:3]）。这是**有意的层级分离**——pelvis 由 `trans_only` 专门控制，非 root 关节由 `pos_only` 控制，二者互补覆盖全部空间位置。如需同时控制二者，可用 `mixed` kind 或 K≥2 的多 atom 组合
 
-#### 8.2.3 稀疏度控制
+#### 7.2.3 稀疏度控制
 
 稀疏度由 **K (atom 数量)** 和 **temporal primitive 参数** 共同控制:
 
@@ -660,7 +660,7 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 
 **关键**: K≥2 时，多个 atom 的 Boolean OR 产生更丰富的条件模式，这是 v3 优于 v2 的核心——v2 只能产生 v3 K=1 等价的模式子集。
 
-#### 8.2.4 旋转 vs Position 模态覆盖
+#### 7.2.4 旋转 vs Position 模态覆盖
 
 | 模态 | 支持方式 | 训练采样概率 |
 |------|---------|-------------|
@@ -670,7 +670,7 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 | **混合模态** | `mixed` kind (18%) + K≥2 的 cross-kind | ~18% + 多 atom 组合 |
 | **全模态** | `all_dim` kind (20%) | ~20% × (1-0.10) ≈ 18% |
 
-### 8.3 V2 vs V3 对比与 Caption 配置的 Gap
+### 7.3 V2 vs V3 对比与 Caption 配置的 Gap
 
 | 维度 | V2 (caption configs) | V3 (uncond configs) |
 |------|---------------------|-------------------|
@@ -684,7 +684,7 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 **Caption 配置使用 V2 的原因**: 历史原因，v2 sampler 在 caption configs 出现时是最新版本。
 **建议**: 将 caption configs 也升级到 v3 sampler，统一训练采样。
 
-### 8.4 当前方案的不足与改进方向
+### 7.4 当前方案的不足与改进方向
 
 | 不足 | 严重度 | 改进方向 |
 |------|--------|---------|
@@ -696,18 +696,18 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 
 ---
 
-## 9. HyMotion M2M 支持的任务枚举 [v1.6 新增]
+## 8. HyMotion M2M 支持的任务枚举 [v1.6 新增]
 
 HyMotion M2M 是一个**统一的 motion-to-motion 框架**，通过 VACE 条件化 + mask 模式的组合，用单一模型覆盖以下全部任务。任务按类别分组:
 
-### 9.1 生成类任务
+### 8.1 生成类任务
 
 | 任务 ID | 任务名 | 描述 | 条件输入 | 对应 Condition Sampler |
 |---------|--------|------|---------|---------------------|
 | **E1** | Text-to-Motion (T2M) | 纯文本驱动生成，无 motion 条件 | text caption | K=0 (empty mask) |
 | **E13** | Multi-Prompt Generation | 给定 N 段文本描述，自回归链式生成任意长度动作 | N × text captions + 上一段末尾帧 | K=1 (interval: prefix anchor) |
 
-### 9.2 Motion Completion 任务（时间维度约束）
+### 8.2 Motion Completion 任务（时间维度约束）
 
 | 任务 ID | 任务名 | 描述 | 条件输入 | 对应 Condition Sampler |
 |---------|--------|------|---------|---------------------|
@@ -718,7 +718,7 @@ HyMotion M2M 是一个**统一的 motion-to-motion 框架**，通过 VACE 条件
 | **E15** | Prepend to Start Pose | 给定完整动作 A 和目标起始姿态 P，在 A 前生成过渡帧 | P (frame 0) + A (suffix) | K=1 (interval) |
 | **E8** | Loop Animation | 生成循环动作，首尾帧一致 | frame 0 = frame T (all_dim) | K=1 (interval) |
 
-### 9.3 Motion Editing 任务（空间维度约束）
+### 8.3 Motion Editing 任务（空间维度约束）
 
 | 任务 ID | 任务名 | 描述 | 条件输入 | 对应 Condition Sampler |
 |---------|--------|------|---------|---------------------|
@@ -727,13 +727,13 @@ HyMotion M2M 是一个**统一的 motion-to-motion 框架**，通过 VACE 条件
 | **E6** | Foot Ground Constraint | 在脚-地面接触帧锁定脚踝位置 | ankle position at contact frames (pos_only) | K=1 (renewal/periodic + pos_only) |
 | **E10** | Part-Level Control | 锁定指定身体部位的旋转，重新生成其余部分 | 指定关节的 rot6d (rot_only) | K=1 (all + rot_only subset) |
 
-### 9.4 Motion Repair 任务
+### 8.4 Motion Repair 任务
 
 | 任务 ID | 任务名 | 描述 | 条件输入 | 对应 Condition Sampler |
 |---------|--------|------|---------|---------------------|
 | **E9** | Motion Repair | 修复质量检测器标记的缺陷帧（抖动/滑步/穿模） | 非缺陷帧 (adaptive mask from checker) | K≥1 (checker-driven adaptive mask) |
 
-### 9.5 任务覆盖与 Condition Sampler 映射
+### 8.5 任务覆盖与 Condition Sampler 映射
 
 上述 14 个任务可归纳为以下训练时条件模式的组合:
 
@@ -760,13 +760,13 @@ HyMotion M2M 是一个**统一的 motion-to-motion 框架**，通过 VACE 条件
 
 ---
 
-## 10. 实验计划（按优先级排序） [v1.5 重写, v1.6 修正维度/null_embedding]
+## 9. 实验计划（按优先级排序） [v1.5 重写, v1.6 修正维度/null_embedding]
 
-### 10.1 实验设计原则
+### 9.1 实验设计原则
 
 每个实验只改变一个模块，按照 **改进生效概率** 从高到低排序。这样即使后续实验失败，前面的成功实验仍然可用。
 
-### 10.2 首批实验（4 个 Taiji 任务）
+### 9.2 首批实验（4 个 Taiji 任务）
 
 首批实验目标是验证 **Root 表征** 和 **Loss 对齐** 的效果。所有实验共享以下 loss 配置:
 
@@ -836,7 +836,7 @@ aux_fk_consistency_weight = 1500.0
 | **预期效果** | KIMODO root 下的 text 条件生成 |
 | **有效概率** | 65% |
 
-### 10.3 资源需求
+### 9.3 资源需求
 
 | 资源 | 需求 |
 |------|------|
@@ -845,7 +845,7 @@ aux_fk_consistency_weight = 1500.0
 | **停止的任务** | uncond_local, caption_local (当前跑的两个实验) |
 | **预计训练时长** | 每个实验 ~5-7 天 (100K steps @ batch_size=20-28) |
 
-### 10.4 后续实验（根据 E1-E4 结果决定）
+### 9.4 后续实验（根据 E1-E4 结果决定）
 
 | 实验 | 条件 | 内容 | 有效概率 |
 |------|------|------|---------|
@@ -856,7 +856,7 @@ aux_fk_consistency_weight = 1500.0
 | **E9: + DM-DSA** | E8 完成 | 加入密度调制双流注意力 | 45% |
 | **E10: + PCE** | E2/E4 text 效果不佳 | 三阶段渐进训练 | 50% |
 
-### 10.5 评估标准
+### 9.5 评估标准
 
 实验成功的**最低标准**:
 1. ✅ 在 Taiji 上成功启动
@@ -872,9 +872,9 @@ aux_fk_consistency_weight = 1500.0
 
 ---
 
-## 11. 评估指标与任务覆盖 [v1.5 从原 §7.2/§7.3 迁移]
+## 10. 评估指标与任务覆盖 [v1.5 从原 §7.2/§7.3 迁移]
 
-### 11.1 评估指标
+### 10.1 评估指标
 
 #### Text Conditioning 评估
 | 指标 | 说明 | 目标 |
@@ -898,7 +898,7 @@ aux_fk_consistency_weight = 1500.0
 | **Jitter** | 关节位置高频抖动 | < 600 |
 | **Physical Plausibility** | 脚穿地面、悬空等比例 | < 5% |
 
-### 11.2 评估任务覆盖
+### 10.2 评估任务覆盖
 
 全部 E1-E15 任务 + 新增:
 - **E-Text**: 纯 T2M 质量评估
@@ -908,9 +908,9 @@ aux_fk_consistency_weight = 1500.0
 
 ---
 
-## 12. 与前沿方法对比及新颖性分析
+## 11. 与前沿方法对比及新颖性分析
 
-### 12.1 方法对比矩阵
+### 11.1 方法对比矩阵
 
 | 特性 | 当前 M2M | VACE (Wan2.1) | OmniGen2 | Seedance 2.0 | Step1X-Edit | **CDO-FM (Ours)** |
 |------|---------|---------------|----------|--------------|-------------|-------------------|
@@ -922,7 +922,7 @@ aux_fk_consistency_weight = 1500.0
 | 任务统一 | 部分 | ✓ | ✓ | ✓ | 编辑为主 | **✓ (全覆盖)** |
 | 运动领域适配 | ✓ | ✗ (视频) | ✗ (图像) | ✗ (视频) | ✗ (图像) | **✓** |
 
-### 12.2 新颖性论证
+### 11.2 新颖性论证
 
 1. **Density-Modulated Dual-Stream Attention**: 不同于 UniCombine 的 LoRA switching 或 OmniGen2 的 hard dual-path，DM-DSA 实现了条件密度驱动的 soft routing，这是首次在 motion generation 中提出。其核心洞察——条件密度的变化需要动态调整语义（text）vs 结构（motion）信号的相对权重——具有普适性，可推广到 video/image inpainting。
 
@@ -932,7 +932,7 @@ aux_fk_consistency_weight = 1500.0
 
 4. **Progressive Condition Exposure**: 受 LLM 指令微调中课程学习的启发，PCE 首次系统化地解决 multi-modal multi-task motion generation 中的 shortcut learning 问题。
 
-### 12.3 与 VACE 的关系
+### 11.3 与 VACE 的关系
 
 CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 - VACE 提出了 `V=[T;F;M]` 的统一编码 → 我们的 TCC 是其类型化扩展
@@ -941,9 +941,9 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ---
 
-## 13. 顶会论文定位
+## 12. 顶会论文定位
 
-### 13.1 推荐标题
+### 12.1 推荐标题
 
 **"CDO-FM: Condition-Decoupled Orchestration for Unified Text-and-Motion Conditioned Human Motion Generation"**
 
@@ -951,7 +951,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 **"MotionCanvas: Density-Aware Condition Orchestration for Universal Motion Generation"**
 
-### 13.2 故事线
+### 12.2 故事线
 
 > 现有 motion generation 方法要么只做 text-to-motion (T2M)，要么只做 motion completion (M2M)，无法在一个模型中同时理解文本语义和空间运动约束。我们发现根因在于两类条件的**信息密度天然不对称**——一句话的信息量远低于 10 帧 dense keyframe。简单地将两者混入同一 conditioning pipeline 会导致模型学到忽略文本的 shortcut。
 >
@@ -959,12 +959,12 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 >
 > 在 XXX benchmark 上，CDO-FM 首次在单一模型中同时达到 T2M SOTA 和 M2M SOTA，且在 text-conditioned motion completion 这一新任务上显著优于所有 baseline。
 
-### 13.3 目标会议
+### 12.3 目标会议
 
 - **首选**: CVPR 2027 (DDL ~Nov 2026) / ICLR 2027 (DDL ~Oct 2026)
 - **备选**: NeurIPS 2027 (DDL ~May 2027) / ECCV 2027 (DDL ~Mar 2027)
 
-### 13.4 可能的审稿人关注点
+### 12.4 可能的审稿人关注点
 
 | 审稿人质疑 | 预备回应 |
 |-----------|---------|
@@ -976,9 +976,9 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ---
 
-## 14. 风险与备选方案
+## 13. 风险与备选方案
 
-### 14.1 风险评估
+### 13.1 风险评估
 
 | 风险 | 概率 | 影响 | 缓解策略 |
 |------|------|------|---------|
