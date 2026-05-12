@@ -2,7 +2,7 @@
 
 **Condition-Decoupled Orchestration Flow Matching**
 
-文档版本: 1.0 | 日期: 2026-05-11 | 状态: 方案设计
+文档版本: 1.4 | 日期: 2026-05-12 | 状态: 方案设计 (Phase 0: v2 caption bugs 已修复; 新增 KIMODO translation 对比实验)
 
 ---
 
@@ -32,28 +32,80 @@
 
 经过对完整代码库的深度审计，发现问题由**实现 bug** 和**架构局限性**共同导致：
 
-#### 1.2.1 实现 Bug（已确认 / 高度疑似）
+#### 1.2.1 实现 Bug（全部已修复）
 
-| # | Bug | 严重程度 | 状态 | 代码位置 |
-|---|-----|---------|------|---------|
-| B1 | **Bundle-level Parameter 不训练/不保存/不同步** | P0-Critical | 已修复 2026-03-27 | `hftrainer/models/base_bundle.py` |
-| B2 | **null_vtxt_feat 每次加载为全零** | P0-Critical | 已修 (B1的后果) | `hymotion_m2m/bundle.py:115` |
-| B3 | **VACE reactive 通道泄露 target 信息** | P0-Critical | 已修复 2026-03-25 | `hymotion_m2m_trainer.py` |
-| B4 | **M2M base bundle `cond_mask_prob=1.0`** | **P0-疑似未修** | **待确认** | `hymotion_m2m/bundle.py:74` |
-| B5 | **Text token长度分布 OOD** | P1 | 已修复 2026-04-20 | text encoder padding |
-| B6 | **Null embedding 分布不匹配** | P1 | 已修复 2026-04-21 | null 统计量对齐 |
+以下仅列出**对 v2 训练有实际影响**的 bug。B3 (VACE reactive 泄漏) 仅影响 v1 — v2 从设计之初就采用 `vace_condition_mode='no_inactive'`，不存在该问题。B4 (`cond_mask_prob` 默认值) v2 config 显式覆盖，无实际影响。修复详情见附录 A。
 
-**关键发现 — B4**: base M2M bundle 的 `cond_mask_prob` 设为 **1.0**（100% 文本 dropout），意味着训练时模型**从未见过真实文本**。这是 text conditioning 完全失效的直接原因。T2M bundle 使用 `cond_mask_prob=0.1`（10% dropout），CRFM v3 trainer 可能覆盖此值，但 base M2M 训练路径下文本被完全屏蔽。
+| # | Bug | 严重程度 | 影响范围 | 修复日期 | 核心影响 |
+|---|-----|---------|---------|---------|---------|
+| B1 | Bundle-level Parameter 不训练/不保存/不同步 | P0 | v2 caption (resume 场景) | 03-27 | null embeddings resume 后丢失 |
+| B2-ext | null embedding 加载链断裂 (safetensors 不含 bundle params) | P0 | v2 caption (phase/soar configs) | 05-12 | CFG 推理完全失效；训练时 10% unconditional 样本用全零 null embed |
+| B5/B6 | Text token OOD + null embedding 分布 | P1 | v2 caption only | 04-20/21 | text encoding 质量下降 |
+
+> **v2 实际影响总结**：
+> - **caption_local**: B1 (resume 场景)、B2-ext (phase/soar configs)、B5、B6 有实际影响
+> - **uncond_local**: **无 bug 影响**（不用文本、`cond_mask_prob=0.0` 从不触发 null embeddings、VACE `no_inactive` 模式免疫 reactive 泄漏）
+> - 其余 bug: B3 仅 v1 (`split_reactive` 模式)；B4 config 显式覆盖无效果
 
 #### 1.2.2 架构局限性
 
 | # | 局限 | 影响 |
 |---|------|------|
 | A1 | **Text 与 Motion condition 信号竞争** | Motion condition 信息密度远高于 text，模型注意力自然偏向 motion，text 信号被淹没 |
-| A2 | **VACE 固定 4 通道编码缺乏条件类型感知** | inactive/reactive/mask 不区分 keyframe、trajectory、joint constraint 等条件类型 |
-| A3 | **CFG 对 text 的控制力不足** | 当 motion condition 很强（dense mask）时，有无 text 的输出差异极小，CFG 失效 |
-| A4 | **训练数据质量** | 15.5% 低质量数据（滑步/抖动/关节跳变）拉低上限 |
-| A5 | **无显式物理约束** | 生成结果不保证脚-地面接触的物理合理性 |
+| A2 | **CFG 对 text 的控制力不足** | 当 motion condition 很强（dense mask）时，有无 text 的输出差异极小，CFG 失效 |
+| A3 | **训练数据质量** | 15.5% 低质量数据（滑步/抖动/关节跳变）拉低上限 |
+| A4 | **无显式物理约束** | 生成结果不保证脚-地面接触的物理合理性 |
+
+#### 1.2.3 滑步问题根因分析（2026-05-12 代码审计）
+
+评测显示 HyMotion M2M 相比 KIMODO 的最大质量差距是**滑步（foot skating）**。经过对 loss 计算、数据加载、translation augmentation 等环节的完整代码审计，确认**不是实现 bug，而是 5 项设计缺陷**：
+
+| # | 缺陷 | 严重度 | 当前状态 | 修复方式 |
+|---|------|--------|---------|---------|
+| D1 | **FK keypoint loss 已实现但被禁用** (`keypoints3d_weight=0.0`) | P0 | 代码存在，config 关闭 | Config: 设为 10+ |
+| D2 | **Translation 信号占比过低** (10.2% vs KIMODO 40.5%) | P1 | `trans_dim_weight=5.0` 但仅 3/135 维度 | 提高 `trans_dim_weight` 或增大 translation 维度权重 |
+| D3 | **Translation augmentation 被禁用** (`transl_aug_prob=0.0`) | P2 | Config 关闭 | Config: 设为 0.5 |
+| D4 | **Local rotation 误差沿运动链放大** | P1 | 无 FK 约束时固有问题 | 启用 FK loss (D1) 即可缓解 |
+| D5 | **无 foot contact / ground constraint 监督** | P2 | 未实现 | 需新增 CCFM (§6) |
+
+**代码验证**：translation-body motion 耦合实现正确。`load_smplx.py` 中 `process_transl()` 对 translation 和 root orientation 做一致的旋转增强；loss 计算中 translation (dims 0-3) 和 rotation (dims 3-135) 均参与 velocity loss，无遗漏。
+
+**立即可行的 config-only 修复**（不改代码）：
+1. `keypoints3d_weight=10.0`：启用已实现的 FK keypoint loss
+2. `transl_aug_prob=0.5`：启用 translation augmentation
+
+**对 CDO-FM 方案的影响**：D1-D3 的修复应纳入 Phase 0 baseline 重训；D5 由 §6 CCFM 解决。
+
+#### 1.2.4 Translation 表征对比：HyMotion vs KIMODO
+
+KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关键因素之一。以下对比两者 translation 表征差异，作为实验消融的依据。
+
+| 特性 | HyMotion M2M v2 (198-dim) | KIMODO (369-dim, SOMA-30) |
+|------|--------------------------|--------------------------|
+| **Translation** | [0:3] 绝对 pelvis XYZ，无平滑 | [0:3] ADMM 平滑后的 pelvis XYZ (margin=6cm) |
+| **Heading** | 隐含在 root rotation 中 | [3:5] 显式 `[cos θ, sin θ]` heading angle |
+| **Joint positions** | [135:198] 21×3 (XZ rel pelvis, Y abs, pelvis 除外) | [5:95] 30×3 (XZ rel pelvis, Y abs, pelvis 包含) |
+| **Rotation** | [3:135] 22×6 rot6d (local frame) | [95:275] 30×6 cont6d (**world frame**) |
+| **Velocity** | 隐含 (diffusion 学习 frame delta) | [275:365] 30×3 **显式 joint velocity** |
+| **Foot contact** | 无 | [365:369] 4-dim binary (L/R heel/toe) |
+| **关节数** | 22 (SMPL) | 30 (SOMA) |
+| **Translation augmentation** | 已实现但禁用 (`transl_aug_prob=0.0`) | 无需（ADMM 平滑提供正则化） |
+
+**关键差异分析**：
+
+1. **ADMM 平滑 translation** (KIMODO): 对 root XZ 轨迹施加 ADMM 优化 (margin ≤ 6cm)，去除高频抖动，使 translation 更平滑连续。HyMotion 直接使用原始 MoCap translation，包含噪声抖动，增加学习难度。
+2. **显式 velocity 通道** (KIMODO [275:365]): 模型直接看到关节速度信息，有利于学习时间一致性和滑步检测。HyMotion 的 velocity 完全隐含在 flow matching 的帧间差分中。
+3. **Foot contact 信号** (KIMODO [365:369]): 二值接触标签 (height < 0.15m ∧ velocity < 0.10 m/s) 提供显式地面约束。HyMotion 完全没有此信息。
+4. **World-frame rotation** (KIMODO [95:275]): 使用全局旋转而非局部旋转，避免局部旋转误差沿运动链传播放大 (D4)。代价是 canonical pose 无关性较弱。
+
+**实验消融计划**（纳入 Phase 0 或 Phase 1）：
+
+| 实验 | 变更 | 预期效果 | 成本 |
+|------|------|---------|------|
+| **E-T1: ADMM 平滑 translation** | 数据预处理: 对 [0:3] translation 施加 ADMM 平滑 (margin=6cm)，重新计算 mean/std | 减少 translation 高频噪声，改善滑步 | 低（预处理 + 重训） |
+| **E-T2: 显式 velocity 通道** | 扩展 198-dim → 261-dim: 增加 21×3 joint velocity [198:261] | 改善时间连续性和滑步检测 | 中（改 representation + 重训） |
+| **E-T3: Translation augmentation** | `transl_aug_prob=0.5`, `transl_aug_yaw_deg=180`, `transl_aug_offset_std=(1,0,1)` | 减少 position/orientation 过拟合 | 低（config-only） |
+| **E-T4: Foot contact 通道** | 扩展 +4-dim foot contact binary labels | 提供显式地面约束信号 | 中（数据预处理 + 改 representation） |
 
 ### 1.3 核心矛盾
 
@@ -470,7 +522,7 @@ Phase 2: Condition Introduction (渐进引入 motion condition)
 
 Phase 3: Full Multi-Task Mastery
 ├─ 目标: 全面提升所有任务性能
-├─ 数据: 100% 全 mask pattern (v3 Rank-K 采样器)
+├─ 数据: 100% 全 mask pattern (Rank-K 采样器)
 │   ├─ T2M (M5): 10-15% (维持 text 能力)
 │   ├─ Condition mix (M1-M4, M6-M7): 70-80%
 │   └─ Edit/Repair: 10-15%
@@ -679,7 +731,7 @@ fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
 
 | 实验 | 配置变化 | 验证目标 | 预计 GPU 时长 |
 |------|---------|---------|-------------|
-| A0: Baseline Fix | 修复 B4 (cond_mask_prob=0.1) | 确认 bug fix 的效果 | 8×V100, 2天 |
+| A0: Baseline Fix | 修复 B4 + FK loss 启用 + quality data | 确认 bug fix + 滑步改善效果 | 8×V100, 2天 |
 | A1: + TCC | 替换 VACE 为 TCC | 条件类型感知的效果 | 8×V100, 3天 |
 | A2: + DM-DSA | 加入密度调制双流注意力 | text-motion 平衡效果 | 8×V100, 3天 |
 | A3: + PCE | 三阶段渐进训练 | 防止 text shortcut | 16×V100, 5天 |
@@ -824,14 +876,20 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ## 11. 实施路线图
 
-### Phase 0: 紧急 Bug 修复 (Week 1)
+### Phase 0: Bug 修复 + 质量基线 (Week 1) — 核心项已完成
 
 ```
-□ 确认 B4: 检查实际训练使用的 cond_mask_prob 值
-□ 如果确实是 1.0，改为 0.1 重新训练一版 baseline
-□ 同步确认所有已知 bug (B1-B6) 的修复状态
+✅ v2 caption bugs 修复 (2026-03-27 ~ 2026-05-12):
+   - B1/B2-ext: bundle params 保存 + null embedding 加载链修复 (影响 v2 caption resume/phase/soar)
+   - B5/B6: text token OOD + null embedding 分布 (影响 v2 caption)
+   - 6 个 v2 caption 配置已添加 null_embedding_source (phase1/phase2/soar × local/global)
+✅ v2 uncond_local: 无 bug 影响，无需修复
+□ 滑步修复 — config-only (§1.2.3):
+  □ 启用 FK keypoint loss: keypoints3d_weight=10.0 (D1)
+  □ 启用 translation augmentation: transl_aug_prob=0.5 (D3)
 □ 切换训练数据到 high_quality.json (456K)
 □ 建立 text conditioning 评估基准 (R-Precision, Text Effect Ratio)
+□ 重新训练 baseline (bug fixes + 滑步修复 + quality data)
 ```
 
 ### Phase 1: MVP — 训练策略改进 (Week 2-3)
@@ -881,9 +939,22 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ## 附录 A: 关键代码修改清单
 
+### Phase 0 Bug Fixes（已完成 2026-05-12）
+
+**v2 caption 相关修复（B1/B2-ext/B5/B6）：**
+
 | 文件 | 修改类型 | 说明 |
 |------|---------|------|
-| `hftrainer/models/motion/hymotion_m2m/bundle.py` | 修改 | 增加 TCC, ContactHead; 修复 cond_mask_prob |
+| `hftrainer/runner/accelerate_runner.py` | 修改 | 新增 `_patch_zero_null_embeddings_from_pretrained()`, 在 auto_resume 和 load_from 后调用 (B2-ext) |
+| `configs/hymotion_m2m_v2/` × 6 configs | 修改 | phase1/phase2/soar caption configs 添加 `null_embedding_source` (B2-ext) |
+
+> **注**：B3 (VACE reactive 泄漏) 仅影响 v1 (`split_reactive` 模式)；v2 从设计之初即使用 `no_inactive` 模式，不存在该问题。B4 (`cond_mask_prob` 默认值) v2 config 显式覆盖，无实际影响。两者均不列入 v2 修复清单。
+
+### CDO-FM 架构升级（待实施）
+
+| 文件 | 修改类型 | 说明 |
+|------|---------|------|
+| `hftrainer/models/motion/hymotion_m2m/bundle.py` | 修改 | 增加 TCC, ContactHead |
 | `hftrainer/models/motion/hymotion_m2m/network/condition_routing.py` | 新增 | TypedConditionCanvas, DensityModulator |
 | `hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py` | 修改 | DualStreamDiTBlock 集成 DM-DSA |
 | `hftrainer/trainers/motion/hymotion_m2m_cdofm_trainer.py` | 新增 | CDO-FM Trainer (PCE + TAL-v2 + contact loss) |
