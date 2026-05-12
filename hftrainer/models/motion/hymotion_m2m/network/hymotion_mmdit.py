@@ -773,15 +773,6 @@ class HunyuanMotionMMDiT(nn.Module):
         self._final_layer_cfg = final_layer_cfg.copy()
         self.final_layer = FinalLayer(**final_layer_cfg)
 
-        # ============ Condition Density Embedding (CDE) — CRFM v3 ============
-        # Optional: encodes mask generation ratio [0,1] into a continuous
-        # embedding that is added to the adapter (alongside timestep + vtxt).
-        # Zero-initialized so that a model trained without CDE produces
-        # identical outputs when CDE is first attached.
-        self.enable_cde = kwargs.get('enable_cde', False)
-        if self.enable_cde:
-            from .condition_routing import ConditionDensityEmbedding
-            self.cde = ConditionDensityEmbedding(dim=feat_dim)
 
     def forward(
         self,
@@ -862,14 +853,6 @@ class HunyuanMotionMMDiT(nn.Module):
         # Combine timestep and vtxt to form the adapter signal for modulation
         # adapter is broadcast to all sequence positions via ModulateDiT layers
         adapter = timestep_feat + vtxt_feat
-
-        # Optionally add CDE (Condition Density Embedding) for CRFM v3.
-        # mask_density is passed via **kwargs; when not provided, CDE is skipped.
-        if self.enable_cde and 'mask_density' in kwargs:
-            mask_density = kwargs['mask_density']
-            if mask_density is not None:
-                cde_out = self.cde(mask_density)  # (B, feat_dim)
-                adapter = adapter + cde_out.unsqueeze(1)  # (B, 1, feat_dim)
 
         # ============ Build Attention Masks ============
         # Convert boolean masks to attention-compatible format (0 for valid, -inf for masked)
