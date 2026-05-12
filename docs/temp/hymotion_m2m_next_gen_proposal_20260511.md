@@ -2,7 +2,7 @@
 
 **Condition-Decoupled Orchestration Flow Matching**
 
-文档版本: 1.6 | 日期: 2026-05-12 | 状态: 方案设计 (Phase 0: v2 caption bugs 已修复; 双 Root 表征方案（KIMODO Root 修正为完整 6D root rotation，138-dim） + KIMODO 对齐 + 条件采样分析 + 优先级实验计划 + 任务枚举)
+文档版本: 1.7 | 日期: 2026-05-12 | 状态: 方案设计 (v1.7: 删除 TCC/CCFM/PCE，简化 KIMODO Root 为 198-dim smooth traj 替换，在线转换，V3 sampler 统一，loss 权重待定)
 
 ---
 
@@ -13,16 +13,15 @@
 3. [核心方案概述](#3-核心方案概述)
 4. [架构设计](#4-架构设计)
 5. [训练策略](#5-训练策略)
-6. [质量增强：接地感知生成](#6-质量增强接地感知生成)
-7. [双 Root 表征方案：SMPL Root vs KIMODO Root](#7-双-root-表征方案smpl-root-vs-kimodo-root) **[v1.6 修正: KIMODO Root 改为完整 6D root rotation]**
-8. [Motion Condition 训练采样分析](#8-motion-condition-训练采样分析) **[v1.5 新增]**
-9. [HyMotion M2M 支持的任务枚举](#9-hymotion-m2m-支持的任务枚举) **[v1.6 新增]**
-10. [实验计划（按优先级排序）](#10-实验计划按优先级排序) **[v1.5 重写, v1.6 修正维度/null_embedding]**
-11. [评估指标与任务覆盖](#11-评估指标与任务覆盖) **[v1.5 从原 §7.2/§7.3 迁移]**
-12. [与前沿方法对比及新颖性分析](#12-与前沿方法对比及新颖性分析)
-13. [顶会论文定位](#13-顶会论文定位)
-14. [风险与备选方案](#14-风险与备选方案)
-15. [实施路线图](#15-实施路线图) **[v1.6 更新]**
+6. [双 Root 表征方案：SMPL Root vs KIMODO Root](#6-双-root-表征方案smpl-root-vs-kimodo-root) **[v1.7 简化: 两版均 198-dim，仅替换 translation，在线转换]**
+7. [Motion Condition 训练采样分析](#7-motion-condition-训练采样分析)
+8. [HyMotion M2M 支持的任务枚举](#8-hymotion-m2m-支持的任务枚举)
+9. [实验计划（按优先级排序）](#9-实验计划按优先级排序)
+10. [评估指标与任务覆盖](#10-评估指标与任务覆盖)
+11. [与前沿方法对比及新颖性分析](#11-与前沿方法对比及新颖性分析)
+12. [顶会论文定位](#12-顶会论文定位)
+13. [风险与备选方案](#13-风险与备选方案)
+14. [实施路线图](#14-实施路线图)
 
 ---
 
@@ -418,266 +417,113 @@ dropout_schedule = {
 
 ---
 
-## 6. 质量增强：接地感知生成
+## 6. 双 Root 表征方案：SMPL Root vs KIMODO Root
 
-### 6.1 Contact-Conditioned Flow Matching (CCFM)
+### 6.1 动机
 
-**核心思想**: 将脚-地面接触状态作为显式条件，让模型在生成过程中直接"知道"哪些帧的脚应该落地。
+KIMODO 在滑步抑制上显著优于 HyMotion，根因之一是其 **ADMM smooth root trajectory** 表征。为了验证这一假设并找到最优方案，我们实现两套 root 表征并做 A/B 对比实验。
 
-#### 6.1.1 Contact Label 提取
+**关键简化（v1.7 修正）**: 经分析 KIMODO 推理代码，发现 heading channel 在推理时完全未使用，trans_residual 分解也不必要。因此我们仅借鉴 KIMODO 的 **ADMM smooth trajectory** 思想，直接替换 translation [0:3]，**不引入 heading、不引入 trans_residual、不改变维度**。两个版本均为 198-dim。
 
-从 GT motion 自动提取接触标签（训练时使用）：
+### 6.2 两版 Root 表征定义
 
-```python
-def extract_contact_labels(motion, skeleton, vel_thresh=0.01, height_thresh=0.03):
-    """
-    从 GT 动作中提取双脚接触标签。
-    Args:
-        motion: (T, 135) — 标准化前的原始动作
-        skeleton: SMPL-22 骨骼定义
-    Returns:
-        contact: (T, 2) — [left_foot, right_foot] 接触状态 (0/1)
-    """
-    # 通过 FK 计算全局关节位置
-    joint_positions = forward_kinematics(motion, skeleton)  # (T, 22, 3)
-
-    # 脚踝关节索引 (SMPL-22: L_Ankle=7, R_Ankle=8)
-    foot_pos = joint_positions[:, [7, 8], :]  # (T, 2, 3)
-    foot_vel = torch.diff(foot_pos, dim=0, prepend=foot_pos[:1])  # (T, 2, 3)
-    foot_speed = foot_vel.norm(dim=-1)  # (T, 2)
-    foot_height = foot_pos[:, :, 1]  # (T, 2) — Y 轴为高度
-
-    # 接触判定: 速度低 AND 高度低
-    contact = (foot_speed < vel_thresh) & (foot_height < height_thresh)
-    return contact.float()
-```
-
-#### 6.1.2 Contact 作为条件通道
-
-```python
-# 在 TCC 编码中追加 contact 通道
-model_input = torch.cat([
-    x_t,            # (B, L, 135) — 噪声状态
-    tcc_features,   # (B, L, 135) — 类型化条件特征
-    mask,           # (B, L, 135) — 生成 mask
-    contact_cond,   # (B, L, 2)   — 双脚接触状态（新增）
-], dim=-1)  # (B, L, 407) → 输入 projection
-```
-
-#### 6.1.3 Contact-Aware Loss
-
-```python
-def contact_aware_loss(pred_velocity, pred_motion, gt_contact, skeleton):
-    """
-    在预测接触的帧上惩罚脚部滑动。
-    """
-    # 通过 FK 获取脚部位置
-    pred_foot_pos = fk_foot(pred_motion, skeleton)  # (B, T, 2, 3)
-    pred_foot_vel = torch.diff(pred_foot_pos, dim=1)  # (B, T-1, 2, 3)
-
-    # 接触帧的脚部速度应为零
-    contact_mask = gt_contact[:, 1:, :]  # (B, T-1, 2)
-    foot_skating_loss = (pred_foot_vel.norm(dim=-1) * contact_mask).mean()
-
-    return foot_skating_loss
-```
-
-#### 6.1.4 Contact Head (辅助预测)
-
-在推理时，如果用户未提供 contact 信息，模型需自行预测合理的接触模式：
-
-```python
-class ContactPredictionHead(nn.Module):
-    """轻量级接触预测头，与主 velocity head 并行"""
-    def __init__(self, dim, num_feet=2):
-        super().__init__()
-        self.proj = nn.Sequential(
-            nn.Linear(dim, dim // 4),
-            nn.SiLU(),
-            nn.Linear(dim // 4, num_feet),
-        )
-
-    def forward(self, motion_features):
-        return self.proj(motion_features).sigmoid()
-```
-
-### 6.2 推理时 IK 精修
-
-即使训练时有 contact loss，推理时仍可能有轻微滑步。增加一个轻量后处理：
-
-```python
-def ik_foot_lock(motion, predicted_contacts, skeleton, blend_frames=3):
-    """
-    对预测的接触帧执行 IK 锁脚。
-    1. 找到每个接触段的第一帧，记录脚部位置
-    2. 在接触段内，固定脚部位置
-    3. IK 求解调整膝/踝关节旋转
-    4. 在接触段边界做 blend_frames 帧的平滑过渡
-    """
-    # ... IK 实现
-    return refined_motion
-```
-
-### 6.3 其他质量增强
-
-#### 6.3.1 Velocity Consistency Loss
-
-惩罚速度的不平滑变化（减少抖动）：
-
-```python
-vel_loss = smooth_l1(pred_velocity[:, 1:] - pred_velocity[:, :-1])
-acc_loss = smooth_l1(pred_accel[:, 1:] - pred_accel[:, :-1])
-```
-
-#### 6.3.2 FK Consistency Loss
-
-确保 rotation 和 position 的一致性：
-
-```python
-# 从预测的 rot6d 通过 FK 计算 position
-pred_pos_from_rot = forward_kinematics(pred_rot6d, skeleton)
-# 与预测的 position 对比
-fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
-```
-
----
-
-## 7. 双 Root 表征方案：SMPL Root vs KIMODO Root [v1.5 新增]
-
-### 7.1 动机
-
-KIMODO 在滑步抑制上显著优于 HyMotion，根因之一是其 **smooth root trajectory + explicit heading** 表征。为了验证这一假设并找到最优方案，我们实现两套 root 表征并做 A/B 对比实验。
-
-### 7.2 两版 Root 表征定义
-
-#### 7.2.1 版本 A: SMPL Root（当前实现）
+#### 6.2.1 版本 A: SMPL Root（当前实现，baseline）
 
 ```
-135-dim layout:
-  [0:3]   = absolute pelvis translation (world XYZ)
-  [3:9]   = pelvis rotation (rot6d, parent-relative = world-frame for pelvis)
-  [9:135]  = 21 body joint rotations (rot6d, parent-relative)
-
-198-dim layout (with position channels):
-  [0:135]   = 同上
-  [135:198] = 21 × 3 joint positions (Scheme D: XZ relative to pelvis, Y absolute)
+198-dim layout:
+  [0:3]     = raw pelvis translation (原始 MoCap world XYZ，含高频噪声)
+  [3:9]     = pelvis rotation (rot6d, world-frame)
+  [9:135]   = 21 body joint rotations (rot6d, parent-relative)
+  [135:198] = 21 × 3 joint positions (XZ relative to raw pelvis, Y absolute)
 ```
 
 **特点**：
 - translation 为原始 MoCap 数据，包含高频噪声/抖动
-- root rotation 隐含了 heading 信息
 - 与 SMPL forward kinematics 直接兼容，无需额外转换
-- 总维度: 135 (core) / 198 (extended)
+- 总维度: 198
 
-#### 7.2.2 版本 B: KIMODO Root（新实现）[v1.6 修正]
-
-> **v1.5→v1.6 重要修正**: 经对 KIMODO 源码 (`kimodo_motionrep.py`) 的深入分析发现，KIMODO 在 `global_rot_data[0:6]` 中**保留了完整 6D root rotation**，heading(2D) 仅是辅助特征用于 canonicalization，并未在重建时使用。因此原 v1.5 的 134-dim 方案（仅 2D heading，丢失 pitch/roll）是**错误的**。修正为保留完整 root rot6d 的 138-dim 方案，实现**零信息丢失的完美可逆**。
+#### 6.2.2 版本 B: KIMODO Root（smooth trajectory 替换）
 
 ```
-138-dim layout (smooth root + full rotation, 22 joints):
-  [0:3]   = ADMM-smoothed pelvis translation (smooth XZ, raw Y)
-  [3:9]   = root rotation (rot6d, 与版本 A 完全相同，无任何修改)
-  [9:135]  = 21 body joint rotations (rot6d, parent-relative) — 与版本 A 完全相同
-  [135:138] = translation residual (raw - smooth) — 用于可逆转换
-
-201-dim layout (with position channels):
-  [0:138]   = 同上
-  [138:201] = 21 × 3 joint positions (Scheme D: XZ relative to smooth root, Y absolute)
+198-dim layout (与版本 A 维度完全相同):
+  [0:3]     = ADMM-smoothed pelvis translation (smooth XZ, raw Y)
+  [3:9]     = pelvis rotation (rot6d, world-frame) — 与版本 A 完全相同
+  [9:135]   = 21 body joint rotations (rot6d, parent-relative) — 与版本 A 完全相同
+  [135:198] = 21 × 3 joint positions (XZ relative to smooth root, Y absolute)
 ```
 
-> **注意**: 我们使用 SMPL-22 骨架（不是 KIMODO 的 SOMA-30），因此关节数与版本 A 一致。与版本 A 的**唯一区别**是: (1) translation 从原始→ADMM平滑，(2) 末尾追加 3-dim translation residual，(3) position channels 参考系从 raw pelvis→smooth root。root rotation 和 body rotation **完全不变**。
+**与版本 A 的唯一区别**:
+1. **[0:3] translation**: raw → ADMM-smoothed（XZ 平面 ADMM 优化，margin ≤ 6cm；Y 轴保持不变）
+2. **[135:198] position channels 参考系**: relative to raw pelvis → relative to smooth root
 
-**关键设计决策（v1.6 修正）**:
+**不引入的内容**:
+- ~~heading channel~~: KIMODO 推理时未使用，不引入
+- ~~trans_residual~~: 不拆分 smooth + residual，不增加维度
+- ~~维度变化~~: 两版均为 198-dim，架构代码完全不变
 
-1. **保留完整 root rotation (rot6d)**：KIMODO 源码证实其 `global_rot_data[0:6]` 保留了完整 3D root rotation。我们同样保留完整 rot6d，**不提取 heading**。这确保零信息丢失，且 KIMODO Root → SMPL Root 转换是精确可逆的。
-2. **ADMM 平滑 translation**: 仅对 XZ 轴施加 ADMM 优化 (margin ≤ 6cm)，保留 Y 轴高度信息。去除 translation 的高频抖动。
-3. **保留 translation residual**: 在末尾 3 dims 存储 `raw_translation - smooth_translation`，确保转换完全可逆。推理时，输出的 smooth_trans + residual = raw_trans，直接恢复 SMPL 格式。
-4. **Body rotation 不变**: dims [9:135] (版本 B) 与 dims [9:135] (版本 A) **完全相同**——都是 21 个 body joint 的 parent-relative rot6d。
-5. **Root rotation 不变**: dims [3:9] (版本 B) 与 dims [3:9] (版本 A) **完全相同**——都是 pelvis 的 world-frame rot6d。版本 B 只改变 translation 和追加 residual。
-6. **Position channels 参考系切换**: position 从 relative to raw pelvis 改为 relative to smooth root，与 KIMODO 保持一致。
+### 6.3 SMPL Trans → KIMODO Trans 在线转换
 
-**vs v1.5 的 134-dim 方案（已废弃）**:
-
-| 对比项 | v1.5 (134-dim, ❌废弃) | v1.6 (138-dim, ✅当前) |
-|--------|----------------------|---------------------|
-| Root rotation | 仅 2D heading [cos(ψ), sin(ψ)]，丢失 pitch/roll | 完整 rot6d (6 dims)，零信息丢失 |
-| 可逆性 | ⚠️ 近似（pelvis pitch/roll < 5° 的假设） | ✅ 精确（所有维度完全可逆） |
-| 维度 | 134 (3+2+126+3) | 138 (3+6+126+3) |
-| 推理兼容 | 需要复杂的 heading→rot6d 近似转换 | 直接取 [3:9] 即可，与 SMPL 完全兼容 |
-| 实现复杂度 | 高（heading 提取/恢复，pitch/roll 近似） | 低（仅 translation 平滑+residual） |
-
-### 7.3 KIMODO Root ↔ SMPL Root 转换（精确可逆）[v1.6 修正]
-
-v1.6 方案中，KIMODO Root 保留完整 root rotation，转换**精确可逆，零信息丢失**。
+转换在数据加载时**在线完成**，不需要离线预处理 motion 文件。仅需预先计算版本 B 的 mean/std 统计量。
 
 ```python
-def smpl_root_to_kimodo_root(smpl_motion: Tensor, admm_margin: float = 0.06) -> Tensor:
+def smpl_trans_to_smooth_trans(motion_198: Tensor, admm_margin: float = 0.06) -> Tensor:
     """
-    将 SMPL root 表征转换为 KIMODO root 表征。
+    在线将 SMPL Root 198-dim 转换为 KIMODO Root 198-dim。
+    在 dataset __getitem__ 中调用。
     
-    输入: (B, T, 135) SMPL root layout
-    输出: (B, T, 138) KIMODO root layout
+    输入/输出: (T, 198)，维度不变
     
-    转换步骤:
-    1. ADMM 平滑 translation XZ (Y 保留)
-    2. 计算 translation residual = raw - smooth
-    3. 拼接: [smooth_trans(3), root_rot6d(6), body_rot(126), trans_residual(3)]
-    
-    注意: root rotation 和 body rotation 完全不变。
-    唯一的区别是 translation 被分解为 smooth + residual。
+    转换:
+    1. [0:3] raw_trans → ADMM smooth_trans (XZ平滑, Y不变)
+    2. [3:135] rotation 部分完全不变
+    3. [135:198] position 参考系从 raw pelvis → smooth root
     """
-    raw_trans = smpl_motion[..., 0:3]        # (B, T, 3)
-    root_rot6d = smpl_motion[..., 3:9]       # (B, T, 6) — 直接保留
-    body_rot = smpl_motion[..., 9:135]       # (B, T, 126) — 直接保留
+    raw_trans = motion_198[..., 0:3]           # (T, 3)
+    rotation = motion_198[..., 3:135]          # (T, 132) — 透传
+    pos_rel_raw = motion_198[..., 135:198]     # (T, 63) = 21×3
     
-    # Step 1: ADMM 平滑 translation (XZ only)
+    # Step 1: ADMM 平滑 translation XZ (Y 保持)
     smooth_trans = admm_smooth_xz(raw_trans, margin=admm_margin)
     
-    # Step 2: Translation residual
-    trans_residual = raw_trans - smooth_trans  # (B, T, 3)
+    # Step 2: 调整 position 参考系
+    # pos_rel_raw[j] = world_pos[j] - raw_trans (对 XZ)
+    # pos_rel_smooth[j] = world_pos[j] - smooth_trans (对 XZ)
+    # → pos_rel_smooth[j] = pos_rel_raw[j] + (raw_trans - smooth_trans)
+    trans_diff = (raw_trans - smooth_trans)  # (T, 3)
+    # 将 trans_diff 广播到 21 个 joint
+    trans_diff_expanded = trans_diff.unsqueeze(-2).expand(..., 21, 3).reshape(..., 63)
+    pos_rel_smooth = pos_rel_raw + trans_diff_expanded  # 仅 XZ 变化，Y 不变（因为 Y 轴 smooth_trans.y == raw_trans.y）
     
-    # Step 3: 拼接 [smooth_trans, root_rot, body_rot, residual]
-    kimodo_motion = torch.cat([smooth_trans, root_rot6d, body_rot, trans_residual], dim=-1)
-    return kimodo_motion  # (B, T, 138)
+    return torch.cat([smooth_trans, rotation, pos_rel_smooth], dim=-1)  # (T, 198)
 
-def kimodo_root_to_smpl_root(kimodo_motion: Tensor) -> Tensor:
+
+def smooth_trans_to_smpl_trans(motion_198_smooth: Tensor, raw_trans: Tensor) -> Tensor:
     """
-    将 KIMODO root 表征转换回 SMPL root 表征。
+    推理后将 KIMODO Root 输出转换回 SMPL Root。
     
-    输入: (B, T, 138) KIMODO root layout
-    输出: (B, T, 135) SMPL root layout
+    注意: 推理输出的 [0:3] 就是 smooth_trans，可直接用于 SMPL 的 translation。
+    因为 ADMM smooth_trans 是 raw_trans 的平滑近似（margin ≤ 6cm），
+    直接使用 smooth_trans 作为 SMPL translation 即可，误差在 6cm 以内。
     
-    转换步骤:
-    1. 恢复原始 translation: raw_trans = smooth_trans + trans_residual
-    2. 拼接: [raw_trans(3), root_rot6d(6), body_rot(126)]
-    
-    精确可逆: 零信息丢失。
+    如果需要更精确的还原，可以在推理时用原始 translation 做 replace guidance。
     """
-    smooth_trans = kimodo_motion[..., 0:3]       # (B, T, 3)
-    root_rot6d = kimodo_motion[..., 3:9]         # (B, T, 6) — 原封不动
-    body_rot = kimodo_motion[..., 9:135]         # (B, T, 126) — 原封不动
-    trans_residual = kimodo_motion[..., 135:138]  # (B, T, 3)
-    
-    # 恢复原始 translation
-    raw_trans = smooth_trans + trans_residual
-    
-    # 拼接回 SMPL 格式
-    smpl_motion = torch.cat([raw_trans, root_rot6d, body_rot], dim=-1)
-    return smpl_motion  # (B, T, 135)
+    # 直接使用 smooth_trans 作为 SMPL translation（近似，误差 ≤ 6cm）
+    return motion_198_smooth  # translation 直接用，rotation 不变
 ```
 
-**可逆性分析 (v1.6 — 精确可逆)**:
+**数据预处理仅需**:
+```
+预计算 KIMODO Root 版本的 mean/std 统计量:
+  1. 对全部训练数据在线转换 (smpl_trans_to_smooth_trans)
+  2. 计算 198-dim 的新 mean/std
+  3. 保存为 mean_std_198dim_kimodo_root.npz
 
-| 方向 | 是否精确可逆 | 说明 |
-|------|-------------|------|
-| SMPL → KIMODO → SMPL (translation) | ✅ 精确 | `smooth + residual = raw`，零误差 |
-| SMPL → KIMODO → SMPL (root rotation) | ✅ 精确 | root rot6d 原封不动传递，零修改 |
-| SMPL → KIMODO → SMPL (body rotation) | ✅ 精确 | body rot 原封不动传递，零修改 |
-| KIMODO → SMPL (推理输出) | ✅ 精确 | `kimodo_root_to_smpl_root()` 精确恢复 |
+预处理耗时: < 30min (遍历一遍训练集即可)
+```
 
-> **与 v1.5 的对比**: v1.5 方案因仅保留 2D heading，pitch/roll 丢失，只能"近似可逆"。v1.6 完全消除了这个问题。
+### 6.4 Loss 对齐
 
-### 7.4 Loss 对齐：Position Loss 在 Relative-to-Root 空间计算
+#### 6.4.1 Position Loss 在 Relative-to-Root 空间计算
 
 当前实现中 keypoint3d loss 已经在 relative to root 空间计算（参见 `m2m_loss.py:222`）:
 ```python
@@ -686,95 +532,62 @@ local_keypoints3d = pred_keypoints3d[:, :, 1:22] - pred_keypoints3d[:, :, 0:1, :
 
 但 position channels 的 loss（x1 loss、velocity loss）在绝对空间计算，需要对齐:
 
-**修改方案**:
-1. **版本 B (KIMODO Root, 201-dim)**: position channels [138:201] 已经是 relative to smooth root，loss 自然在相对空间
-2. **版本 A (SMPL Root, 198-dim)**: 也改为在 relative to root 空间计算 position loss，与版本 B 统一
-3. **实现**: 在 `m2m_loss.py` 中，计算 position loss 前先减去 root position：
-   ```python
-   # Before:
-   pos_loss = smooth_l1(pred_x1[..., 135:198], target_x1[..., 135:198])
-   
-   # After (unified, 版本 A):
-   pred_pos_rel = pred_x1[..., 135:198] - expand_to_joints(pred_x1[..., 0:3])
-   target_pos_rel = target_x1[..., 135:198] - expand_to_joints(target_x1[..., 0:3])
-   pos_loss = smooth_l1(pred_pos_rel, target_pos_rel)
-   
-   # 版本 B 的 position channels 已经是 relative-to-smooth-root，无需额外处理:
-   # pos_loss = smooth_l1(pred_x1[..., 138:201], target_x1[..., 138:201])
-   ```
+**修改方案（两版统一）**:
+- 在 `m2m_loss.py` 中，计算 position loss 前先减去 root position：
+  ```python
+  # Before:
+  pos_loss = smooth_l1(pred_x1[..., 135:198], target_x1[..., 135:198])
+  
+  # After (两版统一):
+  pred_pos_rel = pred_x1[..., 135:198] - expand_to_joints(pred_x1[..., 0:3])
+  target_pos_rel = target_x1[..., 135:198] - expand_to_joints(target_x1[..., 0:3])
+  pos_loss = smooth_l1(pred_pos_rel, target_pos_rel)
+  ```
+- **版本 B** 的 position channels 已经是 relative-to-smooth-root，此公式同样适用（pred_x1[0:3] 就是 smooth_trans）
 
-### 7.5 Loss 对齐：移除 t² Timestep Weighting [v1.6 修正理由]
+#### 6.4.2 移除 t² Timestep Weighting
 
 当前 `kimodo_aux_loss.py` 中对辅助 loss 施加了 t² 加权:
 ```python
-# kimodo_aux_loss.py line 280-283
 if self.timestep_squared_weighting and timesteps is not None:
-    t_sq = (timesteps.to(pred_world.device) ** 2)  # (B,)
+    t_sq = (timesteps.to(pred_world.device) ** 2)
     per_frame = per_frame * t_sq.unsqueeze(-1)
 ```
 
-**t² 加权的效果**: `E[t²] = 1/3`（t~Uniform[0,1]），意味着靠近纯噪声端 (t→0) 的样本贡献被大幅降低。原始设计意图是：在纯噪声时 FK 计算无意义，避免辅助 loss 产生错误梯度。
-
 **移除理由**:
-1. **KIMODO 不使用 t² 加权**: 经代码审计确认，t² weighting 是我们在 `kimodo_aux_loss.py` 中**自行添加的**（灵感来自 `motion198_fk_loss` 的设计），而非来自 KIMODO 原版。KIMODO 原版使用固定 γ 权重，无 timestep-dependent scaling。按照"KIMODO 不用我们也不用"的原则，移除。
-2. **Flow matching 特性**: 在 rectified flow 中，velocity prediction 的目标 `v = x1 - x0` 与 t 无关，所有 t 的 loss 等权是合理的
-3. **辅助 loss 在低 t 也有信号**: 即使 `x_t = (1-t)*noise + t*x1` 在 t 小时接近纯噪声，模型的**预测 x1** 仍然有意义（是模型对 clean motion 的最佳估计），FK 在预测 x1 上计算而非在 x_t 上
-4. **实验对齐**: 移除 t² 使两版模型的 loss 完全可比
+1. **KIMODO 不使用 t² 加权**: 经代码审计确认，t² weighting 是我们自行添加的，而非 KIMODO 原版。按"与 KIMODO 对齐"原则移除
+2. **Flow matching 特性**: velocity prediction 目标 `v = x1 - x0` 与 t 无关，等权合理
+3. **辅助 loss 在低 t 也有信号**: 模型的预测 x1 在任意 t 都有意义，FK 在预测 x1 上计算而非 x_t 上
 
-**修改**: 将 `timestep_squared_weighting=True` 改为 `timestep_squared_weighting=False`（config 修改，不改代码）。
+**修改**: `timestep_squared_weighting=False`（config 修改）
 
-### 7.6 两版配置对比 [v1.6 修正]
+#### 6.4.3 Loss 权重
+
+各 loss 项的权重**待首批实验启动后根据各项 loss 数值量级确定**，暂不硬编码。初始值参考 KIMODO 原版设定，训练后根据 loss 曲线动态调整。
+
+### 6.5 两版配置对比
 
 | 配置项 | 版本 A: SMPL Root | 版本 B: KIMODO Root |
 |--------|------------------|-------------------|
-| **motion_dim** | 198 (135 core + 63 pos) | 201 (138 core + 63 pos) |
-| **root 表征** | [trans(3), root_rot6d(6)] = 9 dims | [smooth_trans(3), root_rot6d(6), residual(3)] = 12 dims |
-| **root rotation** | [3:9] rot6d | [3:9] rot6d (**完全相同**) |
-| **body rotation** | [9:135] 21×6 rot6d | [9:135] 21×6 rot6d (**完全相同**) |
-| **position channels** | [135:198] relative to raw pelvis | [138:201] relative to smooth root |
+| **motion_dim** | 198 | 198 (**相同**) |
+| **layout** | `[raw_trans(3), rot6d(132), pos_rel_raw_pelvis(63)]` | `[smooth_trans(3), rot6d(132), pos_rel_smooth_root(63)]` |
+| **rotation [3:135]** | 22×6 rot6d | **完全相同** |
 | **position loss 空间** | relative to root (对齐后) | relative to smooth root (自然) |
 | **t² weighting** | ❌ 移除 | ❌ 移除 |
 | **velocity loss** | ✅ | ✅ |
-| **FK keypoint loss** | keypoints3d_weight=10.0 | keypoints3d_weight=10.0 |
-| **KIMODO aux losses** | aux_joint_pos=50, aux_joint_vel=500, aux_fk=1500 | 同 |
-| **motion smoothness** | motion_smoothness_weight=0.5 | 同 |
-| **trans_dim_weight** | 5.0 | 5.0 |
-| **transl_aug** | ❌ 不启用 (保持两版纯对比) | ❌ 不需要 (ADMM 已平滑) |
-| **ADMM 预处理** | 不需要 | 离线计算 + 缓存 |
-| **推理后转换** | 不需要 | kimodo_root_to_smpl_root() — 精确可逆 |
-| **与 SMPL Root 的差异** | — | **仅 translation 和末尾 residual 不同，rotation 完全相同** |
-
-### 7.7 数据预处理管线
-
-版本 B (KIMODO Root) 需要离线预处理，将原始 MoCap 数据转换为 KIMODO root 格式:
-
-```
-输入: data/annotation/train_hymotion_400h.json → .npz files (135-dim SMPL Root)
-    ↓
-Step 1: 对每个 motion 的 translation [0:3] 执行 ADMM XZ 平滑 (margin=0.06m)
-    ↓
-Step 2: 计算 translation residual = raw_trans - smooth_trans (3-dim)
-    ↓
-Step 3: 拼接为 138-dim: [smooth_trans(3), root_rot6d(6), body_rot(126), trans_residual(3)]
-       (rotation 部分 [3:135] 直接从原始 SMPL 数据透传，无任何变换)
-    ↓
-Step 4: 重新计算 position channels: 21×3 joints relative to smooth root → 63-dim
-    ↓
-Step 5: 拼接为 201-dim = 138 + 63，计算新的 mean/std 统计量
-    ↓
-输出: data/annotation/train_hymotion_400h_kimodo_root.json + .npz files (201-dim)
-     + data/annotation/mean_std_201dim_kimodo_root.npz
-```
-
-**注意**: Step 1 中 ADMM 平滑仅作用于 XZ 平面，Y 轴透传。这与 KIMODO 原版实现一致。
-
-预计预处理耗时: ~2h (单 CPU，可并行加速)
+| **FK keypoint loss** | 启用 | 启用 |
+| **KIMODO aux losses** | 启用 (权重待定) | 启用 (权重待定) |
+| **transl_aug** | ❌ 不启用 (保持纯对比) | ❌ 不需要 (ADMM 已平滑) |
+| **数据转换** | 无需转换 | 在线 ADMM 转换 (dataset __getitem__) |
+| **额外预处理** | 无 | 仅预算新 mean/std |
+| **推理后转换** | 不需要 | smooth_trans 直接作为 SMPL trans (误差 ≤ 6cm) |
+| **架构代码改动** | 无 | **无** (维度不变，仅 data transform + mean/std 不同) |
 
 ---
 
-## 8. Motion Condition 训练采样分析 [v1.5 新增]
+## 7. Motion Condition 训练采样分析
 
-### 8.1 概述
+### 7.1 概述
 
 Motion condition 采样是 HyMotion M2M 的核心能力之一。它决定了模型在推理时能处理多大范围的 condition pattern。当前有两个采样器版本:
 
@@ -783,7 +596,7 @@ Motion condition 采样是 HyMotion M2M 的核心能力之一。它决定了模�
 | **v2** | caption configs (`cond_mask_prob=0.1`) | ~40% | 两层混合: 60% 参数化 Tier-1 + 40% 模板 Tier-2 |
 | **v3** | uncond configs (`cond_mask_prob=0.0`) | ~84% | Rank-K Boolean Tensor Prior, 数学统一 |
 
-### 8.2 V3 Condition Sampler 详解
+### 7.2 V3 Condition Sampler 详解
 
 V3 sampler 是当前最先进的设计，核心是 **Rank-K Boolean Tensor Prior**:
 
@@ -796,7 +609,7 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
   d_k ∈ {0,1}^198 — 维度模式 (从 5 种 dimensional kind 中采样)
 ```
 
-#### 8.2.1 时间分布 (πT: 6 primitives)
+#### 7.2.1 时间分布 (πT: 6 primitives)
 
 | Primitive | 权重 | 覆盖的评估场景 | 分布特征 |
 |-----------|------|---------------|---------|
@@ -1001,10 +814,10 @@ aux_fk_consistency_weight = 1500.0
 
 | 项目 | 值 |
 |------|-----|
-| **Root 表征** | 版本 B: KIMODO Root (201-dim = 138 rotation/translation + 63 position) |
+| **Root 表征** | 版本 B: KIMODO Root (198-dim) |
 | **训练任务** | Unconditional (cond_mask_prob=0.0) |
-| **Condition Sampler** | v3 (适配 201-dim) |
-| **修改内容** | 新 root 表征 (smooth_trans + rot6d + body_rot + residual) + ADMM 预处理 + 新 mean/std |
+| **Condition Sampler** | v3 (适配 198-dim) |
+| **修改内容** | 新 root 表征 (ADMM smooth translation 替换 raw translation [0:3]) + 在线转换 + 新 mean/std |
 | **Config 基础** | 新建 `hymotion_m2m_v2_kimodo_uncond_046b.py` |
 | **GPU** | 48 × V100 |
 | **预期效果** | 在 E1 基础上进一步减少滑步（ADMM smooth translation 效果） |
@@ -1014,9 +827,9 @@ aux_fk_consistency_weight = 1500.0
 
 | 项目 | 值 |
 |------|-----|
-| **Root 表征** | 版本 B: KIMODO Root (201-dim) |
+| **Root 表征** | 版本 B: KIMODO Root (198-dim) |
 | **训练任务** | Caption (cond_mask_prob=0.1) |
-| **Condition Sampler** | v3 (适配 201-dim) |
+| **Condition Sampler** | v3 (适配 198-dim) |
 | **修改内容** | 同 E3 + caption 支持 + `null_embedding_source` 配置 |
 | **Config 基础** | 新建 `hymotion_m2m_v2_kimodo_caption_046b.py` |
 | **GPU** | 48 × V100 |
@@ -1206,12 +1019,12 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
    - B5/B6: text token OOD + null embedding 分布 (影响 v2 caption)
    - 6 个 v2 caption 配置已添加 null_embedding_source (phase1/phase2/soar × local/global)
 ✅ v2 uncond_local: 无 bug 影响，无需修复
-□ 实现 KIMODO Root 表征 (§7):
-  □ 实现 smpl_root_to_kimodo_root() 和 kimodo_root_to_smpl_root() 转换函数
-     (rotation 透传，translation 做 ADMM 平滑 + residual 拆分)
-  □ 实现 ADMM XZ 平滑 (移植 KIMODO smooth_root.py)
-  □ 数据预处理: 生成 201-dim KIMODO root 版本数据 + mean/std
-  □ 单元测试: 可逆性验证 (SMPL 135 → KIMODO 138 → SMPL 135 roundtrip, 零误差)
+□ 实现 KIMODO Root 表征 (§6):
+  □ 实现在线转换函数 smpl_trans_to_smooth_trans() 和 smooth_trans_to_smpl_trans()
+     (仅替换 translation [0:3] 为 ADMM平滑, rotation 和 position 透传)
+  □ 实现或集成 ADMM XZ 平滑 (margn ≤ 6cm, 可从 KIMODO 或自实现)
+  □   □ 数据预处理: SMPL root 在线转换为 KIMODO root (198-dim) + 计算新 mean/std
+  □ 单元测试: 在线转换验证 (SMPL 198 → 在线ADMM平滑 → SMPL 198 roundtrip, 零误差 + 6cm tolerance)
 □ Loss 对齐 (§7.4, §7.5):
   □ Position loss 改为 relative-to-root 空间
   □ 移除 t² timestep weighting (config 修改)
@@ -1220,7 +1033,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 □ Config 准备:
   □ E1: hymotion_m2m_v2_smpl_uncond_046b.py (版本 A, 198-dim)
   □ E2: hymotion_m2m_v2_smpl_caption_046b.py (版本 A + caption + null_embedding_source)
-  □ E3: hymotion_m2m_v2_kimodo_uncond_046b.py (版本 B, 201-dim)
+  □ E3: hymotion_m2m_v2_kimodo_uncond_046b.py (版本 B, 198-dim, ADMM平滑translation)
   □ E4: hymotion_m2m_v2_kimodo_caption_046b.py (版本 B + caption + null_embedding_source)
 □ Debug on lzy_debug_machine_1/2:
   □ 单步训练 (版本 A 和版本 B 各 1 step)
@@ -1448,4 +1261,4 @@ def test_position_channels():
 
 ---
 
-*文档结束。v1.6 核心更新: KIMODO Root 修正为完整 6D root rotation (138-dim, 非 2D heading)，精确可逆转换 + t² weighting 确认为非 KIMODO 原版 + pos_only/trans_only 层级互补澄清 + 任务枚举 (14 个评估任务) + null_embedding_source 配置要求 + 实验维度修正 (197→201)。方案长期目标: 通过密度感知的条件解耦编排 (CDO-FM)，实现 text 和 motion condition 的自适应平衡，并以接触条件化 flow matching 提升生成质量。*
+*文档结束。v1.7 核心简化：KIMODO Root 从 201-dim (smooth_trans + rot6d + body_rot + trans_residual) 简化为 198-dim (仅替换 translation [0:3] 为 ADMM平滑值，rotation/position 透传)，维度不变、架构无改动、在线转换即可。移除 TCC/CCFM/PCE 复杂方案，聚焦 Phase 0 首批实验：E1-E4 验证 SMPL Root vs KIMODO Root 的滑步改善效果。附录 D 中的 201-dim 转换规范已被 v1.7 简化超越，仅作历史参考。方案长期目标保持不变：通过密度感知的条件解耦编排 (CDO-FM)，实现 text 和 motion condition 的自适应平衡，并以接触条件化 flow matching 提升生成质量。*
