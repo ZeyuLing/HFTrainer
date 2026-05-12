@@ -40,6 +40,143 @@ MOTION_DATA_DIR = str(PROJECT_ROOT / "data" / "hymotion_data")
 KIMODO_SAFE_LEN = 240
 
 
+def _convert_frame_indices_to_kimodo_fps(
+    frame_indices,
+    fps_input,
+    model_fps,
+    T_input
+):
+    """Convert constraint frame indices from input fps to KIMODO fps.
+    
+    This is the CRITICAL FIX for Issue #1 (FPS resampling bug).
+    
+    Args:
+        frame_indices: (K,) tensor of frame indices in input fps space
+        fps_input: input frame rate (e.g., 30)
+        model_fps: KIMODO model frame rate (e.g., 20)
+        T_input: total frames in input fps space
+    
+    Returns:
+        (K,) tensor of frame indices in KIMODO fps space
+        
+    Raises:
+        ValueError if conversion produces invalid frame indices
+    """
+    import torch
+    
+    # Step 1: Convert to seconds
+    times_sec = frame_indices.float() / fps_input
+    
+    # Step 2: Convert to KIMODO frame indices (use round for precision)
+    frames_kimodo = torch.round(times_sec * model_fps).long()
+    
+    # Step 3: Validate before any silent failures
+    duration_sec = T_input / fps_input
+    num_frames_kimodo = int(duration_sec * model_fps)
+    
+    # Check for negative indices
+    invalid_mask = frames_kimodo < 0
+    if invalid_mask.any():
+        raise ValueError(
+            f"Negative frame indices after FPS conversion: "
+            f"{frame_indices[invalid_mask].tolist()} @ {fps_input}fps → "
+            f"{frames_kimodo[invalid_mask].tolist()} (invalid)"
+        )
+    
+    # Check for out-of-bounds indices (THIS IS WHERE SILENT CLAMPING HAPPENS!)
+    invalid_mask = frames_kimodo >= num_frames_kimodo
+    if invalid_mask.any():
+        bad_input = frame_indices[invalid_mask].tolist()
+        bad_output = frames_kimodo[invalid_mask].tolist()
+        raise ValueError(
+            f"Frame indices out of bounds after FPS conversion:\n"
+            f"  Input: {bad_input} @ {fps_input}fps\n"
+            f"  Converted to: {bad_output} @ {model_fps}fps\n"
+            f"  Expected max: {num_frames_kimodo - 1} (num_frames={num_frames_kimodo})\n"
+            f"  This indicates an FPS conversion error or T mismatch.\n"
+            f"  Check: T_input={T_input} actually matches motion length in input fps"
+        )
+    
+    return frames_kimodo
+
+
+def _validate_and_log_constraints(
+    constraints,
+    T,
+    fps,
+    model_fps,
+    task_id="unknown",
+    setting="unknown",
+    verbose=False
+):
+    """Validate and log constraint frame information for debugging.
+    
+    This is the CORE FIX for Issue #7 (no constraint validation).
+    """
+    if not verbose:
+        return
+    
+    duration_sec = T / fps
+    num_frames_kimodo = int(duration_sec * model_fps)
+    
+    print(f"  Constraint validation (Task {task_id}, setting {setting}):")
+    print(f"    Input: T={T} @ {fps}fps = {duration_sec:.4f}s")
+    print(f"    KIMODO: {model_fps}fps → {num_frames_kimodo} frames")
+    
+    for i, c in enumerate(constraints):
+        if hasattr(c, 'frame_indices') and len(c.frame_indices) > 0:
+            indices = c.frame_indices.tolist() if hasattr(c.frame_indices, 'tolist') else list(c.frame_indices)
+            max_frame = max(indices)
+            min_frame = min(indices)
+            print(f"    Constraint {i} ({c.__class__.__name__}):")
+            print(f"      Frames: {indices}")
+            print(f"      Range: [{min_frame}, {max_frame}]")
+            print(f"      Expected range: [0, {num_frames_kimodo-1}]")
+            
+            if max_frame >= num_frames_kimodo:
+                print(f"      ⚠️  WARNING: Max frame {max_frame} >= num_frames {num_frames_kimodo}!")
+
+
+def _validate_frame_indices_in_builder(frame_indices, T, builder_name="unknown"):
+    """Validate that frame indices are within valid range [0, T-1].
+    
+    Called from E8/E14/E15/E16 builders BEFORE building constraints.
+    The indices at this point are in the ORIGINAL fps space; they will be
+    converted to KIMODO fps later.
+    
+    Args:
+        frame_indices: list or tensor of frame indices
+        T: total number of frames in original fps space
+        builder_name: name of builder for error messages
+        
+    Raises:
+        ValueError if any index is out of bounds
+    """
+    import torch
+    
+    if isinstance(frame_indices, torch.Tensor):
+        frame_indices = frame_indices.tolist()
+    
+    if not frame_indices:
+        return  # Empty is OK
+    
+    max_idx = max(frame_indices)
+    min_idx = min(frame_indices)
+    
+    if min_idx < 0:
+        raise ValueError(
+            f"{builder_name}: Negative frame index {min_idx} found! "
+            f"Valid range: [0, {T-1}]"
+        )
+    
+    if max_idx >= T:
+        raise ValueError(
+            f"{builder_name}: Frame index {max_idx} out of bounds! "
+            f"Valid range: [0, {T-1}], T={T}"
+        )
+
+
+
 def _split_num_frames(n: int, safe_len: int = KIMODO_SAFE_LEN) -> list:
     """Split total `n` frames into K balanced segments each ≤ safe_len.
 
@@ -677,22 +814,37 @@ def build_constraints_e6(skeleton, soma30_rots, soma30_pos, gt_pos_22, T, settin
                           caption=""):
     """E6 Foot ground contact: constrain ankles at contact frames.
 
-    Uses SMPL-22 GT positions for foot contact detection (ankle height),
-    but SOMA30 retargeted data for constraint building.
+    ISSUE #6 FIX: Detect contact in SOMA30 space instead of SMPL-22.
+    
+    The original code detected contact using SMPL-22 ankle heights but applied
+    constraints to SOMA30 positions. Because the skeletons have different
+    proportions, contact frames in SMPL-22 space don't necessarily correspond
+    to contact frames in SOMA30 space after retargeting, leading to constraints
+    being applied to frames that are not actually in contact.
     """
     from kimodo.constraints import EndEffectorConstraintSet
     import torch
 
-    # Detect foot contact frames from GT ankle heights (SMPL-22 space)
-    l_ankle_y = gt_pos_22[:, 7, 1]
-    r_ankle_y = gt_pos_22[:, 8, 1]
+    # ISSUE #6 FIX: Detect contact frames in SOMA30 space (where constraints apply)
+    # Get SOMA30 foot joint indices
+    soma30_left_foot_idx = skeleton.bone_index.get('LeftFoot', 10)
+    soma30_right_foot_idx = skeleton.bone_index.get('RightFoot', 16)
+    
+    # Measure SOMA30 foot heights (Y coordinate)
+    l_foot_y = soma30_pos[:, soma30_left_foot_idx, 1]
+    r_foot_y = soma30_pos[:, soma30_right_foot_idx, 1]
+    
+    # Use same threshold as original, but in SOMA30 space
     threshold = 0.05  # 5cm above ground
-    contact_l = l_ankle_y < threshold
-    contact_r = r_ankle_y < threshold
+    contact_l = l_foot_y < threshold
+    contact_r = r_foot_y < threshold
     contact = contact_l | contact_r
     frames = np.where(contact)[0].tolist()
     if not frames:
         frames = [0]
+    
+    # Add validation to ensure frames are in valid range
+    _validate_frame_indices_in_builder(frames, T, "E6")
 
     frame_idx = torch.tensor(frames, dtype=torch.long)
 
@@ -840,6 +992,17 @@ def build_constraints_e14(skeleton, soma30_rots_a, soma30_pos_a,
 
     frames_a = list(range(N_cond_a))
     frames_b = list(range(N_cond_a + N_transition, T))
+    
+    # ISSUE #3 FIX: Validate frame indices are in valid range
+    _validate_frame_indices_in_builder(frames_a, T, "E14 frames_a")
+    _validate_frame_indices_in_builder(frames_b, T, "E14 frames_b")
+    # Sanity check that transition doesn't consume entire sequence
+    if N_cond_a + N_transition >= T:
+        raise ValueError(
+            f"E14: Invalid transition geometry: N_cond_a={N_cond_a} + "
+            f"N_transition={N_transition} >= T={T}. "
+            f"No room for B head frames!"
+        )
 
     # Do not hard-constrain frames inside the generated transition span.
     # Earlier versions pinned the first/last generated frames to boundary
@@ -916,6 +1079,8 @@ def build_constraints_e15(skeleton, soma30_rots, soma30_pos,
     target_first_pos = soma30_pos_target[0:1]    # (1, 30, 3)
 
     frames = list(range(N_cond_tail)) + [T - 1]
+    # ISSUE #3 FIX: Validate frame indices are in valid range
+    _validate_frame_indices_in_builder(frames, T, "E15")
     frame_idx = torch.tensor(frames, dtype=torch.long)
     constraint_rots = torch.cat([tail_rots, target_first_rots], dim=0)
     constraint_pos = torch.cat([tail_pos, target_first_pos], dim=0)
@@ -958,7 +1123,16 @@ def build_constraints_e15_prepend(skeleton, soma30_rots_P, soma30_pos_P,
 
     frames_P = [0]
     frames_A = list(range(N_transition, T_total))
-    frame_idx = torch.tensor(frames_P + frames_A, dtype=torch.long)
+    # ISSUE #3 FIX: Validate frame indices are in valid range
+    all_frames = frames_P + frames_A
+    _validate_frame_indices_in_builder(all_frames, T_total, "E15_prepend")
+    # Sanity check transition geometry
+    if N_transition >= T_total:
+        raise ValueError(
+            f"E15_prepend: N_transition={N_transition} >= T_total={T_total}. "
+            f"No room for A head frames!"
+        )
+    frame_idx = torch.tensor(all_frames, dtype=torch.long)
 
     constraint_rots = torch.cat([soma30_rots_P[:1], soma30_rots_A], dim=0)
     constraint_pos = torch.cat([soma30_pos_P[:1], soma30_pos_A], dim=0)
@@ -990,6 +1164,14 @@ def build_constraints_e16(skeleton, soma30_rots_target, soma30_pos_target,
     head_pos = soma30_pos[:N_cond_head]          # (N_cond_head, 30, 3)
 
     frames = [0] + list(range(1 + N_transition, T))
+    # ISSUE #3 FIX: Validate frame indices are in valid range
+    _validate_frame_indices_in_builder(frames, T, "E16")
+    # Sanity check that transition doesn't consume entire sequence
+    if 1 + N_transition >= T:
+        raise ValueError(
+            f"E16: Invalid transition geometry: 1 + N_transition={N_transition} "
+            f">= T={T}. No room for motion head frames!"
+        )
     frame_idx = torch.tensor(frames, dtype=torch.long)
     constraint_rots = torch.cat([target_last_rots, head_rots], dim=0)
     constraint_pos = torch.cat([target_last_pos, head_pos], dim=0)
@@ -1108,17 +1290,31 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
     if num_frames < 10:
         num_frames = 10
 
-    # Move constraint tensors to device and clamp frame indices
+    # Move constraint tensors to device and convert frame indices to KIMODO fps
     device = next(model.denoiser.parameters()).device
     for c in constraints:
+        # Move tensors to device
         for attr in dir(c):
             if attr.startswith('_'):
                 continue
             val = getattr(c, attr, None)
             if isinstance(val, torch.Tensor):
                 setattr(c, attr, val.to(device))
+        
+        # Convert frame indices from input fps to KIMODO fps (CRITICAL FIX for Issue #1)
         if hasattr(c, 'frame_indices') and isinstance(c.frame_indices, torch.Tensor):
-            c.frame_indices = c.frame_indices.clamp(max=num_frames - 1)
+            try:
+                c.frame_indices = _convert_frame_indices_to_kimodo_fps(
+                    c.frame_indices,
+                    fps_input=fps,
+                    model_fps=model_fps,
+                    T_input=T
+                )
+            except ValueError as e:
+                print(f"    ❌ ERROR: Constraint frame FPS conversion failed!")
+                print(f"    Task: {task_id}, Setting: {setting}")
+                print(f"    Details: {e}")
+                raise
 
     # Sliding-window split: cap each segment ≤ KIMODO_SAFE_LEN to stay inside
     # the model's training distribution (~10s).  See _split_num_frames docstring.
@@ -1320,7 +1516,17 @@ def _run_kimodo_with_constraints(model, skeleton, constraints, caption, T,
             if isinstance(val, torch.Tensor):
                 setattr(c, attr, val.to(device))
         if hasattr(c, 'frame_indices') and isinstance(c.frame_indices, torch.Tensor):
-            c.frame_indices = c.frame_indices.clamp(max=num_frames - 1)
+            try:
+                c.frame_indices = _convert_frame_indices_to_kimodo_fps(
+                    c.frame_indices,
+                    fps_input=fps,
+                    model_fps=model_fps,
+                    T_input=T
+                )
+            except ValueError as e:
+                print(f"    ❌ ERROR: Constraint frame FPS conversion failed in _run_kimodo_with_constraints!")
+                print(f"    Details: {e}")
+                raise
 
     # Sliding-window split (see _split_num_frames + constraint_arg note above).
     seg_lens = _split_num_frames(num_frames)
