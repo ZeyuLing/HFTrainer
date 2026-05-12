@@ -74,6 +74,10 @@ train_dataloader = dict(
                 transl_type='abs',
                 smpl_type='smpl_22',
             ),
+            # Compute198DimPosition MUST come before SmplTransToKimodoRootOnline:
+            # LoadSmplx55 outputs 135-dim, Compute198DimPosition → 198-dim,
+            # then SmplTransToKimodoRootOnline smooths translation on 198-dim.
+            dict(type='Compute198DimPosition', key='motion'),
             # **KEY DIFFERENCE FROM E2/E4**: Convert SMPL Root → KIMODO Root
             # ADMM smoothing applied online during __getitem__
             dict(
@@ -81,7 +85,6 @@ train_dataloader = dict(
                 key='motion',
                 admm_margin_m=0.06,  # 6cm margin on XZ plane
             ),
-            dict(type='Compute198DimPosition', key='motion'),
             dict(
                 type='RandomCropPadding',
                 clip_len=360,

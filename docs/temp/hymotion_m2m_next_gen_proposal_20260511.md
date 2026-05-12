@@ -23,6 +23,7 @@
 13. [风险与备选方案](#13-风险与备选方案)
 14. [实施路线图](#14-实施路线图)
 
+
 ---
 
 ## 1. 问题诊断
@@ -66,13 +67,13 @@
 | # | 缺陷 | 严重度 | 当前状态 | 修复方式 | Phase 0 纳入? |
 |---|------|--------|---------|---------|-------------|
 | D1 | **FK keypoint loss 已实现但被禁用** (`keypoints3d_weight=0.0`) | P0 | 代码存在，config 关闭 | Config: 设为 10+ | ✅ 纳入 |
-| D2 | **Translation 信号占比过低** (10.2% vs KIMODO 40.5%) | P1 | `trans_dim_weight=5.0` 但仅 3/135 维度 | 提高 `trans_dim_weight` 或 KIMODO Root (§7) | ✅ 纳入 (via §7) |
+| D2 | **Translation 信号占比过低** (10.2% vs KIMODO 40.5%) | P1 | `trans_dim_weight=5.0` 但仅 3/135 维度 | 提高 `trans_dim_weight` 或 KIMODO Root (§6) | ✅ 纳入 (via §6) |
 | D4 | **Local rotation 误差沿运动链放大** | P1 | 无 FK 约束时固有问题 | 启用 FK loss (D1) 即可缓解 | ✅ 纳入 (via D1) |
 
 > **已确认不纳入 Phase 0 的方案**:
 > - ~~D3: Translation augmentation (`transl_aug_prob`)~~: KIMODO Root 方案使用 ADMM 平滑替代 augmentation，效果更佳且更合理。SMPL Root 版本暂不启用 transl_aug，以保持两版实验的纯对比。
-> - ~~D5: Foot contact / ground constraint 监督~~: 需要新增 foot contact 通道（扩展运动表征维度），复杂度高，延后到 Phase 3 (§6 CCFM)。
-> - ~~TCC (Typed Condition Canvas)~~: 架构改动大，延后到 Phase 2。
+> - ~~D5: Foot contact / ground constraint 监督~~: 需要新增 foot contact 通道（扩展运动表征维度），复杂度高，延后到后续实验。
+> - ~~TCC (Typed Condition Canvas)~~: 已从方案中移除（v1.7）。
 
 **代码验证**：translation-body motion 耦合实现正确。`load_smplx.py` 中 `process_transl()` 对 translation 和 root orientation 做一致的旋转增强；loss 计算中 translation (dims 0-3) 和 rotation (dims 3-135) 均参与 velocity loss，无遗漏。
 
@@ -105,12 +106,12 @@ KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关
 
 | 实验 | 变更 | 预期效果 | 成本 |
 |------|------|---------|------|
-| **E-T1: ADMM 平滑 translation** | KIMODO Root (§7): 对 [0:3] translation 施加 ADMM 平滑 (margin=6cm) | 减少 translation 高频噪声，改善滑步 | 低（预处理 + 重训） |
+| **E-T1: ADMM 平滑 translation** | KIMODO Root (§6): 对 [0:3] translation 施加 ADMM 平滑 (margin=6cm) | 减少 translation 高频噪声，改善滑步 | 低（预处理 + 重训） |
 | **E-T2: 显式 velocity 通道** | 扩展 198-dim → 261-dim: 增加 21×3 joint velocity [198:261] | 改善时间连续性和滑步检测 | 中（改 representation + 重训），**延后到后续实验** |
 
 > **已移除的实验**：
 > - ~~E-T3: Translation augmentation~~: 由 KIMODO Root ADMM 平滑替代
-> - ~~E-T4: Foot contact 通道~~: 延后到 Phase 3 (CCFM)
+> - ~~E-T4: Foot contact 通道~~: 延后到后续实验 (E7)
 
 ### 1.3 核心矛盾
 
@@ -691,8 +692,31 @@ M = ⊻_{k=1..K} (t_k ⊗ d_k)
 | Caption configs 仍用 v2 sampler (40% 覆盖) | P1 | 统一使用 v3 |
 | 无显式 multi-segment temporal primitive | P2 | K≥2 的 interval OR 近似覆盖 |
 | ~~Pelvis position 不在 `pos_only` 覆盖中~~ | ~~P2~~ | 已有 `trans_only` 覆盖 translation（层级互补设计，非 gap） |
-| 无 contact/foot height 条件类型 | P2 | CCFM (§6) 解决 |
+| 无 contact/foot height 条件类型 | P2 | 后续实验: 增加 foot contact channel |
 | 无 velocity 条件类型 | P3 | 需要扩展 dimensional kind |
+
+### 7.5 V3 Sampler 已知缺陷的坦诚评估 [v1.7 新增]
+
+> 对应反馈：「你觉得V3的采样器已经没有缺陷了吗？」
+
+**V3 Sampler 当前存在以下已知缺陷/风险：**
+
+1. **条件密度分布偏移 (P1)**: V3 的 K 值分布 (K=0:10%, K=1:55%, K=2:25%, K=3:7%, K=4:3%) 是手动设定的先验，未经训练验证其最优性。实际应用中，高密度条件（如 dense edit/repair）和低密度条件（如单 keyframe）的使用频率可能与训练分布不匹配。如果 K 分布偏离实际使用分布，模型在 OOD 密度下的表现可能显著退化。
+
+2. **Primitive 参数空间的 coverage gap (P1)**: 6 种 temporal primitive 虽然覆盖率从 V2 的 ~40% 提升到 ~84%，但仍有 ~16% 的条件模式无法产生。例如:
+   - **不规则间隔的多段条件** (如帧 [10-20, 50-60, 100-120])：K≥2 的 interval OR 虽可近似，但精确匹配概率低
+   - **单帧散列条件** (如仅约束帧 5, 23, 67, 121)：只有 `scatter` primitive 覆盖，但 scatter 的 Bernoulli 采样难以精确控制帧数
+   - **渐进密度条件** (如前半段 dense、后半段 sparse)：需要 K≥2 且恰好选到互补 primitive 的组合
+
+3. **Dimensional kind 粒度不足 (P2)**: 5 种 dimensional kind (all_dim, rot_only, pos_only, trans_only, mixed) 对关节的控制粒度是 group 级别（17 个预定义解剖学 group），无法精确表达"仅约束右手腕旋转+左膝位置"这类细粒度跨模态条件。虽然 K≥2 的多 atom OR 理论上可以组合出此类模式，但采样到的概率极低。
+
+4. **训练与推理的 mask 分布一致性未验证 (P1)**: V3 sampler 的条件 mask 分布在训练时由采样器随机生成，但推理时由用户指定确定性 mask。训练采样分布是否充分覆盖了实际推理时会遇到的 mask 模式，目前仅靠 coverage 指标 (~84%) 估计，没有在真实任务上系统验证。具体风险:
+   - 推理时的精确 keyframe 约束 (例如帧 0 和帧 196 的 exact keypose) 在训练中的出现频率是否足够？
+   - 极端稀疏 (仅 1-2 帧) 和极端密集 (>90% 帧约束) 两个尾部的表现是否稳定？
+
+5. **缺少 adaptive/learned 采样 (P3)**: 当前 V3 是纯规则采样，所有 primitive 权重和 K 分布都是固定的。理想情况下可以根据训练 loss landscape 自适应调整采样分布（类似 curriculum learning），但这增加了实现复杂度，暂不在 Phase 0 考虑。
+
+**结论**: V3 Sampler 相比 V2 是一个显著进步（覆盖率 40%→84%，支持模态独立控制），但**不是一个完善的方案**。上述缺陷 1 和 4 可能直接影响首批实验的效果——如果训练采样分布与评估任务分布差距过大，模型在特定任务上的表现可能不如预期。建议在 E1-E4 评估时重点关注 coverage gap 对应的任务类型（单帧 keyframe、多段条件），并根据评估结果调整 V3 参数。
 
 ---
 
@@ -740,7 +764,7 @@ HyMotion M2M 是一个**统一的 motion-to-motion 框架**，通过 VACE 条件
 ```
 任务覆盖 = {时间模式} × {维度模式}
 
-时间模式 (§8.2.1):
+时间模式 (§7.2.1):
   all      → E8(loop), E10(part-level)
   empty    → E1(T2M)
   interval → E2(inbetween), E7(first-frame), E13(multi-prompt), E14(transition), E15(prepend)
@@ -748,7 +772,7 @@ HyMotion M2M 是一个**统一的 motion-to-motion 框架**，通过 VACE 条件
   renewal  → E6(foot, 不规则接触)
   markov   → E9(repair, checker-driven segments)
 
-维度模式 (§8.2.2):
+维度模式 (§7.2.2):
   all_dim   → E1, E2, E3, E7, E8, E13, E14, E15
   rot_only  → E10(part-level)
   pos_only  → E4(end-effector), E6(foot)
@@ -849,12 +873,10 @@ aux_fk_consistency_weight = 1500.0
 
 | 实验 | 条件 | 内容 | 有效概率 |
 |------|------|------|---------|
-| **E5: + Explicit Velocity Channel** | E3 > E1 (KIMODO root 有效) | 在版本 B 基础上增加 21×3 joint velocity 通道 | 60% |
-| **E6: + Foot Contact Channel** | E1 滑步仍未解决 | 增加 4-dim foot contact 信号 (CCFM) | 55% |
-| **E7: + ADMM-only Translation** | E3 ≤ E1 (KIMODO root 无效) | 仅在版本 A 上用 ADMM 平滑 translation，不改 root | 65% |
-| **E8: + TCC** | E1/E3 完成 | 替换 VACE 为 Typed Condition Canvas | 50% |
-| **E9: + DM-DSA** | E8 完成 | 加入密度调制双流注意力 | 45% |
-| **E10: + PCE** | E2/E4 text 效果不佳 | 三阶段渐进训练 | 50% |
+| **E5: + DM-DSA** | E2/E4 caption 完成 | 加入密度调制双流注意力 (text/motion 自适应平衡) | 55% |
+| **E6: + Explicit Velocity Channel** | E3 > E1 (KIMODO root 有效) | 在版本 B 基础上增加 21×3 joint velocity 通道 | 60% |
+| **E7: + Foot Contact Channel** | E1 滑步仍未解决 | 增加 4-dim foot contact 信号 | 55% |
+| **E8: + FK Keypoint Loss** | E1/E3 完成 | 启用 keypoints3d_weight 消融滑步改善 | 70% |
 
 ### 9.5 评估标准
 
@@ -904,7 +926,7 @@ aux_fk_consistency_weight = 1500.0
 - **E-Text**: 纯 T2M 质量评估
 - **E-TextCond**: Text + sparse condition 联合评估
 - **E-Edit**: 语义编辑（"让走路变得更高兴"）评估
-- **E-Contact**: 接触质量专项评估
+- **E-Skating**: 滑步专项评估 (foot skating score, FK keypoint error)
 
 ---
 
@@ -914,30 +936,29 @@ aux_fk_consistency_weight = 1500.0
 
 | 特性 | 当前 M2M | VACE (Wan2.1) | OmniGen2 | Seedance 2.0 | Step1X-Edit | **CDO-FM (Ours)** |
 |------|---------|---------------|----------|--------------|-------------|-------------------|
-| 条件类型感知 | ✗ (3通道固定) | ✗ (VCU通用) | ✗ | ✗ | ✓ (MLLM理解) | **✓ (TCC 类型嵌入)** |
 | Text-Motion 平衡 | ✗ (竞争) | ✗ | ✓ (双路径) | ✓ (DB-DiT) | ✓ (MLLM路由) | **✓ (DM-DSA 密度调制)** |
 | 解耦 CFG | ✗ | ✗ | ✗ | ? | ✗ | **✓ (二级解耦)** |
-| 渐进训练 | ✗ | ✗ | ✓ (3阶段) | ? | ✓ (2阶段) | **✓ (PCE 3阶段)** |
-| 物理约束 | ✗ | ✗ | ✗ | ✓ (physics-aware) | ✗ | **✓ (CCFM)** |
+| Root 表征鲁棒性 | ✗ (raw MoCap) | N/A | N/A | N/A | N/A | **✓ (Dual Root: ADMM平滑)** |
+| 多任务条件采样 | ✗ (简单随机) | ✗ | ✗ | ✗ | ✗ | **✓ (V3 Rank-K 张量先验)** |
 | 任务统一 | 部分 | ✓ | ✓ | ✓ | 编辑为主 | **✓ (全覆盖)** |
 | 运动领域适配 | ✓ | ✗ (视频) | ✗ (图像) | ✗ (视频) | ✗ (图像) | **✓** |
 
 ### 11.2 新颖性论证
 
-1. **Density-Modulated Dual-Stream Attention**: 不同于 UniCombine 的 LoRA switching 或 OmniGen2 的 hard dual-path，DM-DSA 实现了条件密度驱动的 soft routing，这是首次在 motion generation 中提出。其核心洞察——条件密度的变化需要动态调整语义（text）vs 结构（motion）信号的相对权重——具有普适性，可推广到 video/image inpainting。
+1. **Density-Modulated Dual-Stream Attention (DM-DSA)**: 不同于 UniCombine 的 LoRA switching 或 OmniGen2 的 hard dual-path，DM-DSA 实现了条件密度驱动的 soft routing，这是首次在 motion generation 中提出。其核心洞察——条件密度的变化需要动态调整语义（text）vs 结构（motion）信号的相对权重——具有普适性，可推广到 video/image inpainting。
 
-2. **Typed Condition Canvas**: 不同于 VACE 的无类型 3 通道编码，TCC 赋予每个空间条件明确的语义类型。这使得模型能够用不同的策略处理 keyframe 约束（高置信度精确约束）和 edit source（低置信度参考信号），类似于 VACE 的 Concept Decoupling 但更精细。
+2. **Dual Root Representation**: 提出 SMPL Root 与 KIMODO Root (ADMM-smoothed trajectory) 双版本方案，首次系统化地研究 root representation 对 motion generation 滑步问题的影响。两种表征共享完全相同的 198-dim 框架和 loss 设计，仅 translation [0:3] 和 position 参考系不同，可控变量地验证 smooth trajectory 对生成质量的提升。
 
-3. **Contact-Conditioned Flow Matching**: 将物理接触状态集成到 flow matching 训练中，是首次在扩散式 motion generation 框架中实现端到端的接地感知生成（而非后处理）。
+3. **Rank-K Boolean Tensor Prior (V3 Condition Sampler)**: 提出基于 6 种时间原语 × 5 种维度类型的结构化条件采样策略，相比 random Bernoulli mask 能更系统地覆盖 motion generation 的多样化任务空间（keyframe, prefix, suffix, inbetween, outpainting 及其组合），是首次在统一 M2M 框架中设计面向任务覆盖的条件采样分布。
 
-4. **Progressive Condition Exposure**: 受 LLM 指令微调中课程学习的启发，PCE 首次系统化地解决 multi-modal multi-task motion generation 中的 shortcut learning 问题。
+4. **Decoupled Classifier-Free Guidance**: 针对 text + motion 双条件的信息密度不对称问题，提出两级独立 CFG (w_text, w_motion) 分别控制语义引导和结构引导强度。相比标准 single-scale CFG 能更灵活地平衡 fidelity vs diversity。
 
 ### 11.3 与 VACE 的关系
 
 CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
-- VACE 提出了 `V=[T;F;M]` 的统一编码 → 我们的 TCC 是其类型化扩展
-- VACE 的 Context Adapter → 我们的 DM-DSA 是其密度感知版本
-- VACE 的 Concept Decoupling → 我们的 TCC 条件类型实现了更细粒度的解耦
+- VACE 提出了 `V=[T;F;M]` 的统一编码 → 我们保持 VACE 4 通道编码 `[x_t, inactive, reactive, mask]`，但通过 V3 Condition Sampler 实现更结构化的条件分布采样
+- VACE 的 Context Adapter → 我们的 DM-DSA 是其密度感知版本，根据条件密度动态调制 text/motion 信号权重
+- VACE 的 single-scale CFG → 我们的 Decoupled CFG 实现了 text/motion 独立引导
 
 ---
 
@@ -955,7 +976,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 > 现有 motion generation 方法要么只做 text-to-motion (T2M)，要么只做 motion completion (M2M)，无法在一个模型中同时理解文本语义和空间运动约束。我们发现根因在于两类条件的**信息密度天然不对称**——一句话的信息量远低于 10 帧 dense keyframe。简单地将两者混入同一 conditioning pipeline 会导致模型学到忽略文本的 shortcut。
 >
-> 为此，我们提出 CDO-FM，通过 (1) 密度调制双流注意力实现 text/motion 条件的自适应平衡，(2) 类型化条件画布让模型区分不同语义的空间约束，(3) 渐进式条件暴露训练策略防止 shortcut learning，(4) 接触条件化 flow matching 实现端到端的物理感知生成。
+> 为此，我们提出 CDO-FM，通过 (1) 密度调制双流注意力 (DM-DSA) 实现 text/motion 条件的自适应平衡，(2) Dual Root 表征方案 (SMPL Root + KIMODO ADMM-smoothed Root) 系统性解决 MoCap 噪声导致的滑步问题，(3) 结构化条件采样策略 (Rank-K Boolean Tensor Prior) 系统覆盖多样化 M2M 任务空间，(4) 解耦双级 CFG 独立控制语义和结构引导。
 >
 > 在 XXX benchmark 上，CDO-FM 首次在单一模型中同时达到 T2M SOTA 和 M2M SOTA，且在 text-conditioned motion completion 这一新任务上显著优于所有 baseline。
 
@@ -968,11 +989,11 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 | 审稿人质疑 | 预备回应 |
 |-----------|---------|
-| DM-DSA 是否过于复杂？简单 concat 是否足够？ | A2 消融实验直接对比 |
-| TCC 的条件类型标注是否引入额外成本？ | 完全自动生成，零人工成本 |
-| PCE 的阶段划分是否需要精细调参？ | 提供 sensitivity analysis |
-| Contact loss 与现有 post-processing 的对比？ | A5 消融 + 后处理消融 |
-| 135-dim motion representation 是否限制了方法通用性？ | 讨论扩展到 SMPL-X/手部 |
+| DM-DSA 是否过于复杂？简单 concat 是否足够？ | 消融实验直接对比 DM-DSA vs standard concat |
+| Dual Root 的 ADMM 平滑是否只是简单预处理？ | 提供消融: raw trans vs smooth trans 的 FID/foot skating 对比 |
+| V3 Condition Sampler 相比 random mask 提升多大？ | V2 vs V3 sampler 消融 + 任务覆盖分析 |
+| Decoupled CFG 推理开销 3x 是否可接受？ | 提供 standard CFG 回退对比 + distillation 减少步数 |
+| 198-dim motion representation 是否限制了方法通用性？ | 讨论扩展到 SMPL-X/手部的路径 |
 
 ---
 
@@ -983,18 +1004,17 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 | 风险 | 概率 | 影响 | 缓解策略 |
 |------|------|------|---------|
 | DM-DSA 训练不稳定 | 中 | 高 | 渐进引入 gate (先固定 0.5/0.5，再放开学习) |
-| TCC 条件类型对性能提升有限 | 低-中 | 中 | 退化为标准 VACE (type_embed=0)，不影响其他组件 |
-| PCE 三阶段训练成本过高 | 中 | 中 | Phase 1 可直接从 T2M checkpoint 初始化跳过 |
-| Contact label 提取不准确 | 低 | 低 | 使用多阈值 + 时间窗平滑提高鲁棒性 |
+| KIMODO Root (ADMM平滑) 对生成质量提升有限 | 低-中 | 中 | 退化为 SMPL Root (版本 A)，E1/E2 消融直接验证 |
+| V3 Condition Sampler 对 caption 模型效果不明显 | 低 | 低 | 回退到 V2 sampler (random Bernoulli mask) |
 | Decoupled CFG 推理开销 3x | 高 | 中 | 提供 standard CFG 回退；或 distillation 减少步数 |
 
-### 14.2 降级方案
+### 13.2 降级方案
 
 如果完整 CDO-FM 的某些组件效果不理想，可以独立使用其中任一子系统：
 
-**最小可行方案 (MVP)**: 修复 B4 (cond_mask_prob) + PCE 训练策略 + Decoupled CFG
-- 预期: 解决 text conditioning 失效的 80% 问题
-- 成本: 最低，只需改训练配置和推理代码
+**最小可行方案 (MVP)**: Dual Root (SMPL + KIMODO) + V3 Sampler + Decoupled CFG
+- 预期: 解决滑步问题 + 多任务条件覆盖 + text/motion 平衡
+- 成本: 最低，KIMODO Root 仅需在线转换 translation + 新 mean/std
 - 时间: 1-2 周
 
 **中间方案**: MVP + DM-DSA
@@ -1002,14 +1022,14 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 - 成本: 需要修改 DiT block，重新训练
 - 时间: 3-4 周
 
-**完整方案**: 全部 CDO-FM 组件
+**完整方案**: 全部 CDO-FM 组件 + 后续实验中验证的新模块
 - 预期: 最佳性能，完整的论文故事
-- 成本: 全面架构升级
+- 成本: 根据 E1-E4 结果逐步扩展
 - 时间: 6-8 周
 
 ---
 
-## 15. 实施路线图 [v1.5 更新, v1.6 修正]
+## 14. 实施路线图 [v1.7 更新]
 
 ### Phase 0: Dual Root + Loss 对齐 + 首批实验 (Week 1-2) — v1.5 核心
 
@@ -1025,7 +1045,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
   □ 实现或集成 ADMM XZ 平滑 (margn ≤ 6cm, 可从 KIMODO 或自实现)
   □   □ 数据预处理: SMPL root 在线转换为 KIMODO root (198-dim) + 计算新 mean/std
   □ 单元测试: 在线转换验证 (SMPL 198 → 在线ADMM平滑 → SMPL 198 roundtrip, 零误差 + 6cm tolerance)
-□ Loss 对齐 (§7.4, §7.5):
+□ Loss 对齐 (§6.4):
   □ Position loss 改为 relative-to-root 空间
   □ 移除 t² timestep weighting (config 修改)
 □ 滑步修复 — config-only (§1.2.3):
@@ -1043,40 +1063,29 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 □ 确认 loss 正常下降
 ```
 
-### Phase 1: MVP — 训练策略改进 (Week 3-4)
+### Phase 1: 架构升级 — DM-DSA + Decoupled CFG (Week 3-5)
 
 ```
-□ 实现 PCE 三阶段训练 scheduler
-□ 实现 Decoupled CFG (推理端)
-□ 实现 TAL-v2 (对比损失)
-□ Caption configs 从 v2 升级到 v3 sampler
-□ 切换训练数据到 high_quality.json (456K)
-□ 根据 E1-E4 结果决定后续实验方向
-□ 评估: 确认 text conditioning 恢复工作
-```
-
-### Phase 2: 架构升级 — TCC + DM-DSA (Week 5-7)
-
-```
-□ 实现 TypedConditionCanvas
-□ 修改 PrepareM2MCondition 添加条件类型自动标注
+□ 根据 E1-E4 结果确定 SMPL Root vs KIMODO Root 的最优方案
 □ 实现 DensityModulator
 □ 修改 DualStreamDiTBlock 集成 DM-DSA
-□ 训练 E8 + E9 消融
+□ 实现 Decoupled CFG (推理端: 独立 w_text, w_motion)
+□ 切换训练数据到 high_quality.json (456K)
+□ 训练消融实验: base + DM-DSA, base + Decoupled CFG
+□ 评估: 确认 text conditioning 质量提升
 ```
 
-### Phase 3: 质量增强 — CCFM (Week 7-9)
+### Phase 2: 质量增强 — 滑步专项 + 数据质量 (Week 5-7)
 
 ```
-□ 实现 contact label 提取
-□ 预处理: 对训练集生成 contact labels
-□ 实现 ContactPredictionHead + contact_aware_loss
-□ 实现 IK foot lock 后处理
-□ 训练 E6: CCFM 消融
+□ 根据 E1-E4 KIMODO Root 结果评估滑步改善
+□ 如 KIMODO Root 有效，后续实验统一切换
+□ 启用 FK keypoint loss 消融
+□ 探索 foot contact channel (后续实验)
 □ 训练最终版本
 ```
 
-### Phase 4: 论文撰写 (Week 9-12)
+### Phase 3: 论文撰写 (Week 7-10)
 
 ```
 □ 全面评估: E1-E15 + 新增评估任务
@@ -1105,13 +1114,13 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 | 文件 | 修改类型 | 说明 |
 |------|---------|------|
-| `hftrainer/models/motion/hymotion_m2m/bundle.py` | 修改 | 增加 TCC, ContactHead |
-| `hftrainer/models/motion/hymotion_m2m/network/condition_routing.py` | 新增 | TypedConditionCanvas, DensityModulator |
+| `hftrainer/models/motion/hymotion_m2m/bundle.py` | 修改 | 增加 KIMODO Root 在线转换支持 |
+| `hftrainer/models/motion/hymotion_m2m/network/density_modulator.py` | 新增 | DensityModulator (DM-DSA) |
 | `hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py` | 修改 | DualStreamDiTBlock 集成 DM-DSA |
-| `hftrainer/trainers/motion/hymotion_m2m_cdofm_trainer.py` | 新增 | CDO-FM Trainer (PCE + TAL-v2 + contact loss) |
-| `hftrainer/pipelines/motion/hymotion_m2m_pipeline.py` | 修改 | Decoupled CFG + contact-guided IK |
-| `hftrainer/datasets/motion/transforms/` | 修改 | PrepareM2MCondition 增加类型标注 + contact extraction |
-| `configs/hymotion_m2m/cdofm/` | 新增 | CDO-FM 各阶段训练配置 |
+| `hftrainer/trainers/motion/hymotion_m2m_trainer.py` | 修改 | Position loss 改为 relative-to-root, 移除 t² weighting |
+| `hftrainer/pipelines/motion/hymotion_m2m_pipeline.py` | 修改 | Decoupled CFG (独立 w_text, w_motion) |
+| `hftrainer/datasets/motion/transforms/` | 修改 | PrepareM2MCondition 集成 ADMM 在线转换 |
+| `configs/hymotion_m2m_v2/` | 新增 | SMPL Root / KIMODO Root × uncond / caption 4 个配置 |
 
 ## 附录 B: 参考文献
 
@@ -1146,31 +1155,27 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ---
 
-## 附录 D: KIMODO Root 转换规范 [v1.6 重写]
+## 附录 D: KIMODO Root 转换规范 [v1.7 重写]
 
 ### D.1 维度映射
 
 ```
-SMPL Root (135-dim) → KIMODO Root (138-dim) 转换:
+SMPL Root (198-dim) → KIMODO Root (198-dim) 在线转换:
 
-SMPL:                          KIMODO:
-[0:3]   abs_trans    ──┬──→   [0:3]    smooth_trans = ADMM(abs_trans.xz) + abs_trans.y
-                       └──→   [135:138] trans_residual = abs_trans - smooth_trans
-[3:9]   root_rot6d   ──→     [3:9]    root_rot6d  (透传，不变)
-[9:135]  body_rot     ──→     [9:135]  body_rot    (透传，不变)
+SMPL Root (版本 A):                  KIMODO Root (版本 B):
+[0:3]   raw_trans      ──ADMM──→   [0:3]    smooth_trans = ADMM(raw_trans.xz) + raw_trans.y
+[3:135] rot6d (22×6)   ──透传──→   [3:135]  rot6d (22×6)  (不变)
+[135:198] pos_rel_raw_pelvis ──重算──→ [135:198] pos_rel_smooth_root
+          = FK(rot)[j] - raw_pelvis          = FK(rot)[j] - smooth_trans
 
-逆转换 (KIMODO 138 → SMPL 135):
-[0:3]    smooth_trans   ─┐
-[135:138] trans_residual ─┴──→  [0:3]   abs_trans = smooth_trans + trans_residual
-[3:9]    root_rot6d     ──→    [3:9]   root_rot6d  (透传)
-[9:135]  body_rot       ──→    [9:135]  body_rot    (透传)
-
-扩展版:
-SMPL (198-dim) → KIMODO (201-dim):
-[135:198] pos_rel_pelvis ──→  [138:201] pos_rel_smooth_root (参考系: smooth_trans 替代 raw_trans)
+逆转换 (KIMODO 198 → SMPL 198):
+需要原始 raw_trans (推理时不可用，因此版本 B 推理直接输出 smooth_trans，
+再用 FK 重建 raw pelvis position)。
+实际策略: 训练时 ADMM 在线转换; 推理时版本 B 输出即最终结果。
 ```
 
-**关键**: rotation 部分完全不变，仅 translation 做 smooth + residual 拆分。转换精确可逆，零信息丢失。
+**关键变化**: 相比 v1.6，v1.7 **不再使用** trans_residual，维度保持 198 不变。
+两个版本的唯一区别是 [0:3] translation channel 和 [135:198] position 的参考系原点。
 
 ### D.2 ADMM 平滑参数
 
@@ -1184,81 +1189,80 @@ SMPL (198-dim) → KIMODO (201-dim):
 ### D.3 转换函数实现
 
 ```python
-def smpl_root_to_kimodo_root(smpl_motion: Tensor, admm_margin: float = 0.06) -> Tensor:
+def smpl_trans_to_smooth_trans(raw_trans: Tensor, admm_margin: float = 0.06) -> Tensor:
     """
-    SMPL 135-dim → KIMODO 138-dim.
-    Rotation 透传，translation 做 ADMM 平滑 + residual 拆分。
+    在线转换: SMPL raw translation → KIMODO smooth translation.
+    仅平滑 XZ 分量, Y 保持不变。
+    
+    Args:
+        raw_trans: (B, T, 3) or (T, 3) — 原始 MoCap translation
+        admm_margin: ADMM 平滑的最大偏移约束 (默认 6cm)
+    Returns:
+        smooth_trans: (B, T, 3) or (T, 3) — 平滑后的 translation
     """
-    raw_trans = smpl_motion[..., 0:3]       # (B, T, 3)
-    root_rot6d = smpl_motion[..., 3:9]      # (B, T, 6) — 透传
-    body_rot = smpl_motion[..., 9:135]      # (B, T, 126) — 透传
-    
-    smooth_trans = admm_smooth_xz(raw_trans, margin=admm_margin)  # XZ 平滑, Y 透传
-    trans_residual = raw_trans - smooth_trans                      # 残差
-    
-    return torch.cat([smooth_trans, root_rot6d, body_rot, trans_residual], dim=-1)  # (B, T, 138)
+    smooth_trans = raw_trans.clone()
+    smooth_trans[..., [0, 2]] = admm_smooth_xz(raw_trans[..., [0, 2]], margin=admm_margin)
+    return smooth_trans
 
 
-def kimodo_root_to_smpl_root(kimodo_motion: Tensor) -> Tensor:
+def convert_motion_smpl_to_kimodo(smpl_motion: Tensor, admm_margin: float = 0.06) -> Tensor:
     """
-    KIMODO 138-dim → SMPL 135-dim.
-    逆转换: raw_trans = smooth_trans + residual, rotation 透传。
-    """
-    smooth_trans = kimodo_motion[..., 0:3]        # (B, T, 3)
-    root_rot6d = kimodo_motion[..., 3:9]          # (B, T, 6) — 透传
-    body_rot = kimodo_motion[..., 9:135]          # (B, T, 126) — 透传
-    trans_residual = kimodo_motion[..., 135:138]  # (B, T, 3)
+    SMPL Root 198-dim → KIMODO Root 198-dim 在线转换.
     
-    raw_trans = smooth_trans + trans_residual
-    return torch.cat([raw_trans, root_rot6d, body_rot], dim=-1)  # (B, T, 135)
+    步骤:
+    1. [0:3] raw_trans → smooth_trans (ADMM XZ 平滑)
+    2. [3:135] rot6d 透传
+    3. [135:198] pos_rel_raw_pelvis → pos_rel_smooth_root
+       pos_new[j] = pos_old[j] + (raw_trans - smooth_trans)  (参考系平移)
+    """
+    raw_trans = smpl_motion[..., 0:3]           # (B, T, 3)
+    rot6d = smpl_motion[..., 3:135]             # (B, T, 132) — 透传
+    pos_rel_pelvis = smpl_motion[..., 135:198]  # (B, T, 63)
+    
+    smooth_trans = smpl_trans_to_smooth_trans(raw_trans, admm_margin)
+    
+    # Position 参考系转换: pelvis → smooth_root
+    # FK(rot)[j] - raw_pelvis + raw_pelvis - smooth_trans
+    # = pos_rel_pelvis + (raw_trans - smooth_trans) 的 position 分量
+    trans_offset = (raw_trans - smooth_trans).unsqueeze(-2).expand_as(
+        pos_rel_pelvis.view(*pos_rel_pelvis.shape[:-1], 21, 3)
+    ).reshape_as(pos_rel_pelvis)  # broadcast to 21 joints
+    pos_rel_smooth = pos_rel_pelvis + trans_offset
+    
+    return torch.cat([smooth_trans, rot6d, pos_rel_smooth], dim=-1)  # (B, T, 198)
 ```
 
-### D.4 可逆性测试规范
+### D.4 测试规范
 
 ```python
-def test_roundtrip_conversion():
+def test_online_conversion():
     """
-    单元测试: SMPL → KIMODO → SMPL roundtrip 精度验证。
+    单元测试: SMPL 198 → KIMODO 198 转换正确性验证。
     
     验收标准:
-    - Translation: max_error < 1e-6 (float32 精度，仅浮点舍入误差)
-    - Root rotation: exact (零误差，透传不变)
-    - Body rotation: exact (零误差，透传不变)
-    
-    由于 rotation 完全透传、translation 仅做 smooth + residual 的可逆拆分，
-    roundtrip 误差理论上仅来自浮点舍入，应接近零。
+    - smooth_trans XZ 平滑度 > raw_trans XZ 平滑度 (jerk 更小)
+    - smooth_trans Y == raw_trans Y (exact)
+    - rot6d: 完全不变 (零误差)
+    - pos_rel_smooth 和 pos_rel_pelvis 的差值 == (raw_trans - smooth_trans) broadcast
+    - smooth_trans 与 raw_trans 的最大偏移 ≤ admm_margin (6cm)
     """
-    # 生成随机 SMPL motion
-    smpl_motion = random_smpl_motion(B=4, T=196, dim=135)
+    smpl_motion = random_smpl_motion(B=4, T=196, dim=198)
+    kimodo_motion = convert_motion_smpl_to_kimodo(smpl_motion)
     
-    # Roundtrip
-    kimodo_motion = smpl_root_to_kimodo_root(smpl_motion)
-    recovered_smpl = kimodo_root_to_smpl_root(kimodo_motion)
+    # 维度不变
+    assert kimodo_motion.shape == smpl_motion.shape  # (B, T, 198)
     
-    # 验证 translation (smooth + residual = original)
-    assert (smpl_motion[..., 0:3] - recovered_smpl[..., 0:3]).abs().max() < 1e-6
+    # Y 轴保持不变
+    assert (kimodo_motion[..., 1] - smpl_motion[..., 1]).abs().max() == 0
     
-    # 验证 root rotation (exact pass-through)
-    assert (smpl_motion[..., 3:9] - recovered_smpl[..., 3:9]).abs().max() == 0
+    # Rotation 完全透传
+    assert (kimodo_motion[..., 3:135] - smpl_motion[..., 3:135]).abs().max() == 0
     
-    # 验证 body rotation (exact pass-through)
-    assert (smpl_motion[..., 9:135] - recovered_smpl[..., 9:135]).abs().max() == 0
-
-
-def test_position_channels():
-    """
-    验证 position channels 在不同参考系下的正确性。
-    
-    SMPL 198: pos[j] = FK(rot)[j] - pelvis_pos  (joints 1-21)
-    KIMODO 201: pos[j] = FK(rot)[j] - smooth_trans  (joints 1-21)
-    
-    由于 rotation 相同，FK 输出相同，区别仅在参考系原点:
-    kimodo_pos[j] = smpl_pos[j] + (pelvis_pos - smooth_trans)
-                  = smpl_pos[j] + trans_residual
-    """
-    pass  # 实现时补充
+    # XZ 偏移在 margin 内
+    xz_offset = (kimodo_motion[..., [0, 2]] - smpl_motion[..., [0, 2]]).abs().max()
+    assert xz_offset <= 0.06 + 1e-6
 ```
 
 ---
 
-*文档结束。v1.7 核心简化：KIMODO Root 从 201-dim (smooth_trans + rot6d + body_rot + trans_residual) 简化为 198-dim (仅替换 translation [0:3] 为 ADMM平滑值，rotation/position 透传)，维度不变、架构无改动、在线转换即可。移除 TCC/CCFM/PCE 复杂方案，聚焦 Phase 0 首批实验：E1-E4 验证 SMPL Root vs KIMODO Root 的滑步改善效果。附录 D 中的 201-dim 转换规范已被 v1.7 简化超越，仅作历史参考。方案长期目标保持不变：通过密度感知的条件解耦编排 (CDO-FM)，实现 text 和 motion condition 的自适应平衡，并以接触条件化 flow matching 提升生成质量。*
+*文档结束。v1.7 核心简化：(1) 移除 TCC/CCFM/PCE 复杂方案，聚焦 DM-DSA + Dual Root + V3 Sampler + Decoupled CFG 四项创新；(2) KIMODO Root 简化为 198-dim (仅替换 translation [0:3] 为 ADMM平滑值，无 heading/无 trans_residual)，在线转换，维度不变；(3) 全部 config 统一使用 V3 Sampler；(4) 首批实验 E1-E4 验证 SMPL Root vs KIMODO Root × uncond/caption 的效果。*
