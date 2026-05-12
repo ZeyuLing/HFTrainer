@@ -1299,6 +1299,36 @@ To make MoGenDIT respect the adaptive mask for imputation, one would need to mod
 
 **Backward compatibility**: old checkpoints (without `'__bundle_params__'`) load normally. For M2M inference with old checkpoints, `null_vtxt_feat` must be loaded from T2M pretrained checkpoint (`checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt`) as fallback.
 
+### 2026-05-12: B8 — TAL null-vs-null comparison (CRFM semantic bug)
+
+**Severity**: Medium — TAL regularization was partially ineffective, producing garbage gradients for ~10-21% of batch.
+
+**Root cause**: When `cond_mask_prob > 0`, CFG randomly replaces text with null embeddings for a fraction of the batch. TAL then does an additional null-text forward pass to measure text effect. For CFG-masked samples, this compares NULL-vs-NULL (both branches see null text), yielding zero text effect difference and garbage TAL gradients.
+
+**Impact**: TAL loss was partially corrupted: CFG-masked samples (cond_mask_prob=0.15 → 15% of batch) contributed zero-gradient noise to TAL. Text attention preservation was weakened. No impact on base M2M models (only CRFM v3 uses TAL).
+
+**Fix** (4 files):
+- `bundle.py`: `mask_text_cond()` gains `return_text_available: bool = False` parameter; when True, returns `(vtxt, ctxt, text_available)` where `text_available` is `(B,)` boolean
+- `hymotion_m2m_trainer.py`: All 3 text processing branches call `mask_text_cond` with `return_text_available=True`, store `text_available` in ctx dict
+- `hymotion_m2m_crfm_trainer.py`: `_compute_tal_loss()` extracts `text_available` from ctx, early-returns if all samples masked, passes to `text_awareness_loss()`
+- `condition_routing.py`: `text_awareness_loss()` gains `text_available` parameter; CFG-masked samples get `apply_weight *= 0.0`
+
+**Verification**: 8 unit tests in condition_routing.py + 3 in crfm_trainer.py pass. 3 HyMotion smoke tests pass.
+
+### 2026-05-12: B2-ext — v2 caption configs missing null_embedding_source
+
+**Severity**: High — v2 caption phase1/phase2/soar configs all loaded from intermediate checkpoints with all-zero null embeddings, and the patch function couldn't find correct values since the source safetensors also lacked them.
+
+**Root cause**: `model.safetensors` format doesn't include bundle-level nn.Parameters (they're saved in `model.pt::__bundle_params__`). When `load_from.path` points to a `.safetensors` file, `_patch_zero_null_embeddings_from_pretrained()` falls back to that same path, which also lacks null embeddings. Only configs loading directly from T2M pretrained (`.ckpt` format) got patched automatically.
+
+**Fix**: Added `null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt'` to 6 v2 caption configs:
+- `hymotion_m2m_v2_caption_local_phase1.py`
+- `hymotion_m2m_v2_caption_local_phase2.py`
+- `hymotion_m2m_v2_caption_global_phase1.py`
+- `hymotion_m2m_v2_caption_global_phase2.py`
+- `soar/hymotion_m2m_v2_caption_local_046b_soar.py`
+- `soar/hymotion_m2m_v2_caption_global_046b_soar.py`
+
 ### 2026-03-25: VACE reactive leaked target motion
 
 **Root cause**: `PrepareM2MUniversalMask` returned full `src_motion` (mask regions not zeroed), trainer passed it directly to `prepare_vace_input`. `reactive = src_motion * mask` contained target values.
