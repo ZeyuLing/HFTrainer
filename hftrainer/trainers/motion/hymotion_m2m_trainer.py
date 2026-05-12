@@ -177,10 +177,11 @@ class HyMotionM2MTrainer(BaseTrainer):
                     null_mask.view(B, 1, 1).expand_as(ctxt_input), null_c, ctxt_input
                 )
 
-            vtxt_input, ctxt_input = self.bundle.mask_text_cond(
+            vtxt_input, ctxt_input, text_available = self.bundle.mask_text_cond(
                 vtxt_input, ctxt_input,
                 force_mask=False,
                 cond_mask_prob=self.bundle.cond_mask_prob,
+                return_text_available=True,
             )
         elif 'caption' in batch and batch['caption'] is not None:
             # Online text encoding from raw captions.
@@ -203,17 +204,18 @@ class HyMotionM2MTrainer(BaseTrainer):
             ctxt_input = text_feats['text_ctxt_raw'].to(device)
             ctxt_length = text_feats['text_ctxt_raw_length'].to(device)
             ctxt_mask_temporal = _length_to_mask(ctxt_length, ctxt_input.shape[1])
-            vtxt_input, ctxt_input = self.bundle.mask_text_cond(
+            vtxt_input, ctxt_input, text_available = self.bundle.mask_text_cond(
                 vtxt_input, ctxt_input,
                 force_mask=False,
                 cond_mask_prob=self.bundle.cond_mask_prob,
+                return_text_available=True,
             )
         else:
             vtxt_input = self.bundle.null_vtxt_feat.expand(B, 1, -1)
             ctxt_input = self.bundle.null_ctxt_input.expand(B, 1, -1)
             ctxt_length = torch.tensor([1], device=device).expand(B)
             ctxt_mask_temporal = _length_to_mask(ctxt_length, 1).expand(B, -1)
-
+            text_available = torch.zeros(B, dtype=torch.bool, device=device)
         # 3. Flow matching: sample t, build x_t
         x1 = tgt_motion
         if ref_pose is not None:
@@ -280,6 +282,7 @@ class HyMotionM2MTrainer(BaseTrainer):
             'vace_context': vace_context,
             'pred': pred,
             'generation_mask': generation_mask,
+            'text_available': text_available,
         }
 
     def _compute_base_loss(self, ctx: Dict[str, Any]) -> Dict[str, Tensor]:

@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import os.path as osp
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -71,7 +71,7 @@ class HyMotionM2MBundle(ModelBundle):
         losses_cfg: Optional[dict] = None,
         noise_scheduler_cfg: Optional[dict] = None,
         infer_noise_scheduler_cfg: Optional[dict] = None,
-        cond_mask_prob: float = 1.0,
+        cond_mask_prob: float = 0.0,
         vace_condition_mode: str = 'split_reactive',
         vtxt_input_dim: int = 768,
         ctxt_input_dim: int = 4096,
@@ -81,8 +81,6 @@ class HyMotionM2MBundle(ModelBundle):
         rotation_space: str = 'local',
         # ----- KIMODO-style auxiliary losses (j_p / j_v / fk_consistency) -----
         kimodo_aux_loss_cfg: Optional[dict] = None,
-        # ----- CRFM v3: text attention preservation gradient scale -----
-        text_grad_scale: float = 1.0,
     ):
         super().__init__()
 
@@ -143,11 +141,6 @@ class HyMotionM2MBundle(ModelBundle):
             'validation_steps', 50
         )
 
-        # ---- CRFM v3: CDE enable flag (mirrors motion_transformer.enable_cde) ----
-        self.enable_cde = motion_transformer.get('enable_cde', False)
-
-        # ---- CRFM v3: text gradient scale ----
-        self._text_grad_scale = text_grad_scale
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -225,18 +218,45 @@ class HyMotionM2MBundle(ModelBundle):
         ctxt: Tensor,
         force_mask: bool = False,
         cond_mask_prob: float = 0.0,
-    ) -> Tuple[Tensor, Tensor]:
-        """Apply classifier-free guidance masking to text conditions."""
+        return_text_available: bool = False,
+    ) -> Union[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor, Tensor]]:
+        """Apply classifier-free guidance masking to text conditions.
+
+        Args:
+            vtxt: Sentence-level text embeddings, shape (B, 1, D_v).
+            ctxt: Token-level text embeddings, shape (B, L_c, D_c).
+            force_mask: If True, return null embeddings for all samples.
+            cond_mask_prob: Probability of masking text (CFG dropout rate).
+            return_text_available: If True, also return boolean mask indicating
+                which samples have real text (not masked). Shape (B,).
+
+        Returns:
+            - If return_text_available=False: (vtxt_masked, ctxt_masked)
+            - If return_text_available=True: (vtxt_masked, ctxt_masked, text_available)
+              where text_available[b]=True means sample b has real text,
+              text_available[b]=False means sample b was masked to null.
+        """
         bs = vtxt.shape[0]
+        # Track which samples have real (non-masked) text
+        text_available = torch.ones(bs, dtype=torch.bool, device=vtxt.device)
+
         if force_mask:
-            return (
+            text_available.fill_(False)
+            result = (
                 self.null_vtxt_feat.expand(*vtxt.shape),
                 self.null_ctxt_input.expand(*ctxt.shape),
             )
+            if return_text_available:
+                return result + (text_available,)
+            return result
+
         if self.training and cond_mask_prob > 0.0:
             mask = torch.bernoulli(
                 torch.ones(bs, device=vtxt.device) * cond_mask_prob
             ).view(bs, 1).bool()
+            # Invert: mask=1 (drop text) -> text_available=0 (no real text)
+            text_available = ~mask.squeeze(-1)
+
             mask_vtxt = mask
             while mask_vtxt.ndim < vtxt.ndim:
                 mask_vtxt = mask_vtxt.unsqueeze(-1)
@@ -249,7 +269,11 @@ class HyMotionM2MBundle(ModelBundle):
             ctxt = torch.where(
                 mask_ctxt, self.null_ctxt_input.expand_as(ctxt), ctxt
             )
-        return vtxt, ctxt
+
+        result = (vtxt, ctxt)
+        if return_text_available:
+            return result + (text_available,)
+        return result
 
     def prepare_padding(
         self,
@@ -463,30 +487,6 @@ class HyMotionM2MBundle(ModelBundle):
         std = torch.where(self.std < 1e-3, torch.ones_like(self.std), self.std)
         return motion * std + self.mean
 
-    def compute_mask_density(self, src_mask: Tensor) -> Tensor:
-        """Compute per-sample mask density for CDE (CRFM v3).
-
-        src_mask: (B, L, D), 1=generate, 0=known
-        Returns: (B,) density in [0, 1]
-        """
-        return src_mask.mean(dim=(-1, -2))
-
-    def apply_text_attention_preservation(self) -> None:
-        """Apply TAP gradient scaling to text-related transformer parameters.
-
-        Called by CRFM trainer at initialization. Uses self._text_grad_scale
-        set in __init__. Does nothing if scale >= 1.0.
-        """
-        if self._text_grad_scale >= 1.0:
-            return
-        from hftrainer.models.motion.hymotion_m2m.network.condition_routing import (
-            TextAttentionPreservation,
-        )
-        self._tap = TextAttentionPreservation(
-            text_grad_scale=self._text_grad_scale,
-            refiner_grad_scale=min(self._text_grad_scale * 10, 1.0),
-        )
-        self._tap.apply(self.motion_transformer)
 
     def get_bone_offsets(self) -> Tensor:
         """Get bone offsets for FK/IK.
