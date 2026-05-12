@@ -67,3 +67,8 @@ __all__ = [
     'SplitInbetween',
     'SplitPrediction',
 ]
+from hftrainer.datasets.motion.motionhub.transforms.smpl_trans_to_kimodo_root import (
+    SmplTransToKimodoRootOnline,
+)
+
+__all__.append('SmplTransToKimodoRootOnline')
