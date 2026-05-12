@@ -1,0 +1,215 @@
+================================================================================
+                    SMPL-X SKELETON REFERENCE (22 JOINTS)
+================================================================================
+
+JOINT HIERARCHY & HEIGHT ESTIMATION CHAIN
+==========================================
+
+                              15: HEAD
+                               |
+                    12: NECK
+                       |
+        13: LEFT_COLLAR --- 6: SPINE2 --- 14: RIGHT_COLLAR
+             |                            |
+        16: LEFT_SHOULDER          17: RIGHT_SHOULDER
+             |                           |
+        18: LEFT_ELBOW             19: RIGHT_ELBOW
+             |                           |
+        20: LEFT_WRIST             21: RIGHT_WRIST
+
+
+                    3: SPINE1
+                       |
+        1: LEFT_HIP --- 0: PELVIS --- 2: RIGHT_HIP
+             |                           |
+        4: LEFT_KNEE               5: RIGHT_KNEE
+             |                           |
+        7: LEFT_ANKLE              8: RIGHT_ANKLE
+             |                           |
+        10: LEFT_FOOT              11: RIGHT_FOOT
+
+================================================================================
+COORDINATE SYSTEM
+================================================================================
+
+Standard SMPL convention (verify with FK output):
+  X-axis: Left-Right   (negative=left, positive=right)
+  Y-axis: Up-Down      (negative=down, positive=up)     <-- HEIGHT AXIS
+  Z-axis: Forward-Back (negative=back, positive=forward)
+
+Example joint positions in world space (after FK):
+  HEAD (joint 15):      [0.0, 1.65, 0.0]  ← Top (Y=1.65)
+  PELVIS (joint 0):     [0.0, 0.95, 0.0]  ← Middle
+  FOOT (joint 10/11):   [±0.1, 0.0, 0.0]  ← Bottom (Y=0.0)
+
+Height = max(Y) - min(Y) = 1.65 - 0.0 = 1.65 meters
+
+================================================================================
+JOINT INDEX MAPPING
+================================================================================
+
+ 0: pelvis            (root)
+ 1: left_hip
+ 2: right_hip
+ 3: spine1
+ 4: left_knee
+ 5: right_knee
+ 6: spine2
+ 7: left_ankle
+ 8: right_ankle
+ 9: spine3
+10: left_foot         ← Height measurement (feet)
+11: right_foot        ← Height measurement (feet)
+12: neck
+13: left_collar
+14: right_collar
+15: head              ← Height measurement (head)
+16: left_shoulder
+17: right_shoulder
+18: left_elbow
+19: right_elbow
+20: left_wrist
+21: right_wrist
+
+================================================================================
+HEIGHT ESTIMATION FORMULA
+================================================================================
+
+METHOD: Forward Kinematics (FK) + Direct Measurement
+
+INPUTS:
+  smplx_output.joints  ← numpy array of shape (T, 22, 3)
+                         T = number of frames
+                         22 = number of joints
+                         3 = xyz coordinates
+
+CODE:
+  joints = smplx_output.joints.detach().numpy()  # (T, 22, 3)
+  
+  head_positions = joints[:, 15, :]  # All frames, head joint
+  left_foot_positions = joints[:, 10, :]
+  right_foot_positions = joints[:, 11, :]
+  
+  # Y-axis is vertical (index 1)
+  head_y_max = head_positions[:, 1].max()
+  foot_y_min = min(left_foot_positions[:, 1].min(), 
+                   right_foot_positions[:, 1].min())
+  
+  human_height = head_y_max - foot_y_min
+
+VALIDATION:
+  if 1.3 <= human_height <= 2.3:
+      return human_height
+  else:
+      return 1.7  # Fallback to average
+
+================================================================================
+TYPICAL HEIGHT VALUES (for reference)
+================================================================================
+
+Joint distances (head to feet):
+  Very short humans:       ~1.35m
+  Average short female:    ~1.55m
+  Average female:          ~1.65m
+  Average male:            ~1.75m
+  Tall humans:             ~2.00m
+  Very tall humans:        ~2.15m+
+
+Valid range: [1.3m, 2.3m]
+
+================================================================================
+JOINT INDEX QUICK LOOKUP
+================================================================================
+
+For Height Estimation:
+  HEAD:                  15
+  LEFT_FOOT:            10
+  RIGHT_FOOT:           11
+  PELVIS (root):         0
+
+For Limb Length Estimates:
+  LEFT LEG:       distance(0, 7) or (0, 10)
+  RIGHT LEG:      distance(0, 8) or (0, 11)
+  LEFT UPPER ARM:        distance(16, 18)
+  LEFT FOREARM:          distance(18, 20)
+  RIGHT UPPER ARM:       distance(17, 19)
+  RIGHT FOREARM:         distance(19, 21)
+  TORSO:                 distance(0, 15) or (0, 9)
+
+Distance = sqrt(dx² + dy² + dz²)
+
+================================================================================
+VALIDATION CHECKLIST
+================================================================================
+
+When testing height estimation:
+
+[ ] FK output shape is (T, 22, 3)
+[ ] All coordinates are finite (no NaN or Inf)
+[ ] Head Y-coordinate > Foot Y-coordinate
+[ ] Height difference > 1.0 (not flat)
+[ ] Height < 3.0 (not explosion)
+[ ] Same input produces same output (deterministic)
+[ ] Different motions produce different heights (variance)
+
+Debug output to check:
+  print("Head pos:", joints[0, 15])      # E.g., [0.05, 1.65, -0.02]
+  print("L_Foot pos:", joints[0, 10])    # E.g., [-0.08, 0.02, 0.10]
+  print("R_Foot pos:", joints[0, 11])    # E.g., [0.08, 0.02, 0.10]
+  print("Height:", height_value)         # E.g., 1.631m
+
+================================================================================
+SMPL-X JOINT NAMES (from smplx.joint_names)
+================================================================================
+
+JOINT_NAMES[:22] =
+[
+  'pelvis',            # 0
+  'left_hip',          # 1
+  'right_hip',         # 2
+  'spine1',            # 3
+  'left_knee',         # 4
+  'right_knee',        # 5
+  'spine2',            # 6
+  'left_ankle',        # 7
+  'right_ankle',       # 8
+  'spine3',            # 9
+  'left_foot',         # 10
+  'right_foot',        # 11
+  'neck',              # 12
+  'left_collar',       # 13
+  'right_collar',      # 14
+  'head',              # 15
+  'left_shoulder',     # 16
+  'right_shoulder',    # 17
+  'left_elbow',        # 18
+  'right_elbow',       # 19
+  'left_wrist',        # 20
+  'right_wrist',       # 21
+]
+
+================================================================================
+FK OUTPUT STRUCTURE
+================================================================================
+
+import torch
+from smplx import SMPLX
+
+body_model = SMPLX(...)
+output = body_model(
+    betas=torch.zeros(1, 10),
+    body_pose=torch.randn(1, 63),
+    global_orient=torch.randn(1, 3),
+    transl=torch.zeros(1, 3),
+)
+
+output.joints:        torch.Tensor, shape (T, 22, 3) ← WORLD SPACE
+output.vertices:      torch.Tensor, shape (T, 10475, 3) ← mesh
+output.global_orient: torch.Tensor, shape (T, 3) ← root rotation
+output.full_pose:     torch.Tensor, shape (T, 156) ← all rotations
+
+To use:
+  joints_np = output.joints.detach().numpy()
+  # Now: shape (T, 22, 3), can compute distances
+
+================================================================================

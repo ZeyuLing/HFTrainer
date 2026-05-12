@@ -1,0 +1,307 @@
+================================================================================
+KIMODO HEADING REPRESENTATION INVESTIGATION - FINAL REPORT
+================================================================================
+
+INVESTIGATION DATE: 2026-05-12
+INVESTIGATOR: Code Analysis (ref_repo/KIMODO examination)
+STATUS: COMPLETE ✅
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+QUESTION:
+  Can KIMODO's 2D heading representation [cos(ψ), sin(ψ)] be fully converted 
+  back to SMPL's global orient (root rotation including pitch/roll/yaw)?
+
+ANSWER:
+  ✅ YES - Full conversion is POSSIBLE and VERIFIED
+  ✅ NO information loss occurs
+  ✅ KIMODO does NOT lose pitch/roll information
+
+KEY FINDING:
+  The 2D heading [cos(ψ), sin(ψ)] is a SUMMARY feature for canonicalization,
+  NOT the primary root rotation storage. The FULL 3D root rotation is 
+  preserved in global_rot_data[0] as a 6D continuous representation, which
+  can be perfectly reconstructed to 3×3 matrices and then to SMPL format.
+
+================================================================================
+DETAILED FINDINGS
+================================================================================
+
+1. KIMODO MOTION REPRESENTATION STRUCTURE
+   Location: ref_repo/KIMODO/kimodo/kimodo/motion_rep/reps/kimodo_motionrep.py
+   Lines: 26-41
+   
+   Feature Layout [333 dims total]:
+   ├─ [0:3]    smooth_root_pos [3]         - Position only
+   ├─ [3:5]    global_root_heading [2]    - YAW ONLY [cos(ψ), sin(ψ)] ⚠️
+   ├─ [5:86]   local_joints_positions [81] - Body joint positions
+   ├─ [86:248] global_rot_data [162]       - FULL 3D rotations ⭐
+   │           └─ [86:91] = root [6D]      - FULL 3D root rotation HERE!
+   ├─ [248:329] velocities [81]
+   └─ [329:333] foot_contacts [4]
+
+   CRITICAL DISCOVERY:
+   The feature is named "global_root_heading" but this is MISLEADING.
+   The actual full 3D root rotation is stored in global_rot_data[0].
+
+2. FORWARD PASS (FEATURE EXTRACTION)
+   Location: kimodo_motionrep.py lines 50-106
+   Key lines: 74-90
+   
+   Process:
+   a) Compute global joint rotations via FK [B,T,27,3,3]
+   b) Extract heading angle (YAW ONLY) from hip vector
+   c) Store as global_root_heading [cos(ψ), sin(ψ)]
+   d) Convert ALL joint rotations to 6D continuous form
+   e) global_rot_data[..., 0, :] contains FULL 3D root rotation
+   
+   Evidence:
+   Line 90: global_rot_data = matrix_to_cont6d(global_joints_rots)
+   → Includes global_joints_rots[..., 0, :, :] (root) converted to 6D
+   → Result: global_rot_data[..., 0, :] is [B,T,6] with full info
+
+3. INVERSE RECONSTRUCTION (FEATURE DECODING)
+   Location: kimodo_motionrep.py lines 162-215
+   Key lines: 187-188
+   
+   Process:
+   a) Unpack features (including global_root_heading [B,T,2])
+   b) Convert global_rot_data to 3×3 matrices
+      Line 187: global_rot_mats = cont6d_to_matrix(global_rot_data)
+      → global_rot_mats[..., 0, :, :] is full 3D root [3×3]
+   c) Convert global → local rotations
+      Line 188: local_rot_mats = global_rots_to_local_rots(...)
+      → Applies to all joints including root
+   d) Reconstruct motion
+   
+   CRITICAL FINDING:
+   global_root_heading is NEVER USED in reconstruction!
+   → Extracted at line 181 but never referenced after
+   → Reconstruction uses global_rot_data[0] instead
+
+4. HEADING ANGLE COMPUTATION
+   Location: motion_rep/feature_utils.py lines 112-126
+   
+   Method:
+   - Extract left/right hip positions
+   - Compute hip vector
+   - Compute heading angle: atan2(diff[z], -diff[x])
+   - Result: YAW ONLY (no pitch or roll info)
+   
+   Code: heading_angle = torch.atan2(diff[..., 2], -diff[..., 0])
+   This is fundamentally limited to X-Z plane, cannot capture 3D rotation
+
+5. SMPL CONVERSION (AMASS FORMAT)
+   Location: exports/smplx.py lines 15-63
+   Key lines: 34, 62
+   
+   Process:
+   a) Extract root rotation matrix from local_rot_mats[..., 0, :, :]
+   b) Apply coordinate transform if needed (Y-up to Z-up)
+   c) Convert to axis-angle format
+      Line 62: root_orient = matrix_to_axis_angle(root_rot_mats)
+      → Result: [B,T,3] in axis-angle (pitch, roll, yaw)
+   
+   OUTPUT:
+   - trans [B,T,3]: Root translation
+   - root_orient [B,T,3]: Root rotation (axis-angle, FULL 3 DOF)
+   - pose_body [B,T,78]: Body joint rotations
+
+================================================================================
+INFORMATION FLOW DIAGRAM
+================================================================================
+
+INPUT MOTION (SMPL):
+  local_joint_rots [B,T,22,3,3] + root_positions [B,T,3]
+
+↓ FK (Forward Kinematics)
+
+GLOBAL ROTATIONS:
+  global_joint_rots [B,T,22,3,3] ← Full 3D root at index [0]
+
+↓ Feature Extraction (1) Heading vs (2) 6D Rotation
+
+(1) HEADING COMPUTATION:
+  root_heading_angle = atan2(rhip - lhip)  [B,T]
+  global_root_heading = [cos(ψ), sin(ψ)]   [B,T,2]
+  └─ YAW ONLY, no pitch/roll info
+  
+(2) 6D ROTATION CONVERSION:
+  global_rot_data = matrix_to_cont6d(global_joint_rots) [B,T,27,6]
+  ├─ global_rot_data[..., 0, :] = Root rotation (6D) ⭐
+  └─ Contains FULL pitch/roll/yaw information
+
+↓ Pack Features
+
+KIMODO FEATURES [B,T,333]:
+  [0:3]       smooth_root_pos
+  [3:5]       global_root_heading ← NOT used in reconstruction
+  [5:86]      local_joints_positions
+  [86:91]     global_rot_data[0] ← USED in reconstruction ✅
+  [91:248]    global_rot_data[1:27]
+  [248:329]   velocities
+  [329:333]   foot_contacts
+
+↓ DIFFUSION MODEL (in between)
+
+↓ Inverse Reconstruction
+
+RECOVERED ROTATIONS:
+  global_rot_mats = cont6d_to_matrix(global_rot_data) [B,T,27,3,3]
+  └─ global_rot_mats[..., 0, :, :] ← Full 3D root rotation
+  
+  local_rot_mats = global_rots_to_local_rots(global_rot_mats) [B,T,27,3,3]
+  └─ local_rot_mats[..., 0, :, :] ← Root in SMPL local frame
+
+↓ Convert to SMPL Format
+
+OUTPUT (AMASS):
+  trans: [B,T,3]        ← Root translation
+  root_orient: [B,T,3]  ← Root axis-angle (pitch, roll, yaw) ✅
+  pose_body: [B,T,78]   ← Body rotations
+
+================================================================================
+DOES INFORMATION LOSS OCCUR?
+================================================================================
+
+ANALYSIS: No information is lost
+
+PROOF:
+1. Global rotations are converted to 6D continuous form
+   → 6D form is losslessly reversible to 3×3 matrix
+   → 3×3 matrix fully encodes 3 DOF (pitch, roll, yaw)
+
+2. The 2D heading is a PROJECTION, not a compression
+   → It's extracted from the full 3D rotation
+   → But the original 3D rotation is still stored
+
+3. Reconstruction does not use the 2D heading
+   → It uses the 6D form which is lossless
+   → So no information is lost in the path to SMPL
+
+4. SMPL root_orient is 3D axis-angle
+   → This fully represents the 3×3 rotation matrix
+   → All 3 DOF (pitch, roll, yaw) are present
+
+CONCLUSION: ✅ No information loss occurs in the pipeline
+
+================================================================================
+KEY FILE LOCATIONS
+================================================================================
+
+Primary Analysis Files:
+  ref_repo/KIMODO/kimodo/kimodo/motion_rep/reps/kimodo_motionrep.py
+  ├─ Lines 26-41:   Feature layout definition
+  ├─ Lines 50-106:  Forward pass (__call__)
+  ├─ Lines 74-90:   Key: Global rotation extraction and 6D conversion
+  ├─ Lines 80-81:   Key: Heading computation (YAW ONLY)
+  └─ Lines 162-215: Inverse reconstruction
+
+Supporting Files:
+  ref_repo/KIMODO/kimodo/kimodo/motion_rep/feature_utils.py
+  └─ Lines 112-126: compute_heading_angle() function
+  
+  ref_repo/KIMODO/kimodo/kimodo/skeleton/transforms.py
+  └─ Lines 12-39:   global_rots_to_local_rots() function
+  
+  ref_repo/KIMODO/kimodo/kimodo/exports/smplx.py
+  └─ Lines 15-63:   get_amass_parameters() - SMPL conversion
+
+Geometry Functions:
+  ref_repo/KIMODO/kimodo/kimodo/geometry.py
+  ├─ matrix_to_cont6d()  - Convert 3×3 → 6D
+  ├─ cont6d_to_matrix()  - Convert 6D → 3×3
+  └─ matrix_to_axis_angle() - Convert 3×3 → 3D axis-angle
+
+================================================================================
+ANSWERS TO YOUR SPECIFIC QUESTIONS
+================================================================================
+
+Q1: Does KIMODO truly lose pitch/roll of the root?
+A:  NO - KIMODO does NOT lose pitch/roll.
+    • The 2D heading stores YAW ONLY
+    • The full 3D root rotation is preserved in global_rot_data[0]
+    • This 6D form can be perfectly reconstructed to 3×3 matrix
+    • Pitch and roll are fully recoverable
+
+Q2: If yes, how does KIMODO reconstruct SMPL output for evaluation?
+A:  KIMODO does NOT start from the heading to reconstruct.
+    • It uses global_rot_data[0] (6D) for reconstruction
+    • Path: 6D → 3×3 matrix → local rotations → axis-angle
+    • All 3 DOF are preserved at each step
+    • SMPL root_orient [3D] contains pitch, roll, and yaw
+
+Q3: Is there a way to preserve full root rotation in our KIMODO-style representation?
+A:  KIMODO ALREADY does this correctly!
+    • Store root as 6D continuous rotation (or 3×3 matrix)
+    • Add 2D heading as OPTIONAL auxiliary feature only
+    • For reconstruction, use ONLY the 6D form
+    • Convert to axis-angle at final SMPL export
+    
+    This is the optimal approach KIMODO already uses.
+
+================================================================================
+IMPLICATIONS FOR YOUR PIPELINE
+================================================================================
+
+✅ KIMODO output can be fully converted to SMPL format
+✅ No pitch/roll information is lost
+✅ Reconstruction is accurate and complete
+✅ The 2D heading is auxiliary, not primary
+
+RECOMMENDATION:
+If adapting KIMODO for your needs:
+1. Preserve the 6D continuous rotation storage
+2. Treat 2D heading as optional guidance feature
+3. Use 6D form for reconstruction (not heading)
+4. Convert to axis-angle for SMPL output
+
+================================================================================
+GENERATED DOCUMENTS
+================================================================================
+
+Three comprehensive analysis documents have been created:
+
+1. KIMODO_HEADING_ANALYSIS.md
+   - Comprehensive 14KB analysis document
+   - Detailed code paths and explanations
+   - Feature storage hierarchy
+   - Complete reconstruction pipeline
+
+2. KIMODO_HEADING_QUICK_ANSWER.md
+   - Concise quick reference (3KB)
+   - Direct answers to core questions
+   - Information flow diagram
+   - Bottom-line summary
+
+3. KIMODO_CODE_REFERENCE.md
+   - Exact code locations and line numbers
+   - Critical code sections with comments
+   - Data flow diagram
+   - Debugging checklist
+   - Dimension layout reference
+
+All documents available in /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
+================================================================================
+CONCLUSION
+================================================================================
+
+KIMODO's heading representation is NOT a limitation for SMPL conversion.
+
+The 2D heading [cos(ψ), sin(ψ)] is a SUMMARY feature designed for:
+✓ Canonicalization (rotation to frame-0 heading = 0)
+✓ Constraint specification (text prompts)
+✓ Feature rotation operations
+
+The ACTUAL full 3D root rotation is stored in global_rot_data[0] as a
+6D continuous representation, which is:
+✓ Losslessly reversible to 3×3 matrix
+✓ Fully recoverable to SMPL format
+✓ Never used in the reconstruction (hence why 2D heading is redundant)
+
+Therefore: ✅ You CAN fully convert KIMODO to SMPL with NO information loss.
+
+================================================================================

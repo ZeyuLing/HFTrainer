@@ -1,0 +1,149 @@
+═══════════════════════════════════════════════════════════════════════════════
+HyMotion M2M v2 Loss Configuration - QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 CONFIGURATION FILES:
+  • Uncond (v3 sampler): configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py
+  • Caption (v2 sampler): configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_046b.py
+  • Base (shared):        configs/hymotion_m2m_v2/_base_hymotion_m2m_v2_046b.py
+
+───────────────────────────────────────────────────────────────────────────────
+📊 PRIMARY LOSS (M2MLoss):
+───────────────────────────────────────────────────────────────────────────────
+
+✓ velocity_weight = 1.0
+  └─ Main flow-matching loss (velocity prediction)
+  └─ Compares: pred_vel = pred - x0 vs gt_vel = x1 - x0
+  └─ NO timestep weighting
+  └─ Dimension reweight: trans_dim_weight=5.0 (translation [0:3] ×5)
+
+✓ motion_smoothness_weight = 0.5
+  └─ Frame-to-frame temporal smoothness
+  └─ Penalizes velocity changes between consecutive frames
+  └─ NO timestep weighting
+
+✗ keypoints3d_weight = 0.0 (disabled)
+✗ translation_weight = 0.0 (disabled)
+✗ x1_weight = 0.0 (disabled - velocity prediction mode)
+✗ fk_consistency_weight = 0.0 (disabled - using KIMODO aux instead)
+
+───────────────────────────────────────────────────────────────────────────────
+⭐ KIMODO-STYLE AUXILIARY LOSSES (KimodoStyleAuxLoss) - WITH t² WEIGHTING:
+───────────────────────────────────────────────────────────────────────────────
+
+✓ aux_joint_pos (weight=50.0) **WITH t² weighting**
+  └─ Global joint position supervision from FK
+  └─ Base value: ~1e-4 m (cm-level)
+  └─ Effective: ~5.0e-3 (~14% of velocity loss)
+  └─ Prevents foot skating / pelvis cheating
+
+✓ aux_joint_vel (weight=500.0) **WITH t² weighting**
+  └─ Global joint velocity supervision from FK
+  └─ Base value: ~1e-6 m/frame (mm-level)
+  └─ Effective: ~1.0e-3 (~4% of velocity loss)
+  └─ Strong discriminator for velocity mismatches
+
+✓ aux_fk_consistency (weight=1500.0) **WITH t² weighting**
+  └─ FK consistency: pos_channels[135:198] vs FK-derived positions
+  └─ Base value: ~1.4e-6 m (mm-level intra-pred consistency)
+  └─ Effective: ~2.1e-3 (~7% of velocity loss)
+  └─ Enables position-only inference (no IK needed)
+
+───────────────────────────────────────────────────────────────────────────────
+🎯 t² TIMESTEP WEIGHTING (CRITICAL):
+───────────────────────────────────────────────────────────────────────────────
+
+WHERE:   Applied to ALL three KIMODO auxiliary losses
+         ✓ aux_joint_pos
+         ✓ aux_joint_vel
+         ✓ aux_fk_consistency
+
+HOW:     t_sq = timesteps ** 2
+         loss_weighted = loss_base * t_sq
+
+EFFECT:  • t=0 (pure noise):   loss ≈ 0 (no signal to supervise)
+         • t=1 (clean data):   loss = full weight
+         • E[t²] = 1/3         average impact is 1/3 of nominal weight
+
+RATIONALE: FK on pure noise is uninformative. Down-weight supervision
+           when prediction is mostly noise.
+
+CODE LOCATIONS:
+  • KimodoStyleAuxLoss.forward() line 280-283 (kimodo_aux_loss.py)
+  • motion198_fk_loss() line 190-192 (compute_198dim.py)
+
+───────────────────────────────────────────────────────────────────────────────
+📐 MOTION REPRESENTATION (198-dim):
+───────────────────────────────────────────────────────────────────────────────
+
+[0:3]        Translation (SMPL trans)
+[3:9]        Root joint 6D rotation
+[9:135]      21 body joints × 6D rotation
+[135:198]    21 joints × 3D position (Scheme D: XZ rel-pelvis, Y absolute)
+
+───────────────────────────────────────────────────────────────────────────────
+🎲 MOTION CONDITION SAMPLING:
+───────────────────────────────────────────────────────────────────────────────
+
+Unconditioned (uncond_local):
+  sampler_version = 'v3'  ← Universal Rank-K Boolean Tensor Prior
+  editing_prob = 0.15     (15% corruption editing mode)
+
+Caption-Conditioned (caption_local):
+  sampler_version = 'v2'  ← Tier-2 hard-coded templates
+  tier2_prob = 0.4        (40% of samples use templates)
+  editing_prob = 0.15     (15% corruption editing mode)
+  
+  Tier-2 distribution:
+    'pure_gen': 0.40      (full sequence generation)
+    'inbetween': 0.15     (inbetween-frame completion)
+    'prefix': 0.10        (begin-phrase continuation)
+    'keyframes': 0.10     (sparse keyframe completion)
+    'end_effector': 0.08  (EE trajectory constraint)
+    'trajectory': 0.07    (root trajectory constraint)
+    'foot_ground': 0.05   (ground contact constraint)
+    'edit_repair': 0.05   (corruption repair)
+
+───────────────────────────────────────────────────────────────────────────────
+🧮 OPTIMIZATION SETTINGS:
+───────────────────────────────────────────────────────────────────────────────
+
+Optimizer:         AdamW
+Learning Rate:     1e-4 (constant, no scheduling)
+Betas:             [0.9, 0.99]
+Weight Decay:      0.0
+Gradient Clipping: max_grad_norm=1.0
+
+Batch Size:        28 (uncond) / 20 (caption, V100-32GB)
+Epochs:            10000
+Val Interval:      10 epochs
+Checkpoint:        Save every 10 epochs, keep last 100
+
+Accelerator:       FP32 (no mixed precision)
+Gradient Accum:    1 step
+
+EMA:               decay=0.999, update_interval=1
+
+───────────────────────────────────────────────────────────────────────────────
+🔥 KEY INSIGHTS:
+───────────────────────────────────────────────────────────────────────────────
+
+1. MAIN LOSS: velocity (weight=1.0) + smoothness (weight=0.5)
+   └─ Flow-matching style training, no t-weighting
+
+2. CRITICAL ADDITION: Three KIMODO auxiliary losses with t² weighting
+   └─ Strongly supervise global joint physics
+   └─ Enable FK-consistency enforcement for position channels
+   └─ Down-weight at noisy timesteps (t~0) where FK is uninformative
+
+3. WEIGHT CALIBRATION: Not arbitrary!
+   └─ Calibrated to target fractions of velocity loss
+   └─ Account for denormalized space (meters vs normalized)
+   └─ Compensate for t² averaging (E[t²]=1/3)
+   └─ Result: ~25% of total training signal from KIMODO losses
+
+4. DUAL CONDITIONING:
+   └─ Unconditioned: v3 universal sampler (more flexible masks)
+   └─ Caption: v2 Tier-2 sampler (task-specific templates + text)
+
+═══════════════════════════════════════════════════════════════════════════════

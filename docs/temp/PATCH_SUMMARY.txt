@@ -1,0 +1,148 @@
+================================================================================
+PATCH SUMMARY: FK-Based Height Estimation Fix
+================================================================================
+
+FILE MODIFIED: ref_repo/GMR/general_motion_retargeting/utils/smpl.py
+
+================================================================================
+CHANGE 1: New Helper Function (Lines 11-45)
+================================================================================
+
+def estimate_human_height_from_joints(joints_world, frame_indices=None, 
+                                      head_joint_idx=15, 
+                                      foot_joint_indices=(10, 11)):
+    """
+    Estimate human height from world-space joint positions (FK output).
+    
+    Args:
+        joints_world: (num_frames, num_joints, 3) world-space joint positions from SMPL-X FK
+        frame_indices: which frames to use for height estimation (default: use all frames)
+        head_joint_idx: index of head joint (default: 15 in SMPL-X)
+        foot_joint_indices: indices of foot joints (default: (10, 11) in SMPL-X)
+    
+    Returns:
+        human_height: estimated height in meters
+        frame_heights: (num_frames,) array of per-frame height estimates
+    """
+    if frame_indices is None:
+        frame_indices = slice(None)
+    
+    joints_subset = joints_world[frame_indices]
+    
+    # Extract Y coordinates (vertical axis)
+    head_y = joints_subset[:, head_joint_idx, 1]
+    
+    # Get minimum Y from both feet
+    foot_y = joints_subset[:, list(foot_joint_indices), 1]
+    min_foot_y = np.min(foot_y, axis=1)
+    
+    # Height per frame
+    frame_heights = head_y - min_foot_y
+    
+    # Use median to be robust to outliers
+    human_height = np.median(frame_heights)
+    
+    return human_height, frame_heights
+
+================================================================================
+CHANGE 2: load_smplx_file() Height Calculation (Lines 88-105)
+================================================================================
+
+OLD CODE (Lines 50-53):
+    if len(smplx_data["betas"].shape)==1:
+        human_height = 1.66 + 0.1 * smplx_data["betas"][0]
+    else:
+        human_height = 1.66 + 0.1 * smplx_data["betas"][0, 0]
+
+NEW CODE (Lines 88-105):
+    # ====== FIX: Estimate height from FK joint positions ======
+    joints_world = smplx_output.joints.detach().numpy()  # (num_frames, num_joints, 3)
+    
+    # Use middle 50% of frames for height estimation (skip start/end frames which may be noisy)
+    start_frame = num_frames // 4
+    end_frame = 3 * num_frames // 4
+    frame_indices = slice(start_frame, end_frame)
+    
+    human_height, frame_heights = estimate_human_height_from_joints(
+        joints_world, 
+        frame_indices=frame_indices,
+        head_joint_idx=15,
+        foot_joint_indices=(10, 11)
+    )
+    
+    # Clamp to reasonable human height range [1.4m, 2.2m]
+    human_height = max(1.4, min(2.2, human_height))
+    # ========================================================
+
+================================================================================
+CHANGE 3: load_gvhmr_pred_file() Height Calculation (Lines 157-174)
+================================================================================
+
+OLD CODE (Lines 105-108):
+    if len(smplx_data['betas'].shape)==1:
+        human_height = 1.66 + 0.1 * smplx_data['betas'][0]
+    else:
+        human_height = 1.66 + 0.1 * smplx_data['betas'][0, 0]
+
+NEW CODE (Lines 157-174):
+    # ====== FIX: Estimate height from FK joint positions ======
+    joints_world = smplx_output.joints.detach().numpy()  # (num_frames, num_joints, 3)
+    
+    # Use middle 50% of frames for height estimation
+    start_frame = num_frames // 4
+    end_frame = 3 * num_frames // 4
+    frame_indices = slice(start_frame, end_frame)
+    
+    human_height, frame_heights = estimate_human_height_from_joints(
+        joints_world,
+        frame_indices=frame_indices,
+        head_joint_idx=15,
+        foot_joint_indices=(10, 11)
+    )
+    
+    # Clamp to reasonable human height range [1.4m, 2.2m]
+    human_height = max(1.4, min(2.2, human_height))
+    # ========================================================
+
+================================================================================
+STATISTICS
+================================================================================
+
+Lines added:      ~80
+Lines removed:    ~6
+Net change:       +74 lines
+
+Functions modified:     2 (load_smplx_file, load_gvhmr_pred_file)
+Functions added:        1 (estimate_human_height_from_joints)
+Dependencies:           None (uses only numpy, already imported)
+
+================================================================================
+BREAKING CHANGES
+================================================================================
+
+None. The function signatures and return types remain identical.
+All existing code that calls these functions will continue to work without modification.
+
+================================================================================
+TESTING STATUS
+================================================================================
+
+All unit tests passed:
+  ✓ Basic height estimation with clean data
+  ✓ Various height ranges (1.4m - 2.1m)
+  ✓ Robustness to noisy joint positions
+  ✓ Custom joint indices
+  ✓ Edge cases (single frame)
+  ✓ Clamping to reasonable range
+
+================================================================================
+DEPLOYMENT NOTES
+================================================================================
+
+1. The patch is backward compatible - no code changes needed in calling code
+2. Height estimation is automatic and transparent
+3. Performance impact is minimal (computation happens after FK, which is already done)
+4. No additional dependencies required
+5. Ready for immediate deployment
+
+================================================================================

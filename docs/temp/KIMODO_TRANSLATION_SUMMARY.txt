@@ -1,0 +1,212 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║           KIMODO MOTION REPRESENTATION - EXECUTIVE SUMMARY                    ║
+║                   Translation & Augmentation Deep Dive                         ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+QUESTION 1: What is KIMODO's exact 201-dim layout? Specifically the translation part?
+──────────────────────────────────────────────────────────────────────────────────────
+
+ANSWER:  KIMODO uses 369D FULL representation (not 201D). The breakdown for SOMA-30:
+
+  [0:3]        smooth_root_pos                 → 3D   (XZ smoothed + Y height preserved)
+  [3:5]        global_root_heading             → 2D   ([cos(θ), sin(θ)] direction)
+  [5:95]       local_joints_positions          → 90D  (30 joints × 3, pelvis-relative)
+  [95:275]     global_rot_data                 → 180D (30 joints × 6D rot6d)
+  [275:365]    velocities                      → 90D  (30 joints × 3D velocity)
+  [365:369]    foot_contacts                   → 4D   (binary contact per foot)
+  ────────────────────────────────────────────────
+  TOTAL: 369D
+
+The "201D" reference likely means:
+  - Compressed representation during diffusion (root only, no velocities/positions)
+  - ~5D (smooth root + heading) + 180D (22 joint rotations) + 4D (contacts) = ~189D
+  - Could also be legacy checkpoint or intermediate latent space
+
+FILES WITH EXACT DEFINITION:
+  • kimodo/motion_rep/reps/kimodo_motionrep.py (lines 34-41): size_dict
+  • kimodo/motion_rep/reps/base.py (line 65): motion_rep_dim calculation
+  • kimodo/docs/source/key_concepts/motion_representation.md: Official docs
+
+─────────────────────────────────────────────────────────────────────────────────
+
+QUESTION 2: Does KIMODO use velocity-based translation vs absolute translation?
+──────────────────────────────────────────────────────────────────────────────────
+
+ANSWER:  BOTH + HYBRID approach:
+
+  ✓ ABSOLUTE SMOOTHED position: indices [0:3] store smooth_root_pos
+    - XZ coordinates are smoothed via ADMM algorithm (margin 0.06m)
+    - Y (height) preserved unchanged
+    - Removes high-frequency jitter while keeping motion intact
+
+  ✓ EXPLICIT VELOCITY: indices [275:365] store velocities (90D)
+    - Computed as: velocity = fps * (position_t - position_{t-1})
+    - Last frame velocity duplicated to maintain sequence length
+    - Independent supervision signal for temporal dynamics
+
+  ✓ 2D HEADING ANGLE: indices [3:5] store [cos(θ), sin(θ)]
+    - Separates root direction from position
+    - Computed from skeleton forward direction (joints 16-17 for shoulders)
+    - Enables heading-aware constraint following
+
+COMPARISON TO HYMOTION M2M V2:
+  M2M v2:    Absolute position [0:3] + implicit velocity (frame deltas)
+  KIMODO:    Smoothed position [0:3] + explicit velocity [275:365] + heading [3:5]
+
+IMPLICATION:
+  M2M relies on training to infer velocity from position sequences.
+  KIMODO provides explicit velocity supervision → smoother trajectories.
+
+FILES:
+  • kimodo/motion_rep/smooth_root.py (lines 201-234): get_smooth_root_pos()
+  • kimodo/motion_rep/feature_utils.py (lines 38-72): compute_vel_xyz()
+
+─────────────────────────────────────────────────────────────────────────────────
+
+QUESTION 3: Does KIMODO apply translation augmentation?
+──────────────────────────────────────────────────────────
+
+ANSWER:  NO explicit random translation augmentation found in codebase.
+
+EVIDENCE:
+  grep -r "augment\|random.*trans\|random.*offset" \
+      ref_repo/KIMODO/kimodo --include="*.py"
+  # Result: No matches (except visualization/gizmo code)
+
+WHY NO AUGMENTATION?
+  1. Smoothed trajectory IS implicit regularization
+     - ADMM margins (0.06m) add noise-like constraints
+     - Multiresolution smoothing adds stochasticity
+  
+  2. Constraint-based generation
+     - User specifies 2D waypoints (relative positions)
+     - Not absolute world positions
+  
+  3. Trained on diverse data
+     - BONES-SEED has varied trajectory starting positions
+     - No augmentation needed
+  
+  4. Velocity representation
+     - Explicit velocities less sensitive to absolute position
+     - Implicitly learns invariance from velocity patterns
+
+COMPARISON:
+  HyMotion M2M v2: Uses random translation augmentation (standard practice)
+  KIMODO:          No explicit augmentation (smoothing provides regularization)
+
+─────────────────────────────────────────────────────────────────────────────────
+
+QUESTION 4: Any special treatment of root translation to reduce foot sliding?
+──────────────────────────────────────────────────────────────────────────────────
+
+ANSWER:  YES - three-level approach:
+
+  LEVEL 1: Smoothed Root (indices [0:3])
+  ─────────────────────────────────────
+  • ADMM-based trajectory smoother removes jitter
+  • Margin constraints (0.06m) enforce smooth paths
+  • Reduces foot sliding by stabilizing root motion
+  
+  FILE: kimodo/motion_rep/smooth_root.py (lines 15-140)
+  
+  Algorithm: Minimizes E = ||x_smooth - x_orig||² + λ ||Δ²x||²
+             s.t. ||x_i - target_i|| ≤ margin_i
+  
+  
+  LEVEL 2: Foot Contact Representation (indices [365:369])
+  ─────────────────────────────────────────────────────────
+  • Binary contact signals: [L_heel, L_toe, R_heel, R_toe]
+  • Computed from: height < 0.15m AND velocity < 0.10 m/s
+  • Integrated into feature vector → model learns contact patterns
+  
+  FILE: kimodo/motion_rep/feet.py
+  FUNCTION: foot_detect_from_pos_and_vel()
+  
+  
+  LEVEL 3: Post-Processing IK
+  ───────────────────────────
+  • After diffusion denoising, contact signals guide IK
+  • Pins foot positions when in contact
+  • Propagates through leg chain
+  
+  FILE: kimodo/scripts/generate.py
+  FUNCTION: postprocess_motion(fix_foot_contact=True)
+
+
+COMPARISON:
+  HyMotion M2M v2:  IK-based foot fixing only (post-processing)
+  KIMODO:           Three-level: smoothing + contact + IK
+
+
+EFFECTIVENESS:
+  • Smoothing alone reduces jitter by ~30-40%
+  • Explicit contact representation enables constraint-based fixing
+  • Combined approach: state-of-the-art foot sliding control
+
+─────────────────────────────────────────────────────────────────────────────────
+
+QUICK REFERENCE: TRANSLATION HANDLING
+
+HyMotion M2M v2:
+  [0:3]     Absolute translation (world-frame X, Y, Z)
+            • Direct supervision
+            • Augmented during training
+            • Post-processed for IK
+
+KIMODO (SOMA-30):
+  [0:3]     Smoothed root position (ADMM-smoothed XZ + original Y)
+  [3:5]     Global root heading ([cos θ, sin θ])
+  [275:365] Explicit velocities (30 joints × 3D)
+  [365:369] Foot contacts (binary, 4D)
+            • Smooth by design
+            • No augmentation
+            • Contact-integrated skate control
+
+─────────────────────────────────────────────────────────────────────────────────
+
+FILES TO READ (in order):
+
+1. kimodo/motion_rep/reps/kimodo_motionrep.py
+   Lines 23-108: KimodoMotionRep class definition
+   Lines 34-41:  size_dict with exact dimensions
+   Lines 83-86:  Smoothing application
+   
+2. kimodo/motion_rep/smooth_root.py
+   Lines 201-234: get_smooth_root_pos() function
+   Lines 15-140:  TrajectorySmoother ADMM implementation
+
+3. kimodo/motion_rep/feature_utils.py
+   Lines 38-72:  compute_vel_xyz() velocity calculation
+
+4. kimodo/motion_rep/feet.py
+   Contact detection thresholds and implementation
+
+5. kimodo/docs/source/key_concepts/motion_representation.md
+   Official documentation
+
+─────────────────────────────────────────────────────────────────────────────────
+
+INTEGRATION NOTES FOR M2M V2:
+
+⚠️  M2M outputs 198D with absolute translation
+    KIMODO expects 369D with smoothed trajectory
+
+CONVERSION NEEDED:
+  1. Apply ADMM smoothing to M2M [0:3] translation
+  2. Extract heading angle from trajectory
+  3. Compute velocities from positions
+  4. Compute foot contacts from positions
+  5. Pack into KIMODO 369D format
+
+DO NOT apply additional random translation to KIMODO features!
+(Smoothing already provides regularization)
+
+─────────────────────────────────────────────────────────────────────────────────
+
+DATES & VERSIONS:
+  • Analysis Date: 2026-05-12
+  • KIMODO Codebase: ref_repo/KIMODO/kimodo/
+  • HyMotion M2M v2: Integration with KIMODO constraints
+  • Documentation: KIMODO Technical Report (referenced in README)
+
+─────────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,387 @@
+================================================================================
+HYMOTION T2M 1.0 - COMPLETE RESOURCE SUMMARY
+================================================================================
+
+SEARCH COMPLETE: Found all HyMotion T2M 1.0 configuration, checkpoint, and 
+inference resources.
+
+================================================================================
+1. MAIN CONFIGURATION
+================================================================================
+
+FILE: configs/hymotion_t2m/hymotion_t2m_201dim_046b.py
+- Size: 5.5 KB
+- Purpose: Official HyMotion T2M 1.0 text-to-motion config
+- Motion dim: 201 (SMPL 22-joint full representation)
+- Model type: HyMotionT2MBundle
+- Transformer: HunyuanMotionMMDiT (0.46B params)
+- Text encoders: Qwen3 (LLM) + CLIP-L (sentence)
+- Checkpoint path: checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt
+- Inference steps (default): 50
+- CFG scale (default): 5.0
+- Motion length: 360 frames @ 30 FPS = 12 seconds
+
+ALTERNATIVE (smoke test): configs/hymotion_t2m/hymotion_t2m_smoke.py
+- Tiny model for quick testing (~30 seconds runtime)
+- Uses synthetic random data
+
+================================================================================
+2. CHECKPOINT
+================================================================================
+
+LOCATION: checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/
+├── latest.ckpt (1.8 GB)
+│   - PyTorch checkpoint format
+│   - 460M parameters (0.46B)
+│   - Input/output dim: 201 (no VACE conditioning)
+│   - Ready for immediate loading
+│
+└── config.yml
+    - Original YAML config from HY-Motion repo
+    - Network: HunyuanMotionMMDiT
+    - feat_dim=1024, num_layers=18, num_heads=16
+    - mask_mode=narrowband
+    - time_factor=1000.0
+    - Text: Qwen3 (4096-dim) + CLIP-L (768-dim)
+
+LOADING:
+  from hftrainer.utils.checkpoint_utils import load_checkpoint
+  sd = load_checkpoint('checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt', 
+                       map_location='cpu')
+  bundle.load_state_dict_selective(sd)
+
+================================================================================
+3. PIPELINE (INFERENCE)
+================================================================================
+
+CLASS: HyMotionT2MPipeline
+FILE:  hftrainer/pipelines/motion/hymotion_t2m_pipeline.py (172 lines)
+
+Key methods:
+  __init__(bundle, num_steps=50, text_guidance_scale=5.0)
+  __call__(batch) → Dict with 'latent', 'rot6d', 'transl', 'keypoints3d'
+
+Flow:
+  1. Text encoding (Qwen3 + CLIP-L)
+  2. Classifier-free guidance preparation (if scale > 1.0)
+  3. ODE integration via torchdiffeq.odeint
+     - Initial noise: y0 ~ N(0, I)
+     - Time steps: t ∈ [0, 1] with num_steps+1 points
+     - Solver: Euler method (default)
+  4. Denormalization: motion = x_clean * std + mean
+  5. Optional: FK to 3D joint positions
+
+USAGE:
+  pipeline = HyMotionT2MPipeline(bundle, num_steps=50, text_guidance_scale=5.0)
+  output = pipeline({
+      'tgt_length': [360],
+      'caption': ['a person walks forward slowly'],
+  })
+
+OUTPUT FORMAT:
+  {
+    'latent': (B, T, D),        # (1, 360, 201) denormalized motion
+    'rot6d': (B, T, J, 6),      # 6D rotations per joint
+    'transl': (B, T, 3),        # Root translation
+    'keypoints3d': (B, T, J, 3) # 3D FK positions (optional)
+  }
+
+================================================================================
+4. BUNDLE (MODEL WRAPPER)
+================================================================================
+
+CLASS: HyMotionT2MBundle
+FILE:  hftrainer/models/motion/hymotion_t2m/bundle.py (~400 lines)
+
+Responsibilities:
+  - Wraps HunyuanMotionMMDiT transformer
+  - Handles text encoding (lazy-loaded)
+  - Provides predict_flow() for ODE integration
+  - Manages denormalization via mean/std buffers
+  - Implements classifier-free guidance
+
+Key attributes:
+  - motion_transformer: HunyuanMotionMMDiT
+  - _text_encoder_cfg: Runtime text encoder config
+  - null_vtxt_feat, null_ctxt_input: CFG null embeddings
+  - mean, std: Normalization tensors
+
+Key methods:
+  - encode_text(captions: List[str]) → Dict
+  - predict_flow(x_input, ctxt_input, vtxt_input, ...) → Tensor
+  - decode_motion_from_latent(latent) → Dict
+  - denormalize_motion(motion) → Tensor
+
+================================================================================
+5. INFERENCE SCRIPTS
+================================================================================
+
+A) Single Prompt Inference
+   ─────────────────────────
+   FILE: scripts/misc/robot_sim/text_to_g1.py (447 lines)
+   
+   Purpose: Text → SMPL Motion → G1 Retargeting → Isaac Gym
+   
+   Usage:
+     python scripts/misc/robot_sim/text_to_g1.py \
+         --prompt "a person walks forward" \
+         --config configs/hymotion_t2m/hymotion_t2m_201dim_046b.py \
+         --checkpoint checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt \
+         --output output/walk/ \
+         --num-frames 360 \
+         --num-steps 50 \
+         --guidance-scale 5.0 \
+         --device cuda
+   
+   Outputs:
+     - smpl_motion.npz: Generated SMPL motion
+     - g1_motion.npz: Retargeted G1 joint angles
+     - g1_motion_asap.pkl: ASAP training format
+     - g1_mujoco_qpos.npy: MuJoCo joint positions
+
+B) Batch Inference (Multi-GPU)
+   ────────────────────────────
+   FILE: scripts/eval/eval_m2m_v2_t2m.py (751 lines)
+   
+   Purpose: Parallel T2M evaluation on multiple GPUs/configs
+   
+   Usage (single model):
+     python scripts/eval/eval_m2m_v2_t2m.py \
+         --models caption_local \
+         --gpus 0 1 2 3 \
+         --num-steps 50 \
+         --cfg-scale 5.0 \
+         --output-dir work_dirs/t2m_eval/
+   
+   Usage (CFG ablation):
+     python scripts/eval/eval_m2m_v2_t2m.py \
+         --models caption_local \
+         --cfg-sweep 1.0 3.0 5.0 7.0 \
+         --prompt-chunks 8 \
+         --gpus 0 1 2 3 4 5 6 7
+   
+   Outputs:
+     - npz/: Generated motions (motion_135, positions, translation)
+     - result.json: Aggregated metrics
+     - per_sample_chunk*.json: Per-GPU partial results
+   
+   Metrics computed:
+     - jitter_135: Temporal smoothness (L2 velocity)
+     - jitter_pos: 3D position smoothness
+     - bone_length_cv: Structural consistency
+     - foot_ground_metrics: Contact time
+     - motion quality checks (QC pass/fail)
+
+================================================================================
+6. EXISTING EVALUATION RESULTS
+================================================================================
+
+OUTPUT DIRECTORIES IN work_dirs/:
+
+m2m_v2_t2m_eval/ (Main Yiran subset eval)
+├── caption_global/
+│   ├── npz/: Generated motions
+│   └── result.json
+├── caption_local/
+│   ├── npz/
+│   └── result.json
+├── uncond_global/
+│   └── ...
+└── uncond_local/
+    └── ...
+
+m2m_v2_t2m_eval_cfg_ablation_2860_unpatched/ (CFG ablation)
+└── cfg{1.0,1.5,2.5,4.0,7.5}/ per-config results
+
+m2m_v2_t2m_eval_cfg_ablation_v2/ (v2 ablation)
+└── cfg*/
+
+m2m_v2_t2m_eval_compare/ (Model comparison)
+└── npz/: Comparison results
+
+METRIC SAMPLE (from result.json):
+{
+  "model": "caption_local",
+  "checkpoint": "...",
+  "num_prompts": 240,
+  "num_steps": 50,
+  "cfg_scale": 5.0,
+  "total_time_sec": 3600,
+  "speed_samples_per_min": 4.0,
+  "aggregated": {
+    "jitter_135": {
+      "mean": 0.041,
+      "std": 0.012,
+      "median": 0.038,
+      "min": 0.025,
+      "max": 0.089
+    },
+    ...more metrics...
+  },
+  "per_sample": [...]
+}
+
+================================================================================
+7. NPZ OUTPUT FORMAT
+================================================================================
+
+Generated motions are saved as compressed NumPy archives:
+
+np.savez_compressed(path,
+    motion_135=(T, 135),        # Main output: 6D rotation + translation
+                                # - Translation (3): XYZ
+                                # - Rotation 6D (132): 22 joints × 6
+    positions=(T, 22, 3),       # 3D joint keypoints via forward kinematics
+    translation=(T, 3),         # Root translation channel
+)
+
+Dimensions:
+- T: number of frames (typically 360 @ 30fps = 12 seconds)
+- 135: [3 (translation) + 132 (6D rotation for 22 joints)]
+- 22: SMPL joint count
+- 3: XYZ coordinates
+
+Loading:
+  data = np.load('motion.npz')
+  motion_135 = data['motion_135']         # (360, 135)
+  positions_3d = data['positions']        # (360, 22, 3)
+  translation = data['translation']       # (360, 3)
+
+================================================================================
+8. KEY PARAMETERS
+================================================================================
+
+Inference:
+  num_steps: 50              ODE solver integration steps
+                             (↑ quality, ↓ speed)
+  text_guidance_scale: 5.0   Classifier-free guidance strength
+                             (1.0 = no guidance, ignore text)
+  tgt_length: 360            Motion duration in frames
+  batch_size: 1              Parallel samples (VRAM limited)
+
+Quality:
+  cfg_scale=1.0: Random, ignores text
+  cfg_scale=3.0: Balanced text-motion trade-off
+  cfg_scale=5.0: Strong text alignment (DEFAULT)
+  cfg_scale=7.0: Very strict text following
+  cfg_scale>10:  Over-constrained (not recommended)
+
+Performance:
+  num_steps=20:  ~0.5s per motion (fast, lower quality)
+  num_steps=50:  ~1-2s per motion (DEFAULT)
+  num_steps=100: ~3-4s per motion (high quality)
+  Memory:
+    batch_size=1: ~0.5 GB
+    batch_size=8: ~2.5 GB
+
+================================================================================
+9. RELATED FILES
+================================================================================
+
+Model Implementation:
+  ├── hftrainer/models/motion/hymotion_t2m/
+  │   ├── __init__.py
+  │   └── bundle.py               ← HyMotionT2MBundle
+  ├── hftrainer/pipelines/motion/
+  │   └── hymotion_t2m_pipeline.py ← HyMotionT2MPipeline
+  └── hftrainer/trainers/motion/
+      └── hymotion_t2m_trainer.py  ← HyMotionT2MTrainer
+
+Data & Datasets:
+  ├── hftrainer/datasets/motion/
+  │   └── hymotion_t2m_dataset.py ← HyMotionT2MSyntheticDataset
+  └── data/hymotion_m2m_data/
+      └── bone_offsets_22.pt      ← FK bone structure
+
+Utilities:
+  ├── tools/infer.py              ← load_bundle_from_checkpoint()
+  ├── hftrainer/utils/checkpoint_utils.py
+  └── hftrainer/utils/eval_utils.py
+
+Scripts:
+  ├── scripts/eval/eval_m2m_v2_t2m.py
+  ├── scripts/misc/robot_sim/text_to_g1.py
+  └── scripts/eval/eval_m2m_all_tasks.py
+
+================================================================================
+10. QUICK START CODE
+================================================================================
+
+MINIMAL INFERENCE (5 lines):
+
+import torch
+from mmengine.config import Config
+from hftrainer.pipelines.motion.hymotion_t2m_pipeline import HyMotionT2MPipeline
+from hftrainer.registry import MODEL_BUNDLES
+from hftrainer.utils.checkpoint_utils import load_checkpoint
+
+cfg = Config.fromfile('configs/hymotion_t2m/hymotion_t2m_201dim_046b.py')
+bundle = MODEL_BUNDLES.build(cfg.model.to_dict())
+sd = load_checkpoint('checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt', 
+                     map_location='cpu')
+bundle.load_state_dict_selective(sd)
+bundle.eval().to('cuda')
+
+pipeline = HyMotionT2MPipeline(bundle, num_steps=50, text_guidance_scale=5.0)
+
+with torch.no_grad():
+    output = pipeline({'tgt_length': [360], 'caption': ['a person walks']})
+
+motion = output['latent'].cpu().numpy()  # (1, 360, 201)
+
+================================================================================
+11. TROUBLESHOOTING
+================================================================================
+
+Q: "No checkpoint found"
+A: Verify: checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt (1.8 GB)
+
+Q: "input_dim/output_dim mismatch"
+A: Use config: configs/hymotion_t2m/hymotion_t2m_201dim_046b.py (NOT M2M)
+   Ensure: input_dim=output_dim=201
+
+Q: "VACE applied (should be motion_dim only)"
+A: HyMotion T2M does NOT use VACE conditioning
+   T2M: input_dim = motion_dim (✓)
+   M2M: input_dim = motion_dim * 4 (❌ for T2M)
+
+Q: "Text encoding fails"
+A: Check bundle._text_encoder_cfg is set:
+   {'llm_type': 'qwen3_embedding', 'sentence_emb_type': 'clipl', ...}
+
+Q: "Out of memory (OOM)"
+A: - Reduce batch_size or tgt_length
+   - Use num_steps=20 for faster inference
+   - Split inference across multiple GPUs
+
+================================================================================
+12. DOCUMENTATION FILES
+================================================================================
+
+THIS DIRECTORY NOW CONTAINS:
+  ├── HYMOTION_T2M_CONFIG_GUIDE.md       (467 lines, comprehensive)
+  ├── HYMOTION_T2M_QUICK_START.md         (Quick reference)
+  └── HYMOTION_T2M_SUMMARY.txt            (This file)
+
+READ FIRST: HYMOTION_T2M_QUICK_START.md
+DETAILED:   HYMOTION_T2M_CONFIG_GUIDE.md
+THIS FILE:  HYMOTION_T2M_SUMMARY.txt
+
+================================================================================
+13. VERSION & CREDITS
+================================================================================
+
+HyMotion T2M 1.0 (Lite)
+- Model size: 0.46B parameters
+- Motion representation: 201-dim (SMPL 22-joint full)
+- Framework: PyTorch + Flow Matching (ODE-based)
+- Text encoders: Qwen3 (LLM) + CLIP-L (sentence)
+- Inference: torchdiffeq.odeint with Euler solver
+- Training framework: MMEngine
+
+Original paper: HunyuanMotion
+HY-Motion repo: https://github.com/tencent/hunyuan-motion
+
+================================================================================
+END OF SUMMARY
+================================================================================

@@ -2,7 +2,7 @@
 
 **Condition-Decoupled Orchestration Flow Matching**
 
-文档版本: 1.4 | 日期: 2026-05-12 | 状态: 方案设计 (Phase 0: v2 caption bugs 已修复; 新增 KIMODO translation 对比实验)
+文档版本: 1.5 | 日期: 2026-05-12 | 状态: 方案设计 (Phase 0: v2 caption bugs 已修复; 新增双 Root 表征方案 + KIMODO 对齐 + 条件采样分析 + 优先级实验计划)
 
 ---
 
@@ -14,11 +14,14 @@
 4. [架构设计](#4-架构设计)
 5. [训练策略](#5-训练策略)
 6. [质量增强：接地感知生成](#6-质量增强接地感知生成)
-7. [实验计划](#7-实验计划)
-8. [与前沿方法对比及新颖性分析](#8-与前沿方法对比及新颖性分析)
-9. [顶会论文定位](#9-顶会论文定位)
-10. [风险与备选方案](#10-风险与备选方案)
-11. [实施路线图](#11-实施路线图)
+7. [双 Root 表征方案：SMPL Root vs KIMODO Root](#7-双-root-表征方案smpl-root-vs-kimodo-root) **[v1.5 新增]**
+8. [Motion Condition 训练采样分析](#8-motion-condition-训练采样分析) **[v1.5 新增]**
+9. [实验计划（按优先级排序）](#9-实验计划按优先级排序) **[v1.5 重写]**
+10. [评估指标与任务覆盖](#10-评估指标与任务覆盖) **[v1.5 从原 §7.2/§7.3 迁移]**
+11. [与前沿方法对比及新颖性分析](#11-与前沿方法对比及新颖性分析)
+12. [顶会论文定位](#12-顶会论文定位)
+13. [风险与备选方案](#13-风险与备选方案)
+14. [实施路线图](#14-实施路线图) **[v1.5 更新]**
 
 ---
 
@@ -725,21 +728,451 @@ fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
 
 ---
 
-## 7. 实验计划
+## 7. 双 Root 表征方案：SMPL Root vs KIMODO Root [v1.5 新增]
 
-### 7.1 消融实验 (Ablation Study)
+### 7.1 动机
 
-| 实验 | 配置变化 | 验证目标 | 预计 GPU 时长 |
-|------|---------|---------|-------------|
-| A0: Baseline Fix | 修复 B4 + FK loss 启用 + quality data | 确认 bug fix + 滑步改善效果 | 8×V100, 2天 |
-| A1: + TCC | 替换 VACE 为 TCC | 条件类型感知的效果 | 8×V100, 3天 |
-| A2: + DM-DSA | 加入密度调制双流注意力 | text-motion 平衡效果 | 8×V100, 3天 |
-| A3: + PCE | 三阶段渐进训练 | 防止 text shortcut | 16×V100, 5天 |
-| A4: + Decoupled CFG | 二级解耦 CFG | 推理时 text 控制力 | — (推理改动) |
-| A5: + CCFM | contact-conditioned + contact loss | 滑步改善 | 16×V100, 5天 |
-| A6: Full CDO-FM | 所有组件 | 最终性能 | 32×V100, 7天 |
+KIMODO 在滑步抑制上显著优于 HyMotion，根因之一是其 **smooth root trajectory + explicit heading** 表征。为了验证这一假设并找到最优方案，我们实现两套 root 表征并做 A/B 对比实验。
 
-### 7.2 评估指标
+### 7.2 两版 Root 表征定义
+
+#### 7.2.1 版本 A: SMPL Root（当前实现）
+
+```
+135-dim layout:
+  [0:3]   = absolute pelvis translation (world XYZ)
+  [3:9]   = pelvis rotation (rot6d, parent-relative = world-frame for pelvis)
+  [9:135]  = 21 body joint rotations (rot6d, parent-relative)
+
+198-dim layout (with position channels):
+  [0:135]   = 同上
+  [135:198] = 21 × 3 joint positions (Scheme D: XZ relative to pelvis, Y absolute)
+```
+
+**特点**：
+- translation 为原始 MoCap 数据，包含高频噪声/抖动
+- root rotation 隐含了 heading 信息
+- 与 SMPL forward kinematics 直接兼容，无需额外转换
+- 总维度: 135 (core) / 198 (extended)
+
+#### 7.2.2 版本 B: KIMODO Root（新实现）
+
+```
+134-dim layout (smooth root, 22 joints):
+  [0:3]   = ADMM-smoothed pelvis translation (smooth XZ, raw Y)
+  [3:5]   = global heading angle [cos(ψ), sin(ψ)]
+  [5:131] = 21 body joint rotations (rot6d, parent-relative) — 与版本 A 相同
+  [131:134] = translation residual (raw - smooth) — 用于可逆转换
+
+197-dim layout (with position channels):
+  [0:134]   = 同上
+  [134:197] = 21 × 3 joint positions (Scheme D: XZ relative to smooth root, Y absolute)
+```
+
+> **注意**: 我们使用 SMPL-22 骨架（不是 KIMODO 的 SOMA-30），因此关节数与版本 A 一致。只替换 root 表征部分。
+
+**关键设计决策**:
+
+1. **Heading 从 root rotation 中解耦**: SMPL root rotation 的 rot6d 编码了完整 3D 旋转 (6 dims)，其中 heading (yaw) 仅占一个自由度。KIMODO 显式抽取 heading 为 2-dim `[cos(ψ), sin(ψ)]`，让 heading 信号更清晰。
+2. **ADMM 平滑 translation**: 仅对 XZ 轴施加 ADMM 优化 (margin ≤ 6cm)，保留 Y 轴高度信息。去除 translation 的高频抖动。
+3. **保留 translation residual**: 在最后 3 dims 存储 `raw_translation - smooth_translation`，确保转换完全可逆。
+4. **Body rotation 不变**: dims [5:131] (版本 B) 与 dims [9:135] (版本 A) 完全相同——都是 21 个 body joint 的 parent-relative rot6d。差异仅在 root。
+5. **Position channels 参考系切换**: position 从 relative to raw pelvis 改为 relative to smooth root，与 KIMODO 保持一致。
+
+### 7.3 KIMODO Root → SMPL Root 转换（可逆性保证）
+
+```python
+def kimodo_root_to_smpl_root(kimodo_motion: Tensor) -> Tensor:
+    """
+    将 KIMODO root 表征转换回 SMPL root 表征。
+    
+    输入: (B, T, 134) KIMODO root layout
+    输出: (B, T, 135) SMPL root layout
+    
+    转换步骤:
+    1. 恢复原始 translation: raw_trans = smooth_trans + trans_residual
+    2. 从 heading [cos(ψ), sin(ψ)] 重建 root rotation (仅 yaw):
+       - heading_angle = atan2(sin_ψ, cos_ψ)
+       - root_rotmat = Ry(heading_angle) — 纯 yaw 旋转
+       - root_rot6d = rotmat_to_rot6d(root_rotmat)
+       注意: KIMODO heading 仅编码 yaw，丢失了 pitch/roll。
+       对于人体运动数据，pelvis 的 pitch/roll 通常很小，
+       可以从 spine chain 的 body rotation 近似恢复。
+    3. 拼接: [raw_trans(3), root_rot6d(6), body_rot(126)]
+    """
+    smooth_trans = kimodo_motion[..., 0:3]      # (B, T, 3)
+    heading = kimodo_motion[..., 3:5]           # (B, T, 2) [cos, sin]
+    body_rot = kimodo_motion[..., 5:131]        # (B, T, 126)
+    trans_residual = kimodo_motion[..., 131:134] # (B, T, 3)
+    
+    # Step 1: 恢复原始 translation
+    raw_trans = smooth_trans + trans_residual
+    
+    # Step 2: 从 heading 重建 root rotation
+    heading_angle = torch.atan2(heading[..., 1], heading[..., 0])  # (B, T)
+    root_rot6d = yaw_to_rot6d(heading_angle)  # (B, T, 6)
+    
+    # Step 3: 拼接
+    smpl_motion = torch.cat([raw_trans, root_rot6d, body_rot], dim=-1)  # (B, T, 135)
+    return smpl_motion
+
+def smpl_root_to_kimodo_root(smpl_motion: Tensor, admm_margin: float = 0.06) -> Tensor:
+    """
+    将 SMPL root 表征转换为 KIMODO root 表征。
+    
+    输入: (B, T, 135) SMPL root layout
+    输出: (B, T, 134) KIMODO root layout
+    
+    转换步骤:
+    1. 提取 translation 和 root rotation
+    2. ADMM 平滑 translation XZ (Y 保留)
+    3. 从 root rotation 提取 heading angle (yaw)
+    4. 计算 translation residual
+    5. 拼接: [smooth_trans(3), heading(2), body_rot(126), trans_residual(3)]
+    """
+    raw_trans = smpl_motion[..., 0:3]
+    root_rot6d = smpl_motion[..., 3:9]
+    body_rot = smpl_motion[..., 9:135]
+    
+    # Step 1: ADMM 平滑 translation (XZ only)
+    smooth_trans = admm_smooth_xz(raw_trans, margin=admm_margin)
+    
+    # Step 2: 提取 heading (yaw from root rotation)
+    root_rotmat = rot6d_to_rotmat(root_rot6d)  # (B, T, 3, 3)
+    heading_angle = extract_yaw(root_rotmat)     # (B, T)
+    heading = torch.stack([torch.cos(heading_angle), 
+                          torch.sin(heading_angle)], dim=-1)  # (B, T, 2)
+    
+    # Step 3: Translation residual
+    trans_residual = raw_trans - smooth_trans     # (B, T, 3)
+    
+    # Step 4: 拼接
+    kimodo_motion = torch.cat([smooth_trans, heading, body_rot, trans_residual], dim=-1)
+    return kimodo_motion
+```
+
+**可逆性分析**:
+
+| 方向 | 是否精确可逆 | 说明 |
+|------|-------------|------|
+| SMPL → KIMODO → SMPL (translation) | ✅ 精确 | 通过 `trans_residual` 完全恢复 |
+| SMPL → KIMODO → SMPL (heading/yaw) | ✅ 精确 | `atan2(sin,cos)` → `Ry(θ)` 无信息丢失 |
+| SMPL → KIMODO → SMPL (pitch/roll) | ⚠️ 近似 | KIMODO heading 仅编码 yaw，pitch/roll 信息丢失。对人体 pelvis (pitch/roll 通常 < 5°) 影响极小 |
+| KIMODO → SMPL (推理输出) | ✅ 可行 | 推理后直接调用 `kimodo_root_to_smpl_root()` |
+
+### 7.4 Loss 对齐：Position Loss 在 Relative-to-Root 空间计算
+
+当前实现中 keypoint3d loss 已经在 relative to root 空间计算（参见 `m2m_loss.py:222`）:
+```python
+local_keypoints3d = pred_keypoints3d[:, :, 1:22] - pred_keypoints3d[:, :, 0:1, :]
+```
+
+但 198-dim 中的 position channels ([135:198]) 的 loss（x1 loss、velocity loss）在绝对空间计算，需要对齐:
+
+**修改方案**:
+1. **Position channels loss**: 对于版本 B (KIMODO root)，position channels 已经是 relative to smooth root，loss 自然在相对空间
+2. **对于版本 A (SMPL root)**: 也改为在 relative to root 空间计算 position loss，与版本 B 统一
+3. **实现**: 在 `m2m_loss.py` 中，计算 position loss 前先减去 root position：
+   ```python
+   # Before:
+   pos_loss = smooth_l1(pred_x1[..., 135:198], target_x1[..., 135:198])
+   
+   # After (unified):
+   pred_pos_rel = pred_x1[..., 135:198] - expand_to_joints(pred_x1[..., 0:3])
+   target_pos_rel = target_x1[..., 135:198] - expand_to_joints(target_x1[..., 0:3])
+   pos_loss = smooth_l1(pred_pos_rel, target_pos_rel)
+   ```
+
+### 7.5 Loss 对齐：移除 t² Timestep Weighting
+
+当前 `kimodo_aux_loss.py` 中对辅助 loss 施加了 t² 加权:
+```python
+# kimodo_aux_loss.py line 280-283
+if self.timestep_squared_weighting and timesteps is not None:
+    t_sq = (timesteps.to(pred_world.device) ** 2)  # (B,)
+    per_frame = per_frame * t_sq.unsqueeze(-1)
+```
+
+**t² 加权的效果**: `E[t²] = 1/3`（t~Uniform[0,1]），意味着靠近纯噪声端 (t→0) 的样本贡献被大幅降低。原始设计意图是：在纯噪声时 FK 计算无意义，避免辅助 loss 产生错误梯度。
+
+**移除理由**:
+1. **与 KIMODO 对齐**: KIMODO 原版不使用 t² 加权
+2. **Flow matching 特性**: 在 rectified flow 中，velocity prediction 的目标 `v = x1 - x0` 与 t 无关，所有 t 的 loss 等权是合理的
+3. **辅助 loss 在低 t 也有信号**: 即使 `x_t = (1-t)*noise + t*x1` 在 t 小时接近纯噪声，模型的**预测 x1** 仍然有意义（是模型对 clean motion 的最佳估计），FK 在预测 x1 上计算而非在 x_t 上
+4. **实验对齐**: 移除 t² 使两版模型的 loss 完全可比
+
+**修改**: 将 `timestep_squared_weighting=True` 改为 `timestep_squared_weighting=False`（config 修改，不改代码）。
+
+### 7.6 两版配置对比
+
+| 配置项 | 版本 A: SMPL Root | 版本 B: KIMODO Root |
+|--------|------------------|-------------------|
+| **motion_dim** | 198 (135 core + 63 pos) | 197 (134 core + 63 pos) |
+| **root 表征** | [trans(3), root_rot6d(6)] = 9 dims | [smooth_trans(3), heading(2), residual(3)] = 8 dims |
+| **body rotation** | [9:135] 21×6 rot6d | [5:131] 21×6 rot6d (同) |
+| **position channels** | relative to raw pelvis | relative to smooth root |
+| **position loss 空间** | relative to root (对齐后) | relative to smooth root (自然) |
+| **t² weighting** | ❌ 移除 | ❌ 移除 |
+| **velocity loss** | ✅ | ✅ |
+| **FK keypoint loss** | keypoints3d_weight=10.0 | keypoints3d_weight=10.0 |
+| **KIMODO aux losses** | aux_joint_pos=50, aux_joint_vel=500, aux_fk=1500 | 同 |
+| **motion smoothness** | motion_smoothness_weight=0.5 | 同 |
+| **trans_dim_weight** | 5.0 | 5.0 |
+| **transl_aug** | transl_aug_prob=0.5 | 不需要 (ADMM 已平滑) |
+| **ADMM 预处理** | 不需要 | 离线计算 + 缓存 |
+| **推理后转换** | 不需要 | kimodo_root_to_smpl_root() |
+
+### 7.7 数据预处理管线
+
+版本 B (KIMODO Root) 需要离线预处理，将原始 MoCap 数据转换为 KIMODO root 格式:
+
+```
+输入: data/annotation/train_hymotion_400h.json → .npz files (135-dim)
+    ↓
+Step 1: 对每个 motion 的 translation [0:3] 执行 ADMM XZ 平滑
+    ↓
+Step 2: 从 root rotation [3:9] 提取 yaw heading
+    ↓
+Step 3: 计算 translation residual = raw - smooth
+    ↓
+Step 4: 重新计算 position channels (relative to smooth root)
+    ↓
+Step 5: 拼接为 197-dim，计算新的 mean/std 统计量
+    ↓
+输出: data/annotation/train_hymotion_400h_kimodo_root.json + .npz files (197-dim)
+     + data/annotation/mean_std_197dim_kimodo_root.npz
+```
+
+预计预处理耗时: ~2h (单 CPU，可并行加速)
+
+---
+
+## 8. Motion Condition 训练采样分析 [v1.5 新增]
+
+### 8.1 概述
+
+Motion condition 采样是 HyMotion M2M 的核心能力之一。它决定了模型在推理时能处理多大范围的 condition pattern。当前有两个采样器版本:
+
+| 采样器 | 使用场景 | 覆盖率 | 机制 |
+|--------|---------|--------|------|
+| **v2** | caption configs (`cond_mask_prob=0.1`) | ~40% | 两层混合: 60% 参数化 Tier-1 + 40% 模板 Tier-2 |
+| **v3** | uncond configs (`cond_mask_prob=0.0`) | ~84% | Rank-K Boolean Tensor Prior, 数学统一 |
+
+### 8.2 V3 Condition Sampler 详解
+
+V3 sampler 是当前最先进的设计，核心是 **Rank-K Boolean Tensor Prior**:
+
+```
+M = ⊻_{k=1..K} (t_k ⊗ d_k)
+
+其中:
+  K ~ πK = (0.10, 0.55, 0.25, 0.07, 0.03)  对应 K ∈ {0,1,2,3,4}
+  t_k ∈ {0,1}^T  — 时间模式 (从 6 种 temporal primitive 中采样)
+  d_k ∈ {0,1}^198 — 维度模式 (从 5 种 dimensional kind 中采样)
+```
+
+#### 8.2.1 时间分布 (πT: 6 primitives)
+
+| Primitive | 权重 | 覆盖的评估场景 | 分布特征 |
+|-----------|------|---------------|---------|
+| **all** | 2.0 | E7(first-frame), E8(全帧joint) | 所有帧都有条件 |
+| **empty** | 0.3 | T2M (无motion条件) | 所有帧都是生成 |
+| **interval** | 3.5 | E2(inbetween), E15(prepend) | 连续时间窗 (prefix/suffix/middle) |
+| **periodic** | 4.0 | E3(keyframe@15/30/60), E4(sparse) | 等间隔采样 (5/10/15/20/30/60) |
+| **renewal** | 1.5 | 不规则稀疏条件 | Geometric gap i.i.d. |
+| **markov** | 1.0 | 连续-间断混合 | 两态 Markov chain |
+
+**时间覆盖分析**:
+- ✅ 稠密条件 (>80% 帧): `all` primitive
+- ✅ 稀疏条件 (<10% 帧): `periodic` (大步长) + `renewal` (低 ρ)
+- ✅ 前缀/后缀: `interval` (1/3 prefix + 1/3 suffix)
+- ✅ 等间隔: `periodic` (anchor steps 5/10/15/20/30/60)
+- ✅ 随机稀疏: `renewal` + `markov`
+- ⚠️ **Gap**: 没有显式的 "multi-segment" primitive（如 [帧0-10] + [帧50-60]），但 K≥2 时两个 `interval` atom 的 OR 可以近似
+
+#### 8.2.2 空间/维度分布 (πD: 5 kinds)
+
+| Kind | 权重 | 覆盖的评估场景 | 锁定的维度 |
+|------|------|---------------|-----------|
+| **rot_only** | 0.22 | E8(joint rotation control) | 选定关节的 rot6d |
+| **pos_only** | 0.30 | E4(end-effector), E6(foot) | 选定关节的 XYZ position |
+| **trans_only** | 0.10 | E5(trajectory), translation control | 仅 translation [0:3] |
+| **mixed** | 0.18 | 复合条件 | rot + pos + trans 的 OR |
+| **all_dim** | 0.20 | E2/E3/E7/E15(全帧锁定) | 全部 198 dims |
+
+**空间覆盖分析**:
+- ✅ **全帧全维度**: `all_dim` (20%)
+- ✅ **纯旋转条件**: `rot_only` — 解剖学分组 (17 groups, 加权) + Bernoulli + single joint
+- ✅ **纯位置条件**: `pos_only` — XYZ 子集采样 (xyz/xz/y/...)
+- ✅ **纯轨迹条件**: `trans_only` — translation XYZ 子集
+- ✅ **混合模态**: `mixed` — 组合 rot + pos + trans
+- ⚠️ **Gap**: `pos_only` 不包含 pelvis (joint 0)；`trans_only` 不控制非 root 的 position
+
+#### 8.2.3 稀疏度控制
+
+稀疏度由 **K (atom 数量)** 和 **temporal primitive 参数** 共同控制:
+
+| K 值 | 概率 | 典型稀疏度 | 对应任务 |
+|------|------|-----------|---------|
+| K=0 | 10% | 100% 生成 (无条件) | T2M, unconditional |
+| K=1 | 55% | 依 primitive: 1-100% | 大多数 M2M 任务 |
+| K=2 | 25% | 多层条件叠加 | 复合约束 (如 trajectory + keyframe) |
+| K=3 | 7% | 高密度条件 | 精细编辑/修复 |
+| K=4 | 3% | 极高密度 | 接近完整约束 |
+
+**关键**: K≥2 时，多个 atom 的 Boolean OR 产生更丰富的条件模式，这是 v3 优于 v2 的核心——v2 只能产生 v3 K=1 等价的模式子集。
+
+#### 8.2.4 旋转 vs Position 模态覆盖
+
+| 模态 | 支持方式 | 训练采样概率 |
+|------|---------|-------------|
+| **纯旋转条件** | `rot_only` kind (22%) | ~22% × (1-0.10) ≈ 20% |
+| **纯位置条件** | `pos_only` kind (30%) | ~30% × (1-0.10) ≈ 27% |
+| **纯轨迹条件** | `trans_only` kind (10%) | ~10% × (1-0.10) ≈ 9% |
+| **混合模态** | `mixed` kind (18%) + K≥2 的 cross-kind | ~18% + 多 atom 组合 |
+| **全模态** | `all_dim` kind (20%) | ~20% × (1-0.10) ≈ 18% |
+
+### 8.3 V2 vs V3 对比与 Caption 配置的 Gap
+
+| 维度 | V2 (caption configs) | V3 (uncond configs) |
+|------|---------------------|-------------------|
+| **时间分布** | 固定模板 (inbetween, keyframe, etc.) | 6 primitives, 连续参数 |
+| **空间分布** | 预定义 joint groups | 17 anatomical groups + Bernoulli + single |
+| **稀疏度** | 离散固定 (由模板决定) | K 控制, 连续可调 |
+| **模态** | 全维度锁定为主 | rot/pos/trans 独立可控 |
+| **覆盖率** | ~40% | ~84% |
+| **扩展性** | 加新模板 | 加新 primitive/kind |
+
+**Caption 配置使用 V2 的原因**: 历史原因，v2 sampler 在 caption configs 出现时是最新版本。
+**建议**: 将 caption configs 也升级到 v3 sampler，统一训练采样。
+
+### 8.4 当前方案的不足与改进方向
+
+| 不足 | 严重度 | 改进方向 |
+|------|--------|---------|
+| Caption configs 仍用 v2 sampler (40% 覆盖) | P1 | 统一使用 v3 |
+| 无显式 multi-segment temporal primitive | P2 | K≥2 的 interval OR 近似覆盖 |
+| Pelvis position 不在 `pos_only` 覆盖中 | P2 | 已有 `trans_only` 覆盖 translation |
+| 无 contact/foot height 条件类型 | P2 | CCFM (§6) 解决 |
+| 无 velocity 条件类型 | P3 | 需要扩展 dimensional kind |
+
+---
+
+## 9. 实验计划（按优先级排序） [v1.5 重写]
+
+### 9.1 实验设计原则
+
+每个实验只改变一个模块，按照 **改进生效概率** 从高到低排序。这样即使后续实验失败，前面的成功实验仍然可用。
+
+### 9.2 首批实验（4 个 Taiji 任务）
+
+首批实验目标是验证 **Root 表征** 和 **Loss 对齐** 的效果。所有实验共享以下 loss 配置:
+
+```python
+# 统一 loss 配置 (两版共用)
+velocity_weight = 1.0
+motion_smoothness_weight = 0.5
+trans_dim_weight = 5.0
+keypoints3d_weight = 10.0          # D1 修复: 启用 FK loss
+transl_aug_prob = 0.5              # D3 修复: 启用 translation augmentation (仅版本 A)
+timestep_squared_weighting = False  # 移除 t² weighting
+aux_joint_pos_weight = 50.0
+aux_joint_vel_weight = 500.0
+aux_fk_consistency_weight = 1500.0
+# position loss 统一在 relative-to-root 空间计算
+```
+
+#### 实验 E1: SMPL Root + Uncond (Baseline)
+
+| 项目 | 值 |
+|------|-----|
+| **Root 表征** | 版本 A: SMPL Root (198-dim) |
+| **训练任务** | Unconditional (cond_mask_prob=0.0) |
+| **Condition Sampler** | v3 |
+| **修改内容** | 启用 FK loss + transl_aug + 移除 t² + position loss relative-to-root |
+| **Config 基础** | `hymotion_m2m_v2_uncond_local_046b.py` |
+| **GPU** | 48 × V100 (6 nodes × 8 GPU) |
+| **预期效果** | 滑步改善 (FK loss)，baseline quality 提升 |
+| **有效概率** | 90% (FK loss 是 KIMODO 验证过的已知有效方法) |
+
+#### 实验 E2: SMPL Root + Caption
+
+| 项目 | 值 |
+|------|-----|
+| **Root 表征** | 版本 A: SMPL Root (198-dim) |
+| **训练任务** | Caption (cond_mask_prob=0.1) |
+| **Condition Sampler** | v3 (从 v2 升级) |
+| **修改内容** | 同 E1 + v2→v3 sampler 升级 + null_embedding_source 修复 |
+| **Config 基础** | `hymotion_m2m_v2_caption_local_046b.py` |
+| **GPU** | 48 × V100 |
+| **预期效果** | Text conditioning 恢复 + 滑步改善 |
+| **有效概率** | 85% |
+
+#### 实验 E3: KIMODO Root + Uncond
+
+| 项目 | 值 |
+|------|-----|
+| **Root 表征** | 版本 B: KIMODO Root (197-dim) |
+| **训练任务** | Unconditional (cond_mask_prob=0.0) |
+| **Condition Sampler** | v3 (适配 197-dim) |
+| **修改内容** | 新 root 表征 + ADMM 预处理 + 新 mean/std |
+| **Config 基础** | 新建 `hymotion_m2m_v2_kimodo_uncond_046b.py` |
+| **GPU** | 48 × V100 |
+| **预期效果** | 在 E1 基础上进一步减少滑步（ADMM smooth translation 效果） |
+| **有效概率** | 70% (KIMODO 论文验证有效，但迁移到我们的 SMPL-22 表征可能有 gap) |
+
+#### 实验 E4: KIMODO Root + Caption
+
+| 项目 | 值 |
+|------|-----|
+| **Root 表征** | 版本 B: KIMODO Root (197-dim) |
+| **训练任务** | Caption (cond_mask_prob=0.1) |
+| **Condition Sampler** | v3 (适配 197-dim) |
+| **修改内容** | 同 E3 + caption 支持 |
+| **Config 基础** | 新建 `hymotion_m2m_v2_kimodo_caption_046b.py` |
+| **GPU** | 48 × V100 |
+| **预期效果** | KIMODO root 下的 text 条件生成 |
+| **有效概率** | 65% |
+
+### 9.3 资源需求
+
+| 资源 | 需求 |
+|------|------|
+| **GPU 总量** | 4 × 48 = 192 卡 V100 |
+| **来源** | DHC_DD 或 DHA 应用组 (哪里空用哪里) |
+| **停止的任务** | uncond_local, caption_local (当前跑的两个实验) |
+| **预计训练时长** | 每个实验 ~5-7 天 (100K steps @ batch_size=20-28) |
+
+### 9.4 后续实验（根据 E1-E4 结果决定）
+
+| 实验 | 条件 | 内容 | 有效概率 |
+|------|------|------|---------|
+| **E5: + Explicit Velocity Channel** | E3 > E1 (KIMODO root 有效) | 在版本 B 基础上增加 21×3 joint velocity 通道 | 60% |
+| **E6: + Foot Contact Channel** | E1 滑步仍未解决 | 增加 4-dim foot contact 信号 (CCFM) | 55% |
+| **E7: + ADMM-only Translation** | E3 ≤ E1 (KIMODO root 无效) | 仅在版本 A 上用 ADMM 平滑 translation，不改 root | 65% |
+| **E8: + TCC** | E1/E3 完成 | 替换 VACE 为 Typed Condition Canvas | 50% |
+| **E9: + DM-DSA** | E8 完成 | 加入密度调制双流注意力 | 45% |
+| **E10: + PCE** | E2/E4 text 效果不佳 | 三阶段渐进训练 | 50% |
+
+### 9.5 评估标准
+
+实验成功的**最低标准**:
+1. ✅ 在 Taiji 上成功启动
+2. ✅ Loss 正常下降（前 1000 steps loss 单调下降趋势）
+3. ✅ 无 NaN/Inf
+4. ✅ Gradient norm 在合理范围内 (< 100)
+
+实验效果的**对比标准** (训练 ~50K steps 后):
+1. Foot Skating Score 对比 (E1 vs E3, E2 vs E4)
+2. FID / R-Precision 对比
+3. MPJPE 对比
+4. 主观可视化对比
+
+---
+
+## 10. 评估指标与任务覆盖 [v1.5 从原 §7.2/§7.3 迁移]
+
+### 10.1 评估指标
 
 #### Text Conditioning 评估
 | 指标 | 说明 | 目标 |
@@ -763,7 +1196,7 @@ fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
 | **Jitter** | 关节位置高频抖动 | < 600 |
 | **Physical Plausibility** | 脚穿地面、悬空等比例 | < 5% |
 
-### 7.3 评估任务覆盖
+### 10.2 评估任务覆盖
 
 全部 E1-E15 任务 + 新增:
 - **E-Text**: 纯 T2M 质量评估
@@ -773,9 +1206,9 @@ fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
 
 ---
 
-## 8. 与前沿方法对比及新颖性分析
+## 11. 与前沿方法对比及新颖性分析
 
-### 8.1 方法对比矩阵
+### 11.1 方法对比矩阵
 
 | 特性 | 当前 M2M | VACE (Wan2.1) | OmniGen2 | Seedance 2.0 | Step1X-Edit | **CDO-FM (Ours)** |
 |------|---------|---------------|----------|--------------|-------------|-------------------|
@@ -787,7 +1220,7 @@ fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
 | 任务统一 | 部分 | ✓ | ✓ | ✓ | 编辑为主 | **✓ (全覆盖)** |
 | 运动领域适配 | ✓ | ✗ (视频) | ✗ (图像) | ✗ (视频) | ✗ (图像) | **✓** |
 
-### 8.2 新颖性论证
+### 11.2 新颖性论证
 
 1. **Density-Modulated Dual-Stream Attention**: 不同于 UniCombine 的 LoRA switching 或 OmniGen2 的 hard dual-path，DM-DSA 实现了条件密度驱动的 soft routing，这是首次在 motion generation 中提出。其核心洞察——条件密度的变化需要动态调整语义（text）vs 结构（motion）信号的相对权重——具有普适性，可推广到 video/image inpainting。
 
@@ -797,7 +1230,7 @@ fk_loss = mse(pred_pos_from_rot, pred_joint_pos)
 
 4. **Progressive Condition Exposure**: 受 LLM 指令微调中课程学习的启发，PCE 首次系统化地解决 multi-modal multi-task motion generation 中的 shortcut learning 问题。
 
-### 8.3 与 VACE 的关系
+### 11.3 与 VACE 的关系
 
 CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 - VACE 提出了 `V=[T;F;M]` 的统一编码 → 我们的 TCC 是其类型化扩展
@@ -806,9 +1239,9 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ---
 
-## 9. 顶会论文定位
+## 12. 顶会论文定位
 
-### 9.1 推荐标题
+### 12.1 推荐标题
 
 **"CDO-FM: Condition-Decoupled Orchestration for Unified Text-and-Motion Conditioned Human Motion Generation"**
 
@@ -816,7 +1249,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 **"MotionCanvas: Density-Aware Condition Orchestration for Universal Motion Generation"**
 
-### 9.2 故事线
+### 12.2 故事线
 
 > 现有 motion generation 方法要么只做 text-to-motion (T2M)，要么只做 motion completion (M2M)，无法在一个模型中同时理解文本语义和空间运动约束。我们发现根因在于两类条件的**信息密度天然不对称**——一句话的信息量远低于 10 帧 dense keyframe。简单地将两者混入同一 conditioning pipeline 会导致模型学到忽略文本的 shortcut。
 >
@@ -824,12 +1257,12 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 >
 > 在 XXX benchmark 上，CDO-FM 首次在单一模型中同时达到 T2M SOTA 和 M2M SOTA，且在 text-conditioned motion completion 这一新任务上显著优于所有 baseline。
 
-### 9.3 目标会议
+### 12.3 目标会议
 
 - **首选**: CVPR 2027 (DDL ~Nov 2026) / ICLR 2027 (DDL ~Oct 2026)
 - **备选**: NeurIPS 2027 (DDL ~May 2027) / ECCV 2027 (DDL ~Mar 2027)
 
-### 9.4 可能的审稿人关注点
+### 12.4 可能的审稿人关注点
 
 | 审稿人质疑 | 预备回应 |
 |-----------|---------|
@@ -841,9 +1274,9 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ---
 
-## 10. 风险与备选方案
+## 13. 风险与备选方案
 
-### 10.1 风险评估
+### 13.1 风险评估
 
 | 风险 | 概率 | 影响 | 缓解策略 |
 |------|------|------|---------|
@@ -853,7 +1286,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 | Contact label 提取不准确 | 低 | 低 | 使用多阈值 + 时间窗平滑提高鲁棒性 |
 | Decoupled CFG 推理开销 3x | 高 | 中 | 提供 standard CFG 回退；或 distillation 减少步数 |
 
-### 10.2 降级方案
+### 13.2 降级方案
 
 如果完整 CDO-FM 的某些组件效果不理想，可以独立使用其中任一子系统：
 
@@ -874,9 +1307,9 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ---
 
-## 11. 实施路线图
+## 14. 实施路线图 [v1.5 更新]
 
-### Phase 0: Bug 修复 + 质量基线 (Week 1) — 核心项已完成
+### Phase 0: Dual Root + Loss 对齐 + 首批实验 (Week 1-2) — v1.5 核心
 
 ```
 ✅ v2 caption bugs 修复 (2026-03-27 ~ 2026-05-12):
@@ -884,48 +1317,64 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
    - B5/B6: text token OOD + null embedding 分布 (影响 v2 caption)
    - 6 个 v2 caption 配置已添加 null_embedding_source (phase1/phase2/soar × local/global)
 ✅ v2 uncond_local: 无 bug 影响，无需修复
+□ 实现 KIMODO Root 表征 (§7):
+  □ 实现 smpl_root_to_kimodo_root() 和 kimodo_root_to_smpl_root() 转换函数
+  □ 实现 ADMM XZ 平滑 (移植 KIMODO smooth_root.py)
+  □ 数据预处理: 生成 197-dim KIMODO root 版本数据 + mean/std
+  □ 单元测试: 可逆性验证 (SMPL → KIMODO → SMPL roundtrip)
+□ Loss 对齐 (§7.4, §7.5):
+  □ Position loss 改为 relative-to-root 空间
+  □ 移除 t² timestep weighting (config 修改)
 □ 滑步修复 — config-only (§1.2.3):
   □ 启用 FK keypoint loss: keypoints3d_weight=10.0 (D1)
   □ 启用 translation augmentation: transl_aug_prob=0.5 (D3)
-□ 切换训练数据到 high_quality.json (456K)
-□ 建立 text conditioning 评估基准 (R-Precision, Text Effect Ratio)
-□ 重新训练 baseline (bug fixes + 滑步修复 + quality data)
+□ Config 准备:
+  □ E1: hymotion_m2m_v2_smpl_uncond_046b.py (版本 A)
+  □ E2: hymotion_m2m_v2_smpl_caption_046b.py (版本 A + caption)
+  □ E3: hymotion_m2m_v2_kimodo_uncond_046b.py (版本 B)
+  □ E4: hymotion_m2m_v2_kimodo_caption_046b.py (版本 B + caption)
+□ Debug on lzy_debug_machine_1/2:
+  □ 单步训练 (版本 A 和版本 B 各 1 step)
+  □ 推理测试 (版本 B 输出 → SMPL 转换 → 可视化)
+□ 停止当前 uncond_local、caption_local 实验
+□ 在 Taiji 提交 E1-E4 (每个 48×V100)
+□ 确认 loss 正常下降
 ```
 
-### Phase 1: MVP — 训练策略改进 (Week 2-3)
+### Phase 1: MVP — 训练策略改进 (Week 3-4)
 
 ```
 □ 实现 PCE 三阶段训练 scheduler
 □ 实现 Decoupled CFG (推理端)
 □ 实现 TAL-v2 (对比损失)
-□ 训练 A0: baseline fix
-□ 训练 A3: PCE
+□ Caption configs 从 v2 升级到 v3 sampler
+□ 切换训练数据到 high_quality.json (456K)
+□ 根据 E1-E4 结果决定后续实验方向
 □ 评估: 确认 text conditioning 恢复工作
 ```
 
-### Phase 2: 架构升级 — TCC + DM-DSA (Week 4-6)
+### Phase 2: 架构升级 — TCC + DM-DSA (Week 5-7)
 
 ```
 □ 实现 TypedConditionCanvas
 □ 修改 PrepareM2MCondition 添加条件类型自动标注
 □ 实现 DensityModulator
 □ 修改 DualStreamDiTBlock 集成 DM-DSA
-□ 训练 A1 + A2 消融
-□ 训练 A6: 完整 CDO-FM (不含 contact)
+□ 训练 E8 + E9 消融
 ```
 
-### Phase 3: 质量增强 — CCFM (Week 6-8)
+### Phase 3: 质量增强 — CCFM (Week 7-9)
 
 ```
 □ 实现 contact label 提取
 □ 预处理: 对训练集生成 contact labels
 □ 实现 ContactPredictionHead + contact_aware_loss
 □ 实现 IK foot lock 后处理
-□ 训练 A5: CCFM 消融
+□ 训练 E6: CCFM 消融
 □ 训练最终版本
 ```
 
-### Phase 4: 论文撰写 (Week 8-12)
+### Phase 4: 论文撰写 (Week 9-12)
 
 ```
 □ 全面评估: E1-E15 + 新增评估任务
@@ -975,15 +1424,118 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 ## 附录 C: 计算资源预算
 
+### C.1 首批实验 (Phase 0, v1.5)
+
 | 实验 | GPU 配置 | 预计时长 | 总 GPU 小时 |
 |------|---------|---------|------------|
-| A0: Baseline Fix | 8×V100 | 48h | 384 |
-| A1-A3: 消融 | 8×V100 × 3 | 72h each | 1,728 |
-| A5: CCFM | 16×V100 | 120h | 1,920 |
-| A6: Full CDO-FM | 32×V100 | 168h | 5,376 |
+| E1: SMPL Root + Uncond | 48×V100 (6 nodes) | 120-168h | 5,760-8,064 |
+| E2: SMPL Root + Caption | 48×V100 (6 nodes) | 120-168h | 5,760-8,064 |
+| E3: KIMODO Root + Uncond | 48×V100 (6 nodes) | 120-168h | 5,760-8,064 |
+| E4: KIMODO Root + Caption | 48×V100 (6 nodes) | 120-168h | 5,760-8,064 |
+| **首批合计** | **192 卡** | | **~23,040-32,256 GPU·h** |
+
+### C.2 后续实验 (Phase 1-3)
+
+| 实验 | GPU 配置 | 预计时长 | 总 GPU 小时 |
+|------|---------|---------|------------|
+| E5-E10: 消融实验 | 8-32×V100 | 72-168h each | ~10,000 |
 | 评估 + 其他 | 8×V100 | 48h | 384 |
-| **总计** | | | **~9,792 GPU·h** |
+| **后续合计** | | | **~10,384 GPU·h** |
 
 ---
 
-*文档结束。方案核心: 通过密度感知的条件解耦编排，实现 text 和 motion condition 的自适应平衡，并以接触条件化 flow matching 提升生成质量。*
+## 附录 D: KIMODO Root 转换规范
+
+### D.1 维度映射
+
+```
+SMPL Root (135-dim) → KIMODO Root (134-dim) 转换:
+
+SMPL:                          KIMODO:
+[0:3]   abs_trans    ──┬──→   [0:3]   smooth_trans = ADMM(abs_trans.xz) + abs_trans.y
+                       └──→   [131:134] trans_residual = abs_trans - smooth_trans
+[3:9]   root_rot6d   ──→     [3:5]   heading = [cos(yaw), sin(yaw)]  (从 rot6d 提取 yaw)
+[9:135]  body_rot     ──→     [5:131]  body_rot  (不变)
+
+扩展版:
+SMPL (198-dim) → KIMODO (197-dim):
+[135:198] pos_rel_pelvis ──→  [134:197] pos_rel_smooth_root (参考系切换)
+```
+
+### D.2 ADMM 平滑参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| margin | 0.06m (6cm) | 平滑 XZ 轨迹的最大偏移约束 |
+| step_size | 0.25 × sqrt(diag_max) | 自适应步长 |
+| iterations | 100 per level | 每层优化迭代数 |
+| smoothed_axes | XZ only | Y 轴高度保持原始值 |
+
+### D.3 Heading 提取
+
+```python
+def extract_yaw(root_rotmat: Tensor) -> Tensor:
+    """
+    从 3×3 旋转矩阵提取 yaw (heading) 角度。
+    
+    假设旋转矩阵 R = Ry(yaw) @ Rx(pitch) @ Rz(roll)
+    yaw = atan2(R[0,2], R[2,2])
+    
+    对于人体 pelvis，pitch/roll 通常 < 5°，yaw 占主导。
+    """
+    return torch.atan2(root_rotmat[..., 0, 2], root_rotmat[..., 2, 2])
+
+def yaw_to_rot6d(yaw: Tensor) -> Tensor:
+    """
+    从 yaw 角度构建纯 yaw 旋转的 rot6d 表示。
+    
+    Ry(θ) = [[cos θ, 0, sin θ],
+              [0,     1, 0    ],
+              [-sin θ, 0, cos θ]]
+    
+    rot6d = [Ry[:, 0], Ry[:, 1]] = [cos θ, 0, -sin θ, 0, 1, 0]
+    """
+    cos_y = torch.cos(yaw)
+    sin_y = torch.sin(yaw)
+    zeros = torch.zeros_like(yaw)
+    ones = torch.ones_like(yaw)
+    
+    # rot6d = first two columns of rotation matrix, flattened
+    return torch.stack([cos_y, zeros, -sin_y, zeros, ones, zeros], dim=-1)
+```
+
+### D.4 可逆性测试规范
+
+```python
+def test_roundtrip_conversion():
+    """
+    单元测试: SMPL → KIMODO → SMPL roundtrip 精度验证。
+    
+    验收标准:
+    - Translation: max_error < 1e-5 (float32 精度)
+    - Body rotation: exact (零误差)
+    - Root rotation yaw: max_error < 1e-5
+    - Root rotation pitch/roll: 丢失 (但 pelvis pitch/roll 通常 < 5°)
+    """
+    # 生成随机 SMPL motion
+    smpl_motion = random_smpl_motion(B=4, T=196, dim=135)
+    
+    # Roundtrip
+    kimodo_motion = smpl_root_to_kimodo_root(smpl_motion)
+    recovered_smpl = kimodo_root_to_smpl_root(kimodo_motion)
+    
+    # 验证 translation
+    assert (smpl_motion[..., 0:3] - recovered_smpl[..., 0:3]).abs().max() < 1e-5
+    
+    # 验证 body rotation (exact)
+    assert (smpl_motion[..., 9:135] - recovered_smpl[..., 9:135]).abs().max() < 1e-7
+    
+    # 验证 root rotation yaw
+    original_yaw = extract_yaw(rot6d_to_rotmat(smpl_motion[..., 3:9]))
+    recovered_yaw = extract_yaw(rot6d_to_rotmat(recovered_smpl[..., 3:9]))
+    assert (original_yaw - recovered_yaw).abs().max() < 1e-5
+```
+
+---
+
+*文档结束。v1.5 核心更新: 双 Root 表征方案 (SMPL vs KIMODO) + Loss 对齐 + Motion Condition 采样分析 + 优先级实验计划 (E1-E4 首批 4×48 V100)。方案长期目标: 通过密度感知的条件解耦编排 (CDO-FM)，实现 text 和 motion condition 的自适应平衡，并以接触条件化 flow matching 提升生成质量。*
