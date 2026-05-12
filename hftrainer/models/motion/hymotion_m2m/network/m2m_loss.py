@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -103,6 +103,44 @@ class M2MLoss(nn.Module):
             return per_dim.sum() * 0.0
         return torch.stack(comp_losses).mean()
 
+    _COMP_NAMES = ('trans', 'root_rot', 'body_rot', 'joint_pos')
+
+    def _masked_motion_loss_with_components(
+        self,
+        per_dim: Tensor,
+        data_mask_temporal: Tensor,
+        generation_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Dict[str, Tensor]]:
+        """Like _masked_motion_loss (component_mean path) but also returns
+        per-component scalars for logging.
+
+        Returns:
+            (combined_scalar, {"trans": ..., "root_rot": ..., ...})
+        """
+        data_mask = data_mask_temporal.to(per_dim.device).to(per_dim.dtype)
+        comp_ranges = self._motion_components(per_dim.shape[-1])
+        comp_dict: Dict[str, Tensor] = {}
+        active = []
+        for (start, end), name in zip(comp_ranges, self._COMP_NAMES):
+            comp = per_dim[..., start:end]
+            if generation_mask is not None:
+                comp_mask = (
+                    generation_mask[..., start:end]
+                    .to(per_dim.device)
+                    .to(per_dim.dtype)
+                    * data_mask.unsqueeze(-1)
+                )
+            else:
+                comp_mask = data_mask.unsqueeze(-1).expand_as(comp)
+            denom = comp_mask.sum()
+            if torch.gt(denom.detach(), 0):
+                val = (comp * comp_mask).sum() / denom
+                comp_dict[name] = val
+                active.append(val)
+
+        combined = torch.stack(active).mean() if active else per_dim.sum() * 0.0
+        return combined, comp_dict
+
     def forward(
         self,
         pred_vel=None,
@@ -144,9 +182,17 @@ class M2MLoss(nn.Module):
                 dim_weights = torch.ones(vel_per_dim.shape[-1], device=vel_per_dim.device)
                 dim_weights[:self.trans_dims] = self.trans_dim_weight
                 vel_per_dim = vel_per_dim * dim_weights
-            loss_dict["velocity"] = self.velocity_weight * self._masked_motion_loss(
-                vel_per_dim, data_mask_temporal, generation_mask
-            )
+            if self.velocity_loss_reduction == "component_mean":
+                vel_loss, vel_comps = self._masked_motion_loss_with_components(
+                    vel_per_dim, data_mask_temporal, generation_mask
+                )
+                loss_dict["velocity"] = self.velocity_weight * vel_loss
+                for k, v in vel_comps.items():
+                    loss_dict[f"velocity_{k}"] = v.detach()
+            else:
+                loss_dict["velocity"] = self.velocity_weight * self._masked_motion_loss(
+                    vel_per_dim, data_mask_temporal, generation_mask
+                )
 
         if pred_x1 is not None and gt_x1 is not None:
             # x1 loss: (B, L, D) -> scalar
@@ -156,9 +202,17 @@ class M2MLoss(nn.Module):
                 dim_weights = torch.ones(x1_per_dim.shape[-1], device=x1_per_dim.device)
                 dim_weights[:self.trans_dims] = self.trans_dim_weight
                 x1_per_dim = x1_per_dim * dim_weights
-            loss_dict["x1"] = self.x1_weight * self._masked_motion_loss(
-                x1_per_dim, data_mask_temporal, generation_mask
-            )
+            if self.velocity_loss_reduction == "component_mean":
+                x1_loss, x1_comps = self._masked_motion_loss_with_components(
+                    x1_per_dim, data_mask_temporal, generation_mask
+                )
+                loss_dict["x1"] = self.x1_weight * x1_loss
+                for k, v in x1_comps.items():
+                    loss_dict[f"x1_{k}"] = v.detach()
+            else:
+                loss_dict["x1"] = self.x1_weight * self._masked_motion_loss(
+                    x1_per_dim, data_mask_temporal, generation_mask
+                )
 
         if (global_step is None and self.fk_loss_start_step == 0) or (
             global_step is not None and global_step >= self.fk_loss_start_step
