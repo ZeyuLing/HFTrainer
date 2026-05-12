@@ -258,10 +258,18 @@ def smpl22_to_soma30_retarget(motion_135, bone_offsets):
     )
     # smplx_global_rots: (T, 22, 3, 3), smplx_world_pos: (T, 22, 3)
 
-    # Step 2: Map global rotations SMPLX22 -> SOMA30
-    # Global rotations represent world-space bone orientations, can be directly
-    # copied for matched joints. SOMA30 FK chain decomposes them using its own
-    # parent hierarchy and neutral bone directions.
+    # Step 2: Map global rotations SMPLX22 -> SOMA30 (direct copy).
+    #
+    # Because differentiable_fk produces world-frame global rotations that are
+    # skeleton-neutral (identity local rot → identity global rot for all joints),
+    # copying them directly is correct. The SOMA30 FK chain (global_rots_to_local_rots
+    # → soma30.fk) will re-derive local rotations using SOMA30's own neutral bone
+    # structure, producing correct SOMA30 proportions automatically.
+    #
+    # NOTE: neutral-pose offset compensation is NOT needed here (and was proven
+    # harmful — it introduces ~30° arm tilt). Offset compensation IS needed in
+    # code paths that use smplx22.fk() with axis-angle input (e.g. batch_eval.py),
+    # because that FK bakes in the SMPLX neutral pose rest rotations.
     soma_global_rots = torch.eye(3, dtype=local_rotmat.dtype, device=local_rotmat.device)
     soma_global_rots = soma_global_rots.unsqueeze(0).unsqueeze(0).expand(T, 30, 3, 3).clone()
 
