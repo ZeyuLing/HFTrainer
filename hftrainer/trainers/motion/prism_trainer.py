@@ -25,6 +25,7 @@ class PrismTrainer(BaseTrainer):
         val_prompts: Optional[List[str]] = None,
         num_val_inference_steps: int = 10,
         guidance_scale: float = 5.0,
+        translation_loss_weight: float = 0.5,
         **kwargs,
     ):
         super().__init__(bundle)
@@ -35,6 +36,7 @@ class PrismTrainer(BaseTrainer):
         self.val_prompts = val_prompts or ['a person walking forward']
         self.num_val_inference_steps = num_val_inference_steps
         self.guidance_scale = guidance_scale
+        self.translation_loss_weight = translation_loss_weight
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         motion = batch['motion']
@@ -91,11 +93,29 @@ class PrismTrainer(BaseTrainer):
         ).float()
 
         mse = F.mse_loss(model_pred, targets.float(), reduction='none')
+        # mse shape: [B, C, T', J] where J=23 (token 0=translation, 1-22=rotation)
         condition_mask = condition_frame_mask_vae.expand_as(mse).float()
         padding_mask = padding_mask.unsqueeze(1).expand_as(mse).float()
         full_mask = condition_mask * padding_mask
-        loss = (mse * full_mask).sum() / (full_mask.sum() + 1e-6)
-        return {'loss': loss, 'loss_flow': loss.detach()}
+
+        # Separate translation (J=0) and rotation (J=1:) to prevent
+        # translation loss dilution (1/23 ≈ 4.3% vs 22/23 ≈ 95.7%).
+        mse_transl = mse[:, :, :, :1]           # [B, C, T', 1]
+        mask_transl = full_mask[:, :, :, :1]
+        loss_transl = (mse_transl * mask_transl).sum() / (mask_transl.sum() + 1e-6)
+
+        mse_rot = mse[:, :, :, 1:]              # [B, C, T', 22]
+        mask_rot = full_mask[:, :, :, 1:]
+        loss_rot = (mse_rot * mask_rot).sum() / (mask_rot.sum() + 1e-6)
+
+        w_t = self.translation_loss_weight
+        loss = w_t * loss_transl + (1.0 - w_t) * loss_rot
+        return {
+            'loss': loss,
+            'loss_flow': loss.detach(),
+            'loss_transl': loss_transl.detach(),
+            'loss_rot': loss_rot.detach(),
+        }
 
     def val_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         from hftrainer.pipelines.motion.prism_pipeline import PrismPipeline
