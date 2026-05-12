@@ -1061,6 +1061,12 @@ class AccelerateRunner:
             path = load_cfg.get('path', load_cfg) if isinstance(load_cfg, dict) else load_cfg
             scope = load_cfg.get('load_scope', 'model') if isinstance(load_cfg, dict) else 'model'
             self._load(path, load_scope=scope)
+            # After load_from, patch any zero null embeddings from a
+            # secondary pretrained source.  This handles the case where
+            # load_from points to a checkpoint that lacks good null
+            # embeddings (e.g. an unconditioned model with zeros) while
+            # a pretrained T2M checkpoint has the correct values.
+            self._patch_zero_null_embeddings_from_pretrained()
 
     def _load(self, path: str, load_scope: str = 'model'):
         """
@@ -1248,23 +1254,27 @@ class AccelerateRunner:
         self.accelerator.wait_for_everyone()
 
     def _patch_zero_null_embeddings_from_pretrained(self):
-        """Patch all-zero null embeddings from `load_from` pretrained ckpt.
+        """Patch all-zero null embeddings from a pretrained checkpoint.
 
-        Root cause: when ``auto_resume=True`` resumes from an existing
-        checkpoint in work_dir, ``load_from`` (the pretrained T2M ckpt that
-        carries correct null_vtxt_feat / null_ctxt_input values) is never
-        reached.  If the resumed checkpoint was saved from a run that
-        predates the bundle-orphan-param fix (2026-03-27), its
-        ``__bundle_params__`` contains zeros for these embeddings — and
-        zeros propagate forever through subsequent saves/resumes.
+        Handles two scenarios:
 
-        This method detects that condition (parameter exists, is all-zeros,
-        and load_from config provides a pretrained source) and patches the
-        live parameters in-place.  Called once after any auto_resume load.
+        1. **auto_resume**: resumes from work_dir checkpoint that may have
+           zero null embeddings (pre-2026-03-27 bug). Falls back to
+           ``load_from.path`` to get correct values.
 
-        Impact: null embeddings are only used during inference-time CFG
-        (classifier-free guidance).  Training with cond_mask_prob=0.0 is
-        unaffected by the zeros, but inference quality degrades silently.
+        2. **load_from**: the loaded checkpoint itself may have zero null
+           embeddings (e.g. an unconditioned model never trained with text).
+           In this case, ``load_from.null_embedding_source`` can specify a
+           separate pretrained checkpoint (typically the T2M pretrained) that
+           carries the correct values.  Falls back to ``load_from.path`` if
+           no explicit source is given.
+
+        The method detects frozen bundle-level nn.Parameters that are
+        all-zero and patches them from the resolved source checkpoint.
+
+        Impact: null embeddings are used during CFG training (cond_mask_prob
+        > 0) and inference-time CFG.  Zero null embeddings cause the model
+        to receive uninformative null conditioning, breaking text guidance.
         """
         if self.load_from is None:
             return
@@ -1279,11 +1289,22 @@ class AccelerateRunner:
         if not zero_params:
             return
 
-        # Resolve the pretrained checkpoint path from load_from config.
+        # Resolve the pretrained checkpoint path.
+        # Priority: null_embedding_source > path (from load_from config).
         load_cfg = self.load_from
         if hasattr(load_cfg, 'to_dict'):
             load_cfg = load_cfg.to_dict()
-        pretrained_path = load_cfg.get('path', load_cfg) if isinstance(load_cfg, dict) else load_cfg
+
+        pretrained_path = None
+        if isinstance(load_cfg, dict):
+            # First try explicit null_embedding_source — a separate
+            # checkpoint known to have good null embedding values.
+            pretrained_path = load_cfg.get('null_embedding_source')
+            if not pretrained_path:
+                pretrained_path = load_cfg.get('path')
+        elif isinstance(load_cfg, str):
+            pretrained_path = load_cfg
+
         if not pretrained_path or not isinstance(pretrained_path, str):
             return
 
