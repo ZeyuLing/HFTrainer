@@ -52,4 +52,6 @@ load_from = dict(
     _delete_=True,
     path='work_dirs/hymotion_m2m_v2_caption_local_046b/checkpoint-epoch_498',
     load_scope='model',
+    # B2-ext fix: intermediate checkpoints have all-zero null embeddings.
+    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
 )

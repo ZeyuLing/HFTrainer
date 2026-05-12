@@ -129,4 +129,7 @@ load_from = dict(
     _delete_=True,
     path='work_dirs/hymotion_m2m_v2_caption_local_phase1/checkpoint-epoch_50/model.safetensors',
     load_scope='model',
+    # B2-ext fix: intermediate checkpoints have all-zero null embeddings
+    # (safetensors doesn't store bundle-level params). Patch from T2M pretrained.
+    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
 )
