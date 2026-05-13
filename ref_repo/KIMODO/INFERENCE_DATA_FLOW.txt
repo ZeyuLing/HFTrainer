@@ -1,0 +1,241 @@
+================================================================================
+                    KIMODO INFERENCE DATA FLOW DIAGRAM
+================================================================================
+
+LAYER 0: INPUT
+  ┌────────────────┬────────────────┐
+  │  Text Prompt   │  Constraints   │
+  └────────┬───────┴────────┬───────┘
+           │                │
+           ▼                ▼
+LAYER 1: ENCODING & CONDITIONING
+  ┌──────────────────────────────────────────────────┐
+  │ Text Encoder: LLM2Vec                           │
+  │ └─ Input: "walk to the right"                  │
+  │ └─ Output: 4096-dim embedding                  │
+  │ └─ Project to: 1024-dim latent                 │
+  └────────┬─────────────────────────────────────────┘
+           │
+           │  Constraints Processor
+           │  ┌──────────────────────────────────────┐
+           │  │ create_conditions()                  │
+           │  │ ├─ Input: FullBodyConstraintSet     │
+           │  │ ├─ Output #1: observed_motion       │
+           │  │ │            [B, T, 333]            │
+           │  │ │            (GT values + zeros)    │
+           │  │ └─ Output #2: motion_mask           │
+           │  │              [B, T, 333]            │
+           │  │              (binary: constrained=1)│
+           │  └──────────────────────────────────────┘
+           │
+           ▼
+LAYER 2: DIFFUSION INITIALIZATION
+  ┌──────────────────────────────────────────────────┐
+  │ x_T ~ N(0, 1)                                   │
+  │ Shape: [B, T, 333]                              │
+  │ ├─ [0:3]     smooth_root_pos (noisy)           │
+  │ ├─ [3:5]     global_root_heading (noisy)       │
+  │ ├─ [5:86]    local_joints_positions (noisy)    │
+  │ ├─ [86:248]  global_rot_data (noisy)           │
+  │ ├─ [248:329] velocities (ignored)               │
+  │ └─ [329:333] foot_contacts (ignored)            │
+  └────────┬─────────────────────────────────────────┘
+           │
+           ▼
+LAYER 3: DENOISING LOOP (50 iterations: t=49 → 0)
+  ┌──────────────────────────────────────────────────┐
+  │ For each timestep t:                            │
+  │                                                  │
+  │ 3.1 CONSTRAINT IMPUTATION                       │
+  │     x_t = x_t * (1 - motion_mask)               │
+  │        + observed_motion * motion_mask          │
+  │                                                  │
+  │     Effect: Constrained dims frozen to GT       │
+  │     Unconstrained dims evolved via diffusion    │
+  │                                                  │
+  │ 3.2 EXTEND WITH MASK                            │
+  │     x_extended = cat(x_t, motion_mask, dim=-1) │
+  │     Shape: [B, T, 666]                          │
+  │     ├─ [0:333]     motion after imputation     │
+  │     └─ [333:666]   binary constraint mask      │
+  │                                                  │
+  │ 3.3 TRANSFORMER FORWARD                         │
+  │     TwoStageDenoiser:                           │
+  │     ├─ Stage 1: Predict root motion            │
+  │     ├─ Stage 2: Predict body motion (given root)│
+  │     └─ Output: denoised x_0_pred [B, T, 333]   │
+  │                                                  │
+  │ 3.4 CLASSIFIER-FREE GUIDANCE (Separated CFG)    │
+  │     Three passes through model:                 │
+  │     ├─ Pass A: Normal (text + mask)            │
+  │     ├─ Pass B: Text-only CFG (drop mask)       │
+  │     ├─ Pass C: Constraint-only CFG (drop text) │
+  │     └─ Combine: x̂ = x_uncond                   │
+  │                    + w_text*(x_text-x_uncond)   │
+  │                    + w_constr*(x_constr-x_uncond)│
+  │                                                  │
+  │ 3.5 DDIM SAMPLING                               │
+  │     Sampler computes x_{t-1} from x̂_0          │
+  │     x_{t-1} = f(x_t, x̂_0, t, t-1)              │
+  │                                                  │
+  │ 3.6 [OPTIONAL] RE-IMPUTE                        │
+  │     If KIMODO_REPAINT_CONDITION env var set:   │
+  │     x_{t-1} = x_{t-1} * (1 - motion_mask)      │
+  │            + q_sample(observed_motion, t-1)    │
+  │                       * motion_mask            │
+  └────────┬─────────────────────────────────────────┘
+           │
+           ▼
+LAYER 4: POST-LOOP HARD PASTE
+  ┌──────────────────────────────────────────────────┐
+  │ [OPTIONAL] Hard-enforce all constraints         │
+  │ If KIMODO_FINAL_HARD_PASTE env var set:        │
+  │ x_0 = x_0 * (1 - motion_mask)                  │
+  │     + observed_motion * motion_mask             │
+  │                                                  │
+  │ Effect: Constrained dims are now exact GT       │
+  │ (Not left to model prediction)                  │
+  └────────┬─────────────────────────────────────────┘
+           │
+           ▼
+LAYER 5: POST-PROCESSING
+  ┌──────────────────────────────────────────────────┐
+  │ 5.1 DENORMALIZATION                             │
+  │     Undo per-part statistics:                   │
+  │     ├─ global_root_stats.unnormalize()          │
+  │     ├─ local_root_stats.unnormalize()           │
+  │     └─ body_stats.unnormalize()                 │
+  │     Output: [B, T, 333] denormalized            │
+  │                                                  │
+  │ 5.2 INVERSE TRANSFORM (KimodoMotionRep.inverse)│
+  │     ├─ UNPACK 333 dims into 6 components       │
+  │     │  ├─ smooth_root_pos [B, T, 3]           │
+  │     │  ├─ global_root_heading [B, T, 2]       │
+  │     │  ├─ local_joints_positions [B, T, 81]   │
+  │     │  ├─ global_rot_data [B, T, 162]         │
+  │     │  ├─ velocities [B, T, 81]               │
+  │     │  └─ foot_contacts [B, T, 4]             │
+  │     │                                           │
+  │     ├─ CONVERT 6D → MATRICES                   │
+  │     │  └─ global_rot_mats = cont6d_to_matrix()│
+  │     │     Output: [B, T, 27, 3, 3]            │
+  │     │                                           │
+  │     ├─ GLOBAL → LOCAL ROTATION                │
+  │     │  └─ local_rot_mats = apply hierarchy    │
+  │     │     R_local[i] = R_parent[i]^T @ R_global[i]
+  │     │     Output: [B, T, 27, 3, 3]            │
+  │     │                                           │
+  │     ├─ RECONSTRUCT ROOT POSITION              │
+  │     │  └─ root_positions = local_joints_pos + smooth_root_pos
+  │     │     Add X from smooth_root_pos[x]        │
+  │     │     Keep Y unchanged                     │
+  │     │     Add Z from smooth_root_pos[z]        │
+  │     │     Output: [B, T, 3]                    │
+  │     │                                           │
+  │     ├─ FORWARD KINEMATICS                      │
+  │     │  └─ posed_joints = skeleton.fk(         │
+  │     │       local_rot_mats, root_positions)    │
+  │     │     Output: [B, T, 27, 3] in world frame│
+  │     │                                           │
+  │     ├─ COMPUTE VELOCITIES (unused)            │
+  │     │  └─ velocities = (positions[t+1] -      │
+  │     │       positions[t]) * fps / dt           │
+  │     │     Output: [B, T, 81]                   │
+  │     │                                           │
+  │     ├─ COMPUTE FOOT CONTACTS (unused)         │
+  │     │  └─ contact = (y_velocity < threshold)  │
+  │     │       AND (foot_height < threshold)     │
+  │     │     Output: [B, T, 4] boolean           │
+  │     │                                           │
+  │     └─ BUILD OUTPUT DICTIONARY                │
+  │        {                                        │
+  │          'local_rot_mats': [B, T, 27, 3, 3],  │
+  │          'global_rot_mats': [B, T, 27, 3, 3], │
+  │          'posed_joints': [B, T, 27, 3],       │
+  │          'root_positions': [B, T, 3],         │
+  │          'smooth_root_pos': [B, T, 3],        │
+  │          'foot_contacts': [B, T, 4],          │
+  │          'global_root_heading': [B, T, 2]     │ ← KEPT!
+  │        }                                        │
+  │                                                  │
+  │ 5.3 [OPTIONAL] POST-PROCESS MOTION            │
+  │     ├─ Foot lock: IK corrections              │
+  │     ├─ Constraint enforcement: exact match    │
+  │     └─ Output: corrected motion               │
+  │                                                  │
+  │ 5.4 [OPTIONAL] SKELETON CONVERSION            │
+  │     ├─ SOMA-30 → SOMA-77                      │
+  │     ├─ Add hand/face joints                    │
+  │     └─ Output: expanded skeleton motion       │
+  └────────┬─────────────────────────────────────────┘
+           │
+           ▼
+LAYER 6: OUTPUT
+  ┌──────────────────────────────────────────────────┐
+  │ motion_dict = {                                 │
+  │   'local_rot_mats': [B, T, 27, 3, 3],          │
+  │   'global_rot_mats': [B, T, 27, 3, 3],         │
+  │   'posed_joints': [B, T, 27, 3],               │
+  │   'root_positions': [B, T, 3],                 │
+  │   'smooth_root_pos': [B, T, 3],                │
+  │   'foot_contacts': [B, T, 4],                  │
+  │   'global_root_heading': [B, T, 2],  ← PRESENT │
+  │ }                                               │
+  │                                                  │
+  │ Optionally converted to NumPy arrays            │
+  └──────────────────────────────────────────────────┘
+
+================================================================================
+                           WHAT GETS PREDICTED?
+================================================================================
+
+DURING DIFFUSION (all 50 steps):
+  ✅ smooth_root_pos [3 dims]
+  ✅ global_root_heading [2 dims]
+  ✅ local_joints_positions [81 dims]
+  ✅ global_rot_data [162 dims]
+  ❌ velocities [81 dims] — NOT predicted
+  ❌ foot_contacts [4 dims] — NOT predicted
+
+Model's effective prediction space: 248 dims
+
+Remaining 85 dims computed post-hoc from positions:
+  - Velocities: finite differences
+  - Foot contacts: thresholding on position+velocity
+
+================================================================================
+                    HEADING CHANNEL THROUGH THE PIPELINE
+================================================================================
+
+  INPUT:          (no explicit heading, implicit in motion description)
+         │
+         ▼
+  ENCODING:       (Text prompt contains orientation hints)
+         │
+         ▼
+  INITIALIZATION: x_T[3:5] ~ N(0, 1) (random noise for heading)
+         │
+         ▼
+  DIFFUSION:      Model predicts dims [3:5] at every step
+                  ├─ Step 49: noisy prediction → dims [3:5]
+                  ├─ Step 48: denoise → dims [3:5]
+                  ├─ ...
+                  └─ Step 0:  final clean → dims [3:5]
+         │
+         ▼
+  IMPUTATION:     If heading is constrained: impute GT [cos(ψ), sin(ψ)]
+                  Otherwise: evolved via diffusion
+         │
+         ▼
+  DENORMALIZATION: Undo normalization on dims [3:5]
+         │
+         ▼
+  INVERSE:        Extract global_root_heading from dims [3:5]
+                  ├─ Convert [cos(ψ), sin(ψ)] → radians if needed
+                  └─ Add to output_tensor_dict
+         │
+         ▼
+  OUTPUT:         'global_root_heading' key in motion_dict
+                  Available for: visualization, constraint application, etc.
+
+================================================================================

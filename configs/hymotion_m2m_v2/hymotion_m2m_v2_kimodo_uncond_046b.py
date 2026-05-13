@@ -5,7 +5,7 @@
 #
 # Key overrides from base config (_base_hymotion_m2m_v2_046b.py):
 #   - keypoints3d_weight: 0.0 → 10.0 (enable keypoint supervision)
-#   - timestep_squared_weighting: True → False (standard loss weighting)
+#   - timestep_squared_weighting: True (t² weighting to suppress noisy-FK spikes)
 #   - Data pipeline: Add SmplTransToKimodoRootOnline transform (ADMM smoothing)
 #   - Text conditioning: disabled (uncond_mode=True)
 #   - Rotation space: local (SMPL frame)
@@ -37,6 +37,22 @@ _base_ = './_base_hymotion_m2m_v2_046b.py'
 
 work_dir = 'work_dirs/hymotion_m2m_v2_kimodo_uncond_E3'
 
+# Resume from M2M v2 uncond_local checkpoint (epoch 2930).
+# NOTE: uncond_local ckpt has ALL-ZERO null_ctxt due to historical bug.
+# null_embedding_source tells the runner to patch zero frozen embeddings
+# from the T2M pretrained checkpoint after loading.
+# exclude_bundle_keys: prevent SMPL Root mean/std from overwriting
+# KIMODO Root mean/std (different statistical distributions).
+# load_scope='model' resets optimizer/scheduler (loss config changed:
+# keypoints3d 0→10, t² weighting on, sampler_v3, KIMODO root).
+load_from = dict(
+    _delete_=True,
+    path='work_dirs/hymotion_m2m_v2_uncond_local_046b/checkpoint-epoch_2930',
+    load_scope='model',
+    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    exclude_bundle_keys=['mean', 'std'],
+)
+
 model = dict(
     pred_type='velocity',
     uncondition_mode=True,
@@ -47,14 +63,16 @@ model = dict(
     losses_cfg=dict(
         # Override base: enable keypoint supervision (E3 baseline)
         keypoints3d_weight=10.0,
+        # Decompose velocity loss into trans/root_rot/body_rot/joint_pos
+        # for per-component monitoring in training logs.
+        velocity_loss_reduction='component_mean',
     ),
-    # Override base: disable t² weighting for standard loss weighting
     kimodo_aux_loss_cfg=dict(
         joint_pos_weight=50.0,
         joint_vel_weight=500.0,
         fk_consistency_weight=1500.0,
         loss_type='smooth_l1',
-        timestep_squared_weighting=False,  # E3 baseline: standard weighting
+        timestep_squared_weighting=True,  # E3: t² weighting to suppress noisy-FK spikes at t≈0
         fk_consistency_warmup_steps=2000,
         joint_pos_warmup_steps=2000,
         joint_vel_warmup_steps=2000,
@@ -63,6 +81,8 @@ model = dict(
 
 train_dataloader = dict(
     batch_size=28,
+    num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
+    persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=True),

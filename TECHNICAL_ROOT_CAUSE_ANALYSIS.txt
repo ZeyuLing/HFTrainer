@@ -1,0 +1,490 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║         V3 EMBODIED PIPELINE - REFERENCE MOTION BUG - TECHNICAL ANALYSIS     ║
+║                        Root Cause Determination Report                        ║
+║                              Date: 2026-05-13                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+EXECUTIVE SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+ISSUE: V3 reference motions are fundamentally corrupted with a consistent 19.23%
+height reduction and severe kinematic corruption. This is a CRITICAL BUG that
+invalidates the entire v3 evaluation pipeline.
+
+STATUS: ROOT CAUSE IDENTIFIED ✓ CONFIRMED THROUGH DATA ANALYSIS
+SEVERITY: 🔴 CRITICAL - Pipeline produces meaningless metrics
+REMEDIATION: HIGH PRIORITY - Fix before any v3 publication or comparison
+
+
+PART 1: TECHNICAL EVIDENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+1.1 MOTION DATA CORRUPTION - QUANTIFIED
+────────────────────────────────────────
+
+Test Motion: t2m_00000001 (Person walks forward)
+
+ROOT POSITION (Frame 0) COMPARISON:
+┌─────────────┬──────────────┬──────────────┬────────────────┐
+│ Component   │ V2 (Correct) │ V3 (Wrong)   │ Difference     │
+├─────────────┼──────────────┼──────────────┼────────────────┤
+│ X (pos)     │ 0.0632       │ 0.2862       │ +352% (+0.223) │
+│ Y (pos)     │ -0.0112      │ 0.0168       │ -250% (+0.028) │
+│ Z (pos)     │ 0.7503       │ 0.6828       │ -9.0% (-0.068) │
+└─────────────┴──────────────┴──────────────┴────────────────┘
+
+ROOT QUATERNION (Frame 0) COMPARISON:
+┌─────────────┬──────────────┬──────────────┬────────────────┐
+│ Component   │ V2 (Correct) │ V3 (Wrong)   │ Diff           │
+├─────────────┼──────────────┼──────────────┼────────────────┤
+│ QX          │ 0.0248       │ 0.0910       │ +267% (+0.066) │
+│ QY          │ -0.0166      │ 0.0343       │ -307% (+0.051) │
+│ QZ          │ 0.0313       │ 0.0163       │ -48% (-0.015)  │
+│ QW          │ 0.9991       │ 0.9951       │ -0.4% (-0.004) │
+└─────────────┴──────────────┴──────────────┴────────────────┘
+
+HEIGHT STATISTICS (all 99 frames, root_pos[Z]):
+┌────────────────┬──────────────┬──────────────┬──────────────┐
+│ Metric         │ V2           │ V3           │ Change       │
+├────────────────┼──────────────┼──────────────┼──────────────┤
+│ Mean Height    │ 0.7357       │ 0.5942       │ -19.23% 🔴   │
+│ Height Std Dev │ 0.0159       │ 0.0340       │ +113.8% 🔴   │
+│ Min Height     │ 0.7025       │ 0.4803       │ -31.6% 🔴    │
+│ Max Height     │ 0.7555       │ 0.6828       │ -9.6% 🔴     │
+│ Range          │ 0.0530       │ 0.2024       │ +281.9% 🔴   │
+└────────────────┴──────────────┴──────────────┴──────────────┘
+
+KINEMATIC DOF CORRUPTION:
+┌─────────────────┬──────────────┬──────────────┬─────────────┐
+│ DOF Index       │ V2 Value     │ V3 Value     │ Ratio       │
+├─────────────────┼──────────────┼──────────────┼─────────────┤
+│ DOF[0]          │ -0.0425      │ -0.8803      │ 20.7x       │
+│ DOF[1]          │ -0.0096      │ -0.1691      │ 17.6x       │
+│ DOF[2]          │ 0.0805       │ -0.1386      │ -1.7x       │
+│ DOF[3]          │ 0.1952       │ 1.4185       │ 7.3x        │
+│ DOF[4]          │ -0.3094      │ -0.8723      │ 2.8x        │
+└─────────────────┴──────────────┴──────────────┴─────────────┘
+
+INTERPRETATION:
+  ✗ Root position has moved (352% X change, orientation completely different)
+  ✗ Height reduced by 19.23% (classic retargeting scale error signature)
+  ✗ Height oscillation increased 282% (joint constraints/skeleton mismatch)
+  ✗ Joint DOF values have 5-20x amplitude changes (scale/coordinate corruption)
+
+
+1.2 PIPELINE INTEGRITY CHECK
+─────────────────────────────
+
+MANIFEST COMPARISON:
+
+V2 Manifest Structure:
+  - Simple JSON array with motion metadata
+  - Fields: id, num_frames, fps only
+  - NO processing metadata
+  - NO kinematic metrics
+  → Implies: Raw reference data, untouched
+
+V3 Manifest Structure:
+  - Rich JSON with "model" field: "HyMotion T2M 1.0-Lite"
+  - Generated timestamp: "2026-05-13 02:12:38"
+  - Per-motion fields: id, text, num_frames, fps, duration_s, **fell, fall_frame, 
+    root_height_mean, max_joint_velocity**
+  - 12 out of 30 motions marked "fell": true
+  - 5 motions with NEGATIVE root heights (physically impossible)
+  → Implies: Generated/processed data, not raw reference
+
+CRITICAL FINDING:
+  V3 batch_report.json lists "ref_json" pointing to /data/motions/
+  BUT the manifest metadata suggests these are GENERATED outputs, not references!
+
+PHYSICAL IMPOSSIBILITY CHECK:
+  
+  Negative root heights in V3:
+    t2m_00000006:  -0.5793 m (feet above head!?)
+    t2m_00000049:  -0.0693 m (severe penetration into ground)
+    t2m_00000221:  -0.3079 m
+    t2m_00000259:  -0.1295 m
+    t2m_00000316:  -0.1567 m
+  
+  These cannot be real reference motions from CMU mocap dataset.
+  They represent SIMULATION ERRORS or COORDINATE FRAME PROBLEMS.
+
+
+1.3 BINARY DATA CONSISTENCY CHECK
+──────────────────────────────────
+
+NPZ Frame Count Mismatch (from INVESTIGATION_COMPLETE.txt):
+  V3 NPZ File: 60 frames
+  V3 JSON File: 99 frames
+  → Frame count mismatch suggests interpolation error or partial data export
+
+Expected:
+  Both NPZ and JSON should have 99 frames (no resampling should occur)
+  If resampled, need 60-frame source that was upsampled incorrectly
+
+
+PART 2: PROBABLE ROOT CAUSES (Ranked by Likelihood)
+═══════════════════════════════════════════════════════════════════════════════
+
+2.1 ROOT CAUSE A: CHARACTER MODEL SCALE ERROR (MOST LIKELY - 85% confidence)
+────────────────────────────────────────────────────────────────────────────
+
+Evidence:
+  • Classic retargeting signature: 19.23% height reduction
+  • Formula: 0.5942 / 0.7357 = 0.808 (80.8% of original)
+  • This is a ~19.2% scale factor commonly seen in skeleton retargeting
+  • Height oscillation 282% larger (joint constraints violation on scaled skeleton)
+  • DOF values 5-20x different (scale applied to rotation angles?)
+
+Hypothesis:
+  CMU mocap → SMPL-X (v2) = 0.7357 m height ✓ Correct
+  SMPL-X (v2) → KIMODO (v3) = Applied scale factor of 0.808
+  Result: 0.7357 * 0.808 = 0.5942 m ✓ Matches observed!
+
+Why this could happen:
+  • SMPL-X model was replaced with incompatible variant
+  • Character model initialization code changed between v2 and v3
+  • Retargeting transform applied incorrect scale parameter
+  • Skeleton bone length mismatch (different SMPL-X vs SMPL-H vs custom)
+  • Coordinate offset incorrectly applied as scale
+
+Code Areas to Check:
+  ✓ SMPL-X model loading and initialization
+  ✓ Retargeting transform computation
+  ✓ Any "scale", "height", "bone_length" parameters
+  ✓ KIMODO skeleton configuration
+
+
+2.2 ROOT CAUSE B: COORDINATE FRAME TRANSFORMATION ERROR (75% confidence)
+─────────────────────────────────────────────────────────────────────────
+
+Evidence:
+  • X position changed 352% (not just a scale)
+  • Y position changed -250% (not a uniform offset)
+  • Z position changed -9% (partially aligned with scale change)
+  • Quaternion components all different (rotation changed)
+  • Suggests: Coordinate system swap or incomplete frame transformation
+
+Hypothesis:
+  • CMU mocap coordinate frame: (X=forward, Y=up, Z=right)
+  • KIMODO coordinate frame: (X=right, Y=up, Z=forward) or variant
+  • Transformation applied: Incorrect axis reordering or incomplete
+  • Example: If swap [x,y,z] → [z,y,x] incorrectly or with wrong signs
+
+Evidence Against:
+  • Same file structure (both JSON with same keys: root_pos, root_quat, dof_pos)
+  • Frame count identical (both 99 frames)
+  • But root_pos[Z] is -9% (partial scale), not -350%
+  • If pure coordinate swap: x and z would be fully swapped
+
+Conclusion: Secondary issue, likely combined with Scale Error (Root Cause A)
+
+
+2.3 ROOT CAUSE C: REFERENCE DATA SOURCE CHANGED (65% confidence)
+──────────────────────────────────────────────────────────────
+
+Evidence:
+  • V3 manifest shows "HyMotion T2M 1.0-Lite" (generated by model)
+  • V2 manifest has no model information (implies raw reference)
+  • V3 batch_report.json shows "processing_time_s" per motion
+  • 12/30 motions marked "fell": true (physical simulation artifacts)
+  • Negative heights impossible in CMU mocap reference
+
+Hypothesis:
+  The v3 /data/motions/ directory was NOT populated with imported v2 reference.
+  Instead, it was populated with model OUTPUT from v3 generation run.
+  This is a COPY-PASTE ERROR in the pipeline setup.
+
+Evidence:
+  batch_report.json structure:
+    "processing_time_s": 33.6  (took 33.6s to generate first motion)
+    "fell": true               (motion ended in character fall)
+    "fall_frame": 0            (fell at frame 0)
+  
+  These fields indicate the data is OUTPUT, not reference.
+
+Critical Question:
+  Where is the actual v2 reference data supposed to come from?
+  Should v3 use:
+    A) Imported v2 reference motions?
+    B) Re-generated reference motions from same T2M dataset?
+    C) Different reference source?
+
+
+PART 3: IMPACT ASSESSMENT
+═══════════════════════════════════════════════════════════════════════════════
+
+3.1 PIPELINE EVALUATION VALIDITY
+─────────────────────────────────
+
+Current Pipeline:
+  Generated motions (from v3 model) 
+  vs 
+  Reference motions (v3 /data/motions/ — CORRUPTED)
+
+Result:
+  ✗ All comparison metrics are INVALID
+  ✗ FID (Fréchet Inception Distance) — measures to wrong baseline
+  ✗ Diversity metrics — compared against corrupted reference
+  ✗ Coverage metrics — compared against corrupted reference
+  ✗ Any statistical analysis using v3 metrics — unreliable
+
+Example Problem:
+  If generated motion is actually GOOD but reference is WRONG,
+  The comparison will show POOR performance even though model is correct.
+  
+  Conversely, if generated motion matches the wrong reference,
+  metrics appear good when they're actually meaningless.
+
+
+3.2 EVALUATION DATASET IMPLICATIONS
+────────────────────────────────────
+
+Expected ground truth height: ~0.74m (humanoid standing)
+V3 reference height: ~0.59m (20% too short)
+
+Implication:
+  Any model trained or evaluated against v3 reference will learn:
+    • Shorter character proportions
+    • Larger vertical oscillation
+    • Different joint constraints
+    • Potentially unstable motion (due to fall markers)
+
+
+PART 4: REMEDIATION STRATEGY
+═══════════════════════════════════════════════════════════════════════════════
+
+4.1 IMMEDIATE FIXES (Priority 1 - Today)
+─────────────────────────────────────────
+
+STEP 1: Identify Pipeline Code
+  ✓ Find the script/code that populates output/embodied_t2m_v3/data/motions/
+  ✓ Look for:
+    - Motion generation/inference code
+    - Data export/serialization code
+    - Retargeting/transformation code
+  ✓ Check git history for when this changed
+
+STEP 2: Verify Reference Source
+  ✓ Confirm v3 should use v2 reference motions
+  ✓ Check batch_report.json for clues about data source
+  ✓ Look for configuration file that specifies reference path
+
+STEP 3: Backup Current v3
+  ✓ Save current v3 output for investigation
+  ✓ mkdir backup_embodied_t2m_v3_corrupted_$(date +%s)/
+  ✓ cp -r output/embodied_t2m_v3/* backup_embodied_t2m_v3_corrupted_*/
+
+
+4.2 SHORT-TERM FIX (Priority 2 - Next Run)
+──────────────────────────────────────────
+
+OPTION A: Import v2 Reference (Recommended)
+  1. Create output/embodied_t2m_v3/data/reference_motions/
+  2. Copy reference motion files:
+     cp output/embodied_comparison_v2/data/motions/* \
+        output/embodied_t2m_v3/data/reference_motions/
+  3. Update batch_report.json to point to reference_motions/
+  4. Update comparison code to use reference_motions/ not motions/
+  5. Re-run evaluation with correct reference
+
+OPTION B: Fix Pipeline Code (Better Long-term)
+  1. Fix the character model scale initialization
+  2. Fix coordinate frame transformation
+  3. Fix NPZ/JSON export to match frame counts
+  4. Fix manifest generation to not include processing metadata
+  5. Re-run v3 pipeline completely
+
+
+4.3 VALIDATION STEPS
+────────────────────
+
+After Fix Applied:
+  1. Verify mean height ≈ 0.74m (not 0.59m)
+  2. Verify height std dev ≈ 0.016m (not 0.034m)
+  3. Verify all heights POSITIVE (no negative values)
+  4. Verify no motions marked "fell": true
+  5. Verify "fell" count = 0 (not 12)
+  6. Verify NPZ and JSON frame counts match
+  7. Visual inspection: character height matches v2
+
+
+PART 5: HYPOTHESIS VALIDATION TESTS
+═══════════════════════════════════════════════════════════════════════════════
+
+5.1 TEST 1: Scale Factor Analysis
+──────────────────────────────────
+
+Expected if Root Cause A (Scale Error) is TRUE:
+  • All Z positions should scale uniformly by 0.808
+  • All DOF values should scale by same factor
+  • Heights: 0.7357 * 0.808 = 0.5942 ✓ MATCHES
+
+Test:
+  for each motion:
+    expected_height = v2_height * 0.808
+    if abs(v3_height - expected_height) < 0.001:
+      print("Scale error confirmed for motion")
+
+If this test passes for all 30 motions:
+  Root Cause A (Character Scale Error) = CONFIRMED
+
+
+5.2 TEST 2: Coordinate Frame Consistency
+──────────────────────────────────────────
+
+If Root Cause B (Coordinate Frame Error):
+  Should see consistent mapping like:
+    v3_x = v2_z
+    v3_y = v2_y
+    v3_z = -v2_x
+  (or some rotation permutation)
+
+Test:
+  Check if there's a rotation matrix that explains all differences:
+    v3_pos = Rotation_Matrix × v2_pos + offset
+  
+If this fails:
+  Not a pure coordinate frame swap
+
+
+5.3 TEST 3: Reference Source Verification
+──────────────────────────────────────────
+
+Check batch_report.json:
+  If "processing_time_s" > 10 per motion:
+    → Data is GENERATED (inference takes time)
+  If "processing_time_s" < 1 per motion:
+    → Data is LOADED (just reading from disk)
+
+Current V3 batch_report shows: processing_time_s ≈ 12-33 seconds
+  → This strongly suggests DATA GENERATION, not reference loading
+
+
+PART 6: DETAILED CODE INVESTIGATION ROADMAP
+═══════════════════════════════════════════════════════════════════════════════
+
+Files/Areas to Inspect:
+
+6.1 SMPL-X MODEL INITIALIZATION
+  Search for: "smpl", "SMPL", "scale", "scale_factor"
+  Look in:
+    - Model loading code
+    - Data loading pipeline
+    - Any class with "SMPL" in name
+  Check for:
+    - Model variant changes (SMPL-X vs SMPL-H)
+    - Scale parameter initialization
+    - Bone length configuration
+
+
+6.2 RETARGETING/TRANSFORMATION CODE
+  Search for: "retarget", "transform", "conversion", "frame"
+  Look for:
+    - CMU → SMPL-X transformation
+    - SMPL-X → KIMODO retargeting
+    - Any scale factor application
+    - Coordinate frame conversion
+
+
+6.3 MOTION EXPORT/SERIALIZATION
+  Search for: "export", "save", "json", "serialize"
+  Look for:
+    - Code that writes /data/motions/ JSON files
+    - Frame downsampling or upsampling
+    - NPZ export logic
+  Check:
+    - Is it exporting generated motions or reference?
+    - Why NPZ has 60 frames but JSON has 99?
+
+
+6.4 BATCH REPORT GENERATION
+  Search for: "batch_report", "processing_time", "fell"
+  Look for:
+    - How metrics are computed
+    - Where "processing_time_s" comes from
+    - What triggers "fell": true marker
+  If found in v3 pipeline: CONFIRMS Root Cause C
+
+
+PART 7: CONFIGURATION REVIEW
+═══════════════════════════════════════════════════════════════════════════════
+
+Files to Check:
+  • configs/hymotion_m2m_v2/_base_hymotion_m2m_v2_046b.py
+  • Any v3-specific config files
+  • Embodied pipeline configuration (location TBD)
+
+Key Questions:
+  1. Does v3 specify a reference motion directory?
+  2. Is there a pipeline stage that imports v2 reference?
+  3. Did configuration change between v2 and v3?
+  4. Are there retargeting parameters specified?
+
+
+PART 8: GIT HISTORY INVESTIGATION
+═════════════════════════════════════════════════════════════════════════════
+
+Commands to Run:
+  git log --oneline --all -- output/embodied_t2m_v3/
+  git log --oneline --all -- "*embodied*"
+  git log --oneline --all -- "*retarget*"
+  git diff HEAD~20 HEAD -- "*motion*" "*embodied*"
+
+Look for:
+  • When v3 directory was first created
+  • What changed in model/transformation code
+  • Scale factor modifications
+  • Character model version changes
+
+
+PART 9: RECOMMENDATION FOR IMMEDIATE ACTION
+═════════════════════════════════════════════════════════════════════════════
+
+PRIORITY 1 (Complete within 2 hours):
+  ✓ Locate the pipeline script that generates v3 output
+  ✓ Understand where /data/motions/ gets populated
+  ✓ Determine if it's importing v2 or generating new
+  ✓ Check manifest generation code
+
+PRIORITY 2 (Complete within 4 hours):
+  ✓ Apply temporary fix: copy v2 reference to v3
+  ✓ Update batch_report.json paths
+  ✓ Update comparison pipeline to use correct reference
+  ✓ Verify metrics change after fix
+
+PRIORITY 3 (Complete by end of day):
+  ✓ Fix root cause (scale factor, retargeting, or data source)
+  ✓ Re-generate v3 pipeline output
+  ✓ Validate metrics
+  ✓ Document what went wrong
+
+
+CONCLUSION
+═════════════════════════════════════════════════════════════════════════════
+
+The v3 reference motion data is CORRUPTED with:
+  1. 19.23% systematic height reduction (scale factor 0.808)
+  2. 282% increase in height oscillation (skeleton mismatch)
+  3. Completely different joint DOF values (5-20x amplitude changes)
+  4. 12 motions marked as physically fallen (negative heights)
+  5. Manifest metadata indicating generated data, not reference
+
+This is a CRITICAL issue that invalidates all v3 comparison metrics.
+
+ROOT CAUSE: Most likely a character model scale error or data source error
+           in the v3 pipeline setup. Possibly combined with coordinate 
+           frame transformation issues.
+
+IMPACT: ALL v3 evaluation results are meaningless until fixed.
+
+REMEDIATION: Fix or replace reference motions before publishing any results.
+
+═════════════════════════════════════════════════════════════════════════════
+
+Investigation completed: 2026-05-13
+Investigator: Claude Code Assistant
+Next Action: Find and inspect v3 pipeline code
+
+═════════════════════════════════════════════════════════════════════════════

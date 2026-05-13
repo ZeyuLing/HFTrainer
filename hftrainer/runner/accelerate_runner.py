@@ -564,6 +564,7 @@ class AccelerateRunner:
 
         # When auto_resume found no checkpoint (or is disabled), check load_from
         # so that model-only pretrained weights are loaded BEFORE FSDP wrapping.
+        exclude_bundle_keys = None
         if not ckpt_path and load_from is not None:
             if hasattr(load_from, 'to_dict'):
                 load_from = load_from.to_dict()
@@ -572,6 +573,9 @@ class AccelerateRunner:
                 if scope == 'model':
                     ckpt_path = load_from.get('path', None)
                     is_model_only = True
+                    exclude_bundle_keys = load_from.get(
+                        'exclude_bundle_keys', None
+                    )
                 # scope == 'full' is handled after prepare by _handle_load
 
         if not ckpt_path or not is_model_only:
@@ -593,7 +597,10 @@ class AccelerateRunner:
                         my_rank, num_processes, ckpt_path,
                     )
                     state_dict = load_checkpoint(ckpt_path, map_location='cpu')
-                    bundle.load_state_dict_selective(state_dict)
+                    bundle.load_state_dict_selective(
+                        state_dict,
+                        exclude_bundle_keys=exclude_bundle_keys,
+                    )
                     del state_dict
                     gc.collect()
 
@@ -1060,7 +1067,8 @@ class AccelerateRunner:
                 load_cfg = load_cfg.to_dict()
             path = load_cfg.get('path', load_cfg) if isinstance(load_cfg, dict) else load_cfg
             scope = load_cfg.get('load_scope', 'model') if isinstance(load_cfg, dict) else 'model'
-            self._load(path, load_scope=scope)
+            ebk = load_cfg.get('exclude_bundle_keys', None) if isinstance(load_cfg, dict) else None
+            self._load(path, load_scope=scope, exclude_bundle_keys=ebk)
             # After load_from, patch any zero null embeddings from a
             # secondary pretrained source.  This handles the case where
             # load_from points to a checkpoint that lacks good null
@@ -1068,7 +1076,8 @@ class AccelerateRunner:
             # a pretrained T2M checkpoint has the correct values.
             self._patch_zero_null_embeddings_from_pretrained()
 
-    def _load(self, path: str, load_scope: str = 'model'):
+    def _load(self, path: str, load_scope: str = 'model',
+              exclude_bundle_keys=None):
         """
         Load checkpoint with given scope.
 
@@ -1125,7 +1134,10 @@ class AccelerateRunner:
             from hftrainer.utils.checkpoint_utils import load_checkpoint
             try:
                 state_dict = load_checkpoint(path, map_location='cpu')
-                self.bundle.load_state_dict_selective(state_dict)
+                self.bundle.load_state_dict_selective(
+                    state_dict,
+                    exclude_bundle_keys=exclude_bundle_keys,
+                )
                 logger.info(sep)
                 logger.info(f"Loaded model weights from: {path}")
                 logger.info("Optimizer and training state reset to initial.")

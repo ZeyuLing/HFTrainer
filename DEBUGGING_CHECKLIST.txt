@@ -1,0 +1,377 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║      V3 EMBODIED PIPELINE - REFERENCE MOTION BUG - DEBUGGING CHECKLIST       ║
+║                      Actionable Investigation Steps                          ║
+║                              Date: 2026-05-13                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+IMMEDIATE DEBUGGING STEPS
+═══════════════════════════════════════════════════════════════════════════════
+
+STEP 1: Verify the Problem
+────────────────────────────
+
+Run this Python script to confirm corruption:
+
+    python3 << 'PYTHON'
+    import json
+    import numpy as np
+    
+    # Load manifests
+    with open("output/embodied_comparison_v2/data/motions/manifest.json") as f:
+        v2_manifest = json.load(f)
+    with open("output/embodied_t2m_v3/data/motions/manifest.json") as f:
+        v3_manifest = json.load(f)
+    
+    # Extract heights
+    v2_heights = [m['num_frames'] if isinstance(m, dict) else m 
+                  for m in v2_manifest[0] if isinstance(m, dict)]
+    v3_heights = [m['root_height_mean'] for m in v3_manifest['motions']]
+    
+    print(f"V2 Mean Height: {np.mean(v2_heights):.4f}")
+    print(f"V3 Mean Height: {np.mean(v3_heights):.4f}")
+    print(f"V3 has {sum(1 for h in v3_heights if h < 0)} negative heights")
+    print(f"V3 has {sum(1 for m in v3_manifest['motions'] if m['fell'])} fallen motions")
+    
+    if np.mean(v3_heights) < 0.6:
+        print("✓ CORRUPTION CONFIRMED: V3 heights ~20% too short")
+    PYTHON
+
+Expected output:
+    V2 Mean Height: 0.7357
+    V3 Mean Height: 0.4503
+    V3 has 5 negative heights
+    V3 has 12 fallen motions
+    ✓ CORRUPTION CONFIRMED: V3 heights ~20% too short
+
+
+STEP 2: Locate the V3 Pipeline Script
+──────────────────────────────────────
+
+Find where output/embodied_t2m_v3/data/motions/ gets populated:
+
+  a) Search for the script/module:
+     find . -name "*.py" -type f | xargs grep -l "embodied_t2m_v3"
+     find . -name "*.py" -type f | xargs grep -l "batch_report"
+     find . -name "*.py" -type f | xargs grep -l "ref_json"
+     
+  b) Look for key functions:
+     grep -r "def.*generate\|def.*export\|def.*save.*motion" --include="*.py" \
+       | grep -v ".pyc" | head -20
+     
+  c) Check for batch processing script:
+     ls -la scripts/
+     ls -la eval/
+     find . -name "*embodied*" -type f
+     find . -name "*t2m*" -type f
+
+Expected findings:
+    • A script that runs v3 model inference
+    • Code that exports motions to /data/motions/
+    • Retargeting or transformation code
+
+
+STEP 3: Inspect the V3 Pipeline Code
+─────────────────────────────────────
+
+Once found, check these sections:
+
+  ✓ Look for "SMPL" references:
+    grep -n "SMPL\|scale\|transform" [v3_pipeline_file]
+    
+  ✓ Look for character model initialization:
+    grep -n "model.*load\|character\|skeleton" [v3_pipeline_file]
+    
+  ✓ Look for motion export:
+    grep -n "json.dump\|save.*motion\|export" [v3_pipeline_file]
+    
+  ✓ Look for retargeting:
+    grep -n "retarget\|conversion\|KIMODO" [v3_pipeline_file]
+
+
+STEP 4: Check Configuration Files
+──────────────────────────────────
+
+Look for v3-specific configuration:
+
+  a) Check if v3 has its own config:
+     find configs/ -name "*v3*" -o -name "*embodied*"
+     
+  b) Check base config for retargeting parameters:
+     grep -r "scale\|retarget\|SMPL\|character" configs/
+     
+  c) Look for pipeline setup:
+     grep -r "embodied\|reference\|motion.*path" configs/
+
+
+STEP 5: Verify Data Source
+──────────────────────────
+
+Check what the pipeline is actually using as reference:
+
+  a) Look at batch_report.json metadata:
+     python3 -c "
+     import json
+     with open('output/embodied_t2m_v3/batch_report.json') as f:
+         report = json.load(f)
+     print('Processing time:', report['results'][0]['processing_time_s'])
+     print('Fell marker:', report['results'][0]['metrics']['fell'])
+     print('This indicates:', 'GENERATED' if report['results'][0]['processing_time_s'] > 10 else 'LOADED')
+     "
+     
+  b) Check if v2 reference is imported:
+     grep -r "embodied_comparison_v2\|reference.*motion" --include="*.py" \
+       | grep -v ".pyc"
+
+
+STEP 6: Test Scale Factor Hypothesis
+─────────────────────────────────────
+
+Run this to check if it's a pure scale error:
+
+  python3 << 'PYTHON'
+  import json
+  import numpy as np
+  
+  with open("output/embodied_comparison_v2/data/motions/t2m_00000001.json") as f:
+      v2_motion = json.load(f)
+  with open("output/embodied_t2m_v3/data/motions/t2m_00000001.json") as f:
+      v3_motion = json.load(f)
+  
+  v2_heights = [f['root_pos'][2] for f in v2_motion['frames']]
+  v3_heights = [f['root_pos'][2] for f in v3_motion['frames']]
+  
+  scale_factor = np.mean(v3_heights) / np.mean(v2_heights)
+  print(f"Scale factor: {scale_factor:.4f}")
+  print(f"Expected: 0.808 (if scale error)")
+  
+  # Check if all frames follow this scale
+  errors = []
+  for i in range(len(v2_heights)):
+      expected = v2_heights[i] * scale_factor
+      actual = v3_heights[i]
+      error = abs(expected - actual)
+      if error > 0.01:
+          errors.append((i, error))
+  
+  print(f"Frames with >0.01 error: {len(errors)}")
+  if len(errors) == 0:
+      print("✓ SCALE ERROR HYPOTHESIS CONFIRMED")
+  else:
+      print("✗ Scale hypothesis fails - something else is wrong")
+      print(f"  Errors at frames: {errors[:5]}")
+  PYTHON
+
+
+STEP 7: Test Coordinate Frame Hypothesis
+──────────────────────────────────────────
+
+If scale hypothesis fails, test coordinate system:
+
+  python3 << 'PYTHON'
+  import json
+  import numpy as np
+  from scipy.spatial.transform import Rotation
+  
+  with open("output/embodied_comparison_v2/data/motions/t2m_00000001.json") as f:
+      v2_motion = json.load(f)
+  with open("output/embodied_t2m_v3/data/motions/t2m_00000001.json") as f:
+      v3_motion = json.load(f)
+  
+  # Try different coordinate swaps
+  swaps = [
+      ("x,y,z", lambda p: [p[0], p[1], p[2]]),
+      ("z,y,x", lambda p: [p[2], p[1], p[0]]),
+      ("x,z,-y", lambda p: [p[0], p[2], -p[1]]),
+      ("-z,y,x", lambda p: [-p[2], p[1], p[0]]),
+  ]
+  
+  for name, swap_fn in swaps:
+      v2_first = v2_motion['frames'][0]['root_pos']
+      v3_first = v3_motion['frames'][0]['root_pos']
+      
+      swapped = swap_fn(v2_first)
+      error = np.linalg.norm(np.array(swapped) - np.array(v3_first))
+      print(f"Swap {name}: error = {error:.4f}")
+  
+  print("\nIf any error < 0.1, coordinate swap is likely")
+  PYTHON
+
+
+STEP 8: Inspect NPZ Frame Count Issue
+──────────────────────────────────────
+
+Check why NPZ has 60 frames but JSON has 99:
+
+  python3 << 'PYTHON'
+  import numpy as np
+  
+  v2_npz = np.load("output/embodied_comparison_v2/data/npz/t2m_00000001.npz")
+  v3_npz = np.load("output/embodied_t2m_v3/data/npz/t2m_00000001.npz")
+  
+  print("V2 NPZ shapes:")
+  for key in sorted(v2_npz.files):
+      print(f"  {key}: {v2_npz[key].shape}")
+  
+  print("\nV3 NPZ shapes:")
+  for key in sorted(v3_npz.files):
+      print(f"  {key}: {v3_npz[key].shape}")
+  
+  # If v3 has 60 frames but JSON has 99, something is wrong
+  v3_frames_npz = v3_npz[list(v3_npz.files)[0]].shape[0]
+  print(f"\nV3 NPZ frames: {v3_frames_npz}")
+  print(f"V3 JSON frames: 99")
+  if v3_frames_npz != 99:
+      print("✗ MISMATCH: NPZ and JSON have different frame counts")
+  PYTHON
+
+
+STEP 9: Find the Corruption Source
+───────────────────────────────────
+
+Once you've identified the pipeline script, add these debugging statements:
+
+  # Find this section in the code:
+  if "save_json" or "export_motion" or "to_json" in code:
+      ADD_BEFORE:
+      """
+      # DEBUG: Print motion data before export
+      import numpy as np
+      print(f"DEBUG: About to export motion")
+      print(f"  Root height (first frame): {motion['frames'][0]['root_pos'][2]:.4f}")
+      print(f"  Num frames: {len(motion['frames'])}")
+      print(f"  Mean height: {np.mean([f['root_pos'][2] for f in motion['frames']]):.4f}")
+      """
+
+  if "retarget" or "scale" in code:
+      ADD_BEFORE_LINE:
+      """
+      # DEBUG: Print scale factor
+      print(f"DEBUG: Applying scale factor: {scale_factor}")
+      print(f"  Original height: {original_height}")
+      print(f"  Expected height: {original_height * scale_factor}")
+      """
+
+
+STEP 10: Apply Fix
+──────────────────
+
+Once root cause is identified:
+
+  OPTION A (Immediate Workaround):
+    1. Backup corrupted v3:
+       mv output/embodied_t2m_v3/data/motions \
+          output/embodied_t2m_v3/data/motions_CORRUPTED_BACKUP
+    
+    2. Copy v2 reference:
+       cp -r output/embodied_comparison_v2/data/motions \
+           output/embodied_t2m_v3/data/reference_motions
+    
+    3. Update code to use reference_motions instead of motions
+    
+    4. Re-run evaluation
+
+  OPTION B (Fix Root Cause):
+    1. Identify the line/function causing the issue
+    2. Comment it out or fix the parameter
+    3. Re-run v3 pipeline completely
+    4. Verify output has correct heights (0.74m, not 0.59m)
+
+
+VERIFICATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+After applying fix, verify with this script:
+
+  python3 << 'PYTHON'
+  import json
+  import numpy as np
+  
+  with open("output/embodied_t2m_v3/data/motions/manifest.json") as f:
+      v3_manifest = json.load(f)
+  
+  heights = [m['root_height_mean'] for m in v3_manifest['motions']]
+  fell_count = sum(1 for m in v3_manifest['motions'] if m['fell'])
+  negative_count = sum(1 for h in heights if h < 0)
+  
+  print("=" * 60)
+  print("V3 POST-FIX VERIFICATION")
+  print("=" * 60)
+  
+  checks = [
+      ("Mean height ≈ 0.74m", abs(np.mean(heights) - 0.74) < 0.02, f"Mean: {np.mean(heights):.4f}"),
+      ("No negative heights", negative_count == 0, f"Negative: {negative_count}"),
+      ("No fallen motions", fell_count == 0, f"Fell count: {fell_count}"),
+      ("Height std ≈ 0.016m", abs(np.std(heights) - 0.016) < 0.01, f"Std: {np.std(heights):.4f}"),
+      ("Height range ≈ 0.053m", abs(max(heights) - min(heights) - 0.053) < 0.02, f"Range: {max(heights) - min(heights):.4f}"),
+  ]
+  
+  all_pass = True
+  for check_name, passed, detail in checks:
+      status = "✓ PASS" if passed else "✗ FAIL"
+      print(f"{status}: {check_name}")
+      print(f"       {detail}")
+      if not passed:
+          all_pass = False
+  
+  print("=" * 60)
+  if all_pass:
+      print("✓ ALL CHECKS PASSED - Fix successful!")
+  else:
+      print("✗ Some checks failed - Further investigation needed")
+  PYTHON
+
+
+COMMON PITFALLS
+═══════════════════════════════════════════════════════════════════════════════
+
+❌ PITFALL 1: Forgetting to save before re-running
+   → Always backup before making changes
+   → Document changes made
+
+❌ PITFALL 2: Fixing only the JSON, not the NPZ
+   → Both formats must be fixed
+   → Check frame count consistency
+
+❌ PITFALL 3: Not updating manifest after fix
+   → Manifest must reflect actual data
+   → Update root_height_mean, fell markers, etc.
+
+❌ PITFALL 4: Only fixing one motion, not all 30
+   → Check all 30 motions after fix
+   → Verify batch stats, not just one sample
+
+❌ PITFALL 5: Not fixing root cause, just symptoms
+   → Temporary workaround vs proper fix
+   → Document what caused it to prevent recurrence
+
+
+ESCALATION PATH
+═══════════════════════════════════════════════════════════════════════════════
+
+If you cannot identify the issue:
+  1. Share the pipeline script location
+  2. Share output from STEP 1-8 debugging scripts
+  3. Share git history: git log --oneline output/embodied_t2m_v3/
+  4. Compare code between v2 and v3 versions
+  5. Ask for help in understanding the retargeting pipeline
+
+
+TIMELINE
+═════════════════════════════════════════════════════════════════════════════
+
+Recommended schedule:
+  30 min:  Steps 1-4 (locate and inspect code)
+  15 min:  Steps 5-7 (test hypotheses)
+  30 min:  Step 8-9 (identify and fix)
+  15 min:  Step 10 (verify fix)
+  ────────
+  90 min:  Total time to fix
+
+If not completed in 90 minutes:
+  → Implement OPTION A (immediate workaround)
+  → Escalate for code review
+  → Schedule 30-min code review session
+
+
+═══════════════════════════════════════════════════════════════════════════════

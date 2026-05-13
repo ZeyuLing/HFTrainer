@@ -80,7 +80,7 @@ train_cfg = dict(
     by_epoch=True,
     max_epochs=50,
     val_interval=10,
-    max_grad_norm=1.0,
+    max_grad_norm=10.0,
 )
 
 # Load from latest caption_global checkpoint (epoch 213)

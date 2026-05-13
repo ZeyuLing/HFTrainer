@@ -1,0 +1,127 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           HyMotionT2MBundle Mean/Std Loading Decision Tree                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+INITIALIZATION (__init__)
+│
+├─ Config provides mean_std_dir='checkpoints/HY-Motion-1.0/stats/' ?
+│  │
+│  ├─ YES → Check if directory exists
+│  │  │
+│  │  ├─ Directory EXISTS
+│  │  │  ├─ Mean.npy exists?
+│  │  │  ├─ Std.npy exists?
+│  │  │  └─ YES → ✅ Load from files → register buffers with file stats
+│  │  │  └─ NO  → ❌ FileNotFoundError → Training/inference FAILS
+│  │  │
+│  │  └─ Directory MISSING (Current T2M situation)
+│  │     └─ Fallback to defaults → register zero mean, unit std
+│  │
+│  └─ NO (mean_std_dir=None) → Fallback to defaults
+│     └─ register zero mean, unit std
+
+
+CHECKPOINT LOADING (after __init__)
+│
+├─ load_from.path provided?
+│  │
+│  ├─ YES → Load checkpoint
+│  │  │
+│  │  ├─ Checkpoint contains 'mean' and 'std' buffers?
+│  │  │  │
+│  │  │  ├─ YES (HY-Motion-1.0 does: 201-dim)
+│  │  │  │  └─ ⚠️ OVERWRITES the __init__ buffers
+│  │  │  │     └─ Final buffers = checkpoint values
+│  │  │  │
+│  │  │  └─ NO → Keep __init__ buffers (either files or defaults)
+│  │  │
+│  │  └─ Checkpoint loaded successfully
+│  │
+│  └─ NO → Skip checkpoint loading
+│     └─ Use __init__ buffers (either files or defaults)
+
+
+FINAL STATE (Inference/Training)
+│
+├─ Using file-based stats (from _load_mean_std)
+│  │  Dimensions: Match config (T2M=201)
+│  │  Source: Mean.npy, Std.npy files
+│  │  Status: ✅ Preferred
+│  │
+├─ Using checkpoint stats (from load_state_dict)
+│  │  Dimensions: From checkpoint (T2M=201 from HY-Motion-1.0)
+│  │  Source: Checkpoint buffer tensors
+│  │  Status: ✅ Fallback (HY-Motion-1.0 case)
+│  │
+└─ Using default stats (identity normalization)
+   │  Dimensions: 1 (shape [1])
+   │  Source: Hardcoded zeros(1) and ones(1)
+   │  Status: ⚠️ ONLY for smoke tests/debugging
+   │           ❌ PROBLEMATIC for production (dim mismatch)
+
+═════════════════════════════════════════════════════════════════════════════
+
+T2M CONFIG SPECIFIC PATH
+
+config: mean_std_dir='checkpoints/HY-Motion-1.0/stats/'
+        load_from: 'checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt'
+
+        ↓
+
+1. __init__: Try load from 'checkpoints/HY-Motion-1.0/stats/'
+   ├─ Directory check: os.path.isdir()
+   └─ Result: FALSE (directory doesn't exist)
+   ↓
+2. __init__: Fallback → register(mean=zeros(1), std=ones(1))
+   ↓
+3. load_checkpoint: Extract 'mean' and 'std' from checkpoint
+   ├─ Checkpoint has: mean[201], std[201]
+   └─ Result: Load succeeds
+   ↓
+4. load_state_dict: Overwrite __init__ buffers
+   └─ Final: mean[201], std[201] from checkpoint
+   ↓
+5. ✅ RESULT: Correct T2M stats (201-dim from HY-Motion-1.0)
+
+═════════════════════════════════════════════════════════════════════════════
+
+AVAILABLE STATS DIRECTORIES
+
+data/hymotion_m2m_data/
+├─ _stats/                     [135-dim] ← M2M v1
+├─ _stats_global_rot/          [135-dim] ← M2M v1 globalrot
+├─ _stats_198dim/              [198-dim] ← M2M v2 local
+├─ _stats_198dim_global_rot/   [198-dim] ← M2M v2 globalrot
+├─ _stats_201dim/              [201-dim] ← T2M (exists, unused)
+└─ _stats_201dim_global_rot/   [201-dim] ← T2M globalrot (exists, unused)
+
+═════════════════════════════════════════════════════════════════════════════
+
+KEY FINDINGS
+
+1️⃣  THREE SOURCES (priority order):
+    • mean_std_dir files (primary, in __init__)
+    • Checkpoint buffers (secondary, in load_state_dict, OVERRIDES primary)
+    • Defaults: zero/unit (tertiary, only if no files and no checkpoint)
+
+2️⃣  T2M CURRENT SETUP:
+    • Config references non-existent directory
+    • Falls back to defaults in __init__
+    • Checkpoint load OVERWRITES with correct 201-dim stats
+    • Result: ✅ WORKS (but fragile)
+
+3️⃣  M2M v2 ≠ T2M:
+    • M2M v2: 198-dim (trans + rot6d + position)
+    • T2M: 201-dim (trans + rot6d only)
+    • Stats NOT interchangeable
+
+4️⃣  SAFETENSORS LIMITATION:
+    • .safetensors can't store bundle-level buffers
+    • If saved as .safetensors, mean/std are LOST
+    • Must rely on mean_std_dir files for .safetensors models
+
+5️⃣  PRODUCTION RECOMMENDATION:
+    • Always specify mean_std_dir in config
+    • OR ensure checkpoint has stats buffers
+    • Verify dimension matching (201 for T2M, 198 for M2M v2, etc)
+

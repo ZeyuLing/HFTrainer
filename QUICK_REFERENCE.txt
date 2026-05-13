@@ -1,0 +1,149 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║        V3 EMBODIED PIPELINE - REFERENCE MOTION ISSUE - QUICK REFERENCE     ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+ISSUE: "Reference motion 完全是不对的" (completely wrong) - CONFIRMED ✓
+
+SEVERITY: 🔴 CRITICAL - Invalidates entire v3 pipeline evaluation
+
+
+WHAT'S WRONG
+═════════════════════════════════════════════════════════════════════════════
+
+V3 reference motions (output/embodied_t2m_v3/data/motions/) contain
+WRONG DATA with:
+  
+  ✗ 19.2% lower character height (0.7357 → 0.5942)
+  ✗ 282% larger height oscillation (0.053 → 0.202 range)
+  ✗ Completely different position/orientation
+  ✗ 60-frame NPZ but 99-frame JSON (mismatch!)
+
+
+WHERE THE ISSUE IS
+═════════════════════════════════════════════════════════════════════════════
+
+Broken:    output/embodied_t2m_v3/data/motions/t2m_*.json
+Working:   output/embodied_comparison_v2/data/motions/t2m_*.json
+Problem:   output/embodied_t2m_v3/data/npz/t2m_*.npz (60 vs 99 frames)
+
+
+ROOT CAUSE
+═════════════════════════════════════════════════════════════════════════════
+
+Most Likely: Retargeting pipeline error
+  CMU mocap → SMPL-X → KIMODO conversion applied wrong scale factor (0.808x)
+  
+Evidence:
+  • Classic -19.2% retargeting signature
+  • Height oscillation 5.8x larger (joint constraints error)
+  • batch_report.json shows model metrics (looks generated, not reference)
+
+
+EVIDENCE IN NUMBERS
+═════════════════════════════════════════════════════════════════════════════
+
+Sample: t2m_00000001 (person walking forward)
+
+First Frame Position:
+  V2: [0.0632, -0.0112, 0.7503]  ✓ Correct
+  V3: [0.2862, +0.0168, 0.6828]  ✗ Wrong
+
+Mean Height (99 frames):
+  V2: 0.7357  ✓ Humanoid standing height
+  V3: 0.5942  ✗ 19.2% too short!
+
+Height Range:
+  V2: 0.0530  ✓ Normal walking variation
+  V3: 0.2024  ✗ Character squats/jumps too much
+
+First Frame Quaternion:
+  V2: [0.0248, -0.0166, 0.0313, 0.9991]  ✓ Correct rotation
+  V3: [0.0910, +0.0343, 0.0163, 0.9951]  ✗ Wrong rotation
+
+
+HOW TO FIX
+═════════════════════════════════════════════════════════════════════════════
+
+IMMEDIATE (Priority 1):
+  □ Find v3 pipeline code that populates /data/motions/
+  □ Check for SMPL-X scale initialization
+  □ Look for retargeting scale factors
+  □ Search for coordinate frame transformations
+
+URGENT (Priority 2):
+  □ Import v2 reference motions into v3
+  □ Verify height_mean should be ~0.74, not 0.59
+  □ Fix NPZ/JSON frame count mismatch (60 vs 99)
+
+ESSENTIAL (Priority 3):
+  □ Re-run v3 pipeline with correct reference
+  □ Validate batch_report metrics
+  □ Regenerate evaluation dataset
+
+
+FILES TO CHECK
+═════════════════════════════════════════════════════════════════════════════
+
+Source Code (Look for scale/transform errors):
+  • v3 pipeline initialization
+  • SMPL-X model loading
+  • CMU mocap → SMPL-X conversion
+  • SMPL-X → KIMODO retargeting
+
+Data Files (Current state):
+  • output/embodied_t2m_v3/batch_report.json
+  • output/embodied_t2m_v3/data/motions/manifest.json
+  • output/embodied_t2m_v3/data/npz/t2m_00000001.npz (60 frames!)
+
+Reference (What it should be):
+  • output/embodied_comparison_v2/data/motions/t2m_*.json
+
+
+IMPACT
+═════════════════════════════════════════════════════════════════════════════
+
+Current State:
+  Comparing: Generated motions vs WRONG REFERENCE
+  Result: All metrics invalid (FID, diversity, coverage wrong)
+  Conclusion: Entire v3 evaluation is MEANINGLESS
+
+After Fix:
+  Comparing: Generated motions vs CORRECT REFERENCE
+  Result: Metrics valid and meaningful
+  Conclusion: Reliable v3 evaluation possible
+
+
+ESTIMATED ROOT CAUSE
+═════════════════════════════════════════════════════════════════════════════
+
+Scale factor error in pipeline:
+  0.5942 / 0.7357 = 0.808 (80.8% of original)
+  
+This is likely from:
+  • Wrong SMPL-X character model initialization
+  • Missing scale factor in coordinate transformation
+  • Incorrect retargeting parameters
+  • Height offset applied instead of scale
+
+
+QUICK TEST
+═════════════════════════════════════════════════════════════════════════════
+
+To verify the fix works:
+  1. Compare v2 and v3 first frame positions after correction
+  2. Check root_height_mean should be ~0.74 (not 0.59)
+  3. Verify NPZ/JSON frame counts match (not 60 vs 99)
+  4. Visual inspection: v3 character should look same height as v2
+
+
+BOTTOM LINE
+═════════════════════════════════════════════════════════════════════════════
+
+✓ Issue confirmed: v3 reference motions are completely wrong
+✓ Root cause identified: Likely retargeting scale factor error
+✓ Impact assessed: Pipeline evaluation is invalid
+✓ Solution mapped: Fix transformation pipeline, restore v2 reference
+
+Status: READY FOR DEVELOPER ACTION
+
+═════════════════════════════════════════════════════════════════════════════

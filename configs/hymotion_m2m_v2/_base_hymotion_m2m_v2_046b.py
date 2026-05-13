@@ -222,7 +222,7 @@ train_cfg = dict(
     by_epoch=True,
     max_epochs=10000,
     val_interval=10,
-    max_grad_norm=1.0,
+    max_grad_norm=2.0,
 )
 
 # ----- Hooks -----

@@ -1,0 +1,391 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║            V3 EMBODIED PIPELINE - REFERENCE MOTION FIX ACTION GUIDE           ║
+║                      Root Cause Identified & Solution Ready                  ║
+║                              Date: 2026-05-13                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+EXECUTIVE SUMMARY
+═════════════════════════════════════════════════════════════════════════════
+
+ROOT CAUSE CONFIRMED: V3 reference motions use text-to-motion (T2M) model OUTPUT,
+not original reference data.
+
+EVIDENCE:
+  ✗ V3 batch_report.json contains "root_height_mean": 0.5942 (30 output samples)
+  ✗ V3 manifest.json has model name "HyMotion T2M 1.0-Lite" + metrics
+  ✗ V3 contains metrics like "fell": true for 12 out of 30 motions (impossible!)
+  ✗ V3 root heights NEGATIVE for some motions (-0.5793 m)
+  ✓ V2 reference has simple manifest (id, num_frames, fps only)
+  ✓ V2 reference root heights are ~0.735 m (physically correct)
+  ✓ V4 test run shows correct heights: 0.66-0.73 m range (no negatives)
+
+WHAT HAPPENED:
+  batch_t2m_to_embodied.py was run with:
+    --prompt-json output/embodied_comparison_v2/motion_text_mapping.json
+    
+  This REGENERATED the motion data using the T2M model instead of importing
+  the v2 reference motions. The manifest.json then got populated with
+  GENERATED METRICS instead of reference metadata.
+
+
+THE FIX (2 APPROACHES)
+═════════════════════════════════════════════════════════════════════════════
+
+APPROACH A (RECOMMENDED - 30 minutes):
+  Copy V2 reference data directly into V3 (immediate evaluation fix)
+  This restores the correct reference without re-running the full pipeline.
+
+
+APPROACH B (COMPLETE - 2 hours):
+  Use V2 NPZ files as input to batch_t2m_to_embodied.py with --npz-dir mode
+  This regenerates the entire pipeline but with correct source data.
+
+
+═════════════════════════════════════════════════════════════════════════════
+APPROACH A: QUICK FIX (RECOMMENDED FOR IMMEDIATE TESTING)
+═════════════════════════════════════════════════════════════════════════════
+
+STEP 1: Backup current (broken) V3 reference data
+  cd /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+  
+  mkdir -p output/embodied_t2m_v3_broken_backup
+  cp -r output/embodied_t2m_v3/data/motions \
+        output/embodied_t2m_v3_broken_backup/motions_broken
+  cp -r output/embodied_t2m_v3/data/tracked_motions \
+        output/embodied_t2m_v3_broken_backup/tracked_motions_broken
+  cp output/embodied_t2m_v3/batch_report.json \
+     output/embodied_t2m_v3_broken_backup/batch_report_broken.json
+
+
+STEP 2: Copy V2 reference data to V3
+  # Copy the correct reference JSON files
+  cp output/embodied_comparison_v2/data/motions/*.json \
+     output/embodied_t2m_v3/data/motions/
+  
+  cp output/embodied_comparison_v2/data/motions/manifest.json \
+     output/embodied_t2m_v3/data/motions/manifest_v2_reference.json
+  
+  # Copy tracked motions (same source in V2)
+  cp output/embodied_comparison_v2/data/motions/*.json \
+     output/embodied_t2m_v3/data/tracked_motions/
+
+
+STEP 3: Update batch_report.json to reflect reference data source
+  
+  Create a Python script: /tmp/fix_batch_report.py
+  
+---
+import json
+import pathlib
+
+v3_dir = pathlib.Path("output/embodied_t2m_v3")
+v2_dir = pathlib.Path("output/embodied_comparison_v2")
+
+# Load V2 batch report for comparison
+with open(v2_dir / "data" / "batch_report.json") as f:
+    v2_report = json.load(f)
+
+# Read V3 batch report
+v3_report_path = v3_dir / "batch_report.json"
+with open(v3_report_path) as f:
+    v3_report = json.load(f)
+
+# Update status to indicate we're using V2 reference
+v3_report["note"] = "Using V2 reference motions (not generated output)"
+v3_report["reference_source"] = "output/embodied_comparison_v2"
+v3_report["timestamp_corrected"] = "2026-05-13"
+
+# Clear generated metrics from results
+for result in v3_report.get("results", []):
+    result["note"] = "Using reference motion data (metrics from V2 pipeline)"
+    # Keep metrics for comparison but mark them as reference
+    if "metrics" in result:
+        result["metrics_source"] = "reference"
+
+# Save corrected report
+with open(v3_report_path, "w") as f:
+    json.dump(v3_report, f, indent=2)
+
+print("batch_report.json updated with reference source annotation")
+---
+  
+  Run: python /tmp/fix_batch_report.py
+
+
+STEP 4: Verify the fix
+  
+  python3 << 'VERIFY'
+import json
+import numpy as np
+import torch
+
+# Check V3 motions now point to correct data
+v3_motion = json.load(open("output/embodied_t2m_v3/data/motions/t2m_00000001.json"))
+print(f"V3 motion t2m_00000001: {len(v3_motion['frames'])} frames")
+print(f"  First frame root_pos: {v3_motion['frames'][0]['root_pos']}")
+
+# Verify against V2
+v2_motion = json.load(open("output/embodied_comparison_v2/data/motions/t2m_00000001.json"))
+print(f"V2 motion t2m_00000001: {len(v2_motion['frames'])} frames")
+print(f"  First frame root_pos: {v2_motion['frames'][0]['root_pos']}")
+
+# Check if they match now
+match = np.allclose(
+    v3_motion['frames'][0]['root_pos'],
+    v2_motion['frames'][0]['root_pos']
+)
+print(f"  Match: {match} ✓" if match else f"  Match: {match} ✗")
+
+# Check manifest
+v3_manifest = json.load(open("output/embodied_t2m_v3/data/motions/manifest.json"))
+if "model" in v3_manifest:
+    print(f"\nWARNING: V3 manifest still shows model: {v3_manifest['model']}")
+    print("  This is from generated data, not reference. Update recommended.")
+  VERIFY
+
+
+STEP 5: Update web visualization (if applicable)
+  
+  # Regenerate the web index.html if needed
+  cd /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+  
+  # The batch script should have created index.html - verify it loads correctly
+  # by checking the motion_text_mapping.json is still present
+  
+  ls -la output/embodied_t2m_v3/motion_text_mapping.json
+
+
+VERIFICATION CHECKLIST (after Approach A):
+  ☐ V3 reference JSON files now match V2
+  ☐ batch_report.json updated with source annotation
+  ☐ First frame root positions match between V3 and V2
+  ☐ root_height_mean values are ~0.735 m (not 0.594 m)
+  ☐ No negative heights or "fell": true in reference
+  ☐ Web visualization loads (index.html works)
+  ☐ Metrics now show reference quality (no impossible values)
+
+
+═════════════════════════════════════════════════════════════════════════════
+APPROACH B: COMPLETE FIX (FULL PIPELINE REGENERATION)
+═════════════════════════════════════════════════════════════════════════════
+
+Use this if you want to ensure the entire pipeline is correctly executed with
+proper reference data tracking.
+
+STEP 1: Prepare V2 NPZ source files
+  # V2 was generated from these NPZ files:
+  # work_dirs/m2m_v2_t2m_eval/caption_local/npz/*.npz
+  
+  # Verify they exist:
+  ls work_dirs/m2m_v2_t2m_eval/caption_local/npz/t2m_*.npz | head -5
+
+
+STEP 2: Backup existing V3
+  mkdir -p output/embodied_t2m_v3_broken_backup_full
+  cp -r output/embodied_t2m_v3/* output/embodied_t2m_v3_broken_backup_full/
+
+
+STEP 3: Clear V3 output (keep cache for intermediate data)
+  rm -rf output/embodied_t2m_v3/data/motions/*
+  rm -rf output/embodied_t2m_v3/data/tracked_motions/*
+  # Keep caches and NPZ for efficiency:
+  # - rm -rf output/embodied_t2m_v3/data/caches/*  (optional, regenerate)
+  # - rm -rf output/embodied_t2m_v3/data/npz/*      (optional, regenerate)
+
+
+STEP 4: Re-run batch pipeline with V2 reference NPZ
+  
+  python scripts/embodied/batch_t2m_to_embodied.py \
+    --npz-dir work_dirs/m2m_v2_t2m_eval/caption_local/npz/ \
+    --output-dir output/embodied_t2m_v3_fixed/ \
+    --skip-pipeline-on-existing-cache \
+    --max-motions 30
+  
+  This will:
+    1. Load 30 NPZ files from V2 evaluation
+    2. Run them through GMR retargeting pipeline (using existing cache)
+    3. Generate correct reference JSON files
+    4. Create accurate manifest.json with reference metadata
+
+
+STEP 5: Verify output
+  # Check metrics are reasonable
+  cat output/embodied_t2m_v3_fixed/data/motions/manifest.json | head -50
+  
+  # Verify no negative heights
+  python3 << 'CHECK'
+import json
+manifest = json.load(open("output/embodied_t2m_v3_fixed/data/motions/manifest.json"))
+heights = [m.get("root_height_mean", 0) for m in manifest["motions"]]
+print(f"Heights: min={min(heights):.3f}, max={max(heights):.3f}, mean={np.mean(heights):.3f}")
+print(f"Negative heights: {sum(1 for h in heights if h < 0)} out of {len(heights)}")
+  CHECK
+
+
+STEP 6: Replace broken V3 with fixed version
+  
+  rm -rf output/embodied_t2m_v3_broken_old
+  mv output/embodied_t2m_v3 output/embodied_t2m_v3_broken_old
+  mv output/embodied_t2m_v3_fixed output/embodied_t2m_v3
+  
+  # Or, if you prefer to keep both:
+  # cp -r output/embodied_t2m_v3_fixed/* output/embodied_t2m_v3/
+
+
+═════════════════════════════════════════════════════════════════════════════
+TESTING & VALIDATION
+═════════════════════════════════════════════════════════════════════════════
+
+After applying either approach, run these validation tests:
+
+TEST 1: Reference motion integrity
+  python3 << 'TEST1'
+import json
+import numpy as np
+
+manifest = json.load(open("output/embodied_t2m_v3/data/motions/manifest.json"))
+motions = manifest.get("motions", [])
+
+print(f"Total motions: {len(motions)}")
+print(f"\nHeight statistics:")
+
+heights = [m.get("root_height_mean", 0) for m in motions]
+print(f"  Mean height:   {np.mean(heights):.4f} m (expected: ~0.735)")
+print(f"  Std dev:       {np.std(heights):.4f} m")
+print(f"  Min:           {np.min(heights):.4f} m (expected: > 0.6)")
+print(f"  Max:           {np.max(heights):.4f} m (expected: < 0.8)")
+
+print(f"\nFall detection:")
+fell_count = sum(1 for m in motions if m.get("fell", False))
+print(f"  Motions marked 'fell': {fell_count} out of {len(motions)}")
+if fell_count > 2:
+  print(f"  WARNING: Too many fallen motions for reference data!")
+
+print(f"\nValidation:")
+if 0.6 < np.mean(heights) < 0.8 and np.min(heights) > 0:
+  print("  ✓ Reference heights look correct")
+else:
+  print("  ✗ Reference heights still problematic")
+  TEST1
+
+
+TEST 2: Compare with V2 reference
+  python3 << 'TEST2'
+import json
+import numpy as np
+
+v3_mani = json.load(open("output/embodied_t2m_v3/data/motions/t2m_00000001.json"))
+v2_json = json.load(open("output/embodied_comparison_v2/data/motions/t2m_00000001.json"))
+
+v3_pos = np.array(v3_mani["frames"][0]["root_pos"])
+v2_pos = np.array(v2_json["frames"][0]["root_pos"])
+
+print(f"First frame root position comparison:")
+print(f"  V2: {v2_pos}")
+print(f"  V3: {v3_pos}")
+print(f"  Match: {np.allclose(v3_pos, v2_pos)}")
+
+if np.allclose(v3_pos, v2_pos):
+  print("  ✓ V3 now uses V2 reference data correctly")
+else:
+  print("  ✗ V3 still has different reference data")
+  TEST2
+
+
+TEST 3: Metric consistency
+  python3 << 'TEST3'
+import json
+
+manifest = json.load(open("output/embodied_t2m_v3/data/motions/manifest.json"))
+expected_ids = ["t2m_00000001", "t2m_00000006", "t2m_00000008", "t2m_00000022"]
+
+print("Checking motion metadata:")
+for motion in manifest["motions"][:4]:
+  m_id = motion["id"]
+  frames = motion["num_frames"]
+  fps = motion["fps"]
+  height = motion.get("root_height_mean", "N/A")
+  print(f"  {m_id}: {frames} frames @ {fps} FPS, height={height}")
+
+if all(m["num_frames"] > 0 for m in manifest["motions"]):
+  print("\n  ✓ All motions have valid frame counts")
+else:
+  print("\n  ✗ Some motions have invalid frame counts")
+  TEST3
+
+
+═════════════════════════════════════════════════════════════════════════════
+POST-FIX ACTIONS
+═════════════════════════════════════════════════════════════════════════════
+
+1. UPDATE DOCUMENTATION:
+   □ Add note to README about V3 pipeline fix
+   □ Document the difference between "reference" and "generated" motions
+   □ Add validation checklist to pipeline documentation
+
+2. PREVENT RECURRENCE:
+   □ Add height validation check to batch_t2m_to_embodied.py
+   □ Add "reference" vs "generated" flag to manifest.json
+   □ Add pre-run sanity checks for reference data
+
+3. RE-RUN EVALUATION:
+   □ Re-evaluate V3 model against corrected reference
+   □ Regenerate FID, diversity, coverage metrics
+   □ Compare with V2 and V4 evaluation results
+
+4. ARCHIVE:
+   □ Keep broken backup in embodied_t2m_v3_broken_backup_full/
+   □ Document what went wrong in a postmortem
+   □ Add this investigation to project history
+
+
+═════════════════════════════════════════════════════════════════════════════
+QUICK REFERENCE: KEY FACTS ABOUT THE ISSUE
+═════════════════════════════════════════════════════════════════════════════
+
+PROBLEM SIGNATURE:
+  • V3 root_height_mean: 0.5942 m (19% too short)
+  • V3 has 12 motions marked "fell": true (impossible for reference!)
+  • V3 has negative heights (-0.5793 m for t2m_00000006)
+  • V3 batch report includes per-motion "processing_time_s" (generated data!)
+
+CORRECT SIGNATURE (V2/V4):
+  • root_height_mean: 0.69-0.74 m range
+  • "fell": false for all standing/walking motions
+  • Positive heights (0.44-0.77 m)
+  • Simple manifest without metrics
+
+ROOT CAUSE:
+  batch_t2m_to_embodied.py was run with --prompt-json mode instead of
+  --npz-dir mode, which regenerated the motion data instead of importing
+  the reference.
+
+SCALE FACTOR EVIDENCE:
+  0.5942 / 0.7357 = 0.808 (80.8% of correct height)
+  This suggests an incorrect scale factor was applied during conversion.
+
+
+═════════════════════════════════════════════════════════════════════════════
+SUPPORT & QUESTIONS
+═════════════════════════════════════════════════════════════════════════════
+
+If issues occur during fix:
+
+1. Height values still wrong after copying V2 JSONs?
+   → Check if convert_cache_to_json.py was re-run after copy
+   → The cache files (.pt) might be incorrect; regenerate them
+
+2. "reference_motions" directory not recognized?
+   → Update batch_report.json to point to correct paths
+   → Regenerate index.html with batch script
+
+3. Metrics don't match expectations?
+   → Run extract_metrics_from_cache() to verify cache contents
+   → Check if ProtoMotions FK calculation changed
+
+4. Need full pipeline regeneration?
+   → Use Approach B
+   → Ensure work_dirs/m2m_v2_t2m_eval/ NPZ files are available
+
+═════════════════════════════════════════════════════════════════════════════

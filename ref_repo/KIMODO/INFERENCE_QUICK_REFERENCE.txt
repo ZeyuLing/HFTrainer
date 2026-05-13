@@ -1,0 +1,201 @@
+================================================================================
+                    KIMODO INFERENCE — QUICK REFERENCE
+================================================================================
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                           YOUR 3 QUESTIONS ANSWERED                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Q1: Does KIMODO use heading channel during inference?
+────────────────────────────────────────────────────────────────────────────
+✅ YES — heading IS used at inference
+
+   Location in feature vector: dims [3:5]
+   Representation: [cos(ψ), sin(ψ)]
+   Predicted by model: ✅ YES
+   Discarded after inference: ❌ NO
+   Returned in output dict: ✅ YES
+
+   Code path:
+   - During diffusion: model predicts dims [3:5] at every step
+   - During inverse: heading is extracted and included in output_tensor_dict
+   - In final output: "global_root_heading" is available to user
+
+
+Q2: Does KIMODO predict both smooth_trans AND trans_residual?
+────────────────────────────────────────────────────────────────────────────
+❌ NO — only smooth_trans, NO residual decomposition
+
+   What KIMODO stores:
+   - smooth_root_pos [B, T, 3]: Single smoothed trajectory
+   - Computed at training-time via ADMM smoothing
+   - X-Z heavily smoothed (6cm margin), Y unchanged
+
+   What KIMODO does NOT store:
+   - trans_residual: No explicit residual channel
+   - Implicit residual is encoded in local_joints_positions
+   - Offset between raw pelvis and smooth root is computed on-the-fly
+
+   Why the design:
+   - Animator workflow: direct straight-line/curve constraints
+   - Not learning-based smoothing (pre-computed in preprocessing)
+   - Simplifies constraint application
+
+
+Q3: How does KIMODO convert motion back to SMPL format?
+────────────────────────────────────────────────────────────────────────────
+Standard FK-based decoding (6 steps):
+
+   Step 1: Unpack 333-dim feature vector into 6 components
+           ├─ smooth_root_pos [3]
+           ├─ global_root_heading [2]
+           ├─ local_joints_positions [81]
+           ├─ global_rot_data [162]
+           ├─ velocities [81]
+           └─ foot_contacts [4]
+
+   Step 2: Convert 6D rotations → 3×3 rotation matrices
+           global_rot_data (6D) → global_rot_mats (3×3)
+
+   Step 3: Apply skeleton hierarchy to convert global → local
+           local_rot_mats = global_rots_to_local_rots(global_rot_mats)
+
+   Step 4: Reconstruct root position
+           root_positions = local_joints_positions[root_idx] + smooth_root_pos
+
+   Step 5: Forward kinematics to get world joint positions
+           posed_joints = fk(local_rot_mats, root_positions)
+
+   Step 6: Output dictionary with SMPL-compatible format
+           {local_rot_mats, posed_joints, root_positions, smooth_root_pos, ...}
+
+   Code file: kimodo/motion_rep/reps/kimodo_motionrep.py, inverse() method
+
+
+================================================================================
+                        PREDICTED vs. COMPUTED CHANNELS
+================================================================================
+
+   Channel                     Size    Predicted?  Output?  Role
+   ─────────────────────────   ───    ──────────  ───────  ─────────────────
+   smooth_root_pos               3    ✅ YES      ✅ YES   Used for trajectory
+   global_root_heading           2    ✅ YES      ✅ YES   Used for orientation
+   local_joints_positions       81    ✅ YES      ❌ NO    Internal (FK)
+   global_rot_data             162    ✅ YES      ❌ NO    Converted to matrices
+   velocities                   81    ❌ NO       ❌ NO    Post-hoc (unused)
+   foot_contacts                 4    ❌ NO       ✅ YES   Post-hoc (visualization)
+   ─────────────────────────────────────────────────────────────────────────
+   Predicted during diffusion: 248 dims (first 4 channels)
+   Computed post-hoc: 85 dims (last 2 channels)
+
+
+================================================================================
+                          INFERENCE PIPELINE FLOWCHART
+================================================================================
+
+   TEXT + CONSTRAINTS
+          │
+          ▼
+   ENCODE TEXT (LLM2Vec)
+          │
+          ▼
+   BUILD CONSTRAINT TENSORS
+   ├─ observed_motion [B, T, 333]
+   └─ motion_mask [B, T, 333]
+          │
+          ▼
+   INITIALIZE NOISE [B, T, 333]
+          │
+          ▼
+   DDIM LOOP (50 steps)
+   ├─ For each step i:
+   │  ├─ Impute constraints: x_t = x_t*(1-mask) + observed*mask
+   │  ├─ Extend input: [x_t, mask] → 666 dims
+   │  ├─ Model forward pass: predict denoised motion
+   │  ├─ Apply CFG (separated for text + constraints)
+   │  ├─ Compute next timestep
+   │  └─ [optional] Re-impute constraints
+   │
+   ├─ After loop:
+   │  └─ [optional] Hard-paste all constraints
+          │
+          ▼
+   DENORMALIZE [B, T, 333]
+          │
+          ▼
+   INVERSE (Decode to SMPL-compatible dict)
+   ├─ Unpack 333 dims
+   ├─ Convert 6D rotations → matrices
+   ├─ Apply skeleton hierarchy (global → local)
+   ├─ Forward kinematics
+   ├─ Compute velocities (unused)
+   ├─ Compute foot_contacts
+   └─ Return output dict with heading + all components
+          │
+          ▼
+   [OPTIONAL] POST-PROCESSING
+   ├─ Foot lock correction
+   └─ Constraint enforcement
+          │
+          ▼
+   [OPTIONAL] SKELETON CONVERSION (SOMA30 → SOMA77)
+          │
+          ▼
+   OUTPUT DICT
+   ├─ local_rot_mats [B, T, 27, 3, 3]
+   ├─ global_rot_mats [B, T, 27, 3, 3]
+   ├─ posed_joints [B, T, 27, 3]
+   ├─ root_positions [B, T, 3]
+   ├─ smooth_root_pos [B, T, 3]
+   ├─ foot_contacts [B, T, 4]
+   └─ global_root_heading [B, T, 2] ← STILL HERE!
+
+
+================================================================================
+                              KEY DESIGN INSIGHTS
+================================================================================
+
+1. GLOBAL ROTATIONS (not local SMPL-style)
+   ├─ Stored as 6D continuous representations
+   ├─ Converted to local only at the END (inverse)
+   └─ Enables world-space constraint application (IK-free)
+
+2. SMOOTH ROOT (not smooth + residual)
+   ├─ Pre-computed via ADMM at training time
+   ├─ No learned decomposition
+   └─ Simplifies constraint matching
+
+3. HEADING ALWAYS PRESENT
+   ├─ Predicted at every diffusion step
+   ├─ Returned in final output
+   └─ Available for downstream tasks
+
+4. CONSTRAINT APPLICATION
+   ├─ Direct imputation into noisy motion
+   ├─ Binary mask tells which dims are constrained
+   └─ Frozen at each diffusion step
+
+5. POST-HOC COMPUTATION
+   ├─ Velocities: computed from positions (unused)
+   ├─ Foot contacts: computed from position+velocity
+   └─ Never used to affect generation
+
+
+================================================================================
+                            IMPORTANT FILES
+================================================================================
+
+Primary Source Files:
+  - kimodo/motion_rep/reps/kimodo_motionrep.py      (representation, inverse)
+  - kimodo/model/kimodo_model.py                     (inference pipeline)
+  - kimodo/motion_rep/smooth_root.py                 (trajectory smoothing)
+  - kimodo/motion_rep/reps/base.py                   (base class, normalization)
+
+Key Methods to Reference:
+  - KimodoMotionRep.inverse()      (SMPL conversion happens here)
+  - Kimodo._generate()             (main diffusion loop)
+  - Kimodo.denoising_step()        (single step with CFG)
+  - get_smooth_root_pos()          (ADMM smoothing)
+
+================================================================================
+

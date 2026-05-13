@@ -1,0 +1,217 @@
+
+═══════════════════════════════════════════════════════════════════════════════
+                  REFERENCE MOTION DATA ANALYSIS - V2 vs V3
+                     Investigation Report (2026-05-13)
+═══════════════════════════════════════════════════════════════════════════════
+
+EXECUTIVE SUMMARY
+─────────────────
+The v3 embodied pipeline's reference motion data (output/embodied_t2m_v3/data/motions/)
+is COMPLETELY DIFFERENT from v2 (output/embodied_comparison_v2/data/motions/).
+
+The root position and orientation values for the same motion ID (t2m_00000001) are 
+fundamentally different, suggesting either:
+  1. A transformation was applied incorrectly in v3
+  2. The reference motion source changed between v2 and v3
+  3. A coordinate frame conversion went wrong
+
+
+DETAILED FINDINGS
+─────────────────
+
+1. FILE LOCATIONS
+   ✅ V2 exists at: output/embodied_comparison_v2/
+   ✅ V3 exists at: output/embodied_t2m_v3/
+   ✅ Both contain /data/motions/ directories with JSON files
+   ✅ Both contain /data/npz/ directories with binary motion data
+   ✅ V3 also has /data/tracked_motions/ (alternative representation)
+
+
+2. FILE SIZE COMPARISON (t2m_00000001.json)
+   ┌────────────┬──────────────┬──────────────┐
+   │ Version    │ File Size    │ Num Frames   │
+   ├────────────┼──────────────┼──────────────┤
+   │ V2         │ 77,327 bytes │ 99 frames    │
+   │ V3         │ 76,303 bytes │ 99 frames    │
+   │ Difference │ -1,024 bytes │ Same         │
+   └────────────┴──────────────┴──────────────┘
+   
+   ⚠️  File sizes are similar but numerical content is completely different
+
+
+3. ROOT POSITION DATA (FIRST FRAME)
+   ┌────────────┬────────────┬────────────┬────────────┐
+   │ Version    │ X (pos)    │ Y (pos)    │ Z (pos)    │
+   ├────────────┼────────────┼────────────┼────────────┤
+   │ V2 Ref     │ 0.0632     │ -0.0112    │ 0.7503     │
+   │ V3 Ref     │ 0.2862     │ 0.0168     │ 0.6828     │
+   │ Difference │ +0.2230    │ +0.0280    │ -0.0675    │
+   └────────────┴────────────┴────────────┴────────────┘
+   
+   ❌ COMPLETELY DIFFERENT - Not a simple offset or scale
+
+
+4. ROOT ORIENTATION (FIRST FRAME)
+   ┌────────────┬────────────┬────────────┬────────────┬────────────┐
+   │ Version    │ QX         │ QY         │ QZ         │ QW         │
+   ├────────────┼────────────┼────────────┼────────────┼────────────┤
+   │ V2 Ref     │ 0.0248     │ -0.0166    │ 0.0313     │ 0.9991     │
+   │ V3 Ref     │ 0.0910     │ 0.0343     │ 0.0163     │ 0.9951     │
+   │ Difference │ +0.0662    │ +0.0509    │ -0.0150    │ -0.0040    │
+   └────────────┴────────────┴────────────┴────────────┴────────────┘
+   
+   ❌ COMPLETELY DIFFERENT ROTATION
+
+
+5. ROOT HEIGHT ANALYSIS
+   ┌──────────────┬──────────────┬──────────────┬──────────────┐
+   │ Metric       │ V2           │ V3           │ Diff %       │
+   ├──────────────┼──────────────┼──────────────┼──────────────┤
+   │ Height Mean  │ 0.7357       │ 0.5942       │ -19.2%       │
+   │ Height Max   │ 0.7555       │ 0.6828       │ -9.6%        │
+   │ Height Min   │ 0.7025       │ 0.4803       │ -31.6%       │
+   │ Height Range │ 0.0530       │ 0.2025       │ +282%        │
+   └──────────────┴──────────────┴──────────────┴──────────────┘
+   
+   ❌ V3 HEIGHT IS 19.2% LOWER THAN V2
+   ❌ V3 HAS 282% LARGER HEIGHT OSCILLATION
+   
+   This suggests a CHARACTER MODEL OR SCALE CHANGE
+
+
+6. NPZ BINARY DATA COMPARISON
+   ┌─────────────────────┬────────────┬──────────────┐
+   │ Property            │ V3 NPZ     │ Meaning      │
+   ├─────────────────────┼────────────┼──────────────┤
+   │ Key 1               │ motion_135 │ Full motion  │
+   │ Shape               │ (60, 135)  │ 60 frames *  │
+   │                     │            │ 135 DOFs     │
+   │ First 3 values      │ [0.00443, 0.90675, -0.089] │
+   │ Root pos range      │ Variable   │ Not aligned  │
+   └─────────────────────┴────────────┴──────────────┘
+   
+   ⚠️  NPZ has 60 frames but JSON has 99 frames
+   ⚠️  NPZ motion_135 values are also very different
+
+
+7. V3 TRACKED_MOTIONS vs V3 MOTIONS
+   ┌──────────────────────┬──────────────┐
+   │ Property             │ Match?       │
+   ├──────────────────────┼──────────────┤
+   │ First frame root_pos │ ✅ YES       │
+   │ First frame root_quat│ ✅ YES       │
+   │ Overall structure    │ ✅ IDENTICAL │
+   └──────────────────────┴──────────────┘
+   
+   ✓ tracked_motions and motions are IDENTICAL in v3
+
+
+8. COORDINATE SYSTEM HYPOTHESIS
+   
+   Given the dramatic differences, possible causes:
+   
+   a) CHARACTER SCALE CHANGE
+      - V2 uses one SMPL-X model scale
+      - V3 uses different SMPL-X model scale or skeleton
+      - Height difference of ~19% suggests this
+   
+   b) COORDINATE FRAME SWAP/TRANSFORMATION
+      - V2: Likely uses CMU mocap standard (Y-up, Z-forward)
+      - V3: May have applied incorrect rotation or frame change
+      - Z-pos drops by 9.6% while X changes significantly
+   
+   c) REFERENCE MOTION REPLACED
+      - V3 may be using regenerated motions from v3 model
+      - Not the original t2m dataset reference
+      - Manifest shows "model": "HyMotion T2M 1.0-Lite" for v3
+      - Manifest shows only basic info for v2
+   
+   d) RETARGETING ERROR
+      - Possible incorrect retargeting from CMU to SMPL-X
+      - Or from SMPL-X to a different skeleton format
+
+
+9. MANIFEST DIFFERENCES
+   
+   V2 Manifest:
+   - Simple: just motion_id, num_frames, fps
+   - No metrics or model information
+   - Implies these are "raw" reference motions
+   
+   V3 Manifest:
+   - Rich: includes metrics, model name, "fell" status
+   - Has "root_height_mean", "max_joint_velocity"
+   - Explicitly states model: "HyMotion T2M 1.0-Lite"
+   - Suggests these are GENERATED/PROCESSED motions, not raw reference
+
+
+CRITICAL FINDING
+─────────────────
+V3 batch_report.json shows:
+  "paths": {
+    "ref_json": "output/embodied_t2m_v3/data/motions/t2m_00000001.json",
+    "tracked_json": "output/embodied_t2m_v3/data/tracked_motions/t2m_00000001.json",
+    ...
+  }
+
+The v3 calls the motions directory "ref_json" (reference)
+BUT the data inside suggests it's actually GENERATED OUTPUT, not reference!
+
+The v2 calls its data reference (implying it's the source ground truth)
+And v2 shows root_height_mean around 0.74 (more physically plausible for humanoid)
+
+V3 shows root_height_mean of 0.594 (lower, possibly wrong scaling)
+
+
+PROBABLE ROOT CAUSE
+────────────────────
+The v3 "reference motion" in /data/motions/ is NOT the original reference.
+It appears to be output FROM the v3 pipeline, possibly from:
+
+1. Model-generated motions that were downsampled or filtered
+2. Retargeted motions that lost accuracy
+3. A different character model with different proportions
+4. An incorrectly initialized coordinate transformation
+
+
+RECOMMENDATIONS
+────────────────
+1. ✅ Check if v3/data/motions should actually be GENERATED outputs
+   - Move to a different directory like "outputs/" or "generated/"
+   
+2. ✅ Import the ORIGINAL v2 reference motions into v3
+   - Copy from output/embodied_comparison_v2/data/motions/
+   - To output/embodied_t2m_v3/data/reference_motions/
+   
+3. ✅ Verify the source:
+   - Are v3 motions from CMU mocap (original source)?
+   - Or from T2M dataset with applied transforms?
+   - Check git history for pipeline changes
+   
+4. ✅ Inspect the v3 pipeline code:
+   - Look for coordinate frame changes between v2 and v3
+   - Check for any retargeting or transformation layers
+   - Verify SMPL-X model initialization (especially scale)
+   
+5. ✅ Check if there's an intermediary retargeting step:
+   - CMU mocap → SMPL-X (correct?)
+   - SMPL-X → KIMODO skeleton (applied correctly?)
+   - Any scaling factors applied?
+
+
+FILES TO REVIEW
+────────────────
+Directory structure v3:
+✓ output/embodied_t2m_v3/data/motions/t2m_*.json        (PROBLEMATIC)
+✓ output/embodied_t2m_v3/data/tracked_motions/t2m_*.json (Same as above)
+✓ output/embodied_t2m_v3/data/npz/t2m_*.npz              (Check source)
+✓ output/embodied_t2m_v3/data/caches/t2m_*.pt            (Unknown)
+✓ output/embodied_t2m_v3/batch_report.json               (Metadata)
+✓ output/embodied_t2m_v3/motion_text_mapping.json        (Prompts OK)
+
+Directory structure v2 (REFERENCE - WORKING CORRECTLY):
+✓ output/embodied_comparison_v2/data/motions/t2m_*.json  (CORRECT)
+✓ output/embodied_comparison_v2/data/caches/t2m_*.pt     (Reference cache)
+
+
+═══════════════════════════════════════════════════════════════════════════════

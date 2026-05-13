@@ -1487,6 +1487,8 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
 
 def _run_kimodo_with_constraints(model, skeleton, constraints, caption, T,
                                   gt_pos_22, fps=30,
+                                  constraints_fps=None,
+                                  constraints_T=None,
                                   canon_transform=None):
     """Run KIMODO with pre-built constraints. Used by E14/E15/E16.
 
@@ -1502,6 +1504,8 @@ def _run_kimodo_with_constraints(model, skeleton, constraints, caption, T,
     import torch
 
     model_fps = model.fps
+    constraints_fps = fps if constraints_fps is None else constraints_fps
+    constraints_T = T if constraints_T is None else constraints_T
     duration_sec = T / fps
     num_frames = int(duration_sec * model_fps)
     if num_frames < 10:
@@ -1519,9 +1523,9 @@ def _run_kimodo_with_constraints(model, skeleton, constraints, caption, T,
             try:
                 c.frame_indices = _convert_frame_indices_to_kimodo_fps(
                     c.frame_indices,
-                    fps_input=fps,
+                    fps_input=constraints_fps,
                     model_fps=model_fps,
-                    T_input=T
+                    T_input=constraints_T
                 )
             except ValueError as e:
                 print(f"    ❌ ERROR: Constraint frame FPS conversion failed in _run_kimodo_with_constraints!")

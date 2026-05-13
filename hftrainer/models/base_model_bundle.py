@@ -634,7 +634,12 @@ class ModelBundle(nn.Module):
 
         return sd
 
-    def load_state_dict_selective(self, state_dict: Dict[str, dict], strict: bool = False):
+    def load_state_dict_selective(
+        self,
+        state_dict: Dict[str, dict],
+        strict: bool = False,
+        exclude_bundle_keys: Optional[list] = None,
+    ):
         """
         Load only modules that are present in state_dict.
         Modules not present in state_dict are left unchanged.
@@ -645,6 +650,13 @@ class ModelBundle(nn.Module):
         Args:
             state_dict: {module_name: module_state_dict} or flat state dict
             strict: whether to enforce strict key matching per module
+            exclude_bundle_keys: list of bundle-level parameter/buffer names
+                to skip when loading from ``__bundle_params__``.  Use this
+                when loading a checkpoint whose mean/std (or other buffers)
+                were computed for a different representation and should NOT
+                overwrite the values already initialised by the bundle's
+                ``__init__``.  Example: ``['mean', 'std']`` to preserve
+                KIMODO Root stats when loading an SMPL Root checkpoint.
         """
         if not state_dict:
             return
@@ -663,7 +675,16 @@ class ModelBundle(nn.Module):
         # Restore bundle-level parameters / buffers saved by state_dict_to_save().
         bundle_params = state_dict.pop('__bundle_params__', None)
         if bundle_params and isinstance(bundle_params, dict):
+            _exclude = set(exclude_bundle_keys or [])
             for pname, pval in bundle_params.items():
+                if pname in _exclude:
+                    from hftrainer.utils.logger import get_logger
+                    get_logger().info(
+                        f"Skipping excluded bundle key '{pname}' "
+                        f"(shape {tuple(pval.shape)}) — preserving "
+                        f"config-initialised value."
+                    )
+                    continue
                 if hasattr(self, pname):
                     attr = getattr(self, pname)
                     if isinstance(attr, nn.Parameter):

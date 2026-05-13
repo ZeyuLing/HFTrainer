@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from collections import deque
 
 
 class M2MLoss(nn.Module):
@@ -20,6 +21,10 @@ class M2MLoss(nn.Module):
         velocity_loss_reduction: str = "element_mean",
         fk_consistency_weight: float = 0.0,
         fk_consistency_warmup_steps: int = 1000,
+        spike_downweight_enabled: bool = True,
+        spike_downweight_factor: float = 0.3,
+        spike_detection_std_threshold: float = 2.0,
+        spike_detection_window: int = 100,
     ):
         super().__init__()
         self.velocity_weight = velocity_weight
@@ -33,6 +38,17 @@ class M2MLoss(nn.Module):
         self.velocity_loss_reduction = velocity_loss_reduction
         self.fk_consistency_weight = fk_consistency_weight
         self.fk_consistency_warmup_steps = fk_consistency_warmup_steps
+        
+        # Spike detection parameters (Fix 2, P0)
+        self.spike_downweight_enabled = spike_downweight_enabled
+        self.spike_downweight_factor = spike_downweight_factor
+        self.spike_detection_std_threshold = spike_detection_std_threshold
+        self.spike_detection_window = spike_detection_window
+        
+        # Rolling statistics for spike detection
+        self._trans_loss_history = deque(maxlen=spike_detection_window)
+        self._baseline_trans_loss = 0.0
+        self._trans_loss_std = 0.0
 
         if velocity_loss_reduction not in ("element_mean", "component_mean"):
             raise ValueError(
@@ -58,6 +74,42 @@ class M2MLoss(nn.Module):
         if dim >= 135:
             return ((0, 3), (3, 9), (9, 135))
         return ((0, dim),)
+
+    def _update_spike_detection_stats(self, trans_loss_magnitude: float):
+        """Update rolling statistics for spike detection.
+        
+        Args:
+            trans_loss_magnitude: Combined magnitude of loss_velocity_trans + loss_x1_trans
+        """
+        if not self.spike_downweight_enabled:
+            return
+        
+        self._trans_loss_history.append(trans_loss_magnitude)
+        
+        if len(self._trans_loss_history) >= 10:
+            losses = list(self._trans_loss_history)
+            self._baseline_trans_loss = sum(losses) / len(losses)
+            var = sum((x - self._baseline_trans_loss) ** 2 for x in losses) / len(losses)
+            self._trans_loss_std = var ** 0.5 if var > 0 else 1e-6
+
+    def _detect_trans_spike(self, trans_loss_magnitude: float) -> float:
+        """Detect if current translation loss is a spike and return downweight factor.
+        
+        Args:
+            trans_loss_magnitude: Combined magnitude of loss_velocity_trans + loss_x1_trans
+            
+        Returns:
+            Downweight factor (1.0 if no spike, 0.3 if spike detected)
+        """
+        if not self.spike_downweight_enabled or len(self._trans_loss_history) < 10:
+            return 1.0
+        
+        threshold = self._baseline_trans_loss + self._trans_loss_std * self._spike_detection_std_threshold
+        
+        if trans_loss_magnitude > threshold:
+            return self.spike_downweight_factor
+        
+        return 1.0
 
     def _masked_motion_loss(
         self,
@@ -178,10 +230,20 @@ class M2MLoss(nn.Module):
             # Apply per-dimension weighting: upweight translation dims (first trans_dims)
             # to compensate for the 3/135 dimension ratio imbalance
             vel_per_dim = self.loss_fn(pred_vel, gt_vel, reduction="none")  # (B, L, D)
+            
+            # Spike detection (Fix 2, P0): Compute translation loss before applying weights
+            trans_vel_loss = vel_per_dim[:, :, :self.trans_dims].mean()
+            trans_vel_spike_weight = self._detect_trans_spike(trans_vel_loss.item())
+            self._update_spike_detection_stats(trans_vel_loss.item())
+            
             if self.trans_dim_weight != 1.0:
                 dim_weights = torch.ones(vel_per_dim.shape[-1], device=vel_per_dim.device)
                 dim_weights[:self.trans_dims] = self.trans_dim_weight
                 vel_per_dim = vel_per_dim * dim_weights
+            
+            # Apply spike downweighting to translation components
+            if trans_vel_spike_weight < 1.0:
+                vel_per_dim[:, :, :self.trans_dims] = vel_per_dim[:, :, :self.trans_dims] * trans_vel_spike_weight
             if self.velocity_loss_reduction == "component_mean":
                 vel_loss, vel_comps = self._masked_motion_loss_with_components(
                     vel_per_dim, data_mask_temporal, generation_mask
@@ -198,10 +260,19 @@ class M2MLoss(nn.Module):
             # x1 loss: (B, L, D) -> scalar
             # Apply same per-dimension weighting as velocity loss
             x1_per_dim = self.loss_fn(pred_x1, gt_x1, reduction="none")  # (B, L, D)
+            
+            # Spike detection (Fix 2, P0): Apply spike downweighting to translation components
+            trans_x1_loss = x1_per_dim[:, :, :self.trans_dims].mean()
+            trans_x1_spike_weight = self._detect_trans_spike(trans_x1_loss.item())
+            
             if self.trans_dim_weight != 1.0:
                 dim_weights = torch.ones(x1_per_dim.shape[-1], device=x1_per_dim.device)
                 dim_weights[:self.trans_dims] = self.trans_dim_weight
                 x1_per_dim = x1_per_dim * dim_weights
+            
+            # Apply spike downweighting to translation components
+            if trans_x1_spike_weight < 1.0:
+                x1_per_dim[:, :, :self.trans_dims] = x1_per_dim[:, :, :self.trans_dims] * trans_x1_spike_weight
             if self.velocity_loss_reduction == "component_mean":
                 x1_loss, x1_comps = self._masked_motion_loss_with_components(
                     x1_per_dim, data_mask_temporal, generation_mask
