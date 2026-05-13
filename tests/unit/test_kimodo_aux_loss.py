@@ -401,6 +401,150 @@ class TestKimodoStyleAuxLoss:
         assert set(out.keys()) == {'aux_joint_pos'}
 
 
+class TestTimestepSquaredWeighting:
+    """Tests for timestep_squared_weighting=True suppressing noisy-FK spikes."""
+
+    def test_t_squared_suppresses_low_timestep(self):
+        """At t≈0, t²≈0 so loss with t²-weighting should be much smaller."""
+        from hftrainer.models.motion.hymotion_m2m.network.kimodo_aux_loss import (
+            KimodoStyleAuxLoss,
+        )
+
+        B, L, D = 2, 8, 198
+        mean = torch.zeros(D)
+        std = torch.ones(D)
+        offsets = _bone_offsets()
+
+        torch.manual_seed(123)
+        gt = _build_198_synthetic(B, L, mean, std)
+        pred = gt + 0.5 * torch.randn_like(gt)
+        mask = torch.ones(B, L)
+
+        # Low timesteps: t ≈ 0.05 → t² ≈ 0.0025
+        low_t = torch.tensor([0.05, 0.1])
+
+        loss_with_tsq = KimodoStyleAuxLoss(
+            joint_pos_weight=1.0,
+            joint_vel_weight=1.0,
+            fk_consistency_weight=1.0,
+            timestep_squared_weighting=True,
+        )
+        loss_no_tsq = KimodoStyleAuxLoss(
+            joint_pos_weight=1.0,
+            joint_vel_weight=1.0,
+            fk_consistency_weight=1.0,
+            timestep_squared_weighting=False,
+        )
+
+        kwargs = dict(
+            pred_x1_norm=pred, gt_x1_norm=gt,
+            mean=mean, std=std, bone_offsets=offsets,
+            data_mask_temporal=mask, timesteps=low_t,
+        )
+        out_tsq = loss_with_tsq(**kwargs)
+        out_no = loss_no_tsq(**kwargs)
+
+        # With t²-weighting and t≈[0.05, 0.1], the average t²≈0.00625.
+        # So the t²-weighted loss should be ~160x smaller than unweighted.
+        for key in ('aux_joint_pos', 'aux_joint_vel', 'aux_fk_consistency'):
+            tsq_val = out_tsq[key].item()
+            no_val = out_no[key].item()
+            assert no_val > 0, f'{key} unweighted should be > 0'
+            ratio = tsq_val / no_val
+            assert ratio < 0.05, (
+                f'{key}: t²-weighted / unweighted = {ratio:.4f}, '
+                f'expected < 0.05 at low timesteps (tsq={tsq_val:.6f}, no={no_val:.6f})'
+            )
+
+    def test_t_squared_near_one_similar(self):
+        """At t≈1, t²≈1 so weighted and unweighted losses should be similar."""
+        from hftrainer.models.motion.hymotion_m2m.network.kimodo_aux_loss import (
+            KimodoStyleAuxLoss,
+        )
+
+        B, L, D = 2, 8, 198
+        mean = torch.zeros(D)
+        std = torch.ones(D)
+        offsets = _bone_offsets()
+
+        torch.manual_seed(456)
+        gt = _build_198_synthetic(B, L, mean, std)
+        pred = gt + 0.5 * torch.randn_like(gt)
+        mask = torch.ones(B, L)
+
+        # High timesteps: t ≈ 0.95 → t² ≈ 0.9025
+        high_t = torch.tensor([0.95, 0.98])
+
+        loss_with_tsq = KimodoStyleAuxLoss(
+            joint_pos_weight=1.0,
+            joint_vel_weight=1.0,
+            fk_consistency_weight=1.0,
+            timestep_squared_weighting=True,
+        )
+        loss_no_tsq = KimodoStyleAuxLoss(
+            joint_pos_weight=1.0,
+            joint_vel_weight=1.0,
+            fk_consistency_weight=1.0,
+            timestep_squared_weighting=False,
+        )
+
+        kwargs = dict(
+            pred_x1_norm=pred, gt_x1_norm=gt,
+            mean=mean, std=std, bone_offsets=offsets,
+            data_mask_temporal=mask, timesteps=high_t,
+        )
+        out_tsq = loss_with_tsq(**kwargs)
+        out_no = loss_no_tsq(**kwargs)
+
+        # t²≈0.9 → ratio should be between 0.8 and 1.0
+        for key in ('aux_joint_pos', 'aux_joint_vel', 'aux_fk_consistency'):
+            tsq_val = out_tsq[key].item()
+            no_val = out_no[key].item()
+            assert no_val > 0, f'{key} unweighted should be > 0'
+            ratio = tsq_val / no_val
+            assert 0.8 < ratio < 1.05, (
+                f'{key}: t²-weighted / unweighted = {ratio:.4f}, '
+                f'expected ≈0.9 at t≈[0.95, 0.98] (tsq={tsq_val:.6f}, no={no_val:.6f})'
+            )
+
+    def test_t_squared_none_timesteps_falls_back_to_unweighted(self):
+        """When timesteps=None, t²-weighting should not apply (no crash)."""
+        from hftrainer.models.motion.hymotion_m2m.network.kimodo_aux_loss import (
+            KimodoStyleAuxLoss,
+        )
+
+        B, L, D = 1, 6, 198
+        mean = torch.zeros(D)
+        std = torch.ones(D)
+        offsets = _bone_offsets()
+
+        torch.manual_seed(789)
+        gt = _build_198_synthetic(B, L, mean, std)
+        pred = gt + 0.3 * torch.randn_like(gt)
+        mask = torch.ones(B, L)
+
+        loss_tsq = KimodoStyleAuxLoss(
+            joint_pos_weight=1.0, timestep_squared_weighting=True,
+        )
+        loss_no = KimodoStyleAuxLoss(
+            joint_pos_weight=1.0, timestep_squared_weighting=False,
+        )
+
+        kwargs = dict(
+            pred_x1_norm=pred, gt_x1_norm=gt,
+            mean=mean, std=std, bone_offsets=offsets,
+            data_mask_temporal=mask, timesteps=None,  # No timesteps
+        )
+        out_tsq = loss_tsq(**kwargs)
+        out_no = loss_no(**kwargs)
+
+        # Without timesteps provided, t_sq=None → both should be identical
+        assert torch.allclose(out_tsq['aux_joint_pos'], out_no['aux_joint_pos'], atol=1e-6), (
+            f'With timesteps=None, t²-weighted should equal unweighted: '
+            f'{out_tsq["aux_joint_pos"].item()} vs {out_no["aux_joint_pos"].item()}'
+        )
+
+
 class TestTrainerIntegration:
     """Smoke tests on the trainer-side wiring."""
 
@@ -539,6 +683,64 @@ class TestTrainerIntegration:
             f'production aux_fk_consistency too small: '
             f'{out_prod["aux_fk_consistency"].item()}'
         )
+
+
+class TestE1E2ConfigIntegration:
+    """Verify E1/E2 config changes: component_mean, t²-weighting, dataloader."""
+
+    @staticmethod
+    def _load_e1_cfg():
+        from mmengine.config import Config
+        return Config.fromfile(os.path.join(
+            _REPO_ROOT,
+            'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_uncond_046b.py',
+        ))
+
+    @staticmethod
+    def _load_e2_cfg():
+        from mmengine.config import Config
+        return Config.fromfile(os.path.join(
+            _REPO_ROOT,
+            'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py',
+        ))
+
+    def test_e1_velocity_loss_reduction_component_mean(self):
+        cfg = self._load_e1_cfg()
+        assert cfg.model.losses_cfg.velocity_loss_reduction == 'component_mean'
+
+    def test_e2_velocity_loss_reduction_component_mean(self):
+        cfg = self._load_e2_cfg()
+        assert cfg.model.losses_cfg.velocity_loss_reduction == 'component_mean'
+
+    def test_e1_timestep_squared_weighting_enabled(self):
+        cfg = self._load_e1_cfg()
+        assert cfg.model.kimodo_aux_loss_cfg.timestep_squared_weighting is True
+
+    def test_e2_timestep_squared_weighting_enabled(self):
+        cfg = self._load_e2_cfg()
+        assert cfg.model.kimodo_aux_loss_cfg.timestep_squared_weighting is True
+
+    def test_e1_dataloader_prefetch(self):
+        cfg = self._load_e1_cfg()
+        assert cfg.train_dataloader.num_workers == 8
+        assert cfg.train_dataloader.persistent_workers is True
+
+    def test_e2_dataloader_prefetch(self):
+        cfg = self._load_e2_cfg()
+        assert cfg.train_dataloader.num_workers == 8
+        assert cfg.train_dataloader.persistent_workers is True
+
+    def test_e1_uncond_mode(self):
+        """E1 must be unconditional."""
+        cfg = self._load_e1_cfg()
+        assert cfg.model.uncondition_mode is True
+        assert cfg.model.text_encoder is None
+
+    def test_e2_caption_mode(self):
+        """E2 must have caption conditioning."""
+        cfg = self._load_e2_cfg()
+        assert cfg.model.uncondition_mode is False
+        assert cfg.model.cond_mask_prob == 0.1
 
 
 if __name__ == '__main__':

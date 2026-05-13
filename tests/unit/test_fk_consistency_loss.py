@@ -178,5 +178,66 @@ class TestFKConsistencyLossIntegration:
         assert 'fk_consistency' not in result
 
 
+    def test_component_mean_produces_per_component_detached_keys(self):
+        """component_mean reduction must emit velocity_{trans,root_rot,body_rot,joint_pos}."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 1, 198)
+        gt = torch.zeros(1, 1, 198)
+        gt[..., 0:3] = 1.0
+        gt[..., 3:9] = 2.0
+        gt[..., 9:135] = 3.0
+        gt[..., 135:198] = 4.0
+
+        loss_fn = M2MLoss(
+            loss_type='mse',
+            velocity_weight=1.0,
+            velocity_loss_reduction='component_mean',
+            trans_dim_weight=1.0,
+        )
+        result = loss_fn(
+            pred_vel=pred,
+            gt_vel=gt,
+            data_mask_temporal=torch.ones(1, 1),
+        )
+
+        # Per-component keys must exist
+        for key in ('velocity_trans', 'velocity_root_rot',
+                     'velocity_body_rot', 'velocity_joint_pos'):
+            assert key in result, f"Missing key: {key}"
+            # Values must be detached (no grad_fn)
+            assert not result[key].requires_grad, f"{key} should be detached"
+            assert result[key].grad_fn is None, f"{key} should have no grad_fn"
+
+        # Verify per-component MSE values: trans=1, root_rot=4, body_rot=9, joint_pos=16
+        assert torch.allclose(result['velocity_trans'], torch.tensor(1.0))
+        assert torch.allclose(result['velocity_root_rot'], torch.tensor(4.0))
+        assert torch.allclose(result['velocity_body_rot'], torch.tensor(9.0))
+        assert torch.allclose(result['velocity_joint_pos'], torch.tensor(16.0))
+
+    def test_element_mean_has_no_per_component_keys(self):
+        """element_mean reduction must NOT produce velocity_{trans,...} keys."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 1, 198)
+        gt = torch.ones(1, 1, 198)
+
+        loss_fn = M2MLoss(
+            loss_type='mse',
+            velocity_weight=1.0,
+            velocity_loss_reduction='element_mean',
+            trans_dim_weight=1.0,
+        )
+        result = loss_fn(
+            pred_vel=pred,
+            gt_vel=gt,
+            data_mask_temporal=torch.ones(1, 1),
+        )
+
+        for key in ('velocity_trans', 'velocity_root_rot',
+                     'velocity_body_rot', 'velocity_joint_pos'):
+            assert key not in result, f"Unexpected key with element_mean: {key}"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -26,6 +26,18 @@ _base_ = './_base_hymotion_m2m_v2_046b.py'
 
 work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_E2'
 
+# Resume from caption_local_phase2 checkpoint (epoch 3370).
+# caption_local_phase2 has CORRECT null_ctxt values (non-zero).
+# null_embedding_source added as safety net regardless.
+# load_scope='model' resets optimizer/scheduler (loss config changed:
+# keypoints3d 0→10, t² weighting off, sampler_v3).
+load_from = dict(
+    _delete_=True,
+    path='work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_3370',
+    load_scope='model',
+    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+)
+
 model = dict(
     pred_type='velocity',
     uncondition_mode=False,  # Enable text conditioning
@@ -36,6 +48,9 @@ model = dict(
     losses_cfg=dict(
         # Override base: enable keypoint supervision (E2 baseline)
         keypoints3d_weight=10.0,
+        # Decompose velocity loss into trans/root_rot/body_rot/joint_pos
+        # for per-component monitoring in training logs.
+        velocity_loss_reduction='component_mean',
     ),
     # Override base: disable t² weighting for standard loss weighting
     kimodo_aux_loss_cfg=dict(
@@ -43,7 +58,7 @@ model = dict(
         joint_vel_weight=500.0,
         fk_consistency_weight=1500.0,
         loss_type='smooth_l1',
-        timestep_squared_weighting=False,  # E2 baseline: standard weighting
+        timestep_squared_weighting=True,  # E2 baseline: t² weighting to suppress noisy-FK spikes at t≈0
         fk_consistency_warmup_steps=2000,
         joint_pos_warmup_steps=2000,
         joint_vel_warmup_steps=2000,
@@ -52,6 +67,8 @@ model = dict(
 
 train_dataloader = dict(
     batch_size=20,  # Reduce batch size for caption config (higher memory)
+    num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
+    persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
