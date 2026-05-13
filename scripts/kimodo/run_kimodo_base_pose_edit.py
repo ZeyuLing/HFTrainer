@@ -127,7 +127,8 @@ def _build_fullbody_rot_constraint(skeleton, frame_indices, kp_indices,
     for f in frame_indices:
         if f in kp_set:
             rots.append(after_soma_rots[f])
-            pos.append(after_soma_pos[f])
+            root_delta = before_soma_pos[f, skeleton.root_idx] - after_soma_pos[f, skeleton.root_idx]
+            pos.append(after_soma_pos[f] + root_delta)
         else:
             rots.append(before_soma_rots[f])
             pos.append(before_soma_pos[f])
@@ -154,7 +155,8 @@ def _build_fullbody_pos_constraint(skeleton, frame_indices, kp_indices,
     for f in frame_indices:
         if f in kp_set:
             rots.append(after_soma_rots[f])
-            pos.append(after_soma_pos[f])
+            root_delta = before_soma_pos[f, skeleton.root_idx] - after_soma_pos[f, skeleton.root_idx]
+            pos.append(after_soma_pos[f] + root_delta)
         else:
             rots.append(before_soma_rots[f])
             pos.append(before_soma_pos[f])
@@ -288,6 +290,12 @@ def main() -> None:
     args = parser.parse_args()
 
     kimodo_tasks.DIFFUSION_STEPS = int(args.num_steps)
+    # Base Pose Edit constrains every frame's global position when
+    # context_stride=1. KIMODO's generic long-motion split blends segment
+    # transitions after feature hard-paste, which can move constrained roots
+    # at the segment boundary. Keep this task single-pass so condition frames
+    # remain exact in the inference output.
+    kimodo_tasks.KIMODO_SAFE_LEN = 10000
     before_dir = PROJECT_ROOT / BEFORE_DIR
     after_dir = PROJECT_ROOT / AFTER_DIR
     pairs = load_before_after_pairs(str(before_dir), str(after_dir), max_pairs=args.num_cases)

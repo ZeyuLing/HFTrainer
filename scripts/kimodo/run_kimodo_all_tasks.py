@@ -177,7 +177,7 @@ def _validate_frame_indices_in_builder(frame_indices, T, builder_name="unknown")
 
 
 
-def _split_num_frames(n: int, safe_len: int = KIMODO_SAFE_LEN) -> list:
+def _split_num_frames(n: int, safe_len: Optional[int] = None) -> list:
     """Split total `n` frames into K balanced segments each ≤ safe_len.
 
     Returns a list of segment lengths whose sum equals n.  K=1 when
@@ -185,6 +185,8 @@ def _split_num_frames(n: int, safe_len: int = KIMODO_SAFE_LEN) -> list:
     as possible: e.g. 360 -> [180,180], 320 -> [160,160], 270 -> [270],
     241 -> [121,120].
     """
+    if safe_len is None:
+        safe_len = KIMODO_SAFE_LEN
     if n <= safe_len:
         return [n]
     K = (n + safe_len - 1) // safe_len  # ceil
