@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import os.path as osp
+import warnings
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -40,6 +41,96 @@ def _length_to_mask(lengths: Tensor, max_len: int) -> Tensor:
 
 def _get_module_device(module: nn.Module) -> torch.device:
     return next(module.parameters()).device
+
+
+# ---------------------------------------------------------------------------
+# Unified losses_cfg splitting
+# ---------------------------------------------------------------------------
+
+# Keys accepted by KimodoStyleAuxLoss.__init__ (with aux_ prefix stripped).
+_KIMODO_AUX_KEYS = frozenset({
+    'joint_pos_weight',
+    'joint_vel_weight',
+    'fk_consistency_weight',
+    'loss_type',
+    'motion_dim',
+    'fk_consistency_warmup_steps',
+    'joint_pos_warmup_steps',
+    'joint_vel_warmup_steps',
+    'timestep_squared_weighting',
+})
+
+
+def _split_losses_cfg(
+    losses_cfg: Optional[dict] = None,
+    kimodo_aux_loss_cfg: Optional[dict] = None,
+) -> Tuple[dict, dict]:
+    """Split a unified ``losses_cfg`` into M2MLoss kwargs and KimodoStyleAuxLoss kwargs.
+
+    The unified config uses an ``aux_`` prefix for all KimodoStyleAuxLoss
+    parameters (e.g. ``aux_joint_pos_weight``, ``aux_fk_consistency_weight``).
+    The shared ``loss_type`` key is passed to M2MLoss directly;
+    ``aux_loss_type`` (if present and not None) overrides it for the aux loss,
+    otherwise the same ``loss_type`` is reused.
+
+    Backward compatibility
+    ~~~~~~~~~~~~~~~~~~~~~~
+    If the deprecated ``kimodo_aux_loss_cfg`` dict is provided, its keys are
+    auto-merged into ``losses_cfg`` with the ``aux_`` prefix (existing
+    ``aux_*`` keys in ``losses_cfg`` take precedence).  A deprecation
+    warning is emitted.
+
+    Returns
+    -------
+    (m2m_kwargs, aux_kwargs) : Tuple[dict, dict]
+    """
+    losses_cfg = dict(losses_cfg or {})
+
+    # --- backward compat: merge old-style kimodo_aux_loss_cfg ----------------
+    if kimodo_aux_loss_cfg:
+        warnings.warn(
+            'kimodo_aux_loss_cfg is deprecated.  Merge its keys into '
+            'losses_cfg with an `aux_` prefix instead '
+            '(e.g. fk_consistency_weight -> aux_fk_consistency_weight).',
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        for k, v in kimodo_aux_loss_cfg.items():
+            prefixed = f'aux_{k}'
+            # Only fill if the new-style key is not already present
+            if prefixed not in losses_cfg:
+                losses_cfg[prefixed] = v
+
+    # --- split aux_ keys from the rest --------------------------------------
+    aux_kwargs: dict = {}
+    m2m_kwargs: dict = {}
+
+    for k, v in losses_cfg.items():
+        if k.startswith('aux_'):
+            stripped = k[4:]  # remove 'aux_' prefix
+            if stripped in _KIMODO_AUX_KEYS:
+                aux_kwargs[stripped] = v
+            else:
+                warnings.warn(
+                    f'Unknown aux_ key in losses_cfg: {k!r} '
+                    f'(stripped: {stripped!r}).  Ignored.',
+                    UserWarning,
+                    stacklevel=3,
+                )
+        else:
+            m2m_kwargs[k] = v
+
+    # --- aux_loss_type fallback: use shared loss_type if not specified --------
+    # Only propagate when there are real aux keys (not just loss_type itself).
+    # This avoids injecting e.g. 'mse' into KimodoStyleAuxLoss when no aux_*
+    # keys were configured at all (e.g. the smoke test config).
+    has_real_aux_keys = any(k != 'loss_type' for k in aux_kwargs)
+    if has_real_aux_keys:
+        if 'loss_type' not in aux_kwargs or aux_kwargs['loss_type'] is None:
+            if 'loss_type' in m2m_kwargs:
+                aux_kwargs['loss_type'] = m2m_kwargs['loss_type']
+
+    return m2m_kwargs, aux_kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +170,7 @@ class HyMotionM2MBundle(ModelBundle):
         body_model_path: Optional[str] = None,
         # ----- rotation space -----
         rotation_space: str = 'local',
-        # ----- KIMODO-style auxiliary losses (j_p / j_v / fk_consistency) -----
+        # ----- DEPRECATED: use aux_ prefix in losses_cfg instead -----
         kimodo_aux_loss_cfg: Optional[dict] = None,
     ):
         super().__init__()
@@ -117,8 +208,9 @@ class HyMotionM2MBundle(ModelBundle):
         self._load_mean_std(mean_std_dir)
 
         # ---- M2M loss ----
+        m2m_kwargs, aux_kwargs = _split_losses_cfg(losses_cfg, kimodo_aux_loss_cfg)
         from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
-        self.m2m_loss = M2MLoss(**(losses_cfg or {}))
+        self.m2m_loss = M2MLoss(**m2m_kwargs)
 
         # ---- KIMODO-style auxiliary loss (optional, post-hoc) ----
         # Computed by the trainer in addition to M2MLoss; constructed here so
@@ -126,7 +218,7 @@ class HyMotionM2MBundle(ModelBundle):
         from hftrainer.models.motion.hymotion_m2m.network.kimodo_aux_loss import (
             KimodoStyleAuxLoss,
         )
-        self.kimodo_aux_loss = KimodoStyleAuxLoss(**(kimodo_aux_loss_cfg or {}))
+        self.kimodo_aux_loss = KimodoStyleAuxLoss(**aux_kwargs)
 
         # ---- SMPL body model (optional for FK losses / decode) ----
         self._body_model_path = body_model_path

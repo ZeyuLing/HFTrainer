@@ -66,11 +66,18 @@ class HyMotionT2MPipeline:
         B = len(tgt_length)
         L = max(tgt_length)
 
+        # Pad to at least TRAIN_FRAMES (360) to match official HY-Motion-1.0 training.
+        # The model was trained on 360-frame sequences; shorter sequences produce
+        # different attention patterns and ODE dynamics. Pad noise to TRAIN_FRAMES,
+        # run ODE on full padded length, then truncate output to requested length.
+        TRAIN_FRAMES = 360
+        L_padded = max(L, TRAIN_FRAMES)
+
         # Infer motion dim from the transformer output_dim
         motion_dim = batch.get('motion_dim', self.bundle.motion_transformer.output_dim)
 
         tgt_padding_mask = _length_to_mask(
-            torch.tensor(tgt_length, dtype=torch.long, device=device), L
+            torch.tensor(tgt_length, dtype=torch.long, device=device), L_padded
         )
 
         # Prepare text
@@ -144,7 +151,7 @@ class HyMotionT2MPipeline:
 
         # Initial noise
         dtype = next(self.bundle.motion_transformer.parameters()).dtype
-        y0 = torch.randn(B, L, motion_dim, device=device, dtype=dtype)
+        y0 = torch.randn(B, L_padded, motion_dim, device=device, dtype=dtype)
         t = torch.linspace(0, 1, self.num_steps + 1, device=device, dtype=dtype)
 
         try:
@@ -164,6 +171,11 @@ class HyMotionT2MPipeline:
             trajectory = torch.stack(trajectory, dim=0)
 
         sampled = trajectory[-1]
+
+        # Truncate padded frames back to the requested length.
+        # ODE was run on L_padded (≥360) to match training dynamics;
+        # only the first L frames contain the actual motion.
+        sampled = sampled[:, :L, :]
 
         # Decode to motion
         result = self.bundle.decode_motion_from_latent(sampled)

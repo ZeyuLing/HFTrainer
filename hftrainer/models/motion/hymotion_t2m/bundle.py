@@ -136,8 +136,9 @@ class HyMotionT2MBundle(ModelBundle):
             std = torch.from_numpy(
                 np.load(osp.join(mean_std_dir, 'Std.npy'))
             ).float()
-            # Clamp std to avoid div-by-zero
-            std = torch.where(std < 1e-3, torch.ones_like(std), std)
+            # Zero-out near-zero std dims (matching official HY-Motion-1.0)
+            # These dims are effectively constant and should produce zero after normalization
+            std = torch.where(std < 1e-3, torch.zeros_like(std), std)
             self.register_buffer('mean', mean)
             self.register_buffer('std', std)
         else:
@@ -291,6 +292,14 @@ class HyMotionT2MBundle(ModelBundle):
             except Exception:
                 k3d = None
 
+        # Ground alignment: offset translation so lowest joint touches Y=0.
+        # Matches official HY-Motion-1.0 post-FK processing.
+        if k3d is not None:
+            # min Y across all joints and frames per batch sample
+            min_y = k3d[:, :, :, 1].min(dim=2)[0].min(dim=1)[0]  # (B,)
+            transl[:, :, 1] = transl[:, :, 1] - min_y.unsqueeze(1)
+            k3d[:, :, :, 1] = k3d[:, :, :, 1] - min_y.unsqueeze(1).unsqueeze(1)
+
         return {
             'latent_denorm': latent_denorm,
             'keypoints3d': k3d,
@@ -300,10 +309,19 @@ class HyMotionT2MBundle(ModelBundle):
         }
 
     def normalize_motion(self, motion: Tensor) -> Tensor:
-        """Normalize motion using mean/std buffers."""
-        return (motion - self.mean) / self.std
+        """Normalize motion using mean/std buffers.
+
+        Dims with near-zero std (constant in training data) produce 0 after normalization.
+        This matches official HY-Motion-1.0 behavior.
+        """
+        # Safe division: where std==0, output 0 (those dims are constant)
+        safe_std = torch.where(self.std < 1e-3, torch.ones_like(self.std), self.std)
+        result = (motion - self.mean) / safe_std
+        # Zero out dims where std was near-zero
+        result = torch.where(self.std.unsqueeze(0) < 1e-3, torch.zeros_like(result), result)
+        return result
 
     def denormalize_motion(self, motion: Tensor) -> Tensor:
-        """Denormalize motion."""
-        std = torch.where(self.std < 1e-3, torch.ones_like(self.std), self.std)
+        """Denormalize motion (matching official HY-Motion-1.0: zeros for near-zero std)."""
+        std = torch.where(self.std < 1e-3, torch.zeros_like(self.std), self.std)
         return motion * std + self.mean

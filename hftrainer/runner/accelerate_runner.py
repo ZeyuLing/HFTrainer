@@ -568,7 +568,11 @@ class AccelerateRunner:
         if not ckpt_path and load_from is not None:
             if hasattr(load_from, 'to_dict'):
                 load_from = load_from.to_dict()
-            if isinstance(load_from, dict):
+            if isinstance(load_from, str):
+                # Plain string path → treat as model-only load
+                ckpt_path = load_from
+                is_model_only = True
+            elif isinstance(load_from, dict):
                 scope = load_from.get('load_scope', 'model')
                 if scope == 'model':
                     ckpt_path = load_from.get('path', None)
