@@ -80,10 +80,14 @@ ROOT_BODY_INDEX = 0  # pelvis
 
 
 def convert_cache_to_json(cache_path: str, output_path: str, subsample: int = 1) -> dict:
-    """Convert a single cache .pt to JSON.
+    """Convert a single cache .pt or .motion file to JSON.
+
+    Supports two formats:
+      - Old .pt cache: keys body_pos, body_rot, dof_pos, control_dt, num_frames
+      - New .motion:   keys rigid_body_pos, rigid_body_rot, dof_pos, motion_dt/fps
 
     Args:
-        cache_path: Path to the .pt cache file.
+        cache_path: Path to the .pt cache or .motion file.
         output_path: Path to write JSON output.
         subsample: Take every Nth frame (1 = all frames).
 
@@ -98,11 +102,35 @@ def convert_cache_to_json(cache_path: str, output_path: str, subsample: int = 1)
         return np.asarray(x)
 
     dof_pos = to_numpy(cache["dof_pos"])  # (T, 29)
-    body_pos = to_numpy(cache["body_pos"])  # (T, 33, 3)
-    body_rot = to_numpy(cache["body_rot"])  # (T, 33, 4) xyzw
-    control_dt = float(cache["control_dt"])
-    fps = round(1.0 / control_dt)
-    num_frames_total = int(cache["num_frames"])
+
+    # Support both old .pt cache and new .motion format
+    if "body_pos" in cache:
+        # Old .pt cache format
+        body_pos = to_numpy(cache["body_pos"])  # (T, 33, 3)
+        body_rot = to_numpy(cache["body_rot"])  # (T, 33, 4) xyzw
+        control_dt = float(cache["control_dt"])
+        fps = round(1.0 / control_dt)
+        num_frames_total = int(cache["num_frames"])
+    elif "rigid_body_pos" in cache:
+        # New .motion format (from PyRoki pipeline)
+        body_pos = to_numpy(cache["rigid_body_pos"])  # (T, N_bodies, 3)
+        body_rot = to_numpy(cache["rigid_body_rot"])  # (T, N_bodies, 4) xyzw
+        if "motion_dt" in cache:
+            control_dt = float(cache["motion_dt"])
+            fps = round(1.0 / control_dt)
+        elif "fps" in cache:
+            fps = int(cache["fps"])
+            control_dt = 1.0 / fps
+        else:
+            fps = 30
+            control_dt = 1.0 / 30.0
+            print(f"  WARNING: No fps/motion_dt in .motion file, defaulting to {fps}")
+        num_frames_total = body_pos.shape[0]
+    else:
+        raise KeyError(
+            f"Unrecognized cache format. Keys: {list(cache.keys())}. "
+            "Expected 'body_pos' (old .pt) or 'rigid_body_pos' (.motion)."
+        )
 
     # Subsample
     indices = list(range(0, num_frames_total, subsample))

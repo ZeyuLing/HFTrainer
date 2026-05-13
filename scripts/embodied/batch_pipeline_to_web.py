@@ -94,7 +94,7 @@ def run_pipeline(npz_path: str, cache_output: str, extra_args: list = None) -> b
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
-            timeout=300,  # 5 min per motion
+            timeout=7200,  # 2 hours per motion (PyRoki CPU retarget takes ~60-70 min)
         )
         if result.returncode != 0:
             print(f"    PIPELINE FAILED (exit {result.returncode})")
@@ -106,7 +106,7 @@ def run_pipeline(npz_path: str, cache_output: str, extra_args: list = None) -> b
             return False
         return True
     except subprocess.TimeoutExpired:
-        print(f"    PIPELINE TIMEOUT (>300s)")
+        print(f"    PIPELINE TIMEOUT (>7200s)")
         return False
     except Exception as e:
         print(f"    PIPELINE ERROR: {e}")
