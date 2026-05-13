@@ -56,6 +56,7 @@ model = dict(
     pred_type='velocity',
     uncondition_mode=True,
     losses_cfg=dict(
+        # --- M2MLoss params ---
         loss_type='smooth_l1',
         velocity_weight=1.0,
         x1_weight=0.0,
@@ -64,66 +65,33 @@ model = dict(
         trans_dim_weight=5.0,
         motion_smoothness_weight=0.5,
         # NOTE: legacy fk_consistency in M2MLoss is disabled when KIMODO-style
-        # aux loss is enabled below (see kimodo_aux_loss_cfg) — they compute
-        # the same quantity, so we keep only one path active.
+        # aux loss is enabled below — they compute the same quantity, so we
+        # keep only one path active.
         fk_consistency_weight=0.0,
         fk_consistency_warmup_steps=2000,
-    ),
-    # KIMODO-style auxiliary losses (Eq. 1 in KIMODO paper):
-    #   - joint_pos      ≈ γ₃: smooth-L1 on global (FK-derived) joint
-    #     positions in metres, vs GT joint positions.  Directly supervises
-    #     world-space leg/foot positions, suppressing "pelvis cheating" /
-    #     slipping that the relative-pelvis 198-dim representation otherwise
-    #     allows.
-    #   - joint_vel      ≈ γ₄: smooth-L1 on global joint velocities (from
-    #     the temporal derivative of FK positions, NOT 198-dim d/dt).  A
-    #     slipping pose immediately incurs a velocity error at every joint.
-    #   - fk_consistency ≈ γ₇: pos-channel ↔ FK(pred_rot/trans) consistency,
-    #     **purely intra-prediction** (no GT involved).  Its primary
-    #     purpose is NOT slip-suppression but rather to teach the model an
-    #     *explicit FK equivalence map* inside the 198-dim representation,
-    #     so that at inference time a position-only condition (e.g. E1 hand
-    #     trajectory, E4 end-effector) can be imputed into pred[135:198]
-    #     and the model can generate self-consistent rot/trans (pred[:135])
-    #     without needing IK.  The model has no built-in FK operator; this
-    #     loss is the *only* supervision signal that pred[:135] and
-    #     pred[135:198] must satisfy FK(pred[:135])_rel_pelvis ≡ pred[135:198].
-    #     Without it, FK-equivalence is only induced indirectly via main
-    #     loss + joint_pos through GT correlation, which generalises poorly
-    #     to OOD inference settings (pure position condition).
-    #
-    # === Weight magnitudes (≠ KIMODO γ values; reason below) ===
-    # KIMODO computes Eq.1 in *normalised unit-variance* space where typical
-    # smooth_l1 base values are O(1e-3), so γ in the 1–10 range produces
-    # weighted losses ~1e-2.  Our aux block runs in *denormalised metres*
-    # (FK world coords).  For the already-converged ckpt that resumes here
-    # (~1 cm joint error, ~mm-level intra-pred consistency), smooth_l1
-    # quadratic-region base values are roughly:
-    #   joint_pos:        O(1e-4)        (cm-level pred-vs-GT joint pos)
-    #   joint_vel:        O(1e-6)        (mm/frame; T=360 sequences)
-    #   fk_consistency:   O(1.4e-6)      (mm-level intra-pred consistency)
-    # Combined with t² re-weighting (E[t²]=1/3) the raw base is ~3× weaker.
-    # The weights below target a meaningful fraction of loss_velocity
-    # (≈ 0.025 in normalised space):
-    #   joint_pos:       50      ⇒ ≈ 5.0e-3   (~14% of loss_velocity)
-    #   joint_vel:       500     ⇒ ≈ 1.0e-3   (~ 4% of loss_velocity)
-    #   fk_consistency:  1500    ⇒ ≈ 2.1e-3   (~ 7% of loss_velocity)
-    # fk_consistency uses a much larger nominal weight than joint_pos
-    # because its base value is ~70× smaller (intra-pred consistency on a
-    # already-FK-consistent representation is naturally tighter than pred-
-    # vs-GT joint-position error).  The point of this re-weight is *not* to
-    # mechanically follow KIMODO's γ₃:γ₇ = 10:5 ratio, but to make the
-    # explicit FK-equivalence supervision strong enough to actually shape
-    # the rot↔pos mapping (rather than relying on indirect correlation).
-    kimodo_aux_loss_cfg=dict(
-        joint_pos_weight=50.0,
-        joint_vel_weight=500.0,
-        fk_consistency_weight=1500.0,
-        loss_type='smooth_l1',
-        timestep_squared_weighting=True,
-        fk_consistency_warmup_steps=2000,
-        joint_pos_warmup_steps=2000,
-        joint_vel_warmup_steps=2000,
+        # --- KIMODO-style auxiliary loss params (aux_ prefix) ---
+        # Auxiliary losses (Eq. 1 in KIMODO paper), computed post-hoc via FK
+        # on denormalised motion in metres.  See bundle.py _split_losses_cfg()
+        # for how aux_ keys are routed to KimodoStyleAuxLoss.
+        #
+        #   - aux joint_pos  ≈ γ₃: smooth-L1 on global (FK-derived) joint
+        #     positions in metres, vs GT.
+        #   - aux joint_vel  ≈ γ₄: smooth-L1 on global joint velocities.
+        #   - aux fk_consistency ≈ γ₇: pos-channel ↔ FK(pred_rot/trans)
+        #     consistency, purely intra-prediction.
+        #
+        # Weight magnitudes target a meaningful fraction of loss_velocity
+        # (≈ 0.025 in normalised space):
+        #   joint_pos:       50      ⇒ ≈ 5.0e-3   (~14% of loss_velocity)
+        #   joint_vel:       500     ⇒ ≈ 1.0e-3   (~ 4% of loss_velocity)
+        #   fk_consistency:  1500    ⇒ ≈ 2.1e-3   (~ 7% of loss_velocity)
+        aux_joint_pos_weight=50.0,
+        aux_joint_vel_weight=500.0,
+        aux_fk_consistency_weight=1500.0,
+        aux_timestep_squared_weighting=True,
+        aux_fk_consistency_warmup_steps=2000,
+        aux_joint_pos_warmup_steps=2000,
+        aux_joint_vel_warmup_steps=2000,
     ),
     noise_scheduler_cfg=dict(method='euler'),
     infer_noise_scheduler_cfg=dict(validation_steps=50),

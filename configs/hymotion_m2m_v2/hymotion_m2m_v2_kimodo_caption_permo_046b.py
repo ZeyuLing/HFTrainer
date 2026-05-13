@@ -1,50 +1,44 @@
-# HyMotion M2M v2 — PHASE 0 E4: KIMODO Root + Caption Conditioning
+# HyMotion M2M v2 — PHASE 0 E4+PerMo: KIMODO Root + Caption + PerMo
 #
-# **Experiment E4** from next-gen proposal: SMPL motion converted to KIMODO
-# Root representation (with online ADMM smoothing) and text caption conditioning.
+# **Experiment E4+PerMo**: SMPL motion converted to KIMODO Root representation 
+# (with online ADMM smoothing) and text caption conditioning, augmented with 
+# PerMo dataset (6,542 training samples).
 #
-# Key overrides from base config (_base_hymotion_m2m_v2_046b.py):
-#   - keypoints3d_weight: 0.0 → 10.0 (enable keypoint supervision)
-#   - timestep_squared_weighting: True (t² weighting to suppress noisy-FK spikes)
-#   - cond_mask_prob: 0.0 → 0.1 (enable CFG during training)
-#   - Data pipeline: Add SmplTransToKimodoRootOnline transform (ADMM smoothing)
-#   - Text encoding: enabled (caption_local)
-#   - Rotation space: local (SMPL frame)
-#   - Mean/std: KIMODO Root 198-dim stats
+# Key features:
+#   - Base: Standard E4 config (KIMODO Root + caption_local + ADMM smoothing)
+#   - Dataset: 400h HQ + PerMo (414k total training samples)
+#   - ADMM online smoothing: 6cm margin on XZ plane (horizontal)
+#   - Keypoint supervision enabled (keypoints3d_weight=10.0)
+#   - Timestep squared weighting enabled (suppresses FK spikes)
+#   - Text encoding: QWEN3 + CLIP-L (caption_local variant)
+#   - Classifier-Free Guidance (CFG): 10% unconditional during training
 #
 # KIMODO Root representation (198-dim):
-#   [0:3]      ADMM smoothed pelvis translation (online smoothing during load)
+#   [0:3]      ADMM smoothed pelvis translation (online smoothing)
 #   [3:9]      root joint 6D rotation (continuous)
 #   [9:135]    body (21 non-root joints) 6D rotations
-#   [135:198]  FK-derived joint positions relative to pelvis (21 × 3)
+#   [135:198]  FK-derived joint positions relative to pelvis
 #
-# ADMM smoothing: Applied online during dataset __getitem__ with margin ≤ 6cm
-# on XZ plane (horizontal), Y-axis unchanged (vertical is unsmoothed).
-#
-# E4 combines KIMODO Root with text guidance (T2M with structured root):
-#   - Text-driven generation with smoothed root trajectory
+# Comparison to E4:
+#   - E4 uses 400h only (407,552 samples)
+#   - E4+PerMo uses 400h + PerMo (414,094 samples, +1.6% data)
+#   - Same model architecture with ADMM smoothing
 #   - Better consistency for embodied tasks (robot deployment)
-#   - Position-to-root relative coordinates for text conditioning
-#
-# Prerequisite: KIMODO Root mean/std must be computed and placed at
-#   data/hymotion_m2m_data/_stats_198dim_kimodo_root/
 #
 # Launch (local):
-#   bash tools/dist_train.sh configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_046b.py 8 --auto-resume
+#   bash tools/dist_train.sh configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_permo_046b.py 8 --auto-resume
 # Launch (Taiji, 64 GPUs):
-#   python tools/taiji_submit.py m2m_v2_kimodo_caption_E4 configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_046b.py --host_num 8
+#   python tools/taiji_submit.py m2m_v2_kimodo_caption_permo_E4plus \
+#     configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_permo_046b.py --host_num 8
 
 _base_ = './_base_hymotion_m2m_v2_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_kimodo_caption_E4'
+work_dir = 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_E4plus'
 
-# Resume from M2M v2 caption_local_phase2 checkpoint (epoch 3370).
-# caption_local_phase2 has CORRECT null_ctxt values (non-zero).
-# null_embedding_source added as safety net regardless.
+# Resume from caption_local_phase2 checkpoint (epoch 3370).
 # exclude_bundle_keys: prevent SMPL Root mean/std from overwriting
 # KIMODO Root mean/std (different statistical distributions).
-# load_scope='model' resets optimizer/scheduler (loss config changed:
-# keypoints3d 0→10, t² weighting on, sampler_v3, KIMODO root).
+# load_scope='model' resets optimizer/scheduler
 load_from = dict(
     _delete_=True,
     path='work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_3370',
@@ -57,23 +51,24 @@ model = dict(
     pred_type='velocity',
     uncondition_mode=False,  # Enable text conditioning
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
-    mean_std_dir='data/hymotion_m2m_data/_stats_198dim_kimodo_root',
+    mean_std_dir='data/hymotion_m2m_data/_stats_198dim_kimodo_root',  # KIMODO stats
     rotation_space='local',
     text_encoder=dict(),  # Use default QWEN3 + CLIP-L
     losses_cfg=dict(
         # Override base: enable keypoint supervision (E4 baseline)
         keypoints3d_weight=10.0,
-        # Decompose velocity loss into trans/root_rot/body_rot/joint_pos
-        # for per-component monitoring in training logs.
+        # Decompose velocity loss into components for per-component monitoring
         velocity_loss_reduction='component_mean',
     ),
 )
 
 train_dataloader = dict(
     batch_size=20,  # Reduce batch size for caption config (higher memory)
-    num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
+    num_workers=8,  # Keep DataLoader prefetch ahead of train_step
     persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
+        # CHANGED: Use merged 400h + PerMo annotation file
+        anno_file='data/annotation/train_hymotion_400h_permo_caption_20260514.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
             dict(
@@ -83,11 +78,9 @@ train_dataloader = dict(
                 transl_type='abs',
                 smpl_type='smpl_22',
             ),
-            # Compute198DimPosition MUST come before SmplTransToKimodoRootOnline:
-            # LoadSmplx55 outputs 135-dim, Compute198DimPosition → 198-dim,
-            # then SmplTransToKimodoRootOnline smooths translation on 198-dim.
+            # Compute198DimPosition MUST come before SmplTransToKimodoRootOnline
             dict(type='Compute198DimPosition', key='motion'),
-            # **KEY DIFFERENCE FROM E2/E4**: Convert SMPL Root → KIMODO Root
+            # KEY DIFFERENCE FROM E2+PerMo: Convert SMPL Root → KIMODO Root
             # ADMM smoothing applied online during __getitem__
             dict(
                 type='SmplTransToKimodoRootOnline',

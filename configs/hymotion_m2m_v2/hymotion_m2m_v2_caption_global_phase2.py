@@ -33,18 +33,6 @@ model = dict(
         fk_consistency_weight=0.0,
         fk_consistency_warmup_steps=2000,
     ),
-    # KIMODO-style auxiliary losses: see base config for the rationale behind
-    # the weight magnitudes (denormalised-metres regime, smooth_l1 + t²).
-    kimodo_aux_loss_cfg=dict(
-        joint_pos_weight=50.0,
-        joint_vel_weight=500.0,
-        fk_consistency_weight=1500.0,
-        loss_type='smooth_l1',
-        timestep_squared_weighting=True,
-        fk_consistency_warmup_steps=2000,
-        joint_pos_warmup_steps=2000,
-        joint_vel_warmup_steps=2000,
-    ),
 )
 
 train_dataloader = dict(

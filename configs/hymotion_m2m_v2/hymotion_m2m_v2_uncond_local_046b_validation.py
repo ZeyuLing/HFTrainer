@@ -78,8 +78,10 @@ default_hooks = dict(
 
 work_dir = 'work_dirs/hymotion_m2m_v2_uncond_local_046b_validation'
 
-# Load from the base uncond_local model checkpoint
+# Load from T2M pretrained weights (base config default)
+# This is the standard initialization for all M2M v2 models
 load_from = dict(
-    path='work_dirs/hymotion_m2m_v2_uncond_local_046b/checkpoint-epoch_000',
+    _delete_=True,
+    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
     load_scope='model',
 )

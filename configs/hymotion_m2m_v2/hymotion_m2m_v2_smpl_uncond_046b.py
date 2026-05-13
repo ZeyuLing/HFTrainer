@@ -50,17 +50,6 @@ model = dict(
         # for per-component monitoring in training logs.
         velocity_loss_reduction='component_mean',
     ),
-    # Override base: disable t² weighting for standard loss weighting
-    kimodo_aux_loss_cfg=dict(
-        joint_pos_weight=50.0,
-        joint_vel_weight=500.0,
-        fk_consistency_weight=1500.0,
-        loss_type='smooth_l1',
-        timestep_squared_weighting=True,  # E1 baseline: t² weighting to suppress noisy-FK spikes at t≈0
-        fk_consistency_warmup_steps=2000,
-        joint_pos_warmup_steps=2000,
-        joint_vel_warmup_steps=2000,
-    ),
 )
 
 train_dataloader = dict(
