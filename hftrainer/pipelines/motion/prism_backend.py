@@ -72,6 +72,11 @@ class PrismARPipeline(DiffusionPipeline):
 
         self.vae_scale_factor_temporal = vae.config.scale_factor_temporal
 
+        # KAFS-Inference: Per-joint adaptive timestep scaling
+        # Shape: [num_joints] with values in range [0.85, 1.15] based on kinematic depth
+        self._kafs_alpha_map = None
+        self._kafs_mode = "none"  # Tracks which KAFS mode is active
+
     def prepare_latents(
         self,
         batch_size: int,
@@ -124,6 +129,97 @@ class PrismARPipeline(DiffusionPipeline):
             first_frame_mask[:, :, :1, :] = 0.0
 
         return latents, condition, first_frame_mask
+
+
+    def set_kafs_alpha(self, mode: str = "none", alpha_vals: Optional[torch.Tensor] = None, device: Optional[torch.device] = None) -> None:
+        """Set KAFS (Kinematic-Adaptive Flow Scheduling) per-joint timestep scaling.
+
+        Args:
+            mode: KAFS mode to use. Options:
+                - "none": No KAFS scaling (standard baseline)
+                - "depth_driven": Per-joint scaling based on kinematic tree depth
+                - "uniform": Uniform scaling with all alphas set to a constant
+                - "random": Random alphas for ablation control
+                - "custom": Use provided alpha_vals tensor
+            alpha_vals: Custom alpha values tensor [num_joints] if mode=="custom".
+                        If None and mode=="depth_driven", uses hardcoded kinematic-based values.
+            device: Device to place alpha_map tensor on. Defaults to VAE device.
+
+        Notes:
+            - Alpha values typically range from 0.85 (proximal/root) to 1.15 (distal/wrist)
+            - Multiplies timestep t as: t_j = t * alpha_j
+            - Only applicable when self.config.expand_timesteps is True
+        """
+        if device is None:
+            device = self.vae.device
+
+        if mode == "none":
+            self._kafs_alpha_map = None
+            self._kafs_mode = "none"
+            print_log("KAFS: Disabled (standard baseline)")
+
+        elif mode == "depth_driven":
+            # Kinematic-based alpha values for 23 SMPL joints
+            # Structure: [trans, pelvis, L_hip, R_hip, spine1, L_knee, R_knee, spine2,
+            #            L_ankle, R_ankle, spine3, L_foot, R_foot, neck,
+            #            L_collar, R_collar, head, L_shoulder, R_shoulder, L_elbow, R_elbow, L_wrist, R_wrist]
+            alpha_vals = torch.tensor([
+                0.85,        # Translation (root motion, depth 0)
+                0.85,        # Pelvis (depth 0)
+                0.90, 0.90,  # L_Hip, R_Hip (depth 1)
+                1.00,        # Spine1 (depth 1)
+                1.00, 1.00,  # L_Knee, R_Knee (depth 2)
+                1.00,        # Spine2 (depth 2)
+                1.05, 1.05,  # L_Ankle, R_Ankle (depth 3)
+                1.00,        # Spine3 (depth 3)
+                1.10, 1.10,  # L_Foot, R_Foot (depth 4)
+                1.00,        # Neck (depth 2)
+                1.05, 1.05,  # L_Collar, R_Collar (depth 3)
+                1.00,        # Head (depth 3)
+                1.10, 1.10,  # L_Shoulder, R_Shoulder (depth 4)
+                1.12, 1.12,  # L_Elbow, R_Elbow (depth 5)
+                1.15, 1.15,  # L_Wrist, R_Wrist (depth 6)
+            ], dtype=self.vae.dtype, device=device)
+            
+            self._kafs_alpha_map = alpha_vals.view(1, 1, 1, -1)  # [1, 1, 1, 23]
+            self._kafs_mode = "depth_driven"
+            print_log(f"KAFS: Depth-driven mode enabled. Alpha range: [{alpha_vals.min():.2f}, {alpha_vals.max():.2f}]")
+
+        elif mode == "uniform":
+            # All joints get the same alpha (should give similar results to baseline)
+            uniform_alpha = 1.0
+            alpha_vals = torch.full((23,), uniform_alpha, dtype=self.vae.dtype, device=device)
+            self._kafs_alpha_map = alpha_vals.view(1, 1, 1, -1)
+            self._kafs_mode = "uniform"
+            print_log(f"KAFS: Uniform mode enabled. All alphas = {uniform_alpha}")
+
+        elif mode == "random":
+            # Random alphas in [0.85, 1.15] for ablation control
+            torch.manual_seed(42)  # Reproducible randomness
+            alpha_vals = torch.rand(23, dtype=self.vae.dtype, device=device) * 0.30 + 0.85
+            self._kafs_alpha_map = alpha_vals.view(1, 1, 1, -1)
+            self._kafs_mode = "random"
+            print_log(f"KAFS: Random mode enabled. Alpha range: [{alpha_vals.min():.2f}, {alpha_vals.max():.2f}]")
+
+        elif mode == "custom":
+            if alpha_vals is None:
+                raise ValueError("alpha_vals must be provided when mode='custom'")
+            if isinstance(alpha_vals, list):
+                alpha_vals = torch.tensor(alpha_vals, dtype=self.vae.dtype, device=device)
+            elif not isinstance(alpha_vals, torch.Tensor):
+                raise TypeError("alpha_vals must be a torch.Tensor or list")
+            
+            alpha_vals = alpha_vals.to(dtype=self.vae.dtype, device=device)
+            if alpha_vals.shape[-1] != 23:
+                raise ValueError(f"alpha_vals must have shape [..., 23] for 23 joints, got {alpha_vals.shape}")
+            
+            self._kafs_alpha_map = alpha_vals.view(1, 1, 1, -1)
+            self._kafs_mode = "custom"
+            print_log(f"KAFS: Custom mode enabled. Alpha range: [{alpha_vals.min():.2f}, {alpha_vals.max():.2f}]")
+
+        else:
+            raise ValueError(f"Unknown KAFS mode: {mode}. Choose from: none, depth_driven, uniform, random, custom")
+
 
     def load_condition_pose(self, motion_path: str) -> torch.Tensor:
         """Load and process condition pose from npz file.
@@ -284,7 +380,10 @@ class PrismARPipeline(DiffusionPipeline):
                 latent_model_input = (
                     (1 - first_frame_mask) * condition + first_frame_mask * latents
                 ).to(transformer_dtype)
-                temp_ts = (first_frame_mask[0][0] * t).flatten()
+                if self._kafs_alpha_map is not None:
+                    temp_ts = (first_frame_mask[0][0] * t * self._kafs_alpha_map).flatten()
+                else:
+                    temp_ts = (first_frame_mask[0][0] * t).flatten()
                 timestep = temp_ts.unsqueeze(0).expand(latents.shape[0], -1)
             else:
                 latent_model_input = latents.to(transformer_dtype)
