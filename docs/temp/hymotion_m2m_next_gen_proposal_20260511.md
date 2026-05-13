@@ -2,7 +2,7 @@
 
 **Condition-Decoupled Orchestration Flow Matching**
 
-文档版本: 1.7 | 日期: 2026-05-12 | 状态: 方案设计 (v1.7: 删除 TCC/CCFM/PCE，简化 KIMODO Root 为 198-dim smooth traj 替换，在线转换，V3 sampler 统一，loss 权重待定)
+文档版本: 2.0 | 日期: 2026-05-13 | 状态: 方案设计 (v2.0: 用 STP (语义时空规划) 替换 SEAT——模型先推理文本对应的时空区域与条件覆盖关系，再生成动作；v1.9: 修正 §4.3 输入格式为 MAN+no_inactive 3通道594-dim；修正 CPOS alpha 为 replacement guidance 机制)
 
 ---
 
@@ -151,17 +151,19 @@ KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关
 
 ### 3.2 一句话描述
 
-> 通过**密度感知路由机制**动态编排语义层（text）与结构层（motion condition）的相对贡献，使单一模型自适应地在纯文本生成与强条件补全之间平滑插值，同时引入 KIMODO 风格的 smooth root trajectory 提升生成质量。
+> 通过**语义时空规划 (STP)**——让模型先推理"文本内容对应动作的什么时间、什么部位，哪些已被 motion condition 给定，哪些需要从文本规划"，再执行实际生成——从根本上解决 text/motion condition 信息密度不对称导致的 shortcut learning。结合渐进密度课程训练 (PDCT)、条件渐进 ODE 采样 (CPOS) 和 KIMODO 风格 smooth root trajectory，使单一模型在纯文本生成与强条件补全之间平滑过渡。
 
 ### 3.3 核心创新点
 
-1. **Density-Modulated Dual-Stream Attention (DM-DSA)**: 基于条件密度的双流注意力门控，text stream 和 motion condition stream 的贡献由可学习的密度调制器动态平衡
+1. **Progressive Density Curriculum Training (PDCT)**: 渐进密度课程训练。核心洞察：text 和 motion condition 的信息密度不对称是 shortcut learning 的根因，但如果在训练初期强制模型**只看到低密度 motion condition**（甚至纯 T2M），text pathway 就必须先被建立；后期逐步引入高密度条件，模型已经建立了 text 理解能力，不会再退化为忽略 text 的 shortcut。这与人类学习先学概念再学细节的认知规律一致。**零额外参数，可直接从 E1-E4 checkpoint 继续训练。**
 
 2. **Dual Root Representation + Loss Alignment**: 两套 root 表征方案 (SMPL raw / KIMODO smooth trajectory) 的 A/B 实验，统一 position loss 在 relative-to-root 空间计算，移除 t² weighting
 
 3. **Unified V3 Condition Sampler**: Rank-K Boolean Tensor Prior，统一 caption/uncond configs 的 motion condition 训练采样
 
-4. **Decoupled CFG**: 二级解耦 classifier-free guidance，独立控制 text 和 motion condition 的引导强度
+4. **Semantic-Temporal Planning (STP)**: 语义时空规划。核心洞察：text/motion condition 竞争的根因不在于 dropout 概率或数据构造，而在于**模型缺乏对"文本语义 → 时空区域"映射关系的显式推理能力**。给定 text "一个人先走几步然后坐下" 和 motion condition（前2秒 keyframe），模型应当先理解：(a) "走几步"对应前半段、全身运动，已被条件覆盖 → 从 condition 复用；(b) "坐下"对应后半段、核心躯干 + 下肢，未被条件覆盖 → 需从 text 规划。STP 通过在生成流程中引入**语义-时空接地 (Semantic-Temporal Grounding)** 阶段，让模型显式产出文本各语义片段到 (时间段, 身体部位, 条件覆盖状态) 的映射，再以此指导后续生成。**与任务类型无关 (T2M/M2M/inpainting/editing 统一适用)**。
+
+5. **Condition-Progressive ODE Sampling (CPOS)**: 条件渐进 ODE 采样。核心洞察：flow matching 的 ODE 求解从 t=0（纯噪声）到 t=1（干净数据），早期 step 确定全局结构/语义，后期 step 精细化局部细节。Text 是全局语义信号，motion condition 是局部结构约束——二者的信息粒度天然对应 ODE 的不同阶段。CPOS 在 ODE 前期增强 text 的 CFG 权重、减弱 motion condition 约束；后期反转。**零额外参数，仅修改推理时的 CFG schedule，可直接用于任何已训练模型。**
 
 ---
 
@@ -175,7 +177,7 @@ KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关
                          └─────────────────────────────────────┘
 
   Text Input                                          Motion Condition Input
-  "a person walks                                     [VACE: inactive + reactive + mask]
+  "a person walks                                     [VACE no_inactive: x_t(MAN) + reactive + mask]
    forward and waves"                                 [sparse keyframes / trajectory / ...]
        │                                                      │
        ▼                                                      ▼
@@ -185,39 +187,31 @@ KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关
   └──────┬──────┘                                    └────────┬─────────┘
          │                                           cond (B,L,198)
    ctxt (B,S,4096)                                   mask (B,L,198)
-   vtxt (B,1,768)                                    density (B,L)
+   vtxt (B,1,768)                                    density ρ = 1 - mask.mean()
          │                                                  │
-         │              ┌──────────────┐                    │
-         │              │   Density    │◄───────────────────┘
-         │              │  Modulator   │
-         │              │   (DM)       │
-         │              └──────┬───────┘
-         │                     │ gate_text (B,1), gate_motion (B,L)
-         │                     │
-         ▼                     ▼
-  ╔══════════════════════════════════════════════════════╗
-  ║            MMDiT Backbone (reused)                   ║
-  ║                                                      ║
-  ║  ┌──────────────────────────────────────────────┐   ║
-  ║  │  Dual-Stream Blocks (×N_double)              │   ║
-  ║  │                                              │   ║
-  ║  │  Motion Stream:                              │   ║
-  ║  │    x_t + VACE features → self-attn → FFN     │   ║
-  ║  │                                              │   ║
-  ║  │  Text Stream:                                │   ║
-  ║  │    ctxt → self-attn → FFN                    │   ║
-  ║  │                                              │   ║
-  ║  │  Cross-stream: gated joint attention          │   ║
-  ║  │    gate_text · text_attn + gate_motion ·     │   ║
-  ║  │    motion_attn                               │   ║
-  ║  └──────────────────────────────────────────────┘   ║
-  ║                                                      ║
-  ║  ┌──────────────────────────────────────────────┐   ║
-  ║  │  Single-Stream Blocks (×N_single)            │   ║
-  ║  │    [motion_tokens; text_tokens] → attn → FFN │   ║
-  ║  └──────────────────────────────────────────────┘   ║
-  ║                                                      ║
-  ╚══════════════════════════════════════════════════════╝
+         │           ┌────────────────────────────┐         │
+         │           │  Training: PDCT Schedule    │         │
+         │           │  (condition density ramp)   │         │
+         │           │  + STP (semantic-temporal    │         │
+         │           │    planning)                 │         │
+         │           └────────────────────────────┘         │
+         │                                                  │
+         ▼                                                  ▼
+  ╔══════════════════════════════════════════════════════════╗
+  ║            MMDiT Backbone (reused, no new params)        ║
+  ║                                                          ║
+  ║  ┌──────────────────────────────────────────────┐       ║
+  ║  │  Dual-Stream Blocks (×N_double)              │       ║
+  ║  │    Motion Stream + Text Stream               │       ║
+  ║  │    Joint Attention (unchanged)               │       ║
+  ║  └──────────────────────────────────────────────┘       ║
+  ║                                                          ║
+  ║  ┌──────────────────────────────────────────────┐       ║
+  ║  │  Single-Stream Blocks (×N_single)            │       ║
+  ║  │    [motion_tokens; text_tokens] → attn → FFN │       ║
+  ║  └──────────────────────────────────────────────┘       ║
+  ║                                                          ║
+  ╚══════════════════════════════════════════════════════════╝
          │
          ▼
   ┌─────────────────┐
@@ -227,11 +221,12 @@ KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关
   └─────────────────┘
          │
          ▼
-  ┌─────────────┐
-  │  ODE Solve  │
-  │  + Replace  │
-  │  Guidance   │
-  └─────────────┘
+  ┌──────────────────┐
+  │  CPOS ODE Solve  │
+  │  (text-heavy →   │
+  │   motion-heavy   │
+  │   CFG schedule)  │
+  └──────────────────┘
          │
          ▼
     Output Motion (B, L, 198)
@@ -239,170 +234,373 @@ KIMODO 在滑步抑制上显著优于 HyMotion，其**运动表征设计**是关
 
 ### 4.2 模块详细设计
 
-#### 4.2.1 Density-Modulated Dual-Stream Attention (DM-DSA)
+#### 4.2.1 Progressive Density Curriculum Training (PDCT)
 
-**动机**: Text 和 motion condition 的信息密度天然不对称。当 motion condition 很丰富（如 dense keyframes）时，text 的边际信息量很低，但当 motion condition 很稀疏时，text 是唯一的语义指导。需要一个**自适应机制**来平衡两者。
+**动机**: Text 和 motion condition 的信息密度天然不对称（§1.3）。当两者同时呈现给模型时，模型倾向于忽略信息密度低的 text（shortcut learning）。现有方法（如 DensityModulator 等门控机制）试图通过引入可学习的参数来平衡两者，但：(a) 引入了新参数，无法复用已有 checkpoint；(b) 门控本身也可能学到 shortcut（总是关闭 text gate）。
 
-**设计**:
+**核心洞察**: 类比人类学习——先学"什么是走路"（概念/语义），再学"走路的具体姿势"（结构/约束）。如果在训练初期**强制限制 motion condition 密度**，模型必须依赖 text 来理解任务语义，从而**先建立 text pathway**。一旦 text 理解能力被建立，后续引入高密度 motion condition 时，模型已经学会了从 text 提取有用信息的能力，不会退化为 shortcut。
 
-```python
-class DensityModulator(nn.Module):
-    """
-    基于条件密度计算 text/motion condition 的贡献权重。
-    密度高 → 增强 motion stream、适当保留 text stream
-    密度低 → 增强 text stream
+**设计**: 三阶段课程学习，**零额外参数**，仅修改 V3 Condition Sampler 的采样分布调度。
 
-    关键：不是简单的 hard routing，而是 soft gating，
-    确保即使在高密度条件下 text 仍有一定影响（语义编辑需要）。
-    """
-    def __init__(self, dim=1024, min_text_gate=0.15):
-        super().__init__()
-        self.min_text_gate = min_text_gate  # text 贡献的下限，防止完全忽略
-
-        # 多粒度密度特征
-        self.frame_density_enc = SinusoidalEncoding(dim=dim//2)  # per-frame 密度
-        self.global_density_enc = SinusoidalEncoding(dim=dim//2)  # 全局密度
-
-        # 门控网络
-        self.gate_net = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.SiLU(),
-            nn.Linear(dim, 2),  # [gate_text, gate_motion]
-        )
-        # 初始化为均衡门控
-        nn.init.zeros_(self.gate_net[-1].weight)
-        nn.init.constant_(self.gate_net[-1].bias, torch.tensor([0.5, 0.5]).log())
-
-    def forward(self, condition_mask, timestep_emb):
-        """
-        Args:
-            condition_mask: (B, L, 198) — 1=生成，0=已知
-            timestep_emb:   (B, D) — 时间步嵌入（扩散早期需要更多语义指导）
-        Returns:
-            gate_text:   (B, 1) — text stream 权重
-            gate_motion: (B, 1) — motion condition stream 权重
-        """
-        # 计算多尺度密度
-        frame_density = condition_mask.mean(dim=-1)          # (B, L)  per-frame
-        global_density = condition_mask.mean(dim=(-1, -2))   # (B,)    global
-
-        # 编码密度
-        frame_feat = self.frame_density_enc(frame_density)   # (B, L, D/2)
-        global_feat = self.global_density_enc(global_density) # (B, D/2)
-
-        # 结合时间步（扩散早期=高噪声，更需要语义指导）
-        density_feat = torch.cat([global_feat, timestep_emb[:, :self.dim//2]], dim=-1)
-
-        # 计算门控
-        gates = self.gate_net(density_feat).softmax(dim=-1)  # (B, 2)
-        gate_text = gates[:, 0:1].clamp(min=self.min_text_gate)
-        gate_motion = gates[:, 1:2]
-
-        # 归一化
-        total = gate_text + gate_motion
-        gate_text = gate_text / total
-        gate_motion = gate_motion / total
-
-        return gate_text, gate_motion
+```
+Phase A — Text Foundation (步数 0 ~ S_A):
+  目标: 建立 text understanding pathway
+  V3 Sampler 配置:
+    K 分布: πK = (0.40, 0.50, 0.10, 0.00, 0.00)  — 40% 纯 T2M (K=0), 50% 单 atom, 无高阶
+    时间 primitive 偏置: empty(0.4) + periodic-大步长(0.3) + interval-短(0.2) + renewal(0.1)
+    → 条件密度期望值 E[ρ] ≈ 0.15 (很稀疏, text 是主要语义来源)
+  
+Phase B — Density Ramp (步数 S_A ~ S_B):
+  目标: 逐步引入高密度条件，同时保持 text pathway
+  V3 Sampler 配置随步数线性插值:
+    πK: 从 Phase A 分布线性过渡到目标分布 (0.10, 0.55, 0.25, 0.07, 0.03)
+    条件密度期望值: E[ρ] 从 0.15 线性增长到 0.55
+  关键: 过渡速度不能太快，否则 text pathway 退化
+  
+Phase C — Full Distribution (步数 > S_B):
+  目标: 正常训练，覆盖全部条件密度分布
+  V3 Sampler 配置: 标准分布 πK = (0.10, 0.55, 0.25, 0.07, 0.03)
+  此时模型已具备 text 理解能力，高密度条件不会导致 shortcut
 ```
 
-**在 DiT Block 中的应用**:
+**从 E1-E4 checkpoint 继续训练的策略**:
 
-```python
-class DualStreamDiTBlock(nn.Module):
-    """修改后的 dual-stream block，集成密度调制"""
+```
+E1/E3 (uncond) 的 checkpoint → 直接用作 Phase A 起点
+  原因: uncond 模型已经学习了 motion 生成的基本能力
+  从 Phase B 开始（跳过 Phase A），因为 uncond 没有 text pathway
 
-    def forward(self, x_motion, x_text, gate_text, gate_motion, ...):
-        # 各自的 self-attention
-        motion_out = self.motion_self_attn(x_motion)
-        text_out = self.text_self_attn(x_text)
-
-        # 关键改动：密度调制的 cross-stream attention
-        # 原始: joint_attn = concat_attn([motion, text])
-        # 新: gated contribution
-
-        # Motion 对 Text 的 cross-attention（获取语义指导）
-        m2t_attn = self.cross_attn_m2t(q=motion_out, kv=text_out)
-        # Text 对 Motion 的 cross-attention（获取空间上下文）
-        t2m_attn = self.cross_attn_t2m(q=text_out, kv=motion_out)
-
-        # 密度调制融合
-        motion_out = motion_out + gate_text * m2t_attn + gate_motion * self.motion_cond_proj(vace_features)
-        text_out = text_out + t2m_attn
-
-        # FFN
-        motion_out = motion_out + self.motion_ffn(motion_out)
-        text_out = text_out + self.text_ffn(text_out)
-
-        return motion_out, text_out
+E2/E4 (caption) 的 checkpoint → 从 Phase B 中期开始
+  原因: caption 模型已有初步 text 理解（尽管 shortcut 存在）
+  用低密度条件分布 "回退" 一段时间，强化 text pathway
+  然后正常进入 Phase C
 ```
 
-**关键设计决策**:
-- `min_text_gate=0.15`: 即使在最密集的条件下（如修复任务，只有少数帧待生成），text 至少保留 15% 的贡献。这确保了"语义编辑"类任务（如"让这个走路变得更高兴"）在高条件密度下仍然有效
-- 门控权重与 timestep 耦合：扩散过程的早期（高噪声）更需要 text 的全局语义指导，后期（低噪声）更依赖 motion condition 的精确空间约束
-- Soft gating 而非 hard routing：确保梯度可以流经两个 stream
+**参数选择指南**:
+- `S_A`: 建议 5K-10K steps（Phase A 不需要太长，只需 text pathway 初步建立）
+- `S_B`: 建议 S_A + 15K-25K steps（Ramp 阶段需要足够长以避免 text pathway 退化）
+- 从 checkpoint 继续时，S_A 可跳过，S_B 缩短到 10K-15K steps
+
+**理论支撑**:
+1. **Curriculum Learning** (Bengio et al., 2009): 从简单到复杂的样本排序可以加速收敛并改善泛化
+2. **Information Bottleneck**: Phase A 中 text 是 bottleneck——模型被迫通过 text bottleneck 编码语义信息
+3. **Anti-Shortcut Regularization**: 通过控制训练分布序列，破坏 "有 motion condition → 忽略 text" 的因果链
 
 ### 4.3 输入张量格式
 
-沿用当前 VACE 格式，不引入额外通道:
+v2 采用 **MAN (Mask-Aware Noise) + `no_inactive` 模式**，不使用 inactive 通道——已知位置的条件值直接替换进 x_t:
 
-| 维度 | 当前 VACE | CDO-FM (proposed) | 变化 |
-|------|-----------|-------------------|------|
-| 噪声状态 | x_t (B,L,198) | x_t (B,L,198) | 不变 |
-| 条件值 | inactive (B,L,198) | inactive (B,L,198) | 不变 |
-| 反应通道 | reactive (B,L,198) | reactive (B,L,198) | 不变 |
-| 掩码 | mask (B,L,198) | mask (B,L,198) | 不变 |
-| **模型输入** | **(B,L,792)** → proj | **(B,L,792)** → proj | **不变** |
-
-关键: 不改变输入格式，DM-DSA 在 attention 层面操作，不增加输入维度。
-
-### 4.4 CFG (Classifier-Free Guidance) 改进
-
-当前 CFG 只有一级（drop text），在 motion condition 存在时 text 的 CFG 效果极弱。
-
-**提议：二级解耦 CFG (Decoupled CFG)**
-
-```
-v_uncond     = model(x_t, null_text, null_motion_cond)   # 完全无条件
-v_motion     = model(x_t, null_text, motion_cond)        # 仅 motion
-v_text       = model(x_t, text,      null_motion_cond)   # 仅 text
-v_full       = model(x_t, text,      motion_cond)        # 全条件
-
-# 解耦引导
-v_guided = v_uncond
-         + w_motion * (v_motion - v_uncond)       # motion 条件引导
-         + w_text   * (v_full   - v_motion)       # text 的增量引导（在 motion 基础上）
+**训练时 (MAN)**:
+```python
+# hymotion_m2m_trainer.py: mask_aware_noise=True
+keep_mask = 1 - src_mask        # (B, L, D): 1=已知位置, 0=待生成位置
+x_t = x_t * src_mask + x1 * keep_mask
+# 已知位置 (mask=0, keep=1): x_t = x1 (干净条件值, 不加噪)
+# 待生成位置 (mask=1, keep=0): x_t = 原始噪声混合
 ```
 
-**优势**:
-- `w_text` 控制的是 text 在 motion condition 基础上的**增量贡献**，而非绝对贡献
-- 当 motion condition 很强时，`v_motion` 已经很好，`v_full - v_motion` 的差异主要体现在 text 要求的**风格/情感**变化上
-- 用户可以独立调节 `w_motion` 和 `w_text`
+**推理时 (Replacement Guidance)**:
+```python
+# hymotion_m2m_pipeline.py: use_replacement=True, rep_mode='skip_last'
+if not is_last_step:
+    x = torch.where(keep_mask, x_clean, x)  # 每步替换已知位置为干净值
+```
 
-**训练适配**: 需要三种 dropout 组合
-- (drop_text=True, drop_motion=True): 训练 `v_uncond`
-- (drop_text=True, drop_motion=False): 训练 `v_motion`
-- (drop_text=False, drop_motion=False): 训练 `v_full`
-- (drop_text=False, drop_motion=True): 可选，训练 `v_text`
+**3 通道输入格式** (`vace_condition_mode='no_inactive'`):
 
-推荐采样概率: `p(both_drop)=0.05, p(text_drop)=0.10, p(motion_drop)=0.05, p(no_drop)=0.80`
+| 通道 | 维度 | 含义 |
+|------|------|------|
+| x_t (MAN) | (B,L,198) | 噪声状态，已知位置已被替换为 x1 干净值 |
+| reactive | (B,L,198) | `src_motion * src_mask`，待生成区域的反应通道 |
+| mask | (B,L,198) | 1=待生成, 0=已知条件 |
+| **模型输入** | **(B,L,594)** → proj | **3×D，不使用 inactive 通道** |
+
+关键设计: MAN 将条件信息直接编码进 x_t（已知位置 = 干净值），模型从 x_t 自身读取条件信息，无需额外的 inactive 通道。CDO-FM 的 PDCT/STP/CPOS 均在训练调度和推理 schedule 层面操作，不改变此 3 通道输入格式。
+
+### 4.4 Condition-Progressive ODE Sampling (CPOS)
+
+**动机**: 标准 CFG 对 text 和 motion condition 施加相同的引导强度，且在 ODE 所有步骤中保持不变。但 flow matching 的 ODE 从 t=0（纯噪声）到 t=1（干净数据）的不同阶段承担不同的生成任务：早期确定全局结构和语义，后期精细化局部细节和空间约束。
+
+**核心洞察**: Text 是**全局语义**信号（"走路"、"高兴地跳"），motion condition 是**局部结构**约束（"帧 30 右手在位置 X"）。这种信息粒度的差异天然对应 ODE 的不同阶段：
+- **ODE 早期 (t→0)**: 高噪声，模型确定"做什么动作"→ text 信息最有价值
+- **ODE 后期 (t→1)**: 低噪声，模型精细化"怎么做这个动作"→ motion condition 约束最关键
+
+CPOS 利用这一洞察，设计**时间自适应的 CFG schedule**。
+
+**设计**: 零额外参数，仅在推理时修改 CFG 权重随 ODE timestep 的变化 schedule。
+
+```python
+def cpos_cfg_schedule(t: float, w_text_base: float = 7.5, w_motion_base: float = 1.0,
+                       text_peak: float = 0.3, motion_onset: float = 0.4) -> Tuple[float, float]:
+    """
+    Condition-Progressive ODE Sampling schedule.
+    
+    在 ODE 早期增强 text CFG，后期增强 motion condition 约束。
+    使用标准 CFG (单次 conditional + 单次 unconditional = 2 forward passes)，
+    通过调制 CFG scale 实现条件渐进——不需要额外的 forward pass。
+    
+    Args:
+        t: ODE timestep, 0=noise, 1=clean
+        w_text_base: text CFG 基础权重
+        w_motion_base: motion condition 引导基础权重
+        text_peak: text CFG 峰值位置 (t 值)
+        motion_onset: motion condition 引导开始增强的位置
+    
+    Returns:
+        w_text(t): text CFG 权重 at timestep t
+        alpha(t): motion condition 混合系数 (0=不使用条件, 1=完全条件)
+    """
+    # Text CFG: bell-shaped, 在 ODE 早期到中期达到峰值
+    # 直觉: 早期需要语义引导确定动作类型，中期仍需语义保持一致性，后期衰减
+    w_text = w_text_base * exp(-((t - text_peak) / 0.25)**2)
+    
+    # Motion condition: 通过 replacement guidance 强度控制
+    # v2 推理使用 replacement guidance: 每步将已知位置替换为干净值
+    # alpha 控制替换强度:
+    #   alpha=0: 不执行替换 → 已知位置也被自由生成 → 等同于无条件
+    #   alpha=1: 完全替换 → 已知位置保持精确 → 完全约束
+    # 实现: x_known = alpha * x_clean + (1-alpha) * x_denoised  (在条件帧处)
+    alpha = sigmoid(10 * (t - motion_onset))
+    
+    return w_text, alpha
+
+
+def cpos_ode_step(model, x_t, t, text_emb, null_text_emb, motion_cond, mask, 
+                   w_text_base=7.5, **kwargs):
+    """
+    CPOS 的单步 ODE 求解。
+    仍然只需 2 次 forward pass (标准 CFG)，不增加推理开销。
+    """
+    w_text, alpha = cpos_cfg_schedule(t, w_text_base)
+    
+    # 条件渐进: replacement guidance 强度随 ODE 进程逐渐增强
+    # 早期: alpha≈0, 不替换已知位置 → 模型必须依赖 text 确定语义
+    # 后期: alpha≈1, 完全替换已知位置 → 精确空间约束
+    # (区别于 v2 现有的 skip_last 模式: CPOS 使 alpha 从 0 渐变到 1，而非 0/1 开关)
+    
+    # Standard CFG with time-varying text weight
+    v_cond = model(x_t, text_emb, motion_cond, mask)
+    v_uncond = model(x_t, null_text_emb, motion_cond, mask)
+    v_guided = v_uncond + w_text * (v_cond - v_uncond)
+    
+    # ODE step → 得到 x_{t+dt}
+    x_next = x_t + v_guided * dt
+    
+    # Replacement guidance with progressive alpha
+    # 在条件帧处: x_next = alpha * x_clean + (1-alpha) * x_next
+    if alpha > 0 and not is_last_step:
+        x_next = torch.where(keep_mask, alpha * x_clean + (1-alpha) * x_next, x_next)
+    
+    return x_next
+```
+
+**关键设计决策**:
+- **仅 2 次 forward pass**: 与标准 CFG 相同的推理开销，不像 Decoupled CFG 需要 3-4 次
+- **Text CFG bell-shaped schedule**: 不是简单的线性衰减，而是在 ODE 早期-中期保持高 text 引导（确保语义一致性），最后才衰减
+- **Motion condition progressive reveal**: 通过 alpha 控制 replacement guidance 强度，已知位置从"不替换"渐变为"完全替换"，避免早期 motion condition 约束淹没 text 语义信号
+- **可调参数**: `text_peak`, `motion_onset` 控制两者的时间分配，不同任务（T2M vs dense M2M）可以用不同的 schedule
+
+**与 Decoupled CFG 的对比**:
+
+| 特性 | Decoupled CFG (已废弃) | CPOS |
+|------|----------------------|------|
+| Forward passes per step | 3-4 | **2** (与标准 CFG 相同) |
+| 额外参数 | 无 | **无** |
+| 训练修改 | 需要 4 种 dropout 组合 | **无需修改训练** |
+| Checkpoint 兼容性 | 需要重新训练 | **直接用于任何已有模型** |
+| 理论基础 | Ad hoc 分解 | **ODE 语义-结构时间分离** |
+
+**理论支撑**:
+1. **Diffusion/Flow ODE 的粗-细粒度特性**: 已被广泛验证——ODE 早期决定全局结构，后期精细化细节 (Progressive Distillation, Meng et al. 2023)
+2. **条件引导的时间依赖性**: Imagen (Saharia et al., 2022) 发现 dynamic thresholding 在不同 ODE 阶段应采用不同策略
+3. **信息论视角**: 在高噪声时，motion condition 的 mutual information 与 target 较低（因为条件值本身被噪声淹没），text 的 mutual information 相对更高（全局语义不受空间噪声影响）
 
 ---
 
 ## 5. 训练策略
 
-### 5.1 Text-Motion Condition Dropout 协调
+### 5.1 Semantic-Temporal Planning (STP) — 语义时空规划
+
+**动机**: 信息密度不对称导致 shortcut learning 的根因不在于数据构造或 dropout 策略——即使混入语义编辑数据让 text 在特定样本上不可替代，模型仍然缺乏**通用的文本-时空推理能力**：它不知道文本中的每个语义片段对应动作的哪个时间段、哪些身体部位，也不知道哪些部分已被 motion condition 覆盖、哪些需要从 text 全新规划。这个推理能力与具体任务类型（T2M/M2M/inpainting/editing）无关——任何涉及 text + condition 的生成都需要模型先"想清楚"再"动手做"。
+
+**核心洞察**: 人类动画师拿到一个 text prompt 和部分关键帧约束时，不会直接开始画中间帧——而是先做规划:
+1. 解析文本: "先走几步然后坐下" → [走路: 0-3s, 全身] + [坐下: 3-5s, 躯干+下肢]
+2. 对照条件: keyframe 在 t=0,1,2s 覆盖了走路阶段 → 走路部分主要从条件推断
+3. 识别缺口: 坐下阶段没有条件 → 需要从 text 完全规划姿态序列
+4. 执行生成: 走路部分保持条件一致性，坐下部分按 text 语义创造
+
+STP 将这一推理过程**显式建模**到生成流程中。
+
+**设计**: STP 包含三个互补组件，从训练数据、模型推理到生成过程全链路引入语义-时空推理。
+
+#### 5.1.1 Grounded Text Augmentation (GTA) — 接地文本增强
+
+在训练时，将 caption 增强为带有**时空接地标注**的格式，让模型学习文本语义与运动时空区域的对应关系。
 
 ```python
-# 训练时的 dropout schedule
-# 关键: 确保 (有text, 有motion condition) 的组合占多数
-dropout_schedule = {
-    'text_only':     0.15,  # drop motion condition, keep text → 强制 text 学习
-    'motion_only':   0.10,  # drop text, keep motion condition → 标准 M2M
-    'both':          0.05,  # drop both → 无条件 baseline
-    'full':          0.70,  # keep both → 目标状态
-}
+# 标准 caption (当前):
+"A person walks forward, then sits down on a chair"
+
+# GTA 接地增强后的 caption:
+"A person walks forward [T:0.0-0.6, B:full_body], then sits down on a chair [T:0.6-1.0, B:torso+lower]"
+
+# 其中:
+# [T:start-end] = 归一化时间段 (0.0=开始, 1.0=结束)
+# [B:body_parts] = 涉及的身体部位组 (full_body / upper / lower / torso / arms / legs / head)
 ```
+
+**实现方式**: 利用 LLM (Qwen3/GPT-4) 对现有 caption 进行时空接地标注，生成 `grounded_caption`。模型训练时以一定概率 (如 50%) 使用 grounded caption 替代原始 caption。
+
+**效果**: 模型通过 cross-attention 学习到 text token 与 motion 时空区域的对齐关系——"walks forward" 的 text token 会自然地 attend to 前半段全身运动区域，"sits down" attend to 后半段下半身区域。这种对齐让模型在推理时能**隐式推断**文本各部分应该影响哪些时空区域。
+
+```python
+# GTA 数据预处理
+def augment_caption_with_grounding(caption: str, motion_duration: float) -> str:
+    """
+    用 LLM 将描述性 caption 增强为时空接地格式。
+    
+    输入: "A person walks forward, then sits down on a chair"
+    输出: "A person walks forward [T:0.0-0.6, B:full_body], then sits down on a chair [T:0.6-1.0, B:torso+lower]"
+    """
+    prompt = f"""Given a motion caption and duration {motion_duration:.1f}s, add temporal and body part annotations.
+    Rules:
+    - [T:start-end] uses normalized time (0.0 to 1.0)
+    - [B:parts] uses: full_body, upper, lower, torso, arms, legs, head
+    - Place annotations after each semantic action phrase
+    Caption: "{caption}"
+    """
+    return llm_annotate(prompt)
+
+
+# 训练时条件构造
+def construct_stp_training_sample(motion, caption, grounded_caption, condition_mask):
+    """
+    以 gta_prob 概率使用接地增强的 caption。
+    """
+    if random.random() < gta_prob:  # e.g., 0.5
+        text = grounded_caption  # 带时空标注
+    else:
+        text = caption           # 原始描述
+    
+    return motion, text, condition_mask
+```
+
+#### 5.1.2 Condition-Aware Planning Tokens (CAPT) — 条件感知规划标记
+
+在模型架构中引入**轻量规划头 (planning head)**，让模型在生成 flow velocity 之前，先预测一个**语义-时空规划图 (Semantic-Temporal Plan)**——标注每个 (time_step, body_part) 区域的信息来源应该是 text、condition 还是两者混合。
+
+```python
+# Planning head: 从 MMDiT backbone 的中间表示产出 planning map
+# 输入: backbone 的某层 hidden state h (B, L, D)
+# 输出: plan_map (B, L, K) — 每个 timestep 对 K 个身体部位组的来源分配
+
+class PlanningHead(nn.Module):
+    """
+    轻量规划头。输出每个 (时间步, 身体部位组) 的信息来源权重。
+    
+    参数量极少: 仅一个线性层 D → K (K=5~7 身体部位组)。
+    """
+    def __init__(self, hidden_dim: int, n_body_groups: int = 5):
+        super().__init__()
+        # 5 body groups: torso, left_arm, right_arm, left_leg, right_leg
+        # 输出: 每个 group 的 source_weight ∈ [0,1]
+        #   0 = 完全从 text 规划, 1 = 完全从 condition 读取
+        self.proj = nn.Linear(hidden_dim, n_body_groups)
+    
+    def forward(self, h, condition_mask):
+        """
+        h: (B, L, D) — backbone hidden state
+        condition_mask: (B, L, 198) — 0=已知, 1=待生成
+        
+        Returns:
+            plan_logits: (B, L, K) — 每个身体部位组的 condition reliance
+        """
+        plan_logits = self.proj(h)  # (B, L, K)
+        return plan_logits  # sigmoid 后: 0=text规划, 1=condition读取
+
+
+# 训练目标: plan_logits 的 GT 由 condition_mask 生成
+def compute_plan_gt(condition_mask):
+    """
+    从 condition_mask 生成 planning GT。
+    
+    condition_mask: (B, L, 198) — 0=已知条件, 1=待生成
+    
+    已知区域 → plan GT = 1 (从 condition 读取)
+    待生成区域 → plan GT = 0 (从 text 规划)
+    """
+    # 将 198-dim mask 映射到 K 个身体部位组
+    body_groups = {
+        'torso': list(range(0, 3)) + list(range(3, 3+6)),     # trans + root rot
+        'left_arm': list(range(3+6*4, 3+6*8)),                 # 4 left arm joints
+        'right_arm': list(range(3+6*8, 3+6*12)),               # 4 right arm joints
+        'left_leg': list(range(3+6*1, 3+6*4)),                 # 3 left leg joints
+        'right_leg': list(range(3+6*12, 3+6*15)),              # 3 right leg joints
+    }
+    plan_gt = []
+    for group_dims in body_groups.values():
+        # 该组的条件覆盖率: 0=全部已知(plan=1), 1=全部待生成(plan=0)
+        group_mask = condition_mask[..., group_dims].mean(dim=-1)  # (B, L)
+        plan_gt.append(1.0 - group_mask)  # 反转: 高=从condition, 低=从text
+    plan_gt = torch.stack(plan_gt, dim=-1)  # (B, L, K)
+    return plan_gt
+```
+
+**关键设计**: CAPT 的 planning head **极轻量** (一个线性层，参数量 < 0.01% 模型总参数)，不破坏"零额外参数"的设计原则。其作用不是"控制生成"，而是作为**辅助训练信号**——迫使 backbone 的内部表示中必须编码文本-条件-时空的三角关系，从而提升 backbone 对 text 信号的利用能力。
+
+**推理时**: planning head 的输出可用于 (a) 可视化模型的"规划图"以增强可解释性，(b) 作为 CPOS 的动态 schedule 输入——在模型认为"需要从 text 规划"的区域加强 text CFG 权重。
+
+#### 5.1.3 Plan-Guided Generation (PGG) — 规划引导生成
+
+将 CAPT 的规划结果与 CPOS 的推理 schedule 联动，实现**自适应的条件引导**。
+
+```python
+# 推理时: PGG 将 planning map 反馈到 CPOS schedule
+def plan_guided_cpos_step(x_t, v_model, plan_map, t, dt, ...):
+    """
+    CPOS ODE step with plan-guided adaptive CFG.
+    
+    plan_map: (B, L, K) — 模型预测的规划图
+        高值 = 该区域由 condition 主导 → 降低 text CFG, 增强 replacement
+        低值 = 该区域由 text 主导 → 增强 text CFG, 减弱 replacement
+    """
+    # 基础 CPOS schedule (同 §4.4)
+    w_text_base = bell_shaped_cfg(t, text_peak=0.3)
+    alpha_base = sigmoid_alpha(t, motion_onset=0.5)
+    
+    # Plan-guided 调制: 在 text-dominant 区域增强 text CFG
+    text_reliance = 1.0 - plan_map.mean(dim=-1, keepdim=True)  # (B, L, 1)
+    # text_reliance 高 → 该区域需要更多 text 引导
+    w_text = w_text_base * (1.0 + text_reliance * adaptive_scale)
+    
+    # Plan-guided replacement: 在 condition-dominant 区域增强替换
+    cond_reliance = plan_map.mean(dim=-1, keepdim=True)
+    alpha = alpha_base * (1.0 + cond_reliance * 0.5)  # 条件区域替换更强
+    alpha = alpha.clamp(0, 1)
+    
+    # 标准 CFG + replacement (同 CPOS)
+    v_uncond = v_model(x_t, text=None)
+    v_cond = v_model(x_t, text=text_emb)
+    v_guided = v_uncond + w_text * (v_cond - v_uncond)
+    x_next = x_t + v_guided * dt
+    
+    if alpha.max() > 0:
+        x_next = torch.where(keep_mask, alpha * x_clean + (1-alpha) * x_next, x_next)
+    
+    return x_next
+```
+
+**STP 与 PDCT/CPOS 的协同关系**:
+
+| 组件 | 作用层面 | 解决什么 | 与 STP 的关系 |
+|------|---------|---------|-------------|
+| PDCT | 训练**时间轴** | 条件密度分布编排——先低后高建立 text pathway | STP-GTA 的接地 caption 在所有 Phase 使用 |
+| STP-GTA | 训练**数据** | 文本语义到时空区域的显式对齐 | 为 CAPT 提供训练信号基础 |
+| STP-CAPT | 模型**表示** | 迫使 backbone 编码文本-条件-时空三角关系 | 产出规划图，指导 PGG |
+| STP-PGG | 推理**过程** | 自适应条件引导——text/condition 按区域调度 | 消费 CAPT 的规划图 + CPOS 的时间 schedule |
+| CPOS | 推理**schedule** | ODE timestep 维度的 text/motion 引导调度 | PGG 在 CPOS 基础上叠加空间维度调度 |
+
+**与任务类型的关系**: STP 的设计**完全与任务类型无关**。无论是 T2M (condition=∅, plan 全为 text-dominant)、dense M2M (大部分 plan 为 condition-dominant, 仅空隙从 text 规划)、还是语义编辑 (condition=source, text=编辑方向, plan 需区分保持 vs 修改区域)，STP 都以统一的推理机制工作——模型不需要知道"这是什么任务"，只需推理"文本的哪些部分对应哪些时空区域、与条件的覆盖关系如何"。
 
 ### 5.2 数据策略
 
@@ -873,7 +1071,10 @@ aux_fk_consistency_weight = 1500.0
 
 | 实验 | 条件 | 内容 | 有效概率 |
 |------|------|------|---------|
-| **E5: + DM-DSA** | E2/E4 caption 完成 | 加入密度调制双流注意力 (text/motion 自适应平衡) | 55% |
+| **E5: + PDCT Curriculum** | E2/E4 caption 完成 | 从 E2/E4 checkpoint 继续，用 PDCT 低密度→高密度课程训练 (text pathway 强化) | 65% |
+| **E5b: + STP 语义时空规划** | E2/E4 caption 完成 | 从 E2/E4 checkpoint 继续，启用 GTA 接地 caption (gta_prob=0.5) + CAPT 规划头辅助损失 | 70% |
+| **E5c: + CPOS Inference** | E2/E4 caption 完成 | 不重训，直接在推理端使用 CPOS schedule (text-heavy → motion-heavy CFG) | 55% |
+| **E5d: PDCT + STP + CPOS** | E5/E5b 完成 | 三者联合: PDCT 课程 + STP 接地规划 + CPOS 推理，验证互补效果 | 75% |
 | **E6: + Explicit Velocity Channel** | E3 > E1 (KIMODO root 有效) | 在版本 B 基础上增加 21×3 joint velocity 通道 | 60% |
 | **E7: + Foot Contact Channel** | E1 滑步仍未解决 | 增加 4-dim foot contact 信号 | 55% |
 | **E8: + FK Keypoint Loss** | E1/E3 完成 | 启用 keypoints3d_weight 消融滑步改善 | 70% |
@@ -936,8 +1137,9 @@ aux_fk_consistency_weight = 1500.0
 
 | 特性 | 当前 M2M | VACE (Wan2.1) | OmniGen2 | Seedance 2.0 | Step1X-Edit | **CDO-FM (Ours)** |
 |------|---------|---------------|----------|--------------|-------------|-------------------|
-| Text-Motion 平衡 | ✗ (竞争) | ✗ | ✓ (双路径) | ✓ (DB-DiT) | ✓ (MLLM路由) | **✓ (DM-DSA 密度调制)** |
-| 解耦 CFG | ✗ | ✗ | ✗ | ? | ✗ | **✓ (二级解耦)** |
+| Text-Motion 平衡 | ✗ (竞争) | ✗ | ✓ (双路径) | ✓ (DB-DiT) | ✓ (MLLM路由) | **✓ (PDCT 课程训练 + STP 语义时空规划)** |
+| 零额外参数 | ✓ | ✓ | ✗ (双路径) | ✗ (DB-DiT) | ✗ (MLLM) | **✓** |
+| 推理时条件解耦 | ✗ | ✗ | ✗ | ? | ✗ | **✓ (CPOS 渐进 ODE)** |
 | Root 表征鲁棒性 | ✗ (raw MoCap) | N/A | N/A | N/A | N/A | **✓ (Dual Root: ADMM平滑)** |
 | 多任务条件采样 | ✗ (简单随机) | ✗ | ✗ | ✗ | ✗ | **✓ (V3 Rank-K 张量先验)** |
 | 任务统一 | 部分 | ✓ | ✓ | ✓ | 编辑为主 | **✓ (全覆盖)** |
@@ -945,20 +1147,23 @@ aux_fk_consistency_weight = 1500.0
 
 ### 11.2 新颖性论证
 
-1. **Density-Modulated Dual-Stream Attention (DM-DSA)**: 不同于 UniCombine 的 LoRA switching 或 OmniGen2 的 hard dual-path，DM-DSA 实现了条件密度驱动的 soft routing，这是首次在 motion generation 中提出。其核心洞察——条件密度的变化需要动态调整语义（text）vs 结构（motion）信号的相对权重——具有普适性，可推广到 video/image inpainting。
+1. **Progressive Density Curriculum Training (PDCT)**: 不同于 OmniGen2 的双路径架构或 Seedance 的 DB-DiT（均引入额外参数），PDCT 仅通过训练时的条件密度分布调度就实现了 text/motion 平衡——核心洞察是利用信息密度的时序不对称性：先在低密度条件下迫使 text pathway 建立（类似 information bottleneck），再逐步引入高密度条件。这是首次在 motion generation 中将 curriculum learning 与条件密度分布显式关联。
 
 2. **Dual Root Representation**: 提出 SMPL Root 与 KIMODO Root (ADMM-smoothed trajectory) 双版本方案，首次系统化地研究 root representation 对 motion generation 滑步问题的影响。两种表征共享完全相同的 198-dim 框架和 loss 设计，仅 translation [0:3] 和 position 参考系不同，可控变量地验证 smooth trajectory 对生成质量的提升。
 
 3. **Rank-K Boolean Tensor Prior (V3 Condition Sampler)**: 提出基于 6 种时间原语 × 5 种维度类型的结构化条件采样策略，相比 random Bernoulli mask 能更系统地覆盖 motion generation 的多样化任务空间（keyframe, prefix, suffix, inbetween, outpainting 及其组合），是首次在统一 M2M 框架中设计面向任务覆盖的条件采样分布。
 
-4. **Decoupled Classifier-Free Guidance**: 针对 text + motion 双条件的信息密度不对称问题，提出两级独立 CFG (w_text, w_motion) 分别控制语义引导和结构引导强度。相比标准 single-scale CFG 能更灵活地平衡 fidelity vs diversity。
+4. **Semantic-Temporal Planning (STP)**: 揭示了 shortcut learning 的根本原因不在于 dropout 分配或数据构造，而在于模型缺乏**对文本语义到时空区域映射的显式推理能力**。STP 通过三组件协同——接地文本增强 (GTA) 让模型学习文本-时空对齐、条件感知规划标记 (CAPT) 迫使 backbone 编码文本-条件-时空三角关系、规划引导生成 (PGG) 在推理时按规划图自适应调度引导强度——使模型先"想清楚"文本各语义片段对应的时空区域和条件覆盖关系，再执行生成。这一机制**与具体任务类型无关** (T2M/M2M/inpainting/editing 统一适用)。
+
+5. **Condition-Progressive ODE Sampling (CPOS)**: 发现 flow matching ODE 的粗-细粒度生成特性与 text（全局语义）/ motion condition（局部结构）的信息粒度天然对应，首次提出将条件引导强度与 ODE timestep 解耦调度——在 ODE 早期放大 text CFG、弱化 motion condition 约束，后期反转。这是一种 training-free 的推理改进，可即时应用于任何已训练的 conditional flow matching 模型。
 
 ### 11.3 与 VACE 的关系
 
 CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
-- VACE 提出了 `V=[T;F;M]` 的统一编码 → 我们保持 VACE 4 通道编码 `[x_t, inactive, reactive, mask]`，但通过 V3 Condition Sampler 实现更结构化的条件分布采样
-- VACE 的 Context Adapter → 我们的 DM-DSA 是其密度感知版本，根据条件密度动态调制 text/motion 信号权重
-- VACE 的 single-scale CFG → 我们的 Decoupled CFG 实现了 text/motion 独立引导
+- VACE 提出了 `V=[T;F;M]` 的统一编码 → v2 进化为 MAN + `no_inactive` 的 3 通道编码 `[x_t(MAN), reactive, mask]`，条件信息直接编码进 x_t，并通过 V3 Condition Sampler 实现更结构化的条件分布采样
+- VACE 使用固定的 text dropout 训练 → 我们的 STP 通过接地文本增强和规划头辅助训练让模型显式学习文本-时空-条件的三角关系，PDCT 在训练时间维度编排条件密度分布
+- VACE 的 single-scale CFG → 我们的 CPOS 实现了 ODE timestep 自适应的条件引导 schedule
+- **核心差异**: CDO-FM 的所有创新（PDCT, STP, CPOS）均为低额外参数的训练/推理策略 (STP 的 planning head 仅 <0.01% 参数)，核心模型架构不变，可直接应用于任何基于 VACE 框架的模型
 
 ---
 
@@ -976,7 +1181,7 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 > 现有 motion generation 方法要么只做 text-to-motion (T2M)，要么只做 motion completion (M2M)，无法在一个模型中同时理解文本语义和空间运动约束。我们发现根因在于两类条件的**信息密度天然不对称**——一句话的信息量远低于 10 帧 dense keyframe。简单地将两者混入同一 conditioning pipeline 会导致模型学到忽略文本的 shortcut。
 >
-> 为此，我们提出 CDO-FM，通过 (1) 密度调制双流注意力 (DM-DSA) 实现 text/motion 条件的自适应平衡，(2) Dual Root 表征方案 (SMPL Root + KIMODO ADMM-smoothed Root) 系统性解决 MoCap 噪声导致的滑步问题，(3) 结构化条件采样策略 (Rank-K Boolean Tensor Prior) 系统覆盖多样化 M2M 任务空间，(4) 解耦双级 CFG 独立控制语义和结构引导。
+> 为此，我们提出 CDO-FM，通过 (1) 渐进密度课程训练 (PDCT) 在训练阶段编排条件密度分布，先在低密度条件下迫使 text pathway 建立再逐步引入高密度条件，(2) 语义时空规划 (STP) 让模型在生成前先推理文本各语义片段对应的时空区域和条件覆盖关系——通过接地文本增强 (GTA) 学习文本-时空对齐、条件感知规划标记 (CAPT) 编码三角关系、规划引导生成 (PGG) 自适应调度引导强度，(3) Dual Root 表征方案 (SMPL Root + KIMODO ADMM-smoothed Root) 系统性解决 MoCap 噪声导致的滑步问题，(4) 结构化条件采样策略 (Rank-K Boolean Tensor Prior) 系统覆盖多样化 M2M 任务空间，(5) 条件渐进 ODE 采样 (CPOS) 在推理时根据 ODE timestep 自适应调度 text/motion 引导强度。STP 的 planning head 仅增加 <0.01% 参数，其余创新均为零额外参数的训练/推理策略。
 >
 > 在 XXX benchmark 上，CDO-FM 首次在单一模型中同时达到 T2M SOTA 和 M2M SOTA，且在 text-conditioned motion completion 这一新任务上显著优于所有 baseline。
 
@@ -989,10 +1194,12 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 | 审稿人质疑 | 预备回应 |
 |-----------|---------|
-| DM-DSA 是否过于复杂？简单 concat 是否足够？ | 消融实验直接对比 DM-DSA vs standard concat |
+| PDCT curriculum 阶段划分是否 ad hoc？ | 消融实验: 直接全分布训练 vs PDCT 三阶段，并提供 information bottleneck 理论支撑 |
+| STP 的 GTA 接地标注质量是否可靠？CAPT planning head 是否真正有效？ | GTA 标注由 LLM 生成，提供标注质量评估 (人工抽样 200 条)；CAPT 消融: 有/无 planning head 的 text effect ratio 和 R-Precision 对比 |
 | Dual Root 的 ADMM 平滑是否只是简单预处理？ | 提供消融: raw trans vs smooth trans 的 FID/foot skating 对比 |
 | V3 Condition Sampler 相比 random mask 提升多大？ | V2 vs V3 sampler 消融 + 任务覆盖分析 |
-| Decoupled CFG 推理开销 3x 是否可接受？ | 提供 standard CFG 回退对比 + distillation 减少步数 |
+| CPOS 的 bell-shaped/sigmoid schedule 是否 heuristic？ | 提供与 constant CFG、linear schedule 的对比消融；引用 ODE coarse-to-fine 理论支撑 |
+| STP planning head 引入了额外参数，是否破坏了通用性？ | Planning head 仅一个线性层 (<0.01% 总参数)，可以 training-free 移除 (PGG 退化为 CPOS)；实验证明 PGG 在移除 CAPT 后仍优于 baseline |
 | 198-dim motion representation 是否限制了方法通用性？ | 讨论扩展到 SMPL-X/手部的路径 |
 
 ---
@@ -1003,29 +1210,30 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 | 风险 | 概率 | 影响 | 缓解策略 |
 |------|------|------|---------|
-| DM-DSA 训练不稳定 | 中 | 高 | 渐进引入 gate (先固定 0.5/0.5，再放开学习) |
+| PDCT 课程训练阶段切换时 loss 震荡 | 中 | 中 | Phase B 使用线性 ramp 而非阶梯切换，Phase 过渡设置 warmup |
+| STP-GTA 接地标注质量不均导致模型学习到错误的时空对齐 | 低-中 | 中 | gta_prob 控制接地 caption 使用比例；GTA 标注可后续人工校验；CAPT 有独立 GT 不依赖 GTA 质量 |
 | KIMODO Root (ADMM平滑) 对生成质量提升有限 | 低-中 | 中 | 退化为 SMPL Root (版本 A)，E1/E2 消融直接验证 |
 | V3 Condition Sampler 对 caption 模型效果不明显 | 低 | 低 | 回退到 V2 sampler (random Bernoulli mask) |
-| Decoupled CFG 推理开销 3x | 高 | 中 | 提供 standard CFG 回退；或 distillation 减少步数 |
+| CPOS schedule 参数 (σ_text, k_motion 等) 需要调优 | 中 | 低 | 基于 ODE 理论提供合理默认值，grid search 仅 2-3 个超参 |
 
 ### 13.2 降级方案
 
 如果完整 CDO-FM 的某些组件效果不理想，可以独立使用其中任一子系统：
 
-**最小可行方案 (MVP)**: Dual Root (SMPL + KIMODO) + V3 Sampler + Decoupled CFG
-- 预期: 解决滑步问题 + 多任务条件覆盖 + text/motion 平衡
-- 成本: 最低，KIMODO Root 仅需在线转换 translation + 新 mean/std
-- 时间: 1-2 周
+**最小可行方案 (MVP)**: Dual Root (SMPL + KIMODO) + V3 Sampler + CPOS
+- 预期: 解决滑步问题 + 多任务条件覆盖 + 推理时 text/motion 平衡
+- 成本: 最低，CPOS 为 training-free 推理策略，无需重新训练
+- 时间: 1 周 (CPOS 仅需实现推理 schedule)
 
-**中间方案**: MVP + DM-DSA
-- 预期: 进一步平衡 text/motion，达到论文水平
-- 成本: 需要修改 DiT block，重新训练
-- 时间: 3-4 周
+**中间方案**: MVP + STP-GTA
+- 预期: 接地文本增强让模型学习文本-时空对齐，改善 text 理解能力
+- 成本: LLM 标注现有 caption (一次性预处理)，从 E1-E4 checkpoint 继续训练
+- 时间: 2-3 周 (含 GTA 标注生成)
 
-**完整方案**: 全部 CDO-FM 组件 + 后续实验中验证的新模块
-- 预期: 最佳性能，完整的论文故事
-- 成本: 根据 E1-E4 结果逐步扩展
-- 时间: 6-8 周
+**完整方案**: MVP + STP (GTA+CAPT+PGG) + PDCT
+- 预期: 最佳性能——PDCT 先建立 text pathway，STP 全链路引入语义-时空推理 + CPOS/PGG 推理优化
+- 成本: 需要额外 20K-30K 步训练 (Phase B + Phase C with STP)
+- 时间: 4-6 周
 
 ---
 
@@ -1063,16 +1271,21 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 □ 确认 loss 正常下降
 ```
 
-### Phase 1: 架构升级 — DM-DSA + Decoupled CFG (Week 3-5)
+### Phase 1: 语义时空规划 — STP + PDCT + CPOS (Week 3-5)
 
 ```
 □ 根据 E1-E4 结果确定 SMPL Root vs KIMODO Root 的最优方案
-□ 实现 DensityModulator
-□ 修改 DualStreamDiTBlock 集成 DM-DSA
-□ 实现 Decoupled CFG (推理端: 独立 w_text, w_motion)
+□ STP-GTA: 利用 LLM 对训练集 caption 生成时空接地标注 (grounded_caption)
+□ STP-CAPT: 实现 PlanningHead 轻量规划头 + 辅助训练损失
+□ 从 E1-E4 checkpoint 出发，以 STP-GTA+CAPT 继续训练 (E5b)
+□ 实现 PDCT 三阶段 schedule: Phase A/B/C 的 V3 K-distribution 切换
+□ 从 E1-E4 checkpoint 出发，以 PDCT curriculum 继续训练 (E5)
+□ 实现 CPOS 推理 schedule: bell-shaped text CFG + sigmoid replacement alpha
+□ 在 E1-E4 基础 checkpoint 上直接测试 CPOS (E5c, training-free)
+□ STP-PGG: 实现规划引导生成——将 CAPT 规划图反馈到 CPOS schedule
 □ 切换训练数据到 high_quality.json (456K)
-□ 训练消融实验: base + DM-DSA, base + Decoupled CFG
-□ 评估: 确认 text conditioning 质量提升
+□ 训练完整组合: PDCT + STP + CPOS (E5d)
+□ 评估: 确认 text conditioning 质量提升 + 规划图可视化验证，对比各消融
 ```
 
 ### Phase 2: 质量增强 — 滑步专项 + 数据质量 (Week 5-7)
@@ -1110,17 +1323,17 @@ CDO-FM 可以视为 VACE 框架在 motion generation 领域的**深度进化**:
 
 > **注**：B3 (VACE reactive 泄漏) 仅影响 v1 (`split_reactive` 模式)；v2 从设计之初即使用 `no_inactive` 模式，不存在该问题。B4 (`cond_mask_prob` 默认值) v2 config 显式覆盖，无实际影响。两者均不列入 v2 修复清单。
 
-### CDO-FM 架构升级（待实施）
+### CDO-FM 零参数训练策略（待实施）
 
 | 文件 | 修改类型 | 说明 |
 |------|---------|------|
 | `hftrainer/models/motion/hymotion_m2m/bundle.py` | 修改 | 增加 KIMODO Root 在线转换支持 |
-| `hftrainer/models/motion/hymotion_m2m/network/density_modulator.py` | 新增 | DensityModulator (DM-DSA) |
-| `hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py` | 修改 | DualStreamDiTBlock 集成 DM-DSA |
-| `hftrainer/trainers/motion/hymotion_m2m_trainer.py` | 修改 | Position loss 改为 relative-to-root, 移除 t² weighting |
-| `hftrainer/pipelines/motion/hymotion_m2m_pipeline.py` | 修改 | Decoupled CFG (独立 w_text, w_motion) |
+| `hftrainer/trainers/motion/hymotion_m2m_trainer.py` | 修改 | Position loss 改为 relative-to-root; PDCT schedule 支持 |
+| `hftrainer/pipelines/motion/hymotion_m2m_pipeline.py` | 修改 | CPOS 渐进 ODE 采样 (bell-shaped text CFG + sigmoid replacement alpha) |
 | `hftrainer/datasets/motion/transforms/` | 修改 | PrepareM2MCondition 集成 ADMM 在线转换 |
-| `configs/hymotion_m2m_v2/` | 新增 | SMPL Root / KIMODO Root × uncond / caption 4 个配置 |
+| `hftrainer/datasets/motion/` | 修改 | 支持 GTA 接地 caption 加载 (grounded_caption_path); 以 gta_prob 概率切换标准/接地 caption |
+| `hftrainer/models/motion/hymotion_m2m/bundle.py` | 修改 | 新增 PlanningHead 轻量规划头; planning loss 计算 |
+| `configs/hymotion_m2m_v2/` | 新增/修改 | PDCT phase configs (Phase A/B/C 的 V3 K-distribution schedule), STP-GTA/CAPT 配置 |
 
 ## 附录 B: 参考文献
 
@@ -1265,4 +1478,4 @@ def test_online_conversion():
 
 ---
 
-*文档结束。v1.7 核心简化：(1) 移除 TCC/CCFM/PCE 复杂方案，聚焦 DM-DSA + Dual Root + V3 Sampler + Decoupled CFG 四项创新；(2) KIMODO Root 简化为 198-dim (仅替换 translation [0:3] 为 ADMM平滑值，无 heading/无 trans_residual)，在线转换，维度不变；(3) 全部 config 统一使用 V3 Sampler；(4) 首批实验 E1-E4 验证 SMPL Root vs KIMODO Root × uncond/caption 的效果。*
+*文档结束。v2.0 核心变化：用 STP (Semantic-Temporal Planning，语义时空规划) 替换 SEAT——模型先推理"文本内容对应动作的什么时间、什么部位，哪些已被 motion condition 给定，哪些需要从 text 规划"，再执行生成。STP 三组件: (a) GTA 接地文本增强——LLM 标注 caption 的时空对应关系；(b) CAPT 条件感知规划标记——轻量 planning head (<0.01% 参数) 预测语义-时空规划图；(c) PGG 规划引导生成——将规划图反馈到 CPOS 推理 schedule 实现空间自适应引导。与任务类型无关 (T2M/M2M/inpainting/editing 统一适用)。之前版本变化保留: v1.9 修正 §4.3 MAN+no_inactive 3通道594-dim、CPOS alpha replacement guidance 机制。*
