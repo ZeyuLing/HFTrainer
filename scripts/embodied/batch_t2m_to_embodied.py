@@ -691,8 +691,9 @@ def main():
     npz_cache_dir = output_root / "data" / "npz"            # motion_135 NPZs
     render_dir = output_root / "data" / "renders"           # render videos
     retarget_dir = output_root / "data" / "retarget"        # PyRoki retarget outputs
+    smpl_mesh_dir = output_root / "data" / "smpl_mesh"       # SMPL mesh JSONs for web viz
 
-    for d in [motions_dir, tracked_dir, cache_dir, npz_cache_dir, render_dir, retarget_dir]:
+    for d in [motions_dir, tracked_dir, cache_dir, npz_cache_dir, render_dir, retarget_dir, smpl_mesh_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
     # =========================================================================
@@ -735,6 +736,7 @@ def main():
         npz_path_out = npz_cache_dir / f"{motion_id}.npz"
         ref_render_dir = render_dir / motion_id / "reference"
         tracked_render_dir = render_dir / motion_id / "tracked"
+        smpl_mesh_json_path = smpl_mesh_dir / f"{motion_id}.json"
         meta_path = output_root / "data" / "meta" / f"{motion_id}.json"
         meta_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -788,6 +790,25 @@ def main():
             # Using pre-existing NPZ
             npz_path_out = pathlib.Path(npz_files[idx])
             print(f"  [A] Using existing NPZ: {npz_path_out}")
+
+        # ---- Step A2: Generate SMPL mesh JSON for web visualization ----
+        if not smpl_mesh_json_path.exists():
+            try:
+                print(f"  [A2] Generating SMPL mesh JSON...")
+                from scripts.embodied.batch_npz_to_smpl_mesh_json import convert_single_npz
+                mesh_data = convert_single_npz(
+                    str(npz_path_out), smpl_type="smplh", gender="neutral"
+                )
+                with open(smpl_mesh_json_path, 'w') as f:
+                    json.dump(mesh_data, f, separators=(',', ':'))
+                n_frames = len(mesh_data["frames"])
+                file_size = smpl_mesh_json_path.stat().st_size
+                print(f"      SMPL mesh JSON: {n_frames} frames, {file_size/1024:.1f}KB")
+            except Exception as e:
+                print(f"      SMPL mesh JSON FAILED: {e}")
+                traceback.print_exc()
+        else:
+            print(f"  [A2] SMPL mesh JSON exists, skipping")
 
         # ---- Step B: Retarget pipeline → ProtoMotions .motion (V6 PyRoki) ----
         if motion_file is None or not args.skip_pipeline_on_existing_cache:
@@ -902,6 +923,7 @@ def main():
             "paths": {
                 "ref_json": str(ref_json_path),
                 "tracked_json": str(tracked_json_path),
+                "smpl_mesh_json": str(smpl_mesh_json_path),
                 "motion_file": str(motion_file) if motion_file else None,
                 "npz": str(npz_path_out),
                 "retarget_dir": str(motion_retarget_dir),
