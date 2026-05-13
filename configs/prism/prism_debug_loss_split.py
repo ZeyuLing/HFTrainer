@@ -5,6 +5,7 @@
 _base_ = "../_base_/default_runtime.py"
 
 work_dir = "work_dirs/prism_debug_loss_split"
+load_from = "work_dirs/prism_1b_tp2m_multiframe/checkpoint-iter_15000"
 
 default_hooks = dict(
     logger=dict(type="LoggerHook", interval=1, iter_interval=1),

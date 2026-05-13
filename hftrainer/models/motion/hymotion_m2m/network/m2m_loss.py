@@ -104,7 +104,7 @@ class M2MLoss(nn.Module):
         if not self.spike_downweight_enabled or len(self._trans_loss_history) < 10:
             return 1.0
         
-        threshold = self._baseline_trans_loss + self._trans_loss_std * self._spike_detection_std_threshold
+        threshold = self._baseline_trans_loss + self._trans_loss_std * self.spike_detection_std_threshold
         
         if trans_loss_magnitude > threshold:
             return self.spike_downweight_factor
