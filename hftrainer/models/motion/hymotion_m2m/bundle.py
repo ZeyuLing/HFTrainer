@@ -163,6 +163,7 @@ class HyMotionM2MBundle(ModelBundle):
         noise_scheduler_cfg: Optional[dict] = None,
         infer_noise_scheduler_cfg: Optional[dict] = None,
         cond_mask_prob: float = 0.0,
+        enable_ctxt_null_feat: bool = False,
         vace_condition_mode: str = 'split_reactive',
         vtxt_input_dim: int = 768,
         ctxt_input_dim: int = 4096,
@@ -183,6 +184,10 @@ class HyMotionM2MBundle(ModelBundle):
         self.pred_type = pred_type
         self.uncondition_mode = uncondition_mode
         self.cond_mask_prob = cond_mask_prob
+        # Match the official HY-Motion CFG default: the CFG "silent" branch
+        # nulls vtxt, while token-level ctxt remains caption-conditioned unless
+        # this flag is explicitly enabled.
+        self.enable_ctxt_null_feat = bool(enable_ctxt_null_feat)
         self.vace_condition_mode = str(vace_condition_mode or 'split_reactive').strip()
         self.rotation_space = rotation_space
         assert rotation_space in ('local', 'global'), (
@@ -197,12 +202,15 @@ class HyMotionM2MBundle(ModelBundle):
         self._text_encoder_cfg = deepcopy(text_encoder) if text_encoder else None
 
         # ---- null embeddings for classifier-free guidance ----
-        # Frozen: values come from pretrained T2M checkpoint via load_from.
-        # These represent the learned "no text condition" embedding and should
-        # NOT be updated during M2M training — the transformer adapts to them.
-        # Freezing also avoids the need to save/sync them across checkpoints.
-        self.null_vtxt_feat = nn.Parameter(torch.zeros(1, 1, vtxt_input_dim), requires_grad=False)
-        self.null_ctxt_input = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim), requires_grad=False)
+        # Trainable: initialized with small random values. During M2M training,
+        # these embeddings learn the "no text condition" representation jointly
+        # with the transformer. This allows CFG to work correctly: when text_available=False,
+        # the model sees null_embeddings which are distinct from real text embeddings,
+        # enabling the transformer to learn meaningful text conditioning via the guidance
+        # signal (pred_with_text - pred_with_null). Frozen null embeddings cause CFG
+        # to fail because null and real embeddings appear equivalent to the model.
+        self.null_vtxt_feat = nn.Parameter(torch.randn(1, 1, vtxt_input_dim) * 0.01, requires_grad=True)
+        self.null_ctxt_input = nn.Parameter(torch.randn(1, 1, ctxt_input_dim) * 0.01, requires_grad=True)
 
         # ---- mean / std buffers ----
         self._load_mean_std(mean_std_dir)
