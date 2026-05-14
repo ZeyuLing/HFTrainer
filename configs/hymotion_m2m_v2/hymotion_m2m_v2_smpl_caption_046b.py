@@ -59,8 +59,10 @@ train_dataloader = dict(
     num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
     persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
+        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_20260514.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
+            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
             dict(
                 type='LoadSmplx55',
                 key='motion',
@@ -93,9 +95,11 @@ train_dataloader = dict(
                 keys=[
                     'src_motion', 'tgt_motion', 'src_mask',
                     'tgt_length', 'src_length', 'edit_mode',
+                    'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
                 ],
                 meta_keys=['motion_path', 'fps'],
-                set_dummy_value=False,
+                set_dummy_value=True,
+                dummy_value=None,
             ),
         ],
     ),

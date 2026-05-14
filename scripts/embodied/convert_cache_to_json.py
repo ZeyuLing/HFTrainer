@@ -43,6 +43,11 @@ import sys
 import numpy as np
 import torch
 
+# Add ProtoMotions to path for unpickling .motion files with custom classes
+_proto_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "ref_repo", "ProtoMotions")
+if _proto_path not in sys.path:
+    sys.path.insert(0, _proto_path)
+
 # MuJoCo DOF ordering (from MJCF body-tree traversal)
 DOF_JOINT_NAMES = [
     "left_hip_pitch_joint",

@@ -104,16 +104,15 @@ class HyMotionT2MPipeline:
         do_cfg = self.text_guidance_scale > 1.0
 
         # For CFG: prepare null text embeddings
+        # Official HY-Motion: only null the sentence-level embedding (vtxt),
+        # keep real token-level context (ctxt) and its mask for the unconditional branch.
+        # This matches the official enable_ctxt_null_feat=False default.
         if do_cfg:
             null_vtxt = self.bundle.null_vtxt_feat.expand_as(vtxt_input)
-            null_ctxt = self.bundle.null_ctxt_input.expand_as(ctxt_input)
             # Stack: [unconditional, conditional]
             vtxt_cfg = torch.cat([null_vtxt, vtxt_input], dim=0)
-            ctxt_cfg = torch.cat([null_ctxt, ctxt_input], dim=0)
-            ctxt_mask_cfg = torch.cat([
-                torch.ones(B, ctxt_mask_temporal.shape[1], dtype=torch.bool, device=device),
-                ctxt_mask_temporal,
-            ], dim=0)
+            ctxt_cfg = torch.cat([ctxt_input, ctxt_input], dim=0)  # keep real ctxt for both
+            ctxt_mask_cfg = torch.cat([ctxt_mask_temporal, ctxt_mask_temporal], dim=0)
 
         # ODE function
         def fn(t_val: Tensor, x: Tensor) -> Tensor:

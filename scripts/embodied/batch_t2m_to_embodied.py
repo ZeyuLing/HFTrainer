@@ -85,8 +85,8 @@ def parse_args():
                    help="HyMotion T2M config path")
     p.add_argument("--checkpoint", type=str, default=DEFAULT_T2M_CHECKPOINT,
                    help="HyMotion T2M checkpoint path")
-    p.add_argument("--num-steps", type=int, default=100,
-                   help="ODE denoising steps (default: 100)")
+    p.add_argument("--num-steps", type=int, default=50,
+                   help="ODE denoising steps (default: 50, matches official HY-Motion)")
     p.add_argument("--guidance-scale", type=float, default=5.0,
                    help="CFG guidance scale (default: 5.0, matching official HY-Motion-1.0 CLI --cfg_scale)")
     p.add_argument("--device", type=str, default="cuda",

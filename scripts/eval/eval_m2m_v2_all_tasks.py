@@ -47,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # runtime text_encoder config).
 # ============================================================================
 
-CAPTION_EMBED_CACHE_PATH = Path(__file__).resolve().parent.parent / \
+CAPTION_EMBED_CACHE_PATH = Path(__file__).resolve().parents[2] / \
     'data' / 'eval' / 'm2m_v2' / 'caption_embeddings' / 'cache.pt'
 
 _CAPTION_EMBED_CACHE: Optional[Dict[str, Dict[str, torch.Tensor]]] = None
@@ -152,6 +152,35 @@ V2_MODELS = {
         'desc': 'v2 Caption + Global rotation (Phase 2: T2M + completion)',
         'has_caption': True,
         'rotation_space': 'global',
+    },
+    # Phase 0 root-representation ablations trained on the 2026-05-14 data.
+    'kimodo_caption_E4': {
+        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_046b.py',
+        'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_caption_E4',
+        'desc': 'v2 KIMODO Root + Caption (E4)',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
+    'smpl_caption_E2': {
+        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py',
+        'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_E2',
+        'desc': 'v2 SMPL Root + Caption (E2)',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
+    'kimodo_uncond_E3': {
+        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_uncond_046b.py',
+        'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_uncond_E3',
+        'desc': 'v2 KIMODO Root + Unconditioned (E3)',
+        'has_caption': False,
+        'rotation_space': 'local',
+    },
+    'smpl_uncond_E1': {
+        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_uncond_046b.py',
+        'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_uncond_E1',
+        'desc': 'v2 SMPL Root + Unconditioned (E1)',
+        'has_caption': False,
+        'rotation_space': 'local',
     },
 }
 
@@ -3662,6 +3691,14 @@ def main():
                         help='Prefer the rewritten datalist variant '
                              '(eval_e*_rewritten.json) for caption-carrying '
                              'tasks. Produced by scripts/rewrite_eval_captions.py.')
+    parser.add_argument('--run-caption-nonaware', action='store_true',
+                        help='Also run caption models on tasks marked as not '
+                             'caption-aware, using the task inputs without '
+                             'semantic caption conditioning.')
+    parser.add_argument('--allow-uncond-caption-required', action='store_true',
+                        help='Allow unconditioned models to run settings that '
+                             'normally require captions. The caption is loaded '
+                             'for bookkeeping but ignored by the model.')
     parser.add_argument('--seed-base', type=lambda x: int(x, 0),
                         default=0xE4A10000,
                         help='Base seed for per-sample random state '
@@ -3733,7 +3770,8 @@ def main():
             # tasks produced visibly distorted outputs from caption models in
             # earlier eval rounds, and caption does not add value.
             task_caption_aware = getattr(task, 'caption_aware', True)
-            if (not task_caption_aware) and model_info.get('has_caption', False):
+            if ((not task_caption_aware) and model_info.get('has_caption', False)
+                    and not args.run_caption_nonaware):
                 print(f'\n  Skipping {task_id} ({task.name}) for caption model '
                       f'{model_name} — task is not caption-aware')
                 continue
@@ -3786,7 +3824,8 @@ def main():
 
                 # Skip uncond models on settings that REQUIRE caption.
                 if (caption_policy == 'require' and
-                        not model_info.get('has_caption', False)):
+                        not model_info.get('has_caption', False) and
+                        not args.allow_uncond_caption_required):
                     print(f'\n  Task: {task_key} — SKIPPED for {model_name} '
                           f'(requires caption; setting.use_caption=True)')
                     continue

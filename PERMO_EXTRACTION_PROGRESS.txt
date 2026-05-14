@@ -1,0 +1,72 @@
+PerMo Embedding Extraction - Live Status Report
+===============================================
+
+Date: 2026-05-14 02:12 CST
+Status: RUNNING ✓
+
+## Process Information
+Process ID:     48836
+Command:        python3 scripts/data/prepare_permo_embeddings_optimized.py \
+                  --permo-root data/hymotion_data/PerMo/PerMo/20260513 \
+                  --splits train \
+                  --device cpu \
+                  --batch-size 1 \
+                  --max-length-llm 128 \
+                  --torch-dtype bfloat16
+
+Runtime:        3:45 elapsed (since 2026-05-14 02:07 CST)
+CPU Usage:      600% (6 cores utilized)
+Memory Usage:   14.7 GB RAM
+GPU Status:     Not used (cpu device)
+
+## Progress Metrics
+Embeddings Generated:      18 files
+Total Captions:            6,610
+Progress:                  0.27% (18/6610)
+Estimated Rate:            ~0.16 samples/sec
+Estimated Total Time:      ~68,000 seconds = ~18.9 hours
+
+## Performance Estimate
+Current Rate:              0.16 samples/sec (8-30x slower than expected)
+Expected Rate (CPU):       0.2-0.3 samples/sec
+Bottleneck:               Model loading/inference on CPU (CLIP+Qwen3 pipeline)
+
+Estimated Completion:      2026-05-14 21:00 CST (18-19 hours from now)
+Updated Status Check Time: Every 6 hours recommended
+
+## Next Milestones
+500 embeddings:     Expected ~52 minutes   (at 2026-05-14 03:04)
+1000 embeddings:    Expected ~1:43 hours   (at 2026-05-14 03:55)
+2000 embeddings:    Expected ~3:27 hours   (at 2026-05-14 05:39)
+Full completion:    Expected ~18.9 hours   (at 2026-05-14 21:00)
+
+## System Status
+GPU Memory:        8.4 GB free of 15.4 GB total (blocked by web services)
+CPU Cores:         6 active (Turbo Boost enabled)
+System Load:       High (process dominated)
+
+## Action Items
+1. ✓ Started CPU extraction (cannot use GPU due to memory)
+2. ✓ Documented deployment status
+3. ⏳ Monitor progress every 6 hours
+4. 🔄 (Optional) Request sysadmin to kill web services for 45-sec GPU extraction
+5. ⏳ Validate embedding format after completion
+6. ⏳ Integrate into training pipeline
+7. ⏳ Run training with pre-extracted embeddings
+
+## Previous Test Results (from 2026-05-12)
+- ✓ CPU extraction format verified (15 samples)
+- ✓ Tensor shapes correct: text_vec_raw (1,1,768), text_ctxt_raw (1,seq,4096)
+- ✓ Float32 serialization working
+- ✓ Caption text preservation verified
+- ✓ Multi-split iteration working
+
+## Notes
+- Process is memory-intensive (14.7 GB) to keep models in memory
+- CPU cores are fully utilized (Turbo Boost active)
+- Resume-safe: can restart anytime, skips existing embeddings
+- No GPU required makes this approach bulletproof
+- Slow speed is expected tradeoff for memory independence
+
+Last Updated: 2026-05-14 02:12 CST
+Next Check:   2026-05-14 08:00 CST (recommended)

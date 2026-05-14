@@ -319,6 +319,37 @@ class LoadSmplx55(BaseTransform):
 
         return transl, pose  # numpy
 
+    def _load_precomputed_135(self, data, results: Dict) -> Dict:
+        """Fast path for NPZ files with pre-computed motion_135 (e.g., PerMo).
+
+        These NPZs contain ``motion_135`` (T, 135) already in the target format
+        [trans(3), rot6d_22joints(132)] but lack raw SMPL ``poses``/``trans``.
+        No augmentation is applied (pre-computed data is used as-is).
+
+        Parameters
+        ----------
+        data : NpzFile
+            Already-loaded NPZ data (avoids double I/O).
+        results : dict
+            Pipeline results dict to update.
+        """
+        motion = np.asarray(data["motion_135"], dtype=np.float32)  # [T, 135]
+        fps = int(data["mocap_framerate"]) if "mocap_framerate" in data else None
+        T = motion.shape[0]
+
+        results[self.key] = torch.from_numpy(motion)  # [T, 135]
+        results["num_person"] = 1
+        results["rot_type"] = self.rot_type
+        results["smpl_type"] = self.smpl_type
+        results["transl_type"] = self.transl_type
+        results["num_frames"] = T
+        results["duration"] = (T / fps) if fps else None
+        results["fps"] = fps
+        results["num_joints"] = 22
+        results["aug_yaw_deg"] = 0.0
+        results["aug_offset"] = [0.0, 0.0, 0.0]
+        return results
+
     def transform(self, results: Dict) -> Dict:
         path_or_list = results[f"{self.key}_path"]
 
@@ -330,7 +361,18 @@ class LoadSmplx55(BaseTransform):
                 np.str_,
             ),
         ):
-            abs_trans, poses, fps = _read_one_person_npz(str(path_or_list))
+            path = str(path_or_list)
+
+            # Fast path: pre-computed motion_135 (e.g., PerMo dataset)
+            # These NPZs have motion_135 [T, 135] but no raw SMPL poses/trans.
+            data = np.load(path, allow_pickle=True)
+            if "motion_135" in data and "poses" not in data:
+                return self._load_precomputed_135(data, results)
+
+            # Normal path: raw SMPL params
+            abs_trans = np.asarray(data["trans"], dtype=np.float32)
+            poses = np.asarray(data["poses"], dtype=np.float32)
+            fps = int(data["mocap_framerate"]) if "mocap_framerate" in data else None
 
             do_aug, yaw_deg, R_y, offset = self._sample_group_transform()
             transl, pose = self._process_one_person(
