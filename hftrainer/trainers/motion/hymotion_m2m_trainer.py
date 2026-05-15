@@ -183,6 +183,19 @@ class HyMotionM2MTrainer(BaseTrainer):
                 cond_mask_prob=self.bundle.cond_mask_prob,
                 return_text_available=True,
             )
+            # FIX: Update ctxt_mask_temporal for dropped samples to match inference CFG
+            # When text is dropped via mask_text_cond, the ctxt embeddings become null
+            # embeddings repeated L times, but the attention mask wasn't updated.
+            # This creates a distribution mismatch: training sees variable attention
+            # coverage for null embeddings (based on original caption length), but
+            # inference CFG null branch only attends to 1 position. Update the mask
+            # to match inference for consistency.
+            if not text_available.all():
+                dropped_samples = ~text_available
+                ctxt_mask_temporal = ctxt_mask_temporal.clone()
+                ctxt_mask_temporal[dropped_samples] = False
+                ctxt_mask_temporal[dropped_samples, 0] = True  # Only 1 position valid
+
         elif 'caption' in batch and batch['caption'] is not None:
             # Online text encoding from raw captions.
             # The text encoder (Qwen3-8B) lives on CPU and is never moved to
@@ -210,6 +223,19 @@ class HyMotionM2MTrainer(BaseTrainer):
                 cond_mask_prob=self.bundle.cond_mask_prob,
                 return_text_available=True,
             )
+            # FIX: Update ctxt_mask_temporal for dropped samples to match inference CFG
+            # When text is dropped via mask_text_cond, the ctxt embeddings become null
+            # embeddings repeated L times, but the attention mask wasn't updated.
+            # This creates a distribution mismatch: training sees variable attention
+            # coverage for null embeddings (based on original caption length), but
+            # inference CFG null branch only attends to 1 position. Update the mask
+            # to match inference for consistency.
+            if not text_available.all():
+                dropped_samples = ~text_available
+                ctxt_mask_temporal = ctxt_mask_temporal.clone()
+                ctxt_mask_temporal[dropped_samples] = False
+                ctxt_mask_temporal[dropped_samples, 0] = True  # Only 1 position valid
+
         else:
             vtxt_input = self.bundle.null_vtxt_feat.expand(B, 1, -1)
             ctxt_input = self.bundle.null_ctxt_input.expand(B, 1, -1)
