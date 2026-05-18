@@ -146,6 +146,9 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
         added_kv_proj_dim: Optional[int] = None,
         rope_max_seq_len: int = 1024,
         pos_embed_seq_len: Optional[int] = None,
+        joint_pos_mode: str = "sequential",
+        num_spectral_modes: int = 4,
+        spectral_scale: Optional[float] = None,
     ) -> None:
         # Skip WanTransformer3DModel.__init__ and call ModelMixin.__init__ directly
         # to avoid initializing 3D-specific components
@@ -162,7 +165,10 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
         # ==========================================================
         # RoPE for encoding temporal and joint positions
         self.rope = MotionWanRotaryPosEmbed(
-            attention_head_dim, patch_size, rope_max_seq_len
+            attention_head_dim, patch_size, rope_max_seq_len,
+            joint_pos_mode=joint_pos_mode,
+            num_spectral_modes=num_spectral_modes,
+            spectral_scale=spectral_scale,
         )
         # Conv2d patchifies motion: [B, C, T, J] -> [B, inner_dim, T//p_t, J//p_j]
         self.patch_embedding = nn.Conv2d(

@@ -6,6 +6,12 @@ motion data, which has two spatial dimensions: temporal frames and body joints.
 The RoPE is factorized into separate embeddings for each dimension, following
 the approach used in video/image transformers.
 
+Supports three joint position modes:
+    - "sequential": Standard sequential indices (0, 1, 2, ...) for joints.
+    - "spectral": Laplacian eigenvector coordinates from SMPL-22 kinematic tree.
+      Encodes kinematic distance as RoPE attention bias.
+    - "dfs": Depth-first-search ordering of the kinematic tree.
+
 Reference:
     - RoFormer: Enhanced Transformer with Rotary Position Embedding
       (https://arxiv.org/abs/2104.09864)
@@ -13,10 +19,119 @@ Reference:
       (https://arxiv.org/abs/2403.13298)
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 from torch import nn
 import torch
+import numpy as np
 from diffusers.models.embeddings import get_1d_rotary_pos_embed
+
+
+# SMPL-22 kinematic tree parent array
+# Index i has parent SMPL_22_PARENTS[i]. Root (pelvis, index 0) has parent -1.
+SMPL_22_PARENTS = [
+    -1,  # 0: Pelvis (root)
+    0,   # 1: L_Hip -> Pelvis
+    0,   # 2: R_Hip -> Pelvis
+    0,   # 3: Spine1 -> Pelvis
+    1,   # 4: L_Knee -> L_Hip
+    2,   # 5: R_Knee -> R_Hip
+    3,   # 6: Spine2 -> Spine1
+    4,   # 7: L_Ankle -> L_Knee
+    5,   # 8: R_Ankle -> R_Knee
+    6,   # 9: Spine3 -> Spine2
+    7,   # 10: L_Foot -> L_Ankle
+    8,   # 11: R_Foot -> R_Ankle
+    9,   # 12: Neck -> Spine3
+    9,   # 13: L_Collar -> Spine3
+    9,   # 14: R_Collar -> Spine3
+    12,  # 15: Head -> Neck
+    13,  # 16: L_Shoulder -> L_Collar
+    14,  # 17: R_Shoulder -> R_Collar
+    16,  # 18: L_Elbow -> L_Shoulder
+    17,  # 19: R_Elbow -> R_Shoulder
+    18,  # 20: L_Wrist -> L_Elbow
+    19,  # 21: R_Wrist -> R_Elbow
+]
+
+
+def _compute_spectral_coords(num_joints: int = 22, num_modes: int = 4) -> np.ndarray:
+    """
+    Compute spectral coordinates from the SMPL-22 kinematic tree graph Laplacian.
+
+    Uses the first K non-trivial eigenvectors of the normalized graph Laplacian
+    as positional coordinates for each joint. These coordinates encode kinematic
+    distance: joints close in the kinematic tree have similar spectral coordinates,
+    while distant joints are well-separated.
+
+    Args:
+        num_joints: Number of joints (22 for SMPL-22).
+        num_modes: Number of non-trivial eigenvectors to use (K).
+
+    Returns:
+        spectral_coords: Array of shape (num_joints, num_modes) containing
+            the spectral positional coordinates for each joint.
+    """
+    # Build adjacency matrix from kinematic tree
+    adj = np.zeros((num_joints, num_joints), dtype=np.float64)
+    for child, parent in enumerate(SMPL_22_PARENTS):
+        if parent >= 0:
+            adj[child, parent] = 1.0
+            adj[parent, child] = 1.0
+
+    # Compute degree matrix
+    degree = np.diag(adj.sum(axis=1))
+
+    # Compute graph Laplacian: L = D - A
+    laplacian = degree - adj
+
+    # Compute normalized Laplacian: L_norm = D^{-1/2} L D^{-1/2}
+    d_inv_sqrt = np.diag(1.0 / np.sqrt(np.maximum(adj.sum(axis=1), 1e-10)))
+    laplacian_norm = d_inv_sqrt @ laplacian @ d_inv_sqrt
+
+    # Eigendecomposition (eigenvalues in ascending order)
+    eigenvalues, eigenvectors = np.linalg.eigh(laplacian_norm)
+
+    # Skip the first eigenvector (trivial, constant) and take next K
+    # eigenvectors[:, 0] corresponds to eigenvalue 0 (constant vector)
+    spectral_coords = eigenvectors[:, 1:num_modes + 1]
+
+    return spectral_coords
+
+
+def _compute_dfs_ordering(num_joints: int = 22) -> np.ndarray:
+    """
+    Compute depth-first-search ordering of the SMPL-22 kinematic tree.
+
+    Returns an array where dfs_order[i] is the DFS visit index of joint i.
+    This ensures parent-child joints have nearby indices while maintaining
+    the tree structure.
+
+    Args:
+        num_joints: Number of joints (22 for SMPL-22).
+
+    Returns:
+        dfs_order: Array of shape (num_joints,) with DFS visit indices.
+    """
+    # Build children list
+    children = [[] for _ in range(num_joints)]
+    for child, parent in enumerate(SMPL_22_PARENTS):
+        if parent >= 0:
+            children[parent].append(child)
+
+    # DFS traversal
+    dfs_order = np.zeros(num_joints, dtype=np.float64)
+    visit_idx = 0
+    stack = [0]  # Start from root (pelvis)
+
+    while stack:
+        node = stack.pop()
+        dfs_order[node] = visit_idx
+        visit_idx += 1
+        # Push children in reverse order so leftmost child is visited first
+        for child in reversed(children[node]):
+            stack.append(child)
+
+    return dfs_order
 
 
 class MotionWanRotaryPosEmbed(nn.Module):
@@ -32,38 +147,25 @@ class MotionWanRotaryPosEmbed(nn.Module):
         - First half (t_dim): Encodes temporal/frame position
         - Second half (j_dim): Encodes spatial/joint position
 
-    Architecture:
-        1. Pre-compute 1D RoPE for max_seq_len positions for both dimensions
-        2. During forward pass, slice and reshape based on actual input size
-        3. Expand and combine to create 2D positional encoding
+    Supports three joint position modes:
+        - "sequential": Standard 0, 1, 2, ... indices (default, backward-compatible)
+        - "spectral": Laplacian eigenvector coordinates from kinematic tree.
+          Each joint gets a multi-dimensional spectral coordinate, and the j_dim
+          is further split across spectral modes.
+        - "dfs": DFS ordering of the kinematic tree as joint indices.
 
     Args:
-        attention_head_dim (int): Dimension of each attention head. This will be
-            split between temporal and spatial dimensions (temporal gets the
-            larger half if odd).
+        attention_head_dim (int): Dimension of each attention head.
         patch_size (Tuple[int, int]): Patch size as (patch_frames, patch_joints).
-            Used to compute the number of patches along each dimension.
         max_seq_len (int): Maximum sequence length for pre-computing RoPE.
-            Should be >= max(num_frames // patch_frames, num_joints // patch_joints).
-        theta (float): Base frequency for rotary embeddings. Higher values lead to
-            slower frequency decay. Defaults to 10000.0.
-
-    Attributes:
-        freqs_cos (torch.Tensor): Pre-computed cosine frequencies.
-            Shape: (max_seq_len, attention_head_dim).
-        freqs_sin (torch.Tensor): Pre-computed sine frequencies.
-            Shape: (max_seq_len, attention_head_dim).
-
-    Example:
-        >>> rope = MotionWanRotaryPosEmbed(
-        ...     attention_head_dim=64,
-        ...     patch_size=(1, 1),
-        ...     max_seq_len=256,
-        ... )
-        >>> # Input: (batch, channels, frames, joints)
-        >>> hidden_states = torch.randn(2, 128, 64, 22)
-        >>> freqs_cos, freqs_sin = rope(hidden_states)
-        >>> # Output shapes: (1, 64*22, 1, 64)
+        theta (float): Base frequency for rotary embeddings. Defaults to 10000.0.
+        joint_pos_mode (str): Joint position encoding mode. One of
+            "sequential", "spectral", "dfs". Defaults to "sequential".
+        num_spectral_modes (int): Number of Laplacian eigenvectors to use
+            in spectral mode. Defaults to 4.
+        spectral_scale (float or None): Scale factor for spectral coordinates.
+            If None, defaults to num_joints (22). Spectral coordinates are
+            multiplied by this value before being used as position indices.
     """
 
     def __init__(
@@ -72,109 +174,301 @@ class MotionWanRotaryPosEmbed(nn.Module):
         patch_size: Tuple[int, int],
         max_seq_len: int,
         theta: float = 10000.0,
+        joint_pos_mode: str = "sequential",
+        num_spectral_modes: int = 4,
+        spectral_scale: Optional[float] = None,
     ):
         super().__init__()
 
         self.attention_head_dim = attention_head_dim
         self.patch_size = patch_size
         self.max_seq_len = max_seq_len
+        self.joint_pos_mode = joint_pos_mode
+        self.num_spectral_modes = num_spectral_modes
+        self.spectral_scale = spectral_scale
 
         # Split attention head dimension between temporal and joint axes
         # j_dim gets half, t_dim gets the rest (handles odd dimensions)
         j_dim = attention_head_dim // 2
         t_dim = attention_head_dim - j_dim
 
+        self._t_dim = t_dim
+        self._j_dim = j_dim
+
         # Use float64 for frequency computation precision (float32 on MPS)
         freqs_dtype = (
             torch.float32 if torch.backends.mps.is_available() else torch.float64
         )
 
-        freqs_cos = []
-        freqs_sin = []
+        if joint_pos_mode == "sequential":
+            # Standard sequential mode: pre-compute 1D RoPE for both dimensions
+            freqs_cos = []
+            freqs_sin = []
+            for dim in [t_dim, j_dim]:
+                freq_cos, freq_sin = get_1d_rotary_pos_embed(
+                    dim,
+                    max_seq_len,
+                    theta,
+                    use_real=True,
+                    repeat_interleave_real=True,
+                    freqs_dtype=freqs_dtype,
+                )
+                freqs_cos.append(freq_cos)
+                freqs_sin.append(freq_sin)
 
-        # Compute 1D RoPE for each dimension (temporal and joint)
-        for dim in [t_dim, j_dim]:
-            freq_cos, freq_sin = get_1d_rotary_pos_embed(
-                dim,
+            # Concatenate temporal and joint frequencies along the last dimension
+            # Shape: (max_seq_len, attention_head_dim)
+            self.register_buffer(
+                "freqs_cos", torch.cat(freqs_cos, dim=1), persistent=True
+            )
+            self.register_buffer(
+                "freqs_sin", torch.cat(freqs_sin, dim=1), persistent=True
+            )
+
+        elif joint_pos_mode == "spectral":
+            # Spectral mode: use Laplacian eigenvectors as joint positions
+            # Temporal axis still uses standard sequential RoPE
+            freq_cos_t, freq_sin_t = get_1d_rotary_pos_embed(
+                t_dim,
                 max_seq_len,
                 theta,
-                use_real=True,  # Return real-valued cos/sin instead of complex
-                repeat_interleave_real=True,  # Interleave for real rotation
+                use_real=True,
+                repeat_interleave_real=True,
                 freqs_dtype=freqs_dtype,
             )
-            freqs_cos.append(freq_cos)
-            freqs_sin.append(freq_sin)
+            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=True)
+            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=True)
 
-        # Concatenate temporal and joint frequencies along the last dimension
-        # Shape: (max_seq_len, attention_head_dim)
-        self.register_buffer("freqs_cos", torch.cat(freqs_cos, dim=1), persistent=False)
-        self.register_buffer("freqs_sin", torch.cat(freqs_sin, dim=1), persistent=False)
+            # Compute spectral coordinates for joints
+            spectral_coords = _compute_spectral_coords(
+                num_joints=22, num_modes=num_spectral_modes
+            )
+            # Scale spectral coordinates
+            scale = spectral_scale if spectral_scale is not None else 22.0
+            spectral_coords = spectral_coords * scale
+
+            # spectral_coords shape: (22, num_spectral_modes)
+            # We need to compute per-joint RoPE frequencies using these coords.
+            # Split j_dim across spectral modes:
+            #   Each mode gets j_dim // num_spectral_modes dimensions
+            #   (remainder goes to last mode)
+            dims_per_mode = [j_dim // num_spectral_modes] * num_spectral_modes
+            remainder = j_dim - sum(dims_per_mode)
+            for i in range(remainder):
+                dims_per_mode[-(i + 1)] += 1
+
+            # For each joint, compute RoPE frequencies based on its spectral coords
+            # Pre-compute the frequency bases for each mode
+            joint_freqs_cos_list = []
+            joint_freqs_sin_list = []
+
+            for joint_idx in range(22):
+                mode_cos_list = []
+                mode_sin_list = []
+                for mode_idx in range(num_spectral_modes):
+                    dim = dims_per_mode[mode_idx]
+                    # Position for this joint in this spectral mode
+                    pos = spectral_coords[joint_idx, mode_idx]
+                    # Compute frequencies for a single position
+                    # get_1d_rotary_pos_embed expects integer positions in a range,
+                    # but we need fractional positions. We compute manually.
+                    half_dim = dim // 2
+                    freq_seq = torch.arange(
+                        0, half_dim, dtype=freqs_dtype
+                    )
+                    # Standard RoPE frequency formula: theta^(-2i/d)
+                    freqs = 1.0 / (theta ** (2.0 * freq_seq / dim))
+                    # Multiply by position
+                    angles = pos * freqs
+                    cos_vals = torch.cos(angles)
+                    sin_vals = torch.sin(angles)
+                    # repeat_interleave pattern: [cos(f0), cos(f0), cos(f1), cos(f1), ...]
+                    cos_vals = cos_vals.repeat_interleave(2)
+                    sin_vals = sin_vals.repeat_interleave(2)
+                    mode_cos_list.append(cos_vals)
+                    mode_sin_list.append(sin_vals)
+
+                # Concatenate all modes for this joint: shape (j_dim,)
+                joint_cos = torch.cat(mode_cos_list, dim=0).float()
+                joint_sin = torch.cat(mode_sin_list, dim=0).float()
+                joint_freqs_cos_list.append(joint_cos)
+                joint_freqs_sin_list.append(joint_sin)
+
+            # Stack: shape (22, j_dim)
+            joint_freqs_cos = torch.stack(joint_freqs_cos_list, dim=0)
+            joint_freqs_sin = torch.stack(joint_freqs_sin_list, dim=0)
+
+            self.register_buffer(
+                "joint_freqs_cos", joint_freqs_cos, persistent=True
+            )
+            self.register_buffer(
+                "joint_freqs_sin", joint_freqs_sin, persistent=True
+            )
+
+            # For the translation token (token 0 in the J=23 sequence),
+            # use identity RoPE (cos=1, sin=0)
+            trans_cos = torch.ones(j_dim, dtype=torch.float32)
+            trans_sin = torch.zeros(j_dim, dtype=torch.float32)
+            self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
+            self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
+
+        elif joint_pos_mode == "dfs":
+            # DFS mode: use DFS ordering as joint positions
+            # Temporal axis still uses standard sequential RoPE
+            freq_cos_t, freq_sin_t = get_1d_rotary_pos_embed(
+                t_dim,
+                max_seq_len,
+                theta,
+                use_real=True,
+                repeat_interleave_real=True,
+                freqs_dtype=freqs_dtype,
+            )
+            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=True)
+            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=True)
+
+            # Compute DFS ordering and use as positions for joint RoPE
+            dfs_order = _compute_dfs_ordering(num_joints=22)
+            # dfs_order shape: (22,) with values 0..21 in DFS visit order
+
+            # Pre-compute per-joint RoPE using DFS positions
+            # Use get_1d_rotary_pos_embed for max positions, then index
+            freq_cos_j, freq_sin_j = get_1d_rotary_pos_embed(
+                j_dim,
+                max_seq_len,
+                theta,
+                use_real=True,
+                repeat_interleave_real=True,
+                freqs_dtype=freqs_dtype,
+            )
+            # freq_cos_j shape: (max_seq_len, j_dim)
+            # Index by DFS order for each joint
+            dfs_indices = torch.from_numpy(dfs_order).long()
+            joint_freqs_cos = freq_cos_j[dfs_indices].float()  # (22, j_dim)
+            joint_freqs_sin = freq_sin_j[dfs_indices].float()  # (22, j_dim)
+
+            self.register_buffer(
+                "joint_freqs_cos", joint_freqs_cos, persistent=True
+            )
+            self.register_buffer(
+                "joint_freqs_sin", joint_freqs_sin, persistent=True
+            )
+
+            # Translation token gets index 0 (before all joints in DFS)
+            # Actually, use identity (cos=1, sin=0) for translation token
+            # since it's not a joint in the kinematic tree
+            trans_cos = torch.ones(j_dim, dtype=torch.float32)
+            trans_sin = torch.zeros(j_dim, dtype=torch.float32)
+            self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
+            self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
+
+        else:
+            raise ValueError(
+                f"Unknown joint_pos_mode: '{joint_pos_mode}'. "
+                f"Must be one of 'sequential', 'spectral', 'dfs'."
+            )
 
     def forward(self, hidden_states: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute rotary position embeddings for the given input tensor.
 
-        This method generates 2D positional encodings by:
-        1. Computing the number of patches in each dimension
-        2. Slicing pre-computed frequencies to match input dimensions
-        3. Expanding and combining frequencies for 2D grid structure
-
         Args:
             hidden_states (torch.Tensor): Input tensor with shape
                 (batch_size, num_channels, num_frames, num_joints).
-                Note: The actual values are not used; only the shape is needed
-                to determine the output dimensions.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple containing:
-                - freqs_cos: Cosine frequencies for rotary embedding.
-                    Shape: (1, num_patches, 1, attention_head_dim)
-                    where num_patches = (num_frames // p_t) * (num_joints // p_j)
-                - freqs_sin: Sine frequencies for rotary embedding.
-                    Shape: (1, num_patches, 1, attention_head_dim)
-
-        Note:
-            The output tensors are shaped for broadcasting with attention scores
-            in the transformer layers. The batch and head dimensions are
-            singleton to enable broadcasting.
+            Tuple[torch.Tensor, torch.Tensor]: (freqs_cos, freqs_sin) each with
+                shape (1, num_patches, 1, attention_head_dim).
         """
+        # Get target device and dtype from input
+        device = hidden_states.device
+        dtype = hidden_states.dtype
+        
         # Extract input dimensions
         batch_size, num_channels, num_frames, num_joints = hidden_states.shape
 
         # Calculate number of patches per dimension
-        p_t, p_j = self.patch_size  # patch size for (frames, joints)
+        p_t, p_j = self.patch_size
         ppf = num_frames // p_t  # patches per frame dimension
         ppj = num_joints // p_j  # patches per joint dimension
 
-        # Define split sizes to separate temporal and joint frequencies
-        split_sizes = [
-            self.attention_head_dim - (self.attention_head_dim // 2),  # t_dim
-            self.attention_head_dim // 2,  # j_dim
-        ]
+        if self.joint_pos_mode == "sequential":
+            # Original sequential mode (backward-compatible)
+            split_sizes = [
+                self.attention_head_dim - (self.attention_head_dim // 2),  # t_dim
+                self.attention_head_dim // 2,  # j_dim
+            ]
 
-        # Split concatenated frequencies back into temporal and joint components
-        freqs_cos = self.freqs_cos.split(split_sizes, dim=1)
-        freqs_sin = self.freqs_sin.split(split_sizes, dim=1)
+            # Move buffers to correct device and dtype
+            freqs_cos_all = self.freqs_cos.to(device=device, dtype=dtype)
+            freqs_sin_all = self.freqs_sin.to(device=device, dtype=dtype)
+            
+            freqs_cos = freqs_cos_all.split(split_sizes, dim=1)
+            freqs_sin = freqs_sin_all.split(split_sizes, dim=1)
 
-        # Slice and expand temporal frequencies: (ppf,) -> (ppf, ppj, t_dim)
-        freqs_cos_f = freqs_cos[0][:ppf].view(ppf, 1, -1).expand(ppf, ppj, -1)
-        freqs_cos_j = freqs_cos[1][:ppj].view(1, ppj, -1).expand(ppf, ppj, -1)
+            # Slice and expand temporal frequencies
+            freqs_cos_f = freqs_cos[0][:ppf].view(ppf, 1, -1).expand(ppf, ppj, -1)
+            freqs_cos_j = freqs_cos[1][:ppj].view(1, ppj, -1).expand(ppf, ppj, -1)
 
-        freqs_sin_f = freqs_sin[0][:ppf].view(ppf, 1, -1).expand(ppf, ppj, -1)
-        freqs_sin_j = freqs_sin[1][:ppj].view(1, ppj, -1).expand(ppf, ppj, -1)
+            freqs_sin_f = freqs_sin[0][:ppf].view(ppf, 1, -1).expand(ppf, ppj, -1)
+            freqs_sin_j = freqs_sin[1][:ppj].view(1, ppj, -1).expand(ppf, ppj, -1)
 
-        # Concatenate temporal and joint frequencies and reshape for attention
-        # Final shape: (1, ppf * ppj, 1, attention_head_dim)
-        # - dim 0: batch (broadcast)
-        # - dim 1: sequence (patches)
-        # - dim 2: heads (broadcast)
-        # - dim 3: head dimension
-        freqs_cos = torch.cat([freqs_cos_f, freqs_cos_j], dim=-1).reshape(
-            1, ppf * ppj, 1, -1
-        )
-        freqs_sin = torch.cat([freqs_sin_f, freqs_sin_j], dim=-1).reshape(
-            1, ppf * ppj, 1, -1
-        )
+            # Concatenate and reshape
+            freqs_cos = torch.cat([freqs_cos_f, freqs_cos_j], dim=-1).reshape(
+                1, ppf * ppj, 1, -1
+            )
+            freqs_sin = torch.cat([freqs_sin_f, freqs_sin_j], dim=-1).reshape(
+                1, ppf * ppj, 1, -1
+            )
+
+        elif self.joint_pos_mode in ("spectral", "dfs"):
+            # Spectral/DFS mode: per-joint pre-computed frequencies
+            # Temporal: use sequential RoPE (same as before)
+            # Move temporal buffers to correct device and dtype
+            freqs_cos_t = self.freqs_cos_t.to(device=device, dtype=dtype)[:ppf]  # (ppf, t_dim)
+            freqs_sin_t = self.freqs_sin_t.to(device=device, dtype=dtype)[:ppf]  # (ppf, t_dim)
+
+            # Joint: per-joint pre-computed frequencies
+            # Move joint buffers to correct device and dtype (KEY FIX)
+            joint_freqs_cos = self.joint_freqs_cos.to(device=device, dtype=dtype)  # (22, j_dim)
+            joint_freqs_sin = self.joint_freqs_sin.to(device=device, dtype=dtype)  # (22, j_dim)
+            trans_freqs_cos = self.trans_freqs_cos.to(device=device, dtype=dtype)  # (j_dim,)
+            trans_freqs_sin = self.trans_freqs_sin.to(device=device, dtype=dtype)  # (j_dim,)
+
+            # Build the full joint frequency array including translation token
+            # Token ordering in PRISM: token 0 = translation, tokens 1-22 = joints
+            # Total ppj = num_joints // p_j. With p_j=1, ppj = num_joints = 23
+            # (since VAE outputs J=23: 1 translation + 22 body joints)
+
+            # Construct per-token joint frequencies
+            # Token 0 = translation -> identity RoPE
+            # Tokens 1..22 = body joints -> spectral/dfs RoPE
+            all_joint_cos = torch.cat(
+                [trans_freqs_cos.unsqueeze(0), joint_freqs_cos], dim=0
+            )  # (23, j_dim)
+            all_joint_sin = torch.cat(
+                [trans_freqs_sin.unsqueeze(0), joint_freqs_sin], dim=0
+            )  # (23, j_dim)
+
+            # Slice to actual number of joint patches
+            # (in case ppj != 23, e.g., if p_j > 1)
+            joint_cos = all_joint_cos[:ppj]  # (ppj, j_dim)
+            joint_sin = all_joint_sin[:ppj]  # (ppj, j_dim)
+
+            # Expand temporal: (ppf, 1, t_dim) -> (ppf, ppj, t_dim)
+            freqs_cos_f = freqs_cos_t.view(ppf, 1, -1).expand(ppf, ppj, -1)
+            freqs_sin_f = freqs_sin_t.view(ppf, 1, -1).expand(ppf, ppj, -1)
+
+            # Expand joint: (1, ppj, j_dim) -> (ppf, ppj, j_dim)
+            freqs_cos_j = joint_cos.view(1, ppj, -1).expand(ppf, ppj, -1)
+            freqs_sin_j = joint_sin.view(1, ppj, -1).expand(ppf, ppj, -1)
+
+            # Concatenate temporal and joint, reshape for attention
+            freqs_cos = torch.cat([freqs_cos_f, freqs_cos_j], dim=-1).reshape(
+                1, ppf * ppj, 1, -1
+            )
+            freqs_sin = torch.cat([freqs_sin_f, freqs_sin_j], dim=-1).reshape(
+                1, ppf * ppj, 1, -1
+            )
 
         return freqs_cos, freqs_sin
 
@@ -184,11 +478,12 @@ if __name__ == "__main__":
     Test script for MotionWanRotaryPosEmbed module.
 
     This script validates:
-    1. Basic initialization and forward pass
-    2. Output shapes match expected dimensions
-    3. Different input configurations (varying frames, joints, patch sizes)
-    4. Frequency values are within expected ranges
-    5. Consistency of outputs for same inputs
+    1. Basic initialization and forward pass (sequential mode)
+    2. Spectral mode initialization and forward pass
+    3. DFS mode initialization and forward pass
+    4. Output shapes match expected dimensions
+    5. Frequency values are within expected ranges
+    6. Backward compatibility (sequential mode unchanged)
     """
     print("=" * 60)
     print("Testing MotionWanRotaryPosEmbed module")
@@ -198,170 +493,162 @@ if __name__ == "__main__":
     batch_size = 2
     num_channels = 128
     num_frames = 64
-    num_joints = 22
-    attention_head_dim = 64
+    num_joints = 23  # PRISM uses J=23 (1 translation + 22 body)
+    attention_head_dim = 128  # Match PRISM 1B config
     patch_size = (1, 1)
-    max_seq_len = 256
+    max_seq_len = 1024
 
-    # ==================== Test 1: Basic Initialization ====================
-    print("\n[Test 1] Basic Initialization")
+    # ==================== Test 1: Sequential Mode ====================
+    print("\n[Test 1] Sequential Mode (Backward Compatibility)")
     print("-" * 50)
 
-    rope = MotionWanRotaryPosEmbed(
+    rope_seq = MotionWanRotaryPosEmbed(
         attention_head_dim=attention_head_dim,
         patch_size=patch_size,
         max_seq_len=max_seq_len,
-        theta=10000.0,
+        joint_pos_mode="sequential",
     )
 
-    print(f"attention_head_dim: {rope.attention_head_dim}")
-    print(f"patch_size: {rope.patch_size}")
-    print(f"max_seq_len: {rope.max_seq_len}")
-    print(f"freqs_cos buffer shape: {rope.freqs_cos.shape}")
-    print(f"freqs_sin buffer shape: {rope.freqs_sin.shape}")
-
-    # Validate buffer shapes
-    assert rope.freqs_cos.shape == (
-        max_seq_len,
-        attention_head_dim,
-    ), "freqs_cos shape mismatch!"
-    assert rope.freqs_sin.shape == (
-        max_seq_len,
-        attention_head_dim,
-    ), "freqs_sin shape mismatch!"
-    print("✓ Initialization assertions passed!")
-
-    # ==================== Test 2: Basic Forward Pass ====================
-    print("\n[Test 2] Basic Forward Pass")
-    print("-" * 50)
-
     hidden_states = torch.randn(batch_size, num_channels, num_frames, num_joints)
-    freqs_cos, freqs_sin = rope(hidden_states)
+    freqs_cos, freqs_sin = rope_seq(hidden_states)
 
-    p_t, p_j = patch_size
-    expected_seq_len = (num_frames // p_t) * (num_joints // p_j)
-
-    print(f"Input hidden_states shape: {hidden_states.shape}")
-    print(f"Output freqs_cos shape: {freqs_cos.shape}")
-    print(f"Output freqs_sin shape: {freqs_sin.shape}")
-    print(f"Expected sequence length: {expected_seq_len}")
-
-    # Validate output shapes
+    expected_seq_len = (num_frames // patch_size[0]) * (num_joints // patch_size[1])
     expected_shape = (1, expected_seq_len, 1, attention_head_dim)
-    assert (
-        freqs_cos.shape == expected_shape
-    ), f"freqs_cos shape mismatch! Got {freqs_cos.shape}, expected {expected_shape}"
-    assert (
-        freqs_sin.shape == expected_shape
-    ), f"freqs_sin shape mismatch! Got {freqs_sin.shape}, expected {expected_shape}"
-    print("✓ Forward pass shape assertions passed!")
 
-    # ==================== Test 3: Different Patch Sizes ====================
-    print("\n[Test 3] Different Patch Sizes")
+    print(f"  Input shape: {hidden_states.shape}")
+    print(f"  Output freqs_cos shape: {freqs_cos.shape}")
+    print(f"  Expected shape: {expected_shape}")
+
+    assert freqs_cos.shape == expected_shape, f"Shape mismatch! {freqs_cos.shape} != {expected_shape}"
+    assert freqs_sin.shape == expected_shape, f"Shape mismatch! {freqs_sin.shape} != {expected_shape}"
+    print("  ✓ Sequential mode passed!")
+
+    # ==================== Test 2: Spectral Mode ====================
+    print("\n[Test 2] Spectral Mode (KT-RoPE)")
     print("-" * 50)
 
-    test_configs = [
-        ((1, 1), 64, 22),  # No patching
-        ((2, 1), 64, 22),  # Temporal patching only
-        ((1, 2), 64, 22),  # Joint patching only
-        ((4, 2), 64, 22),  # Both dimensions patched
-    ]
+    rope_spectral = MotionWanRotaryPosEmbed(
+        attention_head_dim=attention_head_dim,
+        patch_size=patch_size,
+        max_seq_len=max_seq_len,
+        joint_pos_mode="spectral",
+        num_spectral_modes=4,
+        spectral_scale=22.0,
+    )
 
-    for p_size, n_frames, n_joints in test_configs:
-        rope_test = MotionWanRotaryPosEmbed(
-            attention_head_dim=attention_head_dim,
-            patch_size=p_size,
-            max_seq_len=max_seq_len,
-        )
-        test_input = torch.randn(batch_size, num_channels, n_frames, n_joints)
-        cos_out, sin_out = rope_test(test_input)
+    freqs_cos_sp, freqs_sin_sp = rope_spectral(hidden_states)
 
-        expected_patches = (n_frames // p_size[0]) * (n_joints // p_size[1])
-        print(
-            f"  patch_size={p_size}, frames={n_frames}, joints={n_joints} "
-            f"-> seq_len={expected_patches}, output_shape={cos_out.shape}"
-        )
+    print(f"  Output freqs_cos shape: {freqs_cos_sp.shape}")
+    print(f"  Expected shape: {expected_shape}")
 
-        assert cos_out.shape[1] == expected_patches, "Sequence length mismatch!"
+    assert freqs_cos_sp.shape == expected_shape, f"Shape mismatch! {freqs_cos_sp.shape} != {expected_shape}"
+    assert freqs_sin_sp.shape == expected_shape, f"Shape mismatch! {freqs_sin_sp.shape} != {expected_shape}"
 
-    print("✓ Different patch size tests passed!")
+    # Verify translation token has identity RoPE (cos=1, sin=0) in joint dimension
+    # Token 0 at frame 0 should have j_dim part = (cos=1, sin=0)
+    j_dim = attention_head_dim // 2
+    t_dim = attention_head_dim - j_dim
+    # First token (frame=0, joint=0) -> index 0 in sequence
+    token0_cos = freqs_cos_sp[0, 0, 0, t_dim:]  # joint part of first token
+    token0_sin = freqs_sin_sp[0, 0, 0, t_dim:]  # joint part of first token
+    assert torch.allclose(token0_cos, torch.ones_like(token0_cos), atol=1e-5), \
+        f"Translation token cos should be 1, got {token0_cos[:5]}"
+    assert torch.allclose(token0_sin, torch.zeros_like(token0_sin), atol=1e-5), \
+        f"Translation token sin should be 0, got {token0_sin[:5]}"
+    print("  ✓ Translation token has identity RoPE!")
 
-    # ==================== Test 4: Frequency Value Validation ====================
-    print("\n[Test 4] Frequency Value Validation")
+    # Verify different joints get different embeddings
+    # Token 1 (joint 0, pelvis) vs Token 2 (joint 1, L_Hip)
+    token1_cos = freqs_cos_sp[0, 1, 0, t_dim:]
+    token2_cos = freqs_cos_sp[0, 2, 0, t_dim:]
+    assert not torch.allclose(token1_cos, token2_cos, atol=1e-3), \
+        "Different joints should have different spectral embeddings!"
+    print("  ✓ Different joints get different embeddings!")
+
+    # Verify spectral mode differs from sequential
+    assert not torch.allclose(freqs_cos, freqs_cos_sp, atol=1e-3), \
+        "Spectral mode should produce different embeddings from sequential!"
+    print("  ✓ Spectral mode differs from sequential!")
+    print("  ✓ Spectral mode passed!")
+
+    # ==================== Test 3: DFS Mode ====================
+    print("\n[Test 3] DFS Mode")
     print("-" * 50)
 
-    # Check that cos/sin values are in valid range [-1, 1]
-    assert (
-        freqs_cos.min() >= -1.0 and freqs_cos.max() <= 1.0
-    ), "freqs_cos values out of range!"
-    assert (
-        freqs_sin.min() >= -1.0 and freqs_sin.max() <= 1.0
-    ), "freqs_sin values out of range!"
+    rope_dfs = MotionWanRotaryPosEmbed(
+        attention_head_dim=attention_head_dim,
+        patch_size=patch_size,
+        max_seq_len=max_seq_len,
+        joint_pos_mode="dfs",
+    )
 
-    # Check that cos^2 + sin^2 ≈ 1 (Pythagorean identity)
-    identity_check = freqs_cos**2 + freqs_sin**2
-    identity_error = (identity_check - 1.0).abs().max().item()
-    print(f"  freqs_cos range: [{freqs_cos.min():.4f}, {freqs_cos.max():.4f}]")
-    print(f"  freqs_sin range: [{freqs_sin.min():.4f}, {freqs_sin.max():.4f}]")
-    print(f"  cos²+sin² identity error (max): {identity_error:.2e}")
+    freqs_cos_dfs, freqs_sin_dfs = rope_dfs(hidden_states)
 
-    assert identity_error < 1e-5, "Pythagorean identity not satisfied!"
-    print("✓ Frequency value validation passed!")
+    print(f"  Output freqs_cos shape: {freqs_cos_dfs.shape}")
+    assert freqs_cos_dfs.shape == expected_shape, f"Shape mismatch!"
+    assert freqs_sin_dfs.shape == expected_shape, f"Shape mismatch!"
 
-    # ==================== Test 5: Consistency Check ====================
-    print("\n[Test 5] Consistency Check (Same Input -> Same Output)")
+    # Verify translation token identity
+    token0_cos_dfs = freqs_cos_dfs[0, 0, 0, t_dim:]
+    token0_sin_dfs = freqs_sin_dfs[0, 0, 0, t_dim:]
+    assert torch.allclose(token0_cos_dfs, torch.ones_like(token0_cos_dfs), atol=1e-5)
+    assert torch.allclose(token0_sin_dfs, torch.zeros_like(token0_sin_dfs), atol=1e-5)
+    print("  ✓ Translation token has identity RoPE!")
+
+    # DFS mode should differ from both sequential and spectral
+    assert not torch.allclose(freqs_cos_dfs, freqs_cos, atol=1e-3)
+    assert not torch.allclose(freqs_cos_dfs, freqs_cos_sp, atol=1e-3)
+    print("  ✓ DFS mode differs from sequential and spectral!")
+    print("  ✓ DFS mode passed!")
+
+    # ==================== Test 4: Frequency Validation ====================
+    print("\n[Test 4] Frequency Value Validation (all modes)")
     print("-" * 50)
 
-    # Run forward twice with same input
-    cos1, sin1 = rope(hidden_states)
-    cos2, sin2 = rope(hidden_states)
+    for name, cos, sin in [
+        ("sequential", freqs_cos, freqs_sin),
+        ("spectral", freqs_cos_sp, freqs_sin_sp),
+        ("dfs", freqs_cos_dfs, freqs_sin_dfs),
+    ]:
+        assert cos.min() >= -1.0 and cos.max() <= 1.0, f"{name}: cos out of range!"
+        assert sin.min() >= -1.0 and sin.max() <= 1.0, f"{name}: sin out of range!"
+        identity_check = cos**2 + sin**2
+        identity_error = (identity_check - 1.0).abs().max().item()
+        print(f"  {name}: cos²+sin² identity error = {identity_error:.2e}")
+        assert identity_error < 1e-4, f"{name}: Pythagorean identity not satisfied!"
 
-    assert torch.allclose(cos1, cos2), "Inconsistent freqs_cos output!"
-    assert torch.allclose(sin1, sin2), "Inconsistent freqs_sin output!"
-    print("  Repeated forward passes produce identical outputs")
-    print("✓ Consistency check passed!")
+    print("  ✓ All modes pass frequency validation!")
 
-    # ==================== Test 6: Different Input Sizes ====================
-    print("\n[Test 6] Different Input Sizes")
+    # ==================== Test 5: Spectral Coordinate Properties ====================
+    print("\n[Test 5] Spectral Coordinate Properties")
     print("-" * 50)
 
-    size_configs = [
-        (32, 22),  # Shorter sequence
-        (128, 22),  # Longer sequence
-        (64, 44),  # More joints
-        (100, 30),  # Non-standard dimensions
-    ]
+    coords = _compute_spectral_coords(num_joints=22, num_modes=4)
+    print(f"  Spectral coords shape: {coords.shape}")
+    print(f"  Coord range: [{coords.min():.4f}, {coords.max():.4f}]")
 
-    for n_frames, n_joints in size_configs:
-        test_input = torch.randn(batch_size, num_channels, n_frames, n_joints)
-        cos_out, sin_out = rope(test_input)
+    # Parent-child pairs should have similar coordinates
+    # L_Hip (1) -> L_Knee (4), distance should be small
+    dist_hip_knee = np.linalg.norm(coords[1] - coords[4])
+    # L_Foot (10) -> R_Wrist (21), distance should be large
+    dist_foot_wrist = np.linalg.norm(coords[10] - coords[21])
+    print(f"  L_Hip->L_Knee spectral distance: {dist_hip_knee:.4f}")
+    print(f"  L_Foot->R_Wrist spectral distance: {dist_foot_wrist:.4f}")
+    assert dist_hip_knee < dist_foot_wrist, \
+        "Parent-child should be closer than distant joints!"
+    print("  ✓ Kinematic proximity preserved in spectral coords!")
 
-        expected_patches = (n_frames // patch_size[0]) * (n_joints // patch_size[1])
-        print(
-            f"  frames={n_frames}, joints={n_joints} -> "
-            f"patches={expected_patches}, shape={cos_out.shape}"
-        )
-
-        assert cos_out.shape == (
-            1,
-            expected_patches,
-            1,
-            attention_head_dim,
-        ), "Shape mismatch!"
-
-    print("✓ Different input size tests passed!")
-
-    # ==================== Test 7: Parameter Statistics ====================
-    print("\n[Test 7] Module Statistics")
+    # ==================== Test 6: DFS Ordering ====================
+    print("\n[Test 6] DFS Ordering Properties")
     print("-" * 50)
 
-    # Count parameters (RoPE typically has no learnable parameters)
-    total_params = sum(p.numel() for p in rope.parameters())
-    buffer_elements = rope.freqs_cos.numel() + rope.freqs_sin.numel()
-
-    print(f"  Learnable parameters: {total_params}")
-    print(f"  Buffer elements (freqs_cos + freqs_sin): {buffer_elements:,}")
-    print(f"  Memory for buffers: {buffer_elements * 4 / 1024:.2f} KB (float32)")
+    dfs_order = _compute_dfs_ordering(num_joints=22)
+    print(f"  DFS order: {dfs_order.astype(int).tolist()}")
+    # Root should be first
+    assert dfs_order[0] == 0, "Root (pelvis) should be visited first!"
+    # All values should be unique 0..21
+    assert len(set(dfs_order.tolist())) == 22, "DFS should visit all joints exactly once!"
+    print("  ✓ DFS ordering is valid!")
 
     # ==================== Summary ====================
     print("\n" + "=" * 60)

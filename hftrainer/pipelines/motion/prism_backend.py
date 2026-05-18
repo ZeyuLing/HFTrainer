@@ -25,6 +25,7 @@ from hftrainer.trainers.motion.prism_trainer import PrismTrainer
 from hftrainer.models.motion.components.utils.geometry.rotation_convert import rotation_6d_to_axis_angle
 
 from diffusers.utils.torch_utils import randn_tensor
+from hftrainer.pipelines.motion.prism_segment_blend import blend_motion_segments, compute_velocity_profile
 
 
 class PrismARPipeline(DiffusionPipeline):
@@ -59,6 +60,26 @@ class PrismARPipeline(DiffusionPipeline):
         )
 
         self.register_to_config(expand_timesteps=expand_timesteps, is_causal=is_causal)
+
+        # ========== SPECTRAL KT-RoPE CONFIG VERIFICATION ==========
+        # Verify that spectral RoPE parameters are preserved in transformer config
+        if hasattr(transformer, 'config'):
+            joint_pos_mode = getattr(transformer.config, 'joint_pos_mode', 'sequential')
+            print_log(f"[PRISM Pipeline] Loaded transformer with joint_pos_mode='{joint_pos_mode}'")
+            
+            if joint_pos_mode == "spectral":
+                num_spectral_modes = getattr(transformer.config, 'num_spectral_modes', 4)
+                spectral_scale = getattr(transformer.config, 'spectral_scale', None)
+                print_log(f"  ├─ num_spectral_modes={num_spectral_modes}")
+                print_log(f"  └─ spectral_scale={spectral_scale}")
+                print_log(f"[PRISM Pipeline] Spectral KT-RoPE mode ACTIVE - inference will use kinematic tree embeddings")
+            elif joint_pos_mode == "dfs":
+                print_log(f"[PRISM Pipeline] DFS mode ACTIVE - inference will use depth-first-search joint ordering")
+            else:
+                print_log(f"[PRISM Pipeline] Sequential mode (default) - inference will use standard sequential indices")
+        else:
+            print_log("[PRISM Pipeline] Warning: transformer has no config - cannot verify RoPE mode")
+        # ============================================================
 
         self.smpl_processor: SMPLPoseProcessor = smpl_processor.to(device, dtype)
 
@@ -309,7 +330,7 @@ class PrismARPipeline(DiffusionPipeline):
         num_frames: int = 129,
         num_joints: int = 23,
         num_inference_steps: int = 50,
-        guidance_scale: float = 5.0,
+        guidance_scale: float = 2.0,
         max_sequence_length: int = 512,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
@@ -370,13 +391,10 @@ class PrismARPipeline(DiffusionPipeline):
         )
 
         # Create motion padding mask (for attention masking of padded positions)
-        # This matches the training behavior in PrismTrainer.train_step()
-        motion_mask = self.bundle.create_padding_mask(
-            num_frames=None,  # Use default all-ones mask during inference
-            batch_size=batch_size,
-            latent_frames=latents.shape[2],  # latents shape: [B, C, T', J]
-            latent_joints=latents.shape[3],
-            device=latents.device,
+        # During inference, all positions are valid (no padding), so use all-ones mask
+        # This matches PrismBundle.create_padding_mask(num_frames=None, ...)
+        motion_mask = torch.ones(
+            batch_size, latents.shape[2], latents.shape[3], device=latents.device
         )
 
         # Denoising loop
@@ -446,10 +464,11 @@ class PrismARPipeline(DiffusionPipeline):
         num_frames_per_segment: Union[int, List[int]] = 129,
         num_joints: int = 23,
         num_inference_steps: int = 50,
-        guidance_scale: float = 5.0,
+        guidance_scale: float = 2.0,
         use_static: bool = False,
         use_smooth: bool = False,
         normalize: bool = True,
+        use_blend: bool = True,
         mocap_framerate: float = 30.0,
         gender: str = "neutral",
         max_sequence_length: int = 512,
@@ -471,6 +490,7 @@ class PrismARPipeline(DiffusionPipeline):
             use_static: Whether to use static joint refinement.
             use_smooth: Whether to apply smoothing to output motion.
             normalize: Whether to normalize facing direction and ground plane.
+            use_blend: Whether to apply segment boundary blending to smooth transitions.
             mocap_framerate: Frame rate of the output motion.
             gender: Gender for SMPL model ('neutral', 'male', 'female').
             max_sequence_length: Maximum sequence length for text encoding.
@@ -555,6 +575,49 @@ class PrismARPipeline(DiffusionPipeline):
         # Concatenate all segments along time dimension
         # motion_vec shape: [B, T, J, C]
         full_motion = torch.cat(all_motion_segments, dim=1)
+        # Apply segment boundary blending if requested
+        if use_blend and len(all_motion_segments) > 1:
+            print_log("Applying segment boundary blending...")
+            # Convert torch to numpy for blending
+            motion_np = full_motion.squeeze(0).cpu().numpy()  # (T, J, C)
+            motion_flat = motion_np.reshape(motion_np.shape[0], -1)  # (T, J*C)
+            
+            # Compute boundary positions (accounting for overlaps)
+            boundaries = []
+            current_pos = all_motion_segments[0].shape[1]
+            for seg_idx in range(1, len(all_motion_segments)):
+                seg_len = all_motion_segments[seg_idx].shape[1]
+                # Boundary is where overlapping region ends
+                boundaries.append(current_pos)
+                current_pos += seg_len
+            
+            # Apply Gaussian blending around each boundary (±5 frames)
+            blend_width = 5
+            for boundary in boundaries:
+                if boundary - blend_width < 0 or boundary + blend_width >= len(motion_flat):
+                    continue
+                
+                # Create Gaussian blend kernel
+                t = np.linspace(-2, 2, 2 * blend_width)
+                kernel = np.exp(-0.5 * t**2)
+                kernel = kernel / kernel.sum()  # Normalize
+                
+                # Apply smoothing in the blend region
+                region_start = boundary - blend_width
+                region_end = boundary + blend_width
+                region = motion_flat[region_start:region_end]
+                
+                # Smooth each dimension
+                for dim in range(region.shape[1]):
+                    region[:, dim] = np.convolve(region[:, dim], kernel, mode='same')
+                
+                motion_flat[region_start:region_end] = region
+            
+            # Convert back to torch
+            motion_blended = motion_flat.reshape(motion_np.shape)
+            full_motion = torch.from_numpy(motion_blended).unsqueeze(0).to(full_motion.device).to(full_motion.dtype)
+            print_log(f"Blending applied at {len(boundaries)} segment boundaries")
+
         print_log(f"Total motion frames: {full_motion.shape[1]}")
 
         # Post-process to SMPL-X format
@@ -753,7 +816,7 @@ def main(
     gender: str = "neutral",
     num_frames_per_segment: int = 129,
     num_joints: int = 23,
-    guidance_scale: float = 5.0,
+    guidance_scale: float = 2.0,
     expand_timesteps: bool = True,
     overlap_frames: int = 1,
     max_sequence_length: int = 256,
