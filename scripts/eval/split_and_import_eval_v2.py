@@ -23,6 +23,32 @@ from typing import Any, Dict, List
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "motion_annot_web" / "eval_dashboard"))
 
+SKIP_TASK_IDS = {"E6"}
+SKIP_SETTINGS = {
+    ("E4", "A_rhand_sparse"),
+    ("E4", "B_ankles_sparse"),
+    ("E4", "C_rhand_lfoot"),
+    ("E4", "D_both_hands"),
+    ("E4", "E_all4_sparse"),
+    ("E4", "F_rhand_dense"),
+    ("E14", "M_c5_t60"),
+    ("E14", "M_c5_t120"),
+    ("E14", "M_c5_t180"),
+    ("E14", "M_c15_t60"),
+    ("E14", "M_c15_t120"),
+    ("E14", "M_c15_t180"),
+    ("E14", "M_c30_t60"),
+    ("E14", "M_c30_t120"),
+    ("E14", "M_c30_t180"),
+    ("E14", "M_c45_t120"),
+    ("E14", "M_c60_t120"),
+    ("E14", "M_c75_t120"),
+    ("E14", "M_c90_t120"),
+    ("E14", "M_c45_t150"),
+    ("E14", "M_c45_t180"),
+    ("E14", "M_c45_t240"),
+}
+
 
 def _slim_run(model_name: str, task_data: Dict[str, Any], parent: Dict[str, Any]) -> Dict[str, Any]:
     """Build the JSON shape that data_importer.import_result_json expects."""
@@ -79,6 +105,10 @@ def split_one(eval_v2_path: Path, out_dir: Path) -> List[Path]:
                 continue
             slim = _slim_run(model_name, task_data, parent)
             if not slim["task_id"] or not slim["setting"]:
+                continue
+            if slim["task_id"] in SKIP_TASK_IDS:
+                continue
+            if (slim["task_id"], slim["setting"]) in SKIP_SETTINGS:
                 continue
             fname = f"{model_name}__{slim['task_id']}_{slim['setting']}.json"
             fpath = out_dir / fname

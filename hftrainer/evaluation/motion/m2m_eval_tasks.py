@@ -1719,24 +1719,34 @@ def _build_tasks() -> Dict[str, EvalTask]:
     tasks['E5'] = EvalTask(
         task_id='E5',
         name='Trajectory Following',
-        description='Follow root translation trajectory on the ground plane. '
-                    'Pelvis X and Z are locked at condition frames; Y (height) '
-                    'is free-generated so the model can produce natural pose '
-                    'dynamics (matches v2 training distribution — see '
-                    'condition_sampler_v2.sample_tier2_trajectory). Settings '
-                    'vary density and whether pelvis heading is co-conditioned.',
+        description='Follow root translation trajectory. Settings cover XZ-only '
+                    '(training-aligned planar trajectory) and XYZ trajectory '
+                    '(explicit height/Y control), with dense/sparse/heading variants.',
         mask_builder=build_trajectory_mask,
-        data_file='eval_e5_trajectory.json',
+        # Use the same held-out 220-motion pool as E2 so trajectory following
+        # is evaluated on a sufficiently broad and directly comparable set.
+        data_file='eval_e2_inbetween_v2_rewritten.json',
         settings={
-            'A': TaskSetting(
-                'A', 'Dense XZ trajectory (every frame)',
-                {'mode': 'dense'}),
-            'B': TaskSetting(
-                'B', 'Sparse XZ waypoints (every 30 frames)',
-                {'mode': 'sparse', 'interval': 30}),
-            'C': TaskSetting(
-                'C', 'XZ trajectory + pelvis heading every frame',
-                {'mode': 'trajectory_heading', 'include_heading': True}),
+            'A_xz_dense': TaskSetting(
+                'A_xz_dense', 'Dense XZ trajectory (every frame)',
+                {'mode': 'dense', 'trans_axes': 'xz'}),
+            'B_xz_sparse': TaskSetting(
+                'B_xz_sparse', 'Sparse XZ waypoints (every 30 frames)',
+                {'mode': 'sparse', 'interval': 30, 'trans_axes': 'xz'}),
+            'C_xz_heading': TaskSetting(
+                'C_xz_heading', 'Dense XZ trajectory + pelvis heading',
+                {'mode': 'trajectory_heading', 'include_heading': True,
+                 'trans_axes': 'xz'}),
+            'D_xyz_dense': TaskSetting(
+                'D_xyz_dense', 'Dense XYZ trajectory including height/Y',
+                {'mode': 'dense', 'trans_axes': 'xyz'}),
+            'E_xyz_sparse': TaskSetting(
+                'E_xyz_sparse', 'Sparse XYZ waypoints including height/Y',
+                {'mode': 'sparse', 'interval': 30, 'trans_axes': 'xyz'}),
+            'F_xyz_heading': TaskSetting(
+                'F_xyz_heading', 'Dense XYZ trajectory + pelvis heading',
+                {'mode': 'trajectory_heading', 'include_heading': True,
+                 'trans_axes': 'xyz'}),
         },
         default_metrics=[
             'trajectory_ade', 'trajectory_fde', 'foot_skating_ratio',
@@ -2655,91 +2665,6 @@ def _build_tasks() -> Dict[str, EvalTask]:
                     '_data_file': 'eval_e14_hq400h_move100.json',
                 },
             ),
-            # ─────────────────────────────────────────────────────────
-            # 2026-04-27: foot-skating ablation matrix (N_cond × N_t).
-            # Goal: identify whether the slipping artefact at high
-            # locomotion distance (E14 setting M, ~1-3 m) is driven by
-            # (a) too-short cond (model can't read cadence in 7 frames),
-            # (b) too-long N_transition forcing the model to inch root
-            #     across at sub-walking speed, or
-            # (c) training distribution simply lacks long-locomotion
-            #     stitched transitions and no inference-time knob fixes
-            #     it.
-            # 3×3 grid: cond ∈ {5, 15, 30} × N_t_max ∈ {60, 120, 180}.
-            # All inherit M's velocity placement + move100 datalist;
-            # N_cond uses 'fixed' policy (matches name); N_transition
-            # uses adaptive root/pose/angle but with the per-setting
-            # max clamp.  N_transition_min stays at 30 throughout.
-            # ─────────────────────────────────────────────────────────
-            **{
-                f'M_c{nc}_t{tmax}': TaskSetting(
-                    f'M_c{nc}_t{tmax}',
-                    f'[Move ablation] N_cond={nc}+{nc}, N_transition '
-                    f'clamp [30, {tmax}] (vs baseline M cond=adaptive, '
-                    f'N_t_max=120). Cell of foot-skating ablation grid '
-                    f'(2026-04-27).',
-                    {
-                        '_use_transition_data': True,
-                        '_placement': 'velocity',
-                        '_context_policy': 'fixed',
-                        '_n_cond_a_frames': nc,
-                        '_n_cond_b_frames': nc,
-                        '_transition_min': 30,
-                        '_transition_max': tmax,
-                        '_data_file': 'eval_e14_hq400h_move100.json',
-                    },
-                )
-                for nc in (5, 15, 30)
-                for tmax in (60, 120, 180)
-            },
-            # 2026-04-27 (extension): the 3×3 grid above is monotone in
-            # N_cond at every tmax row but does NOT saturate at c30. Push
-            # the N_cond axis further with t120 fixed (since t120/t180 are
-            # near-identical in the base grid). Cap at 90 because
-            # clip_len=360 ⇒ 90+180+90 = 360 is the training-seen ceiling.
-            **{
-                f'M_c{nc}_t120': TaskSetting(
-                    f'M_c{nc}_t120',
-                    f'[Move ablation extension] N_cond={nc}+{nc}, '
-                    f'N_transition clamp [30, 120]. Probes whether the '
-                    f'monotone improvement in (c5,c15,c30) saturates.',
-                    {
-                        '_use_transition_data': True,
-                        '_placement': 'velocity',
-                        '_context_policy': 'fixed',
-                        '_n_cond_a_frames': nc,
-                        '_n_cond_b_frames': nc,
-                        '_transition_min': 30,
-                        '_transition_max': 120,
-                        '_data_file': 'eval_e14_hq400h_move100.json',
-                    },
-                )
-                for nc in (45, 60, 75, 90)
-            },
-            # 2026-04-27 (leg-aware extension): with the new leg-only
-            # angle term in compute_transition_length, 8/50 samples get
-            # capped at t120; raise max to expose what the formula
-            # actually wants for those.
-            **{
-                f'M_c45_t{tmax}': TaskSetting(
-                    f'M_c45_t{tmax}',
-                    f'[Leg-aware] N_cond=45+45, N_transition '
-                    f'clamp [30, {tmax}]. Tests whether releasing the '
-                    f'cap helps the leg-heavy samples that the new '
-                    f'leg-angle term flagged as needing >120 frames.',
-                    {
-                        '_use_transition_data': True,
-                        '_placement': 'velocity',
-                        '_context_policy': 'fixed',
-                        '_n_cond_a_frames': 45,
-                        '_n_cond_b_frames': 45,
-                        '_transition_min': 30,
-                        '_transition_max': tmax,
-                        '_data_file': 'eval_e14_hq400h_move100.json',
-                    },
-                )
-                for tmax in (150, 180, 240)
-            },
         },
         default_metrics=[
             'jitter_pos', 'boundary_accel_jump_a', 'boundary_accel_jump_b',
