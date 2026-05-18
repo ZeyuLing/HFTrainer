@@ -85,7 +85,10 @@ def _load_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
     if checkpoint_path.endswith('.ckpt'):
         # PyTorch Lightning checkpoint format
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
-        if isinstance(checkpoint, dict) and 'model' in checkpoint:
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # HyMotion T2M format: {'model_state_dict': {...}, 'epoch': ..., 'global_step': ...}
+            state_dict = checkpoint['model_state_dict']
+        elif isinstance(checkpoint, dict) and 'model' in checkpoint:
             # .ckpt with model/optimizer/trainer_state
             state_dict = checkpoint['model']
         elif isinstance(checkpoint, dict) and any(k.startswith('motion_transformer') or k.startswith('text_encoder') for k in checkpoint.keys()):
@@ -238,9 +241,12 @@ def load_t2m_pretrained_selective(
     # Detect shape mismatches
     mismatches = _get_shape_mismatches(reusable_state, bundle)
     
-    # Load reusable parameters (strict=False to skip mismatches)
+    # Load reusable parameters (strict=False to skip mismatches).
+    # Pass as flat dict — load_state_dict_selective auto-splits
+    # "motion_transformer.ctxt_encoder.weight" → module="motion_transformer",
+    # param="ctxt_encoder.weight" which is the correct format for load_state_dict.
     bundle.load_state_dict_selective(
-        {'motion_transformer': reusable_state},
+        reusable_state,
         strict=False,
         exclude_bundle_keys=list(EXCLUDED_BUNDLE_PARAMS),
     )
