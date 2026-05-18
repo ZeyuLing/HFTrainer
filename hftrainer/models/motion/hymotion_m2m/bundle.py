@@ -12,11 +12,14 @@ forward functions shared between Trainer and Pipeline:
 
 from __future__ import annotations
 
+import logging
 import os
 import os.path as osp
 import warnings
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
@@ -171,6 +174,11 @@ class HyMotionM2MBundle(ModelBundle):
         body_model_path: Optional[str] = None,
         # ----- rotation space -----
         rotation_space: str = 'local',
+        # ----- T2M pretrained checkpoint loading (optional) -----
+        t2m_pretrained_path: Optional[str] = None,
+        t2m_freeze_strategy: str = 'none',
+        # ----- caption-specific freezing (optional) -----
+        caption_freeze_strategy: str = 'none',
         # ----- DEPRECATED: use aux_ prefix in losses_cfg instead -----
         kimodo_aux_loss_cfg: Optional[dict] = None,
     ):
@@ -184,9 +192,9 @@ class HyMotionM2MBundle(ModelBundle):
         self.pred_type = pred_type
         self.uncondition_mode = uncondition_mode
         self.cond_mask_prob = cond_mask_prob
-        # Match the official HY-Motion CFG default: the CFG "silent" branch
-        # nulls vtxt, while token-level ctxt remains caption-conditioned unless
-        # this flag is explicitly enabled.
+        # DEPRECATED: enable_ctxt_null_feat is no longer used by the pipeline.
+        # Since 2026-05-15, inference CFG always nulls both vtxt and ctxt to
+        # match training-time mask_text_cond behavior. Kept for checkpoint compat.
         self.enable_ctxt_null_feat = bool(enable_ctxt_null_feat)
         self.vace_condition_mode = str(vace_condition_mode or 'split_reactive').strip()
         self.rotation_space = rotation_space
@@ -240,6 +248,17 @@ class HyMotionM2MBundle(ModelBundle):
         self.validation_steps = self._infer_noise_scheduler_cfg.get(
             'validation_steps', 50
         )
+
+        # ---- Load T2M pretrained backbone (optional) ----
+        self._t2m_pretrained_path = t2m_pretrained_path
+        self._t2m_freeze_strategy = t2m_freeze_strategy
+        if t2m_pretrained_path:
+            self.load_t2m_backbone(t2m_pretrained_path, t2m_freeze_strategy)
+
+        # ---- Apply caption-specific freezing (after T2M loading) ----
+        self._caption_freeze_strategy = caption_freeze_strategy
+        if caption_freeze_strategy != 'none':
+            self.apply_caption_freeze_strategy(caption_freeze_strategy)
 
 
     # ------------------------------------------------------------------
@@ -587,6 +606,86 @@ class HyMotionM2MBundle(ModelBundle):
         std = torch.where(self.std < 1e-3, torch.ones_like(self.std), self.std)
         return motion * std + self.mean
 
+
+    def load_t2m_backbone(
+        self,
+        checkpoint_path: str,
+        freeze_strategy: str = 'none',
+    ) -> Dict[str, Any]:
+        """Load T2M pretrained weights selectively into this M2M bundle.
+
+        Handles architecture differences (VACE input expansion, output dimension).
+        See checkpoint_loading.load_t2m_pretrained_selective() for details.
+
+        Args:
+            checkpoint_path: Path to T2M pretrained checkpoint (.ckpt or .pt)
+            freeze_strategy: 'none', 'encoders', 'text_refiner', 'blocks', 'full'
+
+        Returns:
+            Dict with loading statistics (modules_loaded, modules_skipped, etc.)
+        """
+        from hftrainer.models.motion.hymotion_m2m.checkpoint_loading import (
+            load_t2m_pretrained_selective,
+        )
+        return load_t2m_pretrained_selective(
+            bundle=self,
+            t2m_checkpoint_path=checkpoint_path,
+            freeze_strategy=freeze_strategy,
+        )
+
+
+    def apply_caption_freeze_strategy(self, strategy: str) -> None:
+        """Freeze modules per strategy to preserve T2M text understanding.
+
+        Called in __init__ when caption_freeze_strategy != 'none'. The freeze
+        is applied early (before checkpoint loading in the runner) so that:
+        - _build_optimizers() correctly excludes frozen params
+        - accelerator.prepare() sees the right requires_grad flags
+        - load_state_dict_selective() later overwrites weights without
+          resetting requires_grad (it uses param.data.copy_)
+
+        Strategies:
+          'none'         — no freezing (default)
+          'encoders'     — freeze vtxt_encoder + ctxt_encoder + timestep_encoder
+          'text_refiner' — above + text_refiner
+          'blocks'       — above + double_blocks + single_blocks
+          'full'         — all reusable T2M modules
+        """
+        from .checkpoint_loading import _apply_freeze_strategy
+
+        frozen = _apply_freeze_strategy(self, strategy)
+
+        # Zero-init null embeddings (matching T2M convention).
+        # Keep trainable so they can adapt to caption conditioning space,
+        # but start from stable zeros instead of randn*0.01 which drifted
+        # during unconditioned training.
+        if frozen:
+            with torch.no_grad():
+                self.null_vtxt_feat.zero_()
+                self.null_ctxt_input.zero_()
+
+            total = sum(p.numel() for p in self.parameters())
+            frozen_n = sum(
+                p.numel() for p in self.parameters() if not p.requires_grad
+            )
+            logger.info(
+                f"Caption freeze ({strategy}): {frozen_n:,}/{total:,} params "
+                f"frozen ({frozen_n / total * 100:.1f}%)"
+            )
+
+    def train(self, mode: bool = True):
+        """Override train() to re-enforce caption freeze strategy.
+
+        Safety net: if anything upstream (e.g. accelerator.prepare, DDP wrapper)
+        calls module.requires_grad_(True), the freeze is re-applied on the next
+        train() call.
+        """
+        super().train(mode)
+        strategy = getattr(self, '_caption_freeze_strategy', 'none')
+        if strategy != 'none':
+            from .checkpoint_loading import _apply_freeze_strategy
+            _apply_freeze_strategy(self, strategy)
+        return self
 
     def get_bone_offsets(self) -> Tensor:
         """Get bone offsets for FK/IK.

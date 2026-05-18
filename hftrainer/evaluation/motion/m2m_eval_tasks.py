@@ -146,6 +146,11 @@ def build_end_effector_mask(
     D: int = 135,
     joint_names: List[str] = None,
     frame_interval: int = 10,
+    frame_mode: str = "regular",
+    frame_count: Optional[int] = None,
+    frame_ratio: Optional[float] = None,
+    num_joints: Optional[int] = None,
+    sample_seed: Optional[int] = None,
     **kwargs,
 ) -> Tuple[np.ndarray, Dict]:
     """E4: End-effector POSITION constraint — lock the target joint's world
@@ -180,6 +185,36 @@ def build_end_effector_mask(
     if joint_names is None:
         joint_names = ['r_wrist']
 
+    if frame_mode == "random":
+        from hftrainer.evaluation.motion.m2m_eval_metrics import JOINT_NAME_TO_IDX
+
+        ee_all = ["l_ankle", "r_ankle", "l_wrist", "r_wrist"]
+        seed = int(sample_seed or 0)
+        # Stable setting-dependent offset without relying on Python's salted hash.
+        for ch in ",".join(joint_names) + f":{frame_count}:{frame_ratio}:{num_joints}":
+            seed = (seed * 131 + ord(ch)) & 0xFFFFFFFF
+        rng = np.random.RandomState(seed)
+
+        if joint_names == ["random"]:
+            n = int(num_joints or 1)
+            n = max(1, min(n, len(ee_all)))
+            joint_names = rng.choice(ee_all, size=n, replace=False).tolist()
+        elif num_joints is not None and num_joints < len(joint_names):
+            n = max(1, min(int(num_joints), len(joint_names)))
+            joint_names = rng.choice(joint_names, size=n, replace=False).tolist()
+
+        if frame_count is None:
+            if frame_ratio is not None:
+                frame_count = int(round(T * float(frame_ratio)))
+            else:
+                # Training T2-5 samples K from geometric(p=0.1), mean ~10.
+                frame_count = min(max(1, rng.geometric(p=0.1)), T)
+        frame_count = max(1, min(int(frame_count), T))
+        frames = sorted(rng.choice(T, size=frame_count, replace=False).tolist())
+        if D >= 198:
+            return _build_ee_mask_198(T, joint_names, frame_interval, frames=frames)
+        return _build_ee_mask_135_legacy(T, joint_names, frame_interval, frames=frames)
+
     from hftrainer.evaluation.motion.m2m_eval_metrics import JOINT_NAME_TO_IDX
 
     # 198-dim layout (v2):
@@ -195,7 +230,8 @@ def build_end_effector_mask(
     return _build_ee_mask_135_legacy(T, joint_names, frame_interval)
 
 
-def _build_ee_mask_198(T: int, joint_names: List[str], frame_interval: int
+def _build_ee_mask_198(T: int, joint_names: List[str], frame_interval: int,
+                       frames: Optional[List[int]] = None
                        ) -> Tuple[np.ndarray, Dict]:
     """198-dim E4 end-effector mask (KIMODO-style position imputation).
 
@@ -247,8 +283,12 @@ def _build_ee_mask_198(T: int, joint_names: List[str], frame_interval: int
     D_full = 198
     mask = np.ones((T, D_full), dtype=np.float32)
 
+    frame_mode = 'random' if frames is not None else 'regular'
     constraint_frames, constraint_joints = [], []
-    for t in range(0, T, frame_interval):
+    if frames is None:
+        frames = list(range(0, T, frame_interval))
+
+    for t in frames:
         for name in joint_names:
             j = JOINT_NAME_TO_IDX[name]  # 0..21, 0 = pelvis
             if j == 0:
@@ -266,11 +306,15 @@ def _build_ee_mask_198(T: int, joint_names: List[str], frame_interval: int
         'frames': np.array(constraint_frames),
         'joints': np.array(constraint_joints),
         'joint_names': joint_names,
+        'frame_interval': frame_interval,
+        'frame_mode': frame_mode,
     }
     return mask, info
 
 
-def _build_ee_mask_135_legacy(T: int, joint_names: List[str], frame_interval: int
+def _build_ee_mask_135_legacy(T: int, joint_names: List[str],
+                              frame_interval: int,
+                              frames: Optional[List[int]] = None
                               ) -> Tuple[np.ndarray, Dict]:
     """Legacy 135-dim fallback: can only lock rot6d (weak constraint).
     Produced by the previous implementation; kept for v1-only models.
@@ -279,8 +323,12 @@ def _build_ee_mask_135_legacy(T: int, joint_names: List[str], frame_interval: in
 
     joint_group_indices = [JOINT_NAME_TO_IDX[name] + 1 for name in joint_names]
     grid = np.ones((T, NUM_JOINT_GROUPS), dtype=np.float32)
+    frame_mode = 'random' if frames is not None else 'regular'
     constraint_frames, constraint_joints = [], []
-    for t in range(0, T, frame_interval):
+    if frames is None:
+        frames = list(range(0, T, frame_interval))
+
+    for t in frames:
         for jg in joint_group_indices:
             grid[t, jg] = 0
         constraint_frames.extend([t] * len(joint_names))
@@ -291,6 +339,8 @@ def _build_ee_mask_135_legacy(T: int, joint_names: List[str], frame_interval: in
         'frames': np.array(constraint_frames),
         'joints': np.array(constraint_joints),
         'joint_names': joint_names,
+        'frame_interval': frame_interval,
+        'frame_mode': frame_mode,
     }
     return mask, info
 
@@ -1616,38 +1666,43 @@ def _build_tasks() -> Dict[str, EvalTask]:
     )
 
     # --- E4: End-Effector Position Constraint ---
-    # Purely end-effector: sparse world-position constraints on hand/foot
-    # joints at selected frames. Frame-level keypose constraints belong to E7
-    # (Bi-directional Pose Completion) and are intentionally NOT duplicated
-    # here.
+    # Pure end-effector position constraints. These settings mirror the
+    # v2 training sampler more closely than the old fixed-period hand-written
+    # patterns: choose 1/2/4 EE joints from {ankles, wrists}, then choose
+    # sparse/medium/dense random frames per sample.
     tasks['E4'] = EvalTask(
         task_id='E4',
         name='End-Effector Constraint',
         description='Constrain end-effector (hand/foot) world positions at '
-                    'sparse frames. Pure EE — no full-body keypose constraints.',
+                    'random sparse frames. Pure EE — no full-body keypose '
+                    'constraints.',
         mask_builder=build_end_effector_mask,
         data_file='eval_e4_end_effector.json',
         settings={
-            'A_rhand_sparse': TaskSetting(
-                'A_rhand_sparse', 'Right hand every 10 frames',
-                {'joint_names': ['r_wrist'], 'frame_interval': 10}),
-            'B_ankles_sparse': TaskSetting(
-                'B_ankles_sparse', 'Both ankles every 15 frames',
-                {'joint_names': ['l_ankle', 'r_ankle'], 'frame_interval': 15}),
-            'C_rhand_lfoot': TaskSetting(
-                'C_rhand_lfoot', 'Right hand + left foot every 15 frames',
-                {'joint_names': ['r_wrist', 'l_foot'], 'frame_interval': 15}),
-            'D_both_hands': TaskSetting(
-                'D_both_hands', 'Both hands every 10 frames',
-                {'joint_names': ['l_wrist', 'r_wrist'], 'frame_interval': 10}),
-            'E_all4_sparse': TaskSetting(
-                'E_all4_sparse',
-                'Both hands + both ankles every 20 frames',
-                {'joint_names': ['l_wrist', 'r_wrist', 'l_ankle', 'r_ankle'],
-                 'frame_interval': 20}),
-            'F_rhand_dense': TaskSetting(
-                'F_rhand_dense', 'Right hand every 5 frames (dense)',
-                {'joint_names': ['r_wrist'], 'frame_interval': 5}),
+            'single_sparse': TaskSetting(
+                'single_sparse', '1 random EE joint, ~10 random frames',
+                {'joint_names': ['random'], 'num_joints': 1,
+                 'frame_mode': 'random', 'frame_count': 10}),
+            'single_medium': TaskSetting(
+                'single_medium', '1 random EE joint, 10% random frames',
+                {'joint_names': ['random'], 'num_joints': 1,
+                 'frame_mode': 'random', 'frame_ratio': 0.10}),
+            'two_sparse': TaskSetting(
+                'two_sparse', '2 random EE joints, ~10 random frames',
+                {'joint_names': ['random'], 'num_joints': 2,
+                 'frame_mode': 'random', 'frame_count': 10}),
+            'two_medium': TaskSetting(
+                'two_medium', '2 random EE joints, 10% random frames',
+                {'joint_names': ['random'], 'num_joints': 2,
+                 'frame_mode': 'random', 'frame_ratio': 0.10}),
+            'all4_sparse': TaskSetting(
+                'all4_sparse', 'Wrists + ankles, ~10 random frames',
+                {'joint_names': ['l_ankle', 'r_ankle', 'l_wrist', 'r_wrist'],
+                 'frame_mode': 'random', 'frame_count': 10}),
+            'all4_dense': TaskSetting(
+                'all4_dense', 'Wrists + ankles, 20% random frames',
+                {'joint_names': ['l_ankle', 'r_ankle', 'l_wrist', 'r_wrist'],
+                 'frame_mode': 'random', 'frame_ratio': 0.20}),
         },
         default_metrics=[
             'ee_error_mean', 'ee_error_p50', 'ee_error_p95', 'ee_error_max',
@@ -1706,7 +1761,7 @@ def _build_tasks() -> Dict[str, EvalTask]:
                 'pos_contact',
                 'Foot-pos-contact: XYZ lock at GT contact frames',
                 {'contact_frames': None, 'constraint_type': 'position',
-                 'position_axes': 'xyz'}),
+                 'position_axes': 'xyz', '_disabled': True}),
         },
         default_metrics=[
             'foot_penetration', 'foot_float', 'foot_skating_ratio',

@@ -27,10 +27,12 @@ CAPTION_TO_QWEN3_DIR = {
     'improved_simple_augmented_caption_deprecated_mirror_251215': 'qwen3_improved_simple_short',
     'improved_simple_caption': 'qwen3_improved_simple_short',
     'improved_simple_caption_deprecated_mirror_251215': 'qwen3_improved_simple_short',
-    # Variants with qwen3embedding prefix (older dirs)
-    'augmented_caption': 'qwen3embedding_augmented',
-    'augmented_caption_deprecated_250905': 'qwen3embedding_augmented',
-    'augmented_caption_deprecated_250926': 'qwen3embedding_augmented',
+    # PerMo / general augmented captions (Qwen3-8B CausalLM embeddings)
+    'augmented_caption': 'qwen3_augmented',
+    'augmented_caption_deprecated_250905': 'qwen3_augmented',
+    'augmented_caption_deprecated_250926': 'qwen3_augmented',
+    # PerMo editing instructions (Neutral→Emotion style transfer)
+    'editing_caption': 'qwen3_editing',
 }
 
 

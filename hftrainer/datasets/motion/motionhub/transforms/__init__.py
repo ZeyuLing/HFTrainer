@@ -70,5 +70,8 @@ __all__ = [
 from hftrainer.datasets.motion.motionhub.transforms.smpl_trans_to_kimodo_root import (
     SmplTransToKimodoRootOnline,
 )
+from hftrainer.datasets.motion.motionhub.transforms.load_editing_source import (
+    LoadEditingSourceMotion,
+)
 
-__all__.append('SmplTransToKimodoRootOnline')
+__all__.extend(['SmplTransToKimodoRootOnline', 'LoadEditingSourceMotion'])

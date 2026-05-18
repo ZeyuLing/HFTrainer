@@ -32,9 +32,8 @@ work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_permo_E2plus'
 # load_scope='model' resets optimizer/scheduler (loss config changed).
 load_from = dict(
     _delete_=True,
-    path='work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_3370',
+    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
     load_scope='model',
-    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
 )
 
 model = dict(
@@ -43,6 +42,7 @@ model = dict(
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim',  # Standard SMPL Root stats
     rotation_space='local',
+    caption_freeze_strategy='encoders',  # Freeze vtxt/ctxt/timestep encoders
     text_encoder=dict(),  # Use default QWEN3 + CLIP-L
     losses_cfg=dict(
         # Override base: enable keypoint supervision (E2 baseline)
@@ -61,6 +61,7 @@ train_dataloader = dict(
         anno_file='data/annotation/train_hymotion_400h_permo_caption_20260514.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
+            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
             dict(
                 type='LoadSmplx55',
                 key='motion',
@@ -93,9 +94,11 @@ train_dataloader = dict(
                 keys=[
                     'src_motion', 'tgt_motion', 'src_mask',
                     'tgt_length', 'src_length', 'edit_mode',
+                    'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
                 ],
                 meta_keys=['motion_path', 'fps'],
-                set_dummy_value=False,
+                set_dummy_value=True,
+                dummy_value=None,
             ),
         ],
     ),

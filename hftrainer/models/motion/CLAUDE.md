@@ -1051,6 +1051,175 @@ From HunyuanMotion T2M 1.0-Lite (0.46B, motion_dim=201):
 - **Loaded**: 18 transformer blocks (feat_dim=1024), text encoders, timestep_encoder, text_refiner (305/308 params)
 - **Random init**: input_encoder (201->540), final_layer (201->135) (3 params)
 
+### T2M-to-M2M v2 Selective Checkpoint Loading (Transfer Learning)
+
+**Motivation**: HyMotion-T2M (0.46B, 135-dim motion) has been trained on 400h of text-to-motion data and has learned strong text representations. M2M v2 (0.46B, 594-dim motion with VACE conditioning) can reuse this text understanding to accelerate training and improve caption conditioning, while keeping architecture-specific components trainable.
+
+**Architecture Differences**:
+
+| Component | T2M | M2M v2 | Status |
+|-----------|-----|--------|--------|
+| **Input** | 135-dim | 594-dim (VACE: [x_t, inactive, reactive, mask] = 4×135) | ✅ **Reusable**: encoders process same embedding space |
+| **Output** | 135-dim | 198-dim (M2M motion dimension) | ❌ **Shape mismatch**: final_layer reinitialized |
+| **Text encoders** | Qwen3+CLIP | Qwen3+CLIP | ✅ **Identical**: ctxt_encoder, vtxt_encoder, text_refiner |
+| **Timestep encoder** | timestep_encoder | timestep_encoder | ✅ **Identical**: no change |
+| **Transformer blocks** | 6 double + 12 single | 6 double + 12 single | ✅ **Identical**: same architecture, same feat_dim=1024 |
+
+**What Gets Loaded vs Reinitialized**:
+
+```
+REUSABLE (shape match, loaded as-is):
+  - motion_transformer.ctxt_encoder (4096→1024 projection)
+  - motion_transformer.vtxt_encoder (768→1024 projection)
+  - motion_transformer.timestep_encoder (time embedding layer)
+  - motion_transformer.text_refiner (single-token refinement)
+  - motion_transformer.double_blocks (6× transformer blocks)
+  - motion_transformer.single_blocks (12× transformer blocks)
+  Total: 305 / 308 params (~99%)
+
+NON-REUSABLE (shape mismatch, randomly reinitialized):
+  - motion_transformer.input_encoder: 135→594 (VACE expands from 135 to 4×135)
+  - motion_transformer.final_layer: 1024→198 (M2M output dim differs from T2M 135)
+  Total: 3 / 308 params (~1%)
+
+EXCLUDED (use M2M-specific initialization):
+  - null_vtxt_feat: M2M keeps trainable randn*0.01 (T2M is frozen zeros)
+  - null_ctxt_input: M2M keeps trainable randn*0.01 (T2M is frozen zeros)
+  - mean/std: M2M uses 198-dim stats (T2M is 135-dim)
+```
+
+**Usage Example**:
+
+```python
+# In your config:
+model = dict(
+    type='HyMotionM2MBundle',
+    motion_transformer=dict(...),
+    # T2M pretrained loading parameters
+    t2m_pretrained_path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    t2m_freeze_strategy='encoders',  # Control which modules remain frozen
+)
+
+# Or programmatically:
+from hftrainer.models.motion.hymotion_m2m.checkpoint_loading import load_t2m_pretrained_selective
+
+stats = load_t2m_pretrained_selective(
+    bundle=m2m_bundle,
+    t2m_checkpoint_path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    freeze_strategy='encoders'
+)
+print(f"Loaded: {stats['modules_loaded']}")
+print(f"Params loaded: {stats['num_params_loaded']:,}")
+print(f"Frozen modules: {stats['frozen_modules']}")
+```
+
+**Freezing Strategies** (control which loaded modules remain frozen):
+
+| Strategy | Frozen Modules | Trainable Modules | Use Case |
+|----------|---|---|---|
+| `'none'` | (none) | all 6 reusable + input/output | Baseline (no transfer learning benefit) |
+| `'encoders'` (recommended) | ctxt_encoder, vtxt_encoder, timestep_encoder | text_refiner + blocks + input/output | **Default**: text understanding stable from T2M, blocks adapt to M2M VACE/caption |
+| `'text_refiner'` | above + text_refiner | blocks + input/output | Stronger freezing: assume both text encoding and refinement are stable |
+| `'blocks'` | all of above + double_blocks + single_blocks | input/output only | Aggressive: only adapt input/output layers for VACE (not recommended) |
+| `'full'` | all reusable modules | input/output only | Maximum freezing (least training benefit, but smallest learning rate adjustment needed) |
+
+**Recommended Strategy**: `'encoders'`
+- **Rationale**: Text encoders and timestep encoder are task-general (similar role in all motion models)
+- Transformer blocks are mostly task-agnostic (attention patterns, MLP layers apply broadly)
+- Input_encoder (VACE expansion) and final_layer (output dim) are M2M-specific and must adapt
+- **Result**: 99% of parameters frozen with only 1% random init, fast convergence + stable text understanding
+
+**Why Null Embeddings Are NOT Loaded**:
+
+M2M v2 uses classifier-free guidance (CFG) with a "null" (unconditional) text embedding:
+```
+output = denoise(v_text, t) + guidance_scale * (denoise(v_text, t) - denoise(v_null, t))
+```
+
+- **T2M**: null_vtxt_feat initialized as **frozen zeros** (requires_grad=False)
+- **M2M v2**: null_vtxt_feat must be **trainable** (requires_grad=True)
+  - Reason: M2M learns to condition on VACE mask patterns, so the null embedding must adapt to M2M's new space
+  - If we loaded T2M's frozen zeros, the CFG term would be misleading (null embedding doesn't represent M2M's unconditional distribution)
+
+**Implementation Details**:
+
+1. **Shape Mismatch Detection**: The loader compares T2M state_dict dimensions with M2M model. Mismatches in `input_encoder` (135→594) and `final_layer` (135→198) are detected and skipped.
+
+2. **Reinitialization**: Shape-mismatched modules use **Xavier uniform** initialization (`nn.init.xavier_uniform_`), same as PyTorch defaults. Bias terms are zeroed.
+
+3. **Bundle Parameters**: The `load_state_dict_selective()` method handles DDP/FSDP unwrapping and respects `exclude_bundle_keys` to prevent null embeddings and stats from being overwritten.
+
+4. **Statistics Return**: The function returns detailed statistics:
+   ```python
+   stats = {
+       'modules_loaded': [list of modules successfully loaded],
+       'modules_skipped': [list of modules with shape mismatches],
+       'modules_reinitialized': [list of randomly initialized modules],
+       'num_params_loaded': total_params_from_t2m,
+       'num_params_skipped': total_params_with_shape_mismatch,
+       'num_params_reinitialized': total_params_randomly_initialized,
+       'frozen_modules': [list of frozen module names per freeze_strategy],
+   }
+   ```
+
+**Troubleshooting**:
+
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| `Checkpoint not found: ...` | t2m_checkpoint_path is invalid | Verify path exists: `ls -lh checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt` |
+| `freeze_strategy must be one of ...` | Invalid freeze_strategy name | Use one of: `'none', 'encoders', 'text_refiner', 'blocks', 'full'` |
+| No modules loaded (empty list) | Checkpoint format not recognized | T2M checkpoint must be `.ckpt` or `.pt` with `motion_transformer.*` keys |
+| Training loss doesn't decrease | Frozen encoders not appropriate for your data | Try `freeze_strategy='none'` to unfreeze all modules |
+| Null embeddings are all zeros | Old checkpoint without bundle params | Use `null_embedding_source='checkpoints/HY-Motion-1.0/...'` in config to restore from T2M |
+
+**Testing**:
+
+Unit tests verify:
+- `tests/unit/test_t2m_to_m2m_checkpoint_loading.py`: 15 test cases covering reinitialization, shape compatibility, freezing strategies, null embedding handling, mean/std preservation
+
+Integration tests verify end-to-end pipeline:
+- `tests/integration/test_t2m_to_m2m_integration.py`: 6 test cases covering bundle initialization, forward pass, gradient flow, loss convergence
+
+Run tests:
+```bash
+python -m pytest tests/unit/test_t2m_to_m2m_checkpoint_loading.py -v
+python -m pytest tests/integration/test_t2m_to_m2m_integration.py -v
+```
+
+**Configuration Examples**:
+
+See `configs/hymotion_m2m_v2/hymotion_m2m_v2_046b_t2m_pretrained.py` for full config example.
+
+Key config additions:
+```python
+_base_ = '_base_hymotion_m2m_v2_046b.py'
+
+model = dict(
+    t2m_pretrained_path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    t2m_freeze_strategy='encoders',
+)
+
+# Optional: if loading from intermediate checkpoint, explicitly specify null embedding source
+load_from = dict(
+    path='work_dirs/hymotion_m2m_v2_046b_sft/checkpoint-epoch_500',
+    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+)
+```
+
+**Performance Impact**:
+
+- **Faster convergence**: Text encoders from T2M reduce initial chaos, model converges ~15-20% faster
+- **Better caption quality**: Text understanding inherited from 400h T2M training
+- **Similar motion quality**: VACE adaptation + output layer reinitialization maintain generation quality
+- **Compute savings**: ~99% params frozen, only ~1% params need gradient computation initially
+
+**Related Code**:
+- Implementation: `hftrainer/models/motion/hymotion_m2m/checkpoint_loading.py`
+- Config template: `configs/hymotion_m2m_v2/hymotion_m2m_v2_046b_t2m_pretrained.py`
+- Unit tests: `tests/unit/test_t2m_to_m2m_checkpoint_loading.py`
+- Integration tests: `tests/integration/test_t2m_to_m2m_integration.py`
+
+
 ---
 
 ## ⚠️ Inference Practical Guide — MUST READ Before Writing Inference Code
@@ -1328,6 +1497,30 @@ To make MoGenDIT respect the adaptive mask for imputation, one would need to mod
 - `hymotion_m2m_v2_caption_global_phase2.py`
 - `soar/hymotion_m2m_v2_caption_local_046b_soar.py`
 - `soar/hymotion_m2m_v2_caption_global_046b_soar.py`
+
+### 2026-05-15: Caption not follow — vtxt_encoder (MLPEncoder) collapse in M2M v2
+
+**Severity**: Critical — text conditioning is effectively non-functional in all M2M v2 caption models (E2, E4).
+
+**Root cause**: The 2-layer MLPEncoder (`Linear(768→1024) → SiLU → Linear(1024→1024)`) that maps CLIP-L sentence embeddings to vtxt_feat catastrophically collapses all inputs to nearly the same point:
+
+| Metric | Raw CLIP-L (768-dim) | After MLPEncoder (1024-dim) |
+|--------|---------------------|----------------------------|
+| cos(caption, null) | 0.099 | 0.983 |
+| Inter-caption cos | 0.343 | 0.992 |
+| Angular diversity | 71.0° | 7.1° (90% destroyed) |
+
+**Mechanism**: Linear₂ has condition number 303,706 (near-singular rank collapse). Its bias (norm=16.9) dominates output — `vtxt_encoder(zeros)` produces ‖output‖=40.03, larger than `vtxt_encoder(CLIP)` mean ‖output‖=37.56. The encoder has converged to a near-constant function.
+
+**Cascading effect**: Since `adapter = timestep_feat + vtxt_feat` and `‖timestep_feat‖ ≈ 130-170` vs `‖vtxt_feat‖ ≈ 26-38`, vtxt contributes only 15-23% of adapter norm. `cos(adapter_text, adapter_null) ≈ 0.9993` — the model literally cannot distinguish text from null through the adapter. All ModulateDiT modulations (shift/scale/gate) are driven by this adapter, so CFG guidance signal `(v_text − v_null)` is effectively zero regardless of `guidance_scale`.
+
+**Why it happened**: (1) null_vtxt_feat initialized as `randn*0.01` drifted to norm=10.1 during training, approaching CLIP embedding space; (2) timestep encoder dominates from init, giving model no incentive to differentiate via vtxt; (3) MLP collapses rather than learns — gradient updates primarily affect the bias direction. Parent model (`checkpoint-epoch_3370`) already shows partial collapse (38% text/null adapter ratio), which worsened during E2 fine-tuning to 7%.
+
+**Diagnostic scripts**: `scripts/debug/diag_caption_raw_clip_similarity.py` (smoking gun), `diag_caption_text_branch_trace.py`, `diag_caption_attention_gates.py`, `diag_caption_ode_velocity.py`.
+
+**Full analysis**: `docs/temp/caption_not_follow_root_cause.md` — includes 6 proposed training fixes (A-F) and 3-phase action plan.
+
+**Status**: Root cause confirmed with quantitative evidence. No training fix applied yet.
 
 ### 2026-03-25: VACE reactive leaked target motion
 

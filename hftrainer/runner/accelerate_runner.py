@@ -565,6 +565,7 @@ class AccelerateRunner:
         # When auto_resume found no checkpoint (or is disabled), check load_from
         # so that model-only pretrained weights are loaded BEFORE FSDP wrapping.
         exclude_bundle_keys = None
+        skip_frozen = False
         if not ckpt_path and load_from is not None:
             if hasattr(load_from, 'to_dict'):
                 load_from = load_from.to_dict()
@@ -580,6 +581,7 @@ class AccelerateRunner:
                     exclude_bundle_keys = load_from.get(
                         'exclude_bundle_keys', None
                     )
+                    skip_frozen = load_from.get('skip_frozen', False)
                 # scope == 'full' is handled after prepare by _handle_load
 
         if not ckpt_path or not is_model_only:
@@ -604,6 +606,7 @@ class AccelerateRunner:
                     bundle.load_state_dict_selective(
                         state_dict,
                         exclude_bundle_keys=exclude_bundle_keys,
+                        skip_frozen=skip_frozen,
                     )
                     del state_dict
                     gc.collect()
@@ -1072,7 +1075,8 @@ class AccelerateRunner:
             path = load_cfg.get('path', load_cfg) if isinstance(load_cfg, dict) else load_cfg
             scope = load_cfg.get('load_scope', 'model') if isinstance(load_cfg, dict) else 'model'
             ebk = load_cfg.get('exclude_bundle_keys', None) if isinstance(load_cfg, dict) else None
-            self._load(path, load_scope=scope, exclude_bundle_keys=ebk)
+            sf = load_cfg.get('skip_frozen', False) if isinstance(load_cfg, dict) else False
+            self._load(path, load_scope=scope, exclude_bundle_keys=ebk, skip_frozen=sf)
             # After load_from, patch any zero null embeddings from a
             # secondary pretrained source.  This handles the case where
             # load_from points to a checkpoint that lacks good null
@@ -1081,7 +1085,7 @@ class AccelerateRunner:
             self._patch_zero_null_embeddings_from_pretrained()
 
     def _load(self, path: str, load_scope: str = 'model',
-              exclude_bundle_keys=None):
+              exclude_bundle_keys=None, skip_frozen: bool = False):
         """
         Load checkpoint with given scope.
 
@@ -1141,6 +1145,7 @@ class AccelerateRunner:
                 self.bundle.load_state_dict_selective(
                     state_dict,
                     exclude_bundle_keys=exclude_bundle_keys,
+                    skip_frozen=skip_frozen,
                 )
                 logger.info(sep)
                 logger.info(f"Loaded model weights from: {path}")

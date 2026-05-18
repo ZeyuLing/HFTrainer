@@ -218,27 +218,29 @@ class HyMotionM2MPipeline:
             src_mask=src_mask,
         )
 
-        do_cfg = self.text_guidance_scale > 1.0
+        do_cfg = self.text_guidance_scale > 1.0 and not self.bundle.uncondition_mode
 
-        # For CFG: prepare null text embeddings for the unconditional branch.
-        # Training convention (mask_text_cond): when CFG dropout fires, the
-        # ctxt tensor is replaced by `null_ctxt_input.expand_as(ctxt)` BUT
-        # `ctxt_mask_temporal` is KEPT AT THE ORIGINAL CAPTION'S LENGTH MASK
-        # (only the values change, the attention coverage does not). So we
-        # mirror that here: the null branch uses the same ctxt_mask_temporal
-        # as the conditioned branch, but with null embedding values. A
-        # previous version used `zeros(128) + first-token=null + mask with
-        # only first token valid`, which the model never saw during training
-        # and produced visibly distorted captioned outputs.
+        # CFG null-branch construction.  The "silent" CFG branch nulls BOTH
+        # sentence-level vtxt AND token-level ctxt to match training-time
+        # mask_text_cond behavior (which masks both vtxt and ctxt).
+        # Previously only vtxt was nulled while ctxt was kept intact, making
+        # CFG guidance depend solely on the 768-dim vtxt difference — far too
+        # weak for effective caption guidance.  Fixed 2026-05-15.
         if do_cfg:
-            # null_ctxt must match ctxt_input's token-length (captioned branch
-            # uses pad_len tokens, uncond branch uses 1 token — see above).
-            # Earlier hard-coded pad_len (128) here crashed when combined
-            # with the 1-token uncond branch via torch.cat (2026-04-21).
-            ctxt_tokens = ctxt_input.shape[1]
-            null_vtxt = self.bundle.null_vtxt_feat.to(dtype=model_dtype).expand(B, 1, -1)
-            null_ctxt = self.bundle.null_ctxt_input.to(dtype=model_dtype).expand(B, ctxt_tokens, -1).contiguous()
-            null_ctxt_mask = ctxt_mask_temporal  # SAME attention coverage
+            null_vtxt = self.bundle.null_vtxt_feat.to(dtype=model_dtype).expand_as(vtxt_input)
+            # Expand null_ctxt to match ctxt_input's sequence length so
+            # torch.cat along batch dim works correctly.
+            null_ctxt = self.bundle.null_ctxt_input.to(dtype=model_dtype).expand(
+                ctxt_input.shape[0], ctxt_input.shape[1], -1
+            ).contiguous()
+            # Build attention mask for the null branch that matches training:
+            # during training, mask_text_cond drops text AND the trainer
+            # updates ctxt_mask_temporal to [True, False, ..., False] (only
+            # position 0 attends).  The old code reused the conditioned mask
+            # here (k True positions where k = caption length), creating a
+            # train-inference mismatch for the null branch.  Fixed 2026-05-15.
+            null_ctxt_mask = torch.zeros_like(ctxt_mask_temporal)
+            null_ctxt_mask[:, 0] = True  # Only position 0 is valid
 
         # ODE function
         ode_cfg = dict(self.bundle._noise_scheduler_cfg)

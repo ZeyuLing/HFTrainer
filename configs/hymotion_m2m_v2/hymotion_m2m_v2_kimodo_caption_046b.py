@@ -74,7 +74,7 @@ train_dataloader = dict(
     num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
     persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
-        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_20260514.json',
+        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_editing_20260514.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
             dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
@@ -114,6 +114,15 @@ train_dataloader = dict(
                     'limb_candy_wrapper', 'wrist_candy_wrapper',
                 ],
                 max_corruptions=2,
+            ),
+            # Override synthetic corruption with real Neutral source for
+            # PerMo editing pairs (source_motion_path present in annotation).
+            # Pass-through for regular T2M / completion samples.
+            # kimodo_root_cfg: Apply same ADMM smoothing to source motion
+            # so both src and tgt use KIMODO Root representation.
+            dict(
+                type='LoadEditingSourceMotion',
+                kimodo_root_cfg=dict(admm_margin_m=0.06),
             ),
             dict(
                 type='PackInputs',

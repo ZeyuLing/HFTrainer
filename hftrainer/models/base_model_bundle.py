@@ -639,6 +639,7 @@ class ModelBundle(nn.Module):
         state_dict: Dict[str, dict],
         strict: bool = False,
         exclude_bundle_keys: Optional[list] = None,
+        skip_frozen: bool = False,
     ):
         """
         Load only modules that are present in state_dict.
@@ -657,6 +658,13 @@ class ModelBundle(nn.Module):
                 overwrite the values already initialised by the bundle's
                 ``__init__``.  Example: ``['mean', 'std']`` to preserve
                 KIMODO Root stats when loading an SMPL Root checkpoint.
+            skip_frozen: if True, skip loading weights for parameters that
+                have ``requires_grad=False``.  Use this when resuming from
+                a checkpoint that has degraded/collapsed values for modules
+                that have already been frozen (e.g. caption_freeze_strategy
+                freezes text encoders from T2M pretrained, but the resume
+                checkpoint has collapsed encoder weights from unconditioned
+                training).
         """
         if not state_dict:
             return
@@ -688,6 +696,14 @@ class ModelBundle(nn.Module):
                 if hasattr(self, pname):
                     attr = getattr(self, pname)
                     if isinstance(attr, nn.Parameter):
+                        # skip_frozen: don't overwrite frozen bundle params
+                        if skip_frozen and not attr.requires_grad:
+                            from hftrainer.utils.logger import get_logger
+                            get_logger().info(
+                                f"skip_frozen: skipping frozen bundle param "
+                                f"'{pname}' (shape {tuple(pval.shape)})"
+                            )
+                            continue
                         if attr.shape == pval.shape:
                             attr.data.copy_(pval)
                         else:
@@ -757,6 +773,26 @@ class ModelBundle(nn.Module):
                             logger.warning(
                                 f"Skipped {len(shape_mismatched)} shape-mismatched params "
                                 f"in module '{name}': {shape_mismatched[:5]}"
+                            )
+
+                    # Skip frozen parameters: don't overwrite params that have
+                    # requires_grad=False (e.g. encoders frozen via
+                    # caption_freeze_strategy).  This lets us resume from an
+                    # intermediate checkpoint without destroying the T2M-pretrained
+                    # encoder weights that were loaded and frozen during __init__.
+                    if skip_frozen:
+                        frozen_skipped = []
+                        for pname, param in load_target.named_parameters():
+                            if not param.requires_grad and pname in sd:
+                                frozen_skipped.append(pname)
+                                del sd[pname]
+                        if frozen_skipped:
+                            from hftrainer.utils.logger import get_logger
+                            logger = get_logger()
+                            logger.info(
+                                f"skip_frozen: skipped {len(frozen_skipped)} frozen "
+                                f"params in module '{name}': "
+                                f"{frozen_skipped[:5]}{'...' if len(frozen_skipped) > 5 else ''}"
                             )
 
                     missing, unexpected = load_target.load_state_dict(sd, strict=strict)

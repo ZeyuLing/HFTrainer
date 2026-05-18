@@ -35,15 +35,14 @@ _base_ = './_base_hymotion_m2m_v2_046b.py'
 
 work_dir = 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_E4plus'
 
-# Resume from caption_local_phase2 checkpoint (epoch 3370).
+# Load T2M pretrained directly (clean text encoders).
 # exclude_bundle_keys: prevent SMPL Root mean/std from overwriting
 # KIMODO Root mean/std (different statistical distributions).
 # load_scope='model' resets optimizer/scheduler
 load_from = dict(
     _delete_=True,
-    path='work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_3370',
+    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
     load_scope='model',
-    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
     exclude_bundle_keys=['mean', 'std'],
 )
 
@@ -53,6 +52,7 @@ model = dict(
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim_kimodo_root',  # KIMODO stats
     rotation_space='local',
+    caption_freeze_strategy='encoders',  # Freeze vtxt/ctxt/timestep encoders
     text_encoder=dict(),  # Use default QWEN3 + CLIP-L
     losses_cfg=dict(
         # Override base: enable keypoint supervision (E4 baseline)
@@ -67,10 +67,13 @@ train_dataloader = dict(
     num_workers=8,  # Keep DataLoader prefetch ahead of train_step
     persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
-        # CHANGED: Use merged 400h + PerMo annotation file
-        anno_file='data/annotation/train_hymotion_400h_permo_caption_20260514.json',
+        # CHANGED: Use merged 400h + PerMo + MotionFix annotation file
+        # (same data as E2 SMPL but without editing pairs — KIMODO pipeline
+        # doesn't include LoadEditingSourceMotion)
+        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_20260514.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
+            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
             dict(
                 type='LoadSmplx55',
                 key='motion',
@@ -111,9 +114,11 @@ train_dataloader = dict(
                 keys=[
                     'src_motion', 'tgt_motion', 'src_mask',
                     'tgt_length', 'src_length', 'edit_mode',
+                    'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
                 ],
                 meta_keys=['motion_path', 'fps'],
-                set_dummy_value=False,
+                set_dummy_value=True,
+                dummy_value=None,
             ),
         ],
     ),

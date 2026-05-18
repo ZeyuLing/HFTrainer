@@ -1,41 +1,34 @@
-# HyMotion M2M v2 — PHASE 0 E2: SMPL Root + Caption Conditioning
+# HyMotion M2M v2 — SMPL Root + Caption Conditioning (default caption config)
 #
-# **Experiment E2** from next-gen proposal: SMPL root rotation baseline
-# with text caption conditioning (caption_local variant).
+# Standard caption-conditioned M2M training config with:
+#   - Text conditioning via QWEN3 + CLIP-L pre-extracted embeddings
+#   - Frozen vtxt/ctxt/timestep encoders (from T2M pretrained) to prevent
+#     encoder collapse during M2M training
+#   - CFG: 10% unconditional during training
+#   - Keypoint supervision enabled (keypoints3d_weight=10.0)
+#   - PerMo editing pairs (6,177 real Neutral→Emotional editing samples)
+#   - Standard velocity prediction on 198-dim SMPL representation
 #
-# Key overrides from base config (_base_hymotion_m2m_v2_046b.py):
-#   - keypoints3d_weight: 0.0 → 10.0 (enable keypoint supervision)
-#   - timestep_squared_weighting: True → False (standard loss weighting)
-#   - cond_mask_prob: 0.0 → 0.1 (enable CFG during training)
-#   - text encoding: enabled (caption_local)
-#   - Rotation space: local (SMPL frame)
-#
-# This validates text-to-motion generation with SMPL Root baseline:
-# - Caption conditioning + classifier-free guidance
-# - Standard velocity prediction on 198-dim SMPL representation
-# - No ADMM smoothing / KIMODO Root transform
-#
-# Difference from E1: Adds text encoder + caption pipeline
+# Loads directly from T2M pretrained (clean text encoders). Previous approach
+# of loading from caption_local_phase2 was abandoned because vtxt_encoder had
+# collapsed (cos>0.98 between all caption embeddings) during the Gen1 training
+# chain (046b→phase1→phase2).
 #
 # Launch (local):
 #   bash tools/dist_train.sh configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py 8 --auto-resume
 # Launch (Taiji, 64 GPUs):
-#   python tools/taiji_submit.py m2m_v2_smpl_caption_E2 configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py --host_num 8
+#   python tools/taiji_submit.py m2m_v2_smpl_caption configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py --host_num 8
 
 _base_ = './_base_hymotion_m2m_v2_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_E2'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption'
 
-# Resume from caption_local_phase2 checkpoint (epoch 3370).
-# caption_local_phase2 has CORRECT null_ctxt values (non-zero).
-# null_embedding_source added as safety net regardless.
-# load_scope='model' resets optimizer/scheduler (loss config changed:
-# keypoints3d 0→10, t² weighting off, sampler_v3).
+# Load from T2M pretrained (clean text encoders, not degraded phase2).
+# load_scope='model' resets optimizer/scheduler for clean start.
 load_from = dict(
     _delete_=True,
-    path='work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_3370',
+    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
     load_scope='model',
-    null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
 )
 
 model = dict(
@@ -44,12 +37,12 @@ model = dict(
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim',
     rotation_space='local',
+    # Freeze vtxt/ctxt/timestep encoders to preserve T2M text understanding.
+    # Without this, vtxt_encoder collapses during M2M training (cos>0.98).
+    caption_freeze_strategy='encoders',
     text_encoder=dict(),  # Use default QWEN3 + CLIP-L
     losses_cfg=dict(
-        # Override base: enable keypoint supervision (E2 baseline)
         keypoints3d_weight=10.0,
-        # Decompose velocity loss into trans/root_rot/body_rot/joint_pos
-        # for per-component monitoring in training logs.
         velocity_loss_reduction='component_mean',
     ),
 )
@@ -59,7 +52,7 @@ train_dataloader = dict(
     num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
     persistent_workers=True,  # Avoid per-epoch worker restart overhead
     dataset=dict(
-        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_20260514.json',
+        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_editing_20260514.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
             dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
@@ -90,6 +83,10 @@ train_dataloader = dict(
                 ],
                 max_corruptions=2,
             ),
+            # Override synthetic corruption with real Neutral source for
+            # PerMo editing pairs (source_motion_path present in annotation).
+            # Pass-through for regular T2M / completion samples.
+            dict(type='LoadEditingSourceMotion'),
             dict(
                 type='PackInputs',
                 keys=[

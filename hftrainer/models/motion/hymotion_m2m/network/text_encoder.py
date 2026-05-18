@@ -73,7 +73,7 @@ SENTENCE_EMB_LAYOUT = {
 class HYTextModel(nn.Module):
     def __init__(
         self,
-        llm_type: str = "qwen3_embedding",
+        llm_type: str = "qwen3",
         max_length_llm: int = 512,
         sentence_emb_type: str = "clipl",
         max_length_sentence_emb: int = 77,

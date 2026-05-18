@@ -228,6 +228,13 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
             if not os.path.exists(speech_script_path):
                 speech_script_path = None
 
+        # source_motion_path: for editing pairs (e.g. PerMo Neutral→Emotion)
+        source_motion_path = raw_data_info.get("source_motion_path", None)
+        if source_motion_path is not None:
+            source_motion_path = os.path.join(self.data_dir, source_motion_path)
+            if not os.path.exists(source_motion_path):
+                source_motion_path = None
+
         data_info = {
             "num_person": num_person,
             "motion_path": motion_path,
@@ -248,6 +255,8 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
             "audio_path": audio_path,
             "speech_script_path": speech_script_path,
             "speaker_id": raw_data_info.get("speaker_id"),
+            # editing pair: source motion for Neutral→Emotion style transfer
+            "source_motion_path": source_motion_path,
         }
         candidate_tasks = self._resolve_candidate_tasks(task_bucket)
         # determine what tasks can be trained on this data
