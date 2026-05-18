@@ -369,6 +369,16 @@ class PrismARPipeline(DiffusionPipeline):
             first_frame_latents=first_frame_latents,
         )
 
+        # Create motion padding mask (for attention masking of padded positions)
+        # This matches the training behavior in PrismTrainer.train_step()
+        motion_mask = self.bundle.create_padding_mask(
+            num_frames=None,  # Use default all-ones mask during inference
+            batch_size=batch_size,
+            latent_frames=latents.shape[2],  # latents shape: [B, C, T', J]
+            latent_joints=latents.shape[3],
+            device=latents.device,
+        )
+
         # Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
 
@@ -395,6 +405,7 @@ class PrismARPipeline(DiffusionPipeline):
                 encoder_hidden_states=prompt_embeds,
                 attention_kwargs=attention_kwargs,
                 is_causal=self.config.is_causal,
+                hidden_states_mask=motion_mask,
             )
 
             if do_cfg:
@@ -404,6 +415,7 @@ class PrismARPipeline(DiffusionPipeline):
                     encoder_hidden_states=negative_prompt_embeds,
                     attention_kwargs=attention_kwargs,
                     is_causal=self.config.is_causal,
+                    hidden_states_mask=motion_mask,
                 )
                 noise_pred = noise_uncond + current_guidance_scale * (
                     noise_pred - noise_uncond
