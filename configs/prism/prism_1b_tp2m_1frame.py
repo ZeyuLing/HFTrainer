@@ -34,6 +34,10 @@ model = dict(
         out_channels=16,
         qk_norm="rms_norm_across_heads",
         rope_max_seq_len=1024,
+        # KT-RoPE: Kinematic-Topology Rotary Position Embedding
+        joint_pos_mode="sequential",  # Options: "sequential", "spectral", "dfs"
+        num_spectral_modes=4,  # Number of Laplacian eigenvector modes (if spectral)
+        spectral_scale=None,  # Scaling for spectral coordinates (None = num_joints)
         text_dim=4096,
     ),
     vae=dict(

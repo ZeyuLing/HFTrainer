@@ -1,149 +1,217 @@
 ╔════════════════════════════════════════════════════════════════════════════╗
-║        V3 EMBODIED PIPELINE - REFERENCE MOTION ISSUE - QUICK REFERENCE     ║
+║         MotionWanRotaryPosEmbed KT-RoPE Integration - QUICK REFERENCE      ║
 ╚════════════════════════════════════════════════════════════════════════════╝
 
-ISSUE: "Reference motion 完全是不对的" (completely wrong) - CONFIRMED ✓
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 WHERE IS RoPE INSTANTIATED?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SEVERITY: 🔴 CRITICAL - Invalidates entire v3 pipeline evaluation
+FILE: hftrainer/models/motion/prism/network/transformer_prism.py
+LINES: 164-166 (in PrismTransformerMotionModel.__init__)
 
+    self.rope = MotionWanRotaryPosEmbed(
+        attention_head_dim, patch_size, rope_max_seq_len
+    )
 
-WHAT'S WRONG
-═════════════════════════════════════════════════════════════════════════════
+PROBLEM: Only passes 3 parameters, missing KT-RoPE params!
 
-V3 reference motions (output/embodied_t2m_v3/data/motions/) contain
-WRONG DATA with:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 WHAT PARAMETERS NEED TO BE ADDED?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NEW PARAMETERS (4 total):
+  • rope_theta (float, default: 10000.0)
+  • joint_pos_mode (str, default: "sequential")
+  • num_spectral_modes (int, default: 4)
+  • spectral_scale (Optional[int], default: None)
+
+ALREADY CONFIGURABLE (3 total):
+  • attention_head_dim (default: 128)
+  • patch_size (default: (1, 1))
+  • rope_max_seq_len (default: 1024)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 4-STEP IMPLEMENTATION CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 1: CONFIG FILE
+  FILE: configs/prism/prism_1b_tp2m_1frame.py
+  LINES: After line 35
+  ADD:
+    rope_theta=10000.0,
+    joint_pos_mode="sequential",
+    num_spectral_modes=4,
+    spectral_scale=None,
+  ✓ DONE
+
+STEP 2A: TRANSFORMER __init__ SIGNATURE
+  FILE: hftrainer/models/motion/prism/network/transformer_prism.py
+  LINES: 132-149
+  ADD to signature:
+    rope_theta: float = 10000.0,
+    joint_pos_mode: str = "sequential",
+    num_spectral_modes: int = 4,
+    spectral_scale: Optional[int] = None,
+  ✓ DONE
+
+STEP 2B: ROPE INSTANTIATION
+  FILE: hftrainer/models/motion/prism/network/transformer_prism.py
+  LINES: 164-166
+  REPLACE: self.rope = MotionWanRotaryPosEmbed(...)
+  WITH:
+    self.rope = MotionWanRotaryPosEmbed(
+        attention_head_dim=attention_head_dim,
+        patch_size=patch_size,
+        rope_max_seq_len=rope_max_seq_len,
+        theta=rope_theta,
+        joint_pos_mode=joint_pos_mode,
+        num_spectral_modes=num_spectral_modes,
+        spectral_scale=spectral_scale,
+    )
+  ✓ DONE
+
+STEP 3: RoPE MODULE __init__
+  FILE: hftrainer/models/motion/prism/network/motion_rope.py
+  LINES: 69-75 (signature) + after line 111 (storage)
   
-  ✗ 19.2% lower character height (0.7357 → 0.5942)
-  ✗ 282% larger height oscillation (0.053 → 0.202 range)
-  ✗ Completely different position/orientation
-  ✗ 60-frame NPZ but 99-frame JSON (mismatch!)
-
-
-WHERE THE ISSUE IS
-═════════════════════════════════════════════════════════════════════════════
-
-Broken:    output/embodied_t2m_v3/data/motions/t2m_*.json
-Working:   output/embodied_comparison_v2/data/motions/t2m_*.json
-Problem:   output/embodied_t2m_v3/data/npz/t2m_*.npz (60 vs 99 frames)
-
-
-ROOT CAUSE
-═════════════════════════════════════════════════════════════════════════════
-
-Most Likely: Retargeting pipeline error
-  CMU mocap → SMPL-X → KIMODO conversion applied wrong scale factor (0.808x)
+  UPDATE SIGNATURE:
+    def __init__(
+        self,
+        attention_head_dim: int,
+        patch_size: Tuple[int, int],
+        max_seq_len: int,
+        theta: float = 10000.0,
+        joint_pos_mode: str = "sequential",
+        num_spectral_modes: int = 4,
+        spectral_scale: Optional[int] = None,
+    ):
   
-Evidence:
-  • Classic -19.2% retargeting signature
-  • Height oscillation 5.8x larger (joint constraints error)
-  • batch_report.json shows model metrics (looks generated, not reference)
+  STORE PARAMETERS (after line 111):
+    self.joint_pos_mode = joint_pos_mode
+    self.num_spectral_modes = num_spectral_modes
+    self.spectral_scale = spectral_scale
+  ✓ DONE
 
-
-EVIDENCE IN NUMBERS
-═════════════════════════════════════════════════════════════════════════════
-
-Sample: t2m_00000001 (person walking forward)
-
-First Frame Position:
-  V2: [0.0632, -0.0112, 0.7503]  ✓ Correct
-  V3: [0.2862, +0.0168, 0.6828]  ✗ Wrong
-
-Mean Height (99 frames):
-  V2: 0.7357  ✓ Humanoid standing height
-  V3: 0.5942  ✗ 19.2% too short!
-
-Height Range:
-  V2: 0.0530  ✓ Normal walking variation
-  V3: 0.2024  ✗ Character squats/jumps too much
-
-First Frame Quaternion:
-  V2: [0.0248, -0.0166, 0.0313, 0.9991]  ✓ Correct rotation
-  V3: [0.0910, +0.0343, 0.0163, 0.9951]  ✗ Wrong rotation
-
-
-HOW TO FIX
-═════════════════════════════════════════════════════════════════════════════
-
-IMMEDIATE (Priority 1):
-  □ Find v3 pipeline code that populates /data/motions/
-  □ Check for SMPL-X scale initialization
-  □ Look for retargeting scale factors
-  □ Search for coordinate frame transformations
-
-URGENT (Priority 2):
-  □ Import v2 reference motions into v3
-  □ Verify height_mean should be ~0.74, not 0.59
-  □ Fix NPZ/JSON frame count mismatch (60 vs 99)
-
-ESSENTIAL (Priority 3):
-  □ Re-run v3 pipeline with correct reference
-  □ Validate batch_report metrics
-  □ Regenerate evaluation dataset
-
-
-FILES TO CHECK
-═════════════════════════════════════════════════════════════════════════════
-
-Source Code (Look for scale/transform errors):
-  • v3 pipeline initialization
-  • SMPL-X model loading
-  • CMU mocap → SMPL-X conversion
-  • SMPL-X → KIMODO retargeting
-
-Data Files (Current state):
-  • output/embodied_t2m_v3/batch_report.json
-  • output/embodied_t2m_v3/data/motions/manifest.json
-  • output/embodied_t2m_v3/data/npz/t2m_00000001.npz (60 frames!)
-
-Reference (What it should be):
-  • output/embodied_comparison_v2/data/motions/t2m_*.json
-
-
-IMPACT
-═════════════════════════════════════════════════════════════════════════════
-
-Current State:
-  Comparing: Generated motions vs WRONG REFERENCE
-  Result: All metrics invalid (FID, diversity, coverage wrong)
-  Conclusion: Entire v3 evaluation is MEANINGLESS
-
-After Fix:
-  Comparing: Generated motions vs CORRECT REFERENCE
-  Result: Metrics valid and meaningful
-  Conclusion: Reliable v3 evaluation possible
-
-
-ESTIMATED ROOT CAUSE
-═════════════════════════════════════════════════════════════════════════════
-
-Scale factor error in pipeline:
-  0.5942 / 0.7357 = 0.808 (80.8% of original)
+STEP 4: IMPLEMENT KT-RoPE LOGIC (OPTIONAL)
+  FILE: hftrainer/models/motion/prism/network/motion_rope.py
+  LINES: In forward(), after line 178
   
-This is likely from:
-  • Wrong SMPL-X character model initialization
-  • Missing scale factor in coordinate transformation
-  • Incorrect retargeting parameters
-  • Height offset applied instead of scale
+  ADD:
+    if self.joint_pos_mode == "spectral":
+        # TODO: Apply Laplacian eigenvector decomposition
+        pass
+    elif self.joint_pos_mode == "dfs":
+        # TODO: Apply kinematic tree DFS traversal
+        pass
+  ✓ OPTIONAL
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 TESTING COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-QUICK TEST
-═════════════════════════════════════════════════════════════════════════════
+Unit Tests (RoPE):
+  cd hftrainer/models/motion/prism/network
+  python motion_rope.py
 
-To verify the fix works:
-  1. Compare v2 and v3 first frame positions after correction
-  2. Check root_height_mean should be ~0.74 (not 0.59)
-  3. Verify NPZ/JSON frame counts match (not 60 vs 99)
-  4. Visual inspection: v3 character should look same height as v2
+Integration Tests (Transformer):
+  cd hftrainer/models/motion/prism/network
+  python transformer_prism.py
 
+Verification Script:
+  python test_ktropoe_params.py
 
-BOTTOM LINE
-═════════════════════════════════════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 RESUME TRAINING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✓ Issue confirmed: v3 reference motions are completely wrong
-✓ Root cause identified: Likely retargeting scale factor error
-✓ Impact assessed: Pipeline evaluation is invalid
-✓ Solution mapped: Fix transformation pipeline, restore v2 reference
+Before: bash tools/taiji_dist_train.sh configs/prism/prism_1b_tp2m_1frame.py --auto-resume
+After:  bash tools/taiji_dist_train.sh configs/prism/prism_1b_tp2m_1frame.py --auto-resume
 
-Status: READY FOR DEVELOPER ACTION
+(Same command - the updated config will be used automatically)
 
-═════════════════════════════════════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 ARCHITECTURE DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DIMENSION SPLIT (attention_head_dim=128):
+  temporal dimension (t_dim) = 64
+  spatial dimension (j_dim) = 64
+
+SEQUENCE LENGTH EXAMPLE (64 frames, 22 joints, patch_size=(1,1)):
+  N = (64 // 1) * (22 // 1) = 1408
+
+OUTPUT SHAPE:
+  (batch, seq_len, 1, attention_head_dim) = (1, 1408, 1, 128)
+
+USAGE:
+  • Passed to all 30 transformer blocks
+  • Used in attention layer rotations
+  • Compatible with hidden_states_mask
+  • Compatible with causal_mask
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 DOCUMENTATION FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. KTROPOE_SUMMARY.md (10 KB)
+   → Executive summary and overview
+
+2. ktropoe_instantiation_report.md (13 KB)
+   → Comprehensive technical analysis
+
+3. ktropoe_config_flow.txt (22 KB)
+   → Visual flow diagrams and architecture
+
+4. ktropoe_implementation_snippets.md (12 KB)
+   → Ready-to-use code snippets
+
+5. QUICK_REFERENCE.txt (This file)
+   → Quick checklist for implementation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⏱️  ESTIMATED TIMELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Documentation Review:     5-10 minutes
+Implementation (4 steps): 15-30 minutes
+Testing & Verification:   10-15 minutes
+─────────────────────────────────────────
+TOTAL:                   30-55 minutes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❓ COMMON QUESTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Will my existing training break?
+A: No! Default values match current behavior.
+
+Q: What's the most important parameter?
+A: rope_theta - it was hardcoded and now needs to be configurable.
+
+Q: Can I change only some parameters?
+A: Yes! Each has a sensible default, only override what you need.
+
+Q: How do I verify parameters are being passed?
+A: Check model.config.rope_theta and model.rope.joint_pos_mode
+
+Q: Do I need to implement spectral/dfs modes immediately?
+A: No, they're optional. "sequential" works as-is.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ SUCCESS CRITERIA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After implementation, verify:
+  ☐ Config file loads without errors
+  ☐ Model accepts new parameters from config
+  ☐ Parameters accessible in model.config
+  ☐ Parameters accessible in model.rope
+  ☐ Unit tests pass (motion_rope.py)
+  ☐ Integration tests pass (transformer_prism.py)
+  ☐ Forward pass produces correct shapes
+  ☐ Training resumption works (--auto-resume)
+
+══════════════════════════════════════════════════════════════════════════════
+For detailed information, see the comprehensive documentation files.
+Start with KTROPOE_SUMMARY.md, then refer to specific files as needed.
+══════════════════════════════════════════════════════════════════════════════

@@ -1,218 +1,192 @@
 ================================================================================
-COMPREHENSIVE INVESTIGATION SUMMARY
+TEXT GUIDANCE SCALE INVESTIGATION: COMPLETE RESULTS
 ================================================================================
 
-Two investigations completed with detailed findings:
+INVESTIGATION COMPLETED: May 15, 2026
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PART A: SMPL MESH VISUALIZATION FOR THREE.JS WEBSITE                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+Question: "Is CFG disabled? Does text_guidance_scale default to 1.0, making 
+caption conditioning ineffective?"
 
-CURRENT STATE:
-  • Skeleton-based rendering only (22 joints as spheres, bones as cylinders)
-  • No mesh geometry displayed
-  • G1 robot uses full STL meshes (33 bodies) for comparison
-  • Frame sync: 30Hz SMPL → 50Hz robot control (1.67× upsampling)
-
-AVAILABLE RESOURCES:
-  • SMPL model files: /apdcephfs_cq11/.../smpl_models/smpl/
-    - SMPL_FEMALE.pkl, MALE.pkl, NEUTRAL.pkl
-    - 6,890 vertices, 23,451 triangles per mesh
-    - 52 parameters (10 shape + 72 pose + 3 translation)
-
-THREE APPROACHES ANALYZED:
-
-1. IN-BROWSER COMPUTATION
-   Pros:  Offline, real-time, no server dependency
-   Cons:  Complex shader, 15-30ms per frame for 3 viewers, memory intensive
-   Status: NOT VIABLE for triple-viewer sync
-
-2. SERVER-SIDE PRE-COMPUTATION  ← RECOMMENDED
-   Pros:  Fast rendering, integrates with export, predictable
-   Cons:  File size 600KB-1MB per motion, export latency
-   Status: FEASIBLE, production-ready
-
-3. CURRENT SKELETON RENDERING
-   Pros:  Lightweight, proven, responsive
-   Cons:  Less realistic visual
-   Status: Keep for real-time control
-
-RECOMMENDATION:
-  Hybrid approach—add optional server-side pre-computed mesh overlay:
-  
-  Step 1: Modify gmr_to_protomotions.py to compute SMPL vertices
-  Step 2: Cache vertices as .bin files with motion
-  Step 3: Update Three.js loader for mesh geometry
-  Step 4: Add UI toggle for visibility
-  
-  Expected: 600KB-1MB per motion, instant browser render, no perf hit
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PART B: PHYSICS SIMULATION REALISM - WHY ROBOTS FALL                       │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-ROOT CAUSE ANALYSIS:
-  
-  PRIMARY ISSUE: Overdamped PD control (ζ = 2.0)
-  └─ 2× slower joint response than critically damped
-  └─ At 50Hz control (20ms cycles), no time for disturbance recovery
-  └─ Falls cascade when robot can't catch itself during transitions
-
-CURRENT CONFIGURATION:
-
-Physics Simulation:
-  • Timestep: 0.001s (1000 Hz) ✓ GOOD
-  • Control decimation: 20× → 50 Hz ✓ APPROPRIATE  
-  • Control mode: Implicit PD ✓ CORRECT
-  • Solver: MuJoCo built-in ✓ REASONABLE
-  
-  Status: Physics engine tuned well, PROBLEM IS CONTROL GAINS
-
-PD GAIN CALCULATION (from g1.py):
-  Natural frequency: ωₙ = 10 Hz (62.83 rad/s)
-  Damping ratio: ζ = 2.0 ← CRITICAL PROBLEM
-  
-  Stiffness: K = m_a × ωₙ²
-  Damping: D = 2 × ζ × m_a × ωₙ
-
-COMPUTED GAINS BY JOINT:
-
-  Hip pitch/yaw:      K~400   D~130   Limit: 88Nm   (weak for heavy legs)
-  Hip roll/knee:      K~995   D~321   Limit:139Nm   (adequate)
-  Ankle:              K~290   D~94    Limit: 50Nm   (weak for plant)
-  Waist roll/pitch:   K~290   D~94    Limit: 50Nm   (CRITICAL - insufficient!)
-  Shoulder/elbow:     K~145   D~47    Limit: 25Nm   (weak by design)
-
-SETTLING TIME ANALYSIS:
-
-  Formula: t_s = 4 / (ζ × ωₙ)
-  
-  ζ = 1.0 (critical):   t_s = 101 ms  ≈ 5 control cycles
-  ζ = 2.0 (current):    t_s = 203 ms  ≈ 10 control cycles (2× SLOWER!)
-  
-  Problem: 10 cycles to settle, but new disturbance arrives every cycle
-           → Can't catch robot from falling
-
-FIVE ROOT CAUSES:
-
-1. OVERDAMPED CONTROL (ζ=2.0)
-   • 2× slower response than critically damped
-   • By 20ms, position still far from target
-   • Torques hit limits before reaching target
-   • Residual error cascades into falls
-
-2. FRAME RATE MISMATCH (30Hz → 50Hz)
-   • 1.67× upsampling with linear interpolation
-   • Can cause overshoot at joint limits
-   • Velocity discontinuities at frame boundaries
-   • High-frequency noise folded into commands
-
-3. INSUFFICIENT TORSO STIFFNESS
-   • Waist needs ~165Nm to prevent 0.1m tip
-   • Available: 290 Nm/rad × 0.3 rad = 87Nm (INSUFFICIENT!)
-   • Can't maintain posture on slopes or dynamic motions
-   • Weak torso → leg corrections ineffective
-
-4. QUATERNION DISCONTINUITIES
-   • FK ground correction modifies pelvis quaternion
-   • Linear interpolation can create orientation jumps
-   • Large changes → ankles/knees can't keep up
-   • Overdamped system magnifies problem
-
-5. WEAK GROUND CONTACT
-   • Ground correction only fixes Z height (not contact quality)
-   • Ankle stiffness insufficient to prevent sliding
-   • Foot slipping under load during complex motions
-   • No frame-by-frame adjustment
-
-
-CONFIGURATION FILES & KEY LOCATIONS:
-
-File                                     Key Lines    Issue
-─────────────────────────────────────────────────────────────────
-protomotions/robot_configs/g1.py         44-45        ζ=2.0, ωₙ=10Hz
-                                         47-55        Computed gains too conservative
-protomotions/simulator/mujoco/config.py  ~50          Physics OK, control is problem
-protomotions/envs/action/action_*.py     145-191      Action scaling may overshoot
-examples/experiments/mimic/mlp.py        49-114       Weak contact reward (-0.1)
-scripts/embodied/gmr_to_protomotions.py  FK section   Quaternion linear interp issue
-scripts/embodied/pipeline_motion_to_robot.py 85-151   Ground mode "global" insufficient
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ ACTIONABLE RECOMMENDATIONS                                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-TIER 1: QUICK WINS (Low Risk, 30 minutes)
-
-  1.1 Reduce Damping Ratio: ζ = 2.0 → 1.0
-      File: protomotions/robot_configs/g1.py, line 45
-      Expected: 40-50% fall reduction, 2× faster response
-      Risk: LOW (critically damped, stable)
-      
-  1.2 Increase Natural Frequency: 10Hz → 15Hz  
-      File: protomotions/robot_configs/g1.py, line 44
-      Expected: +50% stiffness, 35% faster settling, 10-20% additional improvement
-      Risk: LOW to MODERATE (higher cost, minor overshoot risk)
-
-TIER 2: MODERATE CHANGES (2-4 hours, requires testing)
-
-  2.1 Enable Smooth Ground Correction
-      Use: --fk-ground-mode smooth (instead of "global")
-      Effect: Smooths foot trajectory, prevents contact spikes
-      
-  2.2 Implement SLERP for Quaternion Interpolation
-      File: scripts/embodied/gmr_to_protomotions.py
-      Effect: Smooth orientations, no quaternion flips, less torque spikes
-
-TIER 3: INVESTIGATION ONLY (No code changes)
-
-  3.1 Profile Joint Tracking Accuracy
-      Identify which joints fail first (ankles? torso?)
-      
-  3.2 Test Different Action Transforms
-      Try clamp vs tanh vs no transform
-
-
-EXPECTED OUTCOMES AFTER TIER 1 CHANGES:
-
-  Current behavior:
-    • Settling time: ~200ms (10 control cycles)
-    • Fall rate: HIGH
-    • Motion quality: Sluggish
-    • Latency: High tracking error
-  
-  After ζ=1.0 + ωₙ=15Hz:
-    • Settling time: 60-70ms (3-4 cycles)
-    • Fall rate: 40-50% reduction
-    • Motion quality: Natural, energetic
-    • Latency: 50% lower error
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ FILES & LOCATIONS                                                           │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-Full Report:
-  /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
-  INVESTIGATION_REPORT.md
-
-SMPL Models:
-  /apdcephfs_cq11/share_1467498/home/zeyuling/versatilemotion/
-  checkpoints/smpl_models/smpl/
-  • SMPL_FEMALE.pkl, MALE.pkl, NEUTRAL.pkl
-  • J_regressor_extra.npy, J_regressor_h36m.npy
-  • gmm_08.pkl
-
-Three.js Visualization:
-  /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
-  output/embodied_t2m_v5/index.html
-
-Key ProtoMotions Files:
-  • g1.py: protomotions/robot_configs/g1.py (PD gains)
-  • mujoco/config.py: protomotions/simulator/mujoco/config.py (physics)
-  • mlp.py: examples/experiments/mimic/mlp.py (experiment config)
-  • gmr_to_protomotions.py: scripts/embodied/ (conversion pipeline)
-  • pipeline_motion_to_robot.py: scripts/embodied/ (orchestration)
+ANSWER: ✅ NO - CFG IS PROPERLY CONFIGURED AND ACTIVE
 
 ================================================================================
-END SUMMARY
+KEY FINDINGS
+================================================================================
+
+1. CLI ARGUMENT (scripts/eval/eval_m2m_v2_all_tasks.py, lines 3797-3798)
+   ✅ EXISTS with DEFAULT: 5.0
+   
+   parser.add_argument('--text-guidance-scale', type=float, default=5.0,
+       help='CFG scale for text-conditioned models (5.0 standard for flow matching)')
+
+2. PIPELINE INITIALIZATION (scripts/eval/eval_m2m_v2_all_tasks.py, lines 1385-1389)
+   ⚠️ INITIALIZED WITHOUT EXPLICIT text_guidance_scale (defaults to 1.0 internally)
+   
+   pipeline = HyMotionM2MPipeline(
+       bundle=bundle,
+       num_steps=50,
+       replacement_guidance='none',
+   )
+
+3. PIPELINE OVERRIDE (scripts/eval/eval_m2m_v2_all_tasks.py, line 2905)
+   ✅ OVERRIDDEN BEFORE INFERENCE
+   
+   pipeline.text_guidance_scale = text_guidance_scale
+
+4. VALUE PASSED (scripts/eval/eval_m2m_v2_all_tasks.py, lines 4046-4048)
+   ✅ CONDITIONED ON MODEL TYPE
+   
+   text_guidance_scale=(
+       args.text_guidance_scale if model_info.get('has_caption') else 1.0)
+   
+   For caption models (caption_local, caption_global, etc.): 5.0 ✅
+   For uncond models (uncond_local, uncond_global, etc.): 1.0 ✅
+
+5. CFG ACTIVATION (hftrainer/pipelines/motion/hymotion_m2m_pipeline.py, line 221)
+   ✅ CORRECT LOGIC
+   
+   do_cfg = self.text_guidance_scale > 1.0 and not self.bundle.uncondition_mode
+   
+   Result: do_cfg = (5.0 > 1.0) and (not False) = True ✅
+
+6. CFG APPLICATION (hftrainer/pipelines/motion/hymotion_m2m_pipeline.py, line 277)
+   ✅ APPLIED AT EACH ODE STEP
+   
+   x_pred = pred_basic + self.text_guidance_scale * (pred_text - pred_basic)
+                         ↑
+                    Amplifies text influence by 5.0×
+
+================================================================================
+DATA FLOW SUMMARY
+================================================================================
+
+Default CLI: --text-guidance-scale 5.0
+           ↓
+eval script parses: args.text_guidance_scale = 5.0
+           ↓
+Main loop: model_info.get('has_caption') = True
+           ↓
+Passed to evaluate_sample(): text_guidance_scale = 5.0
+           ↓
+Pipeline override: pipeline.text_guidance_scale = 5.0
+           ↓
+Pipeline inference:
+   - do_cfg activation: (5.0 > 1.0) = True ✅
+   - CFG formula: x_pred = uncond + 5.0 × (cond - uncond)
+   - At every ODE step: caption influence amplified 5×
+
+================================================================================
+MODEL BREAKDOWN
+================================================================================
+
+CAPTION-ENABLED MODELS (CFG ACTIVE):
+✅ caption_local       → text_guidance_scale = 5.0
+✅ caption_global      → text_guidance_scale = 5.0
+✅ caption_local_phase1     → text_guidance_scale = 5.0
+✅ caption_global_phase1    → text_guidance_scale = 5.0
+✅ caption_local_phase2     → text_guidance_scale = 5.0
+✅ caption_global_phase2    → text_guidance_scale = 5.0
+✅ kimodo_caption_E4   → text_guidance_scale = 5.0
+✅ smpl_caption_E2     → text_guidance_scale = 5.0
+
+UNCONDITIONED MODELS (CFG DISABLED):
+❌ uncond_local        → text_guidance_scale = 1.0
+❌ uncond_global       → text_guidance_scale = 1.0
+❌ kimodo_uncond_E3    → text_guidance_scale = 1.0
+❌ smpl_uncond_E1      → text_guidance_scale = 1.0
+
+================================================================================
+VERIFICATION CHECKLIST
+================================================================================
+
+[✅] CLI argument exists: --text-guidance-scale
+[✅] Default value: 5.0 (safe, non-zero)
+[✅] Value received by evaluate_sample()
+[✅] Value set on pipeline before inference
+[✅] CFG activation check: scale > 1.0
+[✅] CFG formula applied at each step
+[✅] Caption models identified with has_caption=True
+[✅] Uncond models get safe default 1.0
+
+================================================================================
+CRITICAL CODE LOCATIONS
+================================================================================
+
+File: scripts/eval/eval_m2m_v2_all_tasks.py
+  Line 3797-3798: CLI argument definition (default 5.0)
+  Line 1385-1389: Pipeline initialization
+  Line 2905:      Pipeline parameter override
+  Line 4046-4048: Conditional passing to evaluate_sample()
+
+File: hftrainer/pipelines/motion/hymotion_m2m_pipeline.py
+  Line 86:   Constructor (default text_guidance_scale=1.0)
+  Line 99:   Store as instance variable
+  Line 221:  CFG activation check: do_cfg = scale > 1.0
+  Line 277:  CFG application formula
+
+================================================================================
+POTENTIAL ISSUE FOUND
+================================================================================
+
+tools/infer.py for HyMotion M2M (lines 230-233):
+❌ DOES NOT PASS text_guidance_scale to pipeline
+
+Current code:
+    pipeline = HyMotionM2MPipeline(
+        bundle=bundle,
+        num_steps=args.num_steps or 50,
+    )
+
+Should be:
+    pipeline = HyMotionM2MPipeline(
+        bundle=bundle,
+        num_steps=args.num_steps or 50,
+        text_guidance_scale=getattr(args, 'guidance_scale', 5.0) or 5.0,
+    )
+
+Also missing: --guidance-scale CLI argument for M2M in tools/infer.py
+(T2M has it at line 286)
+
+================================================================================
+CONCLUSION
+================================================================================
+
+✅ CFG IS CORRECTLY IMPLEMENTED
+
+1. ✅ Text guidance is NOT disabled
+2. ✅ Default scale is 5.0 (not 1.0)
+3. ✅ Pipeline receives the correct value
+4. ✅ CFG is activated when scale > 1.0
+5. ✅ Caption effect is amplified 5× during inference
+6. ✅ Eval script correctly distinguishes caption vs uncond models
+
+The design is robust:
+- Safe default (1.0 for uncond models)
+- Flexible (can override via CLI)
+- Model-aware (checks has_caption)
+- Correct implementation (CFG formula applied properly)
+
+================================================================================
+DOCUMENTATION GENERATED
+================================================================================
+
+✓ TEXT_GUIDANCE_SCALE_ANALYSIS.md
+  - Comprehensive analysis with code references
+  - 9 major sections covering all aspects
+  - Table of all models and their CFG status
+
+✓ CFG_DETAILED_FLOW.md
+  - Step-by-step execution trace
+  - 9 phases from CLI to inference
+  - Detailed data flow diagram
+  - Key checkpoints for verification
+
+✓ TEXT_GUIDANCE_QUICK_REFERENCE.md
+  - Quick lookup guide
+  - Command-line usage examples
+  - Common issues and solutions
+  - Critical code locations
+
+All saved to: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
 ================================================================================
