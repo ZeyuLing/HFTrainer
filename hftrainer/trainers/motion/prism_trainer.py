@@ -53,7 +53,7 @@ class PrismTrainer(BaseTrainer):
             latent_joints=latent_joints,
             device=latents.device,
         )
-        text_states = self.bundle.encode_prompt(
+        text_states, text_mask = self.bundle.encode_prompt_with_mask(
             captions,
             max_sequence_length=self.max_text_length,
             prompt_drop_rate=self.prompt_drop_rate,
@@ -89,7 +89,7 @@ class PrismTrainer(BaseTrainer):
             encoder_hidden_states=text_states,
             timestep=timesteps,
             hidden_states_mask=padding_mask if num_frames is not None else None,
-            encoder_hidden_states_mask=None,
+            encoder_hidden_states_mask=text_mask,
         ).float()
 
         mse = F.mse_loss(model_pred, targets.float(), reduction='none')

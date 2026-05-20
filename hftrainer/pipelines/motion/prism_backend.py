@@ -331,7 +331,7 @@ class PrismARPipeline(DiffusionPipeline):
         num_joints: int = 23,
         num_inference_steps: int = 50,
         guidance_scale: float = 2.0,
-        max_sequence_length: int = 512,
+        max_sequence_length: int = 256,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
         """Generate a single motion segment.
@@ -359,8 +359,8 @@ class PrismARPipeline(DiffusionPipeline):
         if first_frame_motion is not None:
             first_frame_latents = self.encode_motion(first_frame_motion)
 
-        # Encode prompt
-        prompt_embeds, negative_prompt_embeds = self.encode_prompt(
+        # Encode prompt with attention masks
+        prompt_embeds, negative_prompt_embeds, prompt_mask, negative_prompt_mask = self.encode_prompt_with_mask(
             prompt=prompt,
             negative_prompt=negative_prompt,
             do_classifier_free_guidance=do_cfg,
@@ -373,6 +373,12 @@ class PrismARPipeline(DiffusionPipeline):
         prompt_embeds = prompt_embeds.to(transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
+        
+        # Move masks to correct dtype for transformer
+        if prompt_mask is not None:
+            prompt_mask = prompt_mask.to(transformer_dtype)
+        if negative_prompt_mask is not None:
+            negative_prompt_mask = negative_prompt_mask.to(transformer_dtype)
 
         # Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -421,6 +427,7 @@ class PrismARPipeline(DiffusionPipeline):
                 hidden_states=latent_model_input,
                 timestep=timestep,
                 encoder_hidden_states=prompt_embeds,
+                encoder_hidden_states_mask=prompt_mask,
                 attention_kwargs=attention_kwargs,
                 is_causal=self.config.is_causal,
                 hidden_states_mask=motion_mask,
@@ -431,6 +438,7 @@ class PrismARPipeline(DiffusionPipeline):
                     hidden_states=latent_model_input,
                     timestep=timestep,
                     encoder_hidden_states=negative_prompt_embeds,
+                    encoder_hidden_states_mask=negative_prompt_mask,
                     attention_kwargs=attention_kwargs,
                     is_causal=self.config.is_causal,
                     hidden_states_mask=motion_mask,
@@ -450,11 +458,10 @@ class PrismARPipeline(DiffusionPipeline):
         if self.config.expand_timesteps and first_frame_latents is not None:
             latents = (1 - first_frame_mask) * condition + first_frame_mask * latents
 
-        # Decode to motion
+        # Decode to motion (fix applied later in post_process_motion in axis-angle space)
         motion_vec = self.decode_motion(latents)
 
         return motion_vec
-
     @torch.no_grad()
     def __call__(
         self,
@@ -471,7 +478,7 @@ class PrismARPipeline(DiffusionPipeline):
         use_blend: bool = True,
         mocap_framerate: float = 30.0,
         gender: str = "neutral",
-        max_sequence_length: int = 512,
+        max_sequence_length: int = 256,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         overlap_frames: int = 1,
     ) -> Dict:
@@ -531,6 +538,7 @@ class PrismARPipeline(DiffusionPipeline):
 
         # Load first frame condition if provided
         first_frame_motion = None
+        has_initial_conditioning = (first_frame_motion_path is not None)
         if first_frame_motion_path is not None:
             first_frame_motion = self.load_condition_pose(first_frame_motion_path)
             # Only use first frame
@@ -621,22 +629,29 @@ class PrismARPipeline(DiffusionPipeline):
         print_log(f"Total motion frames: {full_motion.shape[1]}")
 
         # Post-process to SMPL-X format
+        # Only apply first-chunk fix when there was no initial frame conditioning
+        # (i.e., this is a fresh generation, not conditioned on an external motion).
+        fix_first = not has_initial_conditioning
         smplx_dict = self.post_process_motion(
             full_motion,
             use_static=use_static,
             use_smooth=use_smooth,
             normalize=normalize,
+            fix_first_chunk=fix_first,
             mocap_framerate=mocap_framerate,
             gender=gender,
         )
 
         return smplx_dict
 
-    def decode_motion(self, latents: torch.Tensor) -> torch.Tensor:
+    def decode_motion(self, latents: torch.Tensor, fix_first_chunk: bool = True) -> torch.Tensor:
         """Decode latents to motion.
 
         Args:
             latents: Latent tensor of shape [B, C, T_latent, J].
+            fix_first_chunk: Whether to apply the first-chunk velocity spike fix
+                in normalized rot6d space. Note: the main fix is applied post
+                axis-angle conversion in post_process_motion() for better results.
 
         Returns:
             Motion tensor of shape [B, T, J, C].
@@ -646,6 +661,7 @@ class PrismARPipeline(DiffusionPipeline):
         device_type = latents.device.type
         with torch.autocast(device_type, enabled=False):
             motion = self.vae.decode(latents.float())
+
         return motion
 
     def post_process_motion(
@@ -654,6 +670,7 @@ class PrismARPipeline(DiffusionPipeline):
         use_static: bool = False,
         use_smooth: bool = False,
         normalize: bool = True,
+        fix_first_chunk: bool = True,
         mocap_framerate: float = 30.0,
         gender: str = "neutral",
     ) -> Dict:
@@ -664,6 +681,9 @@ class PrismARPipeline(DiffusionPipeline):
             use_static: Whether to use post-hoc static joint refinement.
             use_smooth: Whether to apply smoothing.
             normalize: Whether to normalize facing direction and ground plane.
+            fix_first_chunk: Whether to fix the first-chunk velocity spike.
+                Applied in axis-angle space after rot6d→aa conversion for
+                correct nonlinear handling.
             mocap_framerate: Frame rate of the motion.
             gender: Gender for SMPL model.
 
@@ -678,8 +698,98 @@ class PrismARPipeline(DiffusionPipeline):
 
         pred_poses = rearrange(pred_poses, "b t (j d)-> (b t) j d", d=6)
 
+        # Training data uses row-major 6D convention [R00,R01,R10,R11,R20,R21]
+        # (applied by LoadSmplx55: col_major[[0,3,1,4,2,5]] -> row_major).
+        # rotation_6d_to_axis_angle expects column-major [R00,R10,R20,R01,R11,R21],
+        # so we reverse the permutation: row_major[[0,2,4,1,3,5]] -> col_major.
+        pred_poses = pred_poses[..., [0, 2, 4, 1, 3, 5]]
         pred_poses = rotation_6d_to_axis_angle(pred_poses)
         pred_poses = rearrange(pred_poses, "(b t) j d -> b t (j d)", b=1)
+
+        # ---- Fix VAE first-chunk velocity spike (in axis-angle space) ----
+        # The causal decoder's `first_chunk=True` handling in DupUp2DTK introduces
+        # structural velocity discontinuities in the first decoded chunk.
+        # The artifact extends through the full causal conv receptive field and the
+        # nonlinear rot6d->axis-angle conversion amplifies it further.
+        # Fix: scan backward from stable region to find artifact boundary, replace
+        # corrupted frames with backward extrapolation, then blend at boundary.
+        if fix_first_chunk:
+            T = pred_poses.shape[1]
+            scale = self.vae_scale_factor_temporal  # typically 4
+            min_fix = 3 * scale  # 12 frames minimum for long motions
+            max_fix = min(T // 3, 10 * scale)  # up to T/3 or 40 frames
+
+            # Determine if we have enough frames for the adaptive fix
+            # For short motions (T < 28), use a simpler proportional fix
+            if T >= min_fix + 16:
+                # --- Adaptive fix for longer motions ---
+                # Compute per-frame velocity for spike detection
+                diffs = pred_poses[:, 1:] - pred_poses[:, :-1]  # (1, T-1, D)
+                vel = diffs.norm(dim=-1).squeeze(0)  # (T-1,)
+
+                # Use stable region (last 40%) as velocity reference
+                stable_start = max(max_fix + 8, int(T * 0.6))
+                stable_vel_median = vel[stable_start:].median()
+                spike_threshold = 2.0 * stable_vel_median
+
+                # Scan forward to find the LAST spike frame within range
+                n_fix = min_fix
+                for i in range(min_fix, min(max_fix, len(vel))):
+                    if vel[i] > spike_threshold:
+                        n_fix = i + 2  # fix past this spike + margin
+                n_fix = min(n_fix, max_fix)
+
+            elif T >= 8:
+                # --- Simple proportional fix for short motions ---
+                # Fix first scale frames (typically 4), which is the minimum
+                # first-chunk artifact region
+                n_fix = min(scale, T // 3)
+
+            else:
+                n_fix = 0  # Too short to fix
+
+            if n_fix > 0 and T > n_fix + 4:
+                # Anchor at the first stable frame after the artifact
+                anchor_idx = n_fix
+                # Reference velocity from a longer window in stable region
+                n_ref = min(16, T - anchor_idx - 1)
+                n_ref = max(n_ref, 1)  # at least 1 frame reference
+                anchor = pred_poses[:, anchor_idx]
+                ref_vel = (pred_poses[:, anchor_idx + n_ref] - pred_poses[:, anchor_idx]) / n_ref
+
+                # Replace corrupted frames with backward extrapolation
+                n_blend = min(8, n_fix // 2)  # blend zone length
+                n_hard = n_fix - n_blend  # hard replacement zone
+
+                # Hard replacement zone: frames 0..n_hard-1
+                for i in range(n_hard):
+                    pred_poses[:, i] = anchor - (n_fix - i) * ref_vel
+
+                # Blend zone: frames n_hard..n_fix-1 (smooth transition)
+                # Cosine blend from extrapolated to original
+                if n_blend > 0:
+                    original_poses = pred_poses[:, n_hard:n_fix].clone()
+                    for i in range(n_blend):
+                        extrap = anchor - (n_blend - i) * ref_vel
+                        # Cosine weight: 0 at start of blend -> 1 at end
+                        alpha = 0.5 * (1.0 - torch.cos(torch.tensor(
+                            (i + 1) / (n_blend + 1) * 3.14159265)))
+                        pred_poses[:, n_hard + i] = (1 - alpha) * extrap + alpha * original_poses[:, i]
+
+                # Also fix translation with same approach
+                T_tr = transl.shape[1]
+                if T_tr > n_fix + 4:
+                    tr_anchor = transl[:, anchor_idx]
+                    tr_ref_vel = (transl[:, anchor_idx + n_ref] - transl[:, anchor_idx]) / n_ref
+                    for i in range(n_hard):
+                        transl[:, i] = tr_anchor - (n_fix - i) * tr_ref_vel
+                    if n_blend > 0:
+                        original_tr = transl[:, n_hard:n_fix].clone()
+                        for i in range(n_blend):
+                            extrap_tr = tr_anchor - (n_blend - i) * tr_ref_vel
+                            alpha = 0.5 * (1.0 - torch.cos(torch.tensor(
+                                (i + 1) / (n_blend + 1) * 3.14159265)))
+                            transl[:, n_hard + i] = (1 - alpha) * extrap_tr + alpha * original_tr[:, i]
 
         if use_static:
             pred_poses = self.smpl_processor.post_hoc_static_refine(
@@ -709,7 +819,7 @@ class PrismARPipeline(DiffusionPipeline):
         negative_prompt: Optional[Union[str, List[str]]] = None,
         do_classifier_free_guidance: bool = True,
         num_motion_per_prompt: int = 1,
-        max_sequence_length: int = 512,
+        max_sequence_length: int = 256,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ):
@@ -764,7 +874,7 @@ class PrismARPipeline(DiffusionPipeline):
         self,
         prompt: Union[str, List[str]] = None,
         num_motion_per_prompt: int = 1,
-        max_sequence_length: int = 512,
+        max_sequence_length: int = 256,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ):
@@ -804,6 +914,125 @@ class PrismARPipeline(DiffusionPipeline):
         )
 
         return prompt_embeds
+    @torch.no_grad()
+    def _get_t5_prompt_embeds_with_mask(
+        self,
+        prompt: Union[str, List[str]] = None,
+        num_motion_per_prompt: int = 1,
+        max_sequence_length: int = 256,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        """Get T5 prompt embeddings with attention mask.
+        
+        Returns:
+            Tuple of:
+                - prompt_embeds: Text embeddings [B*num_motion, max_seq_len, hidden_dim]
+                - prompt_mask: Attention mask [B*num_motion, max_seq_len] (1 for valid, 0 for padding)
+        """
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        batch_size = len(prompt)
+
+        text_inputs = self.tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=max_sequence_length,
+            truncation=True,
+            add_special_tokens=True,
+            return_attention_mask=True,
+            return_tensors="pt",
+        )
+        text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
+        seq_lens = mask.gt(0).sum(dim=1).long()
+
+        prompt_embeds = self.text_encoder(
+            text_input_ids.to(device), mask.to(device)
+        ).last_hidden_state
+        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+        prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens)]
+        prompt_embeds = torch.stack(
+            [
+                torch.cat([u, u.new_zeros(max_sequence_length - u.size(0), u.size(1))])
+                for u in prompt_embeds
+            ],
+            dim=0,
+        )
+        
+        # Create attention mask: 1 for valid tokens, 0 for padding
+        encoder_hidden_states_mask = torch.zeros(
+            batch_size, max_sequence_length, dtype=torch.long, device=device
+        )
+        for i, seq_len in enumerate(seq_lens):
+            encoder_hidden_states_mask[i, :seq_len] = 1
+
+        # duplicate text embeddings and mask for each generation per prompt
+        _, seq_len, _ = prompt_embeds.shape
+        prompt_embeds = prompt_embeds.repeat(1, num_motion_per_prompt, 1)
+        prompt_embeds = prompt_embeds.view(
+            batch_size * num_motion_per_prompt, seq_len, -1
+        )
+        
+        # Repeat mask as well
+        encoder_hidden_states_mask = encoder_hidden_states_mask.repeat(num_motion_per_prompt, 1)
+
+        return prompt_embeds, encoder_hidden_states_mask
+
+    def encode_prompt_with_mask(
+        self,
+        prompt: Union[str, List[str]],
+        negative_prompt: Optional[Union[str, List[str]]] = None,
+        do_classifier_free_guidance: bool = True,
+        num_motion_per_prompt: int = 1,
+        max_sequence_length: int = 256,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        """Encodes the prompt into text encoder hidden states with attention masks."""
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        if prompt is not None:
+            batch_size = len(prompt)
+        else:
+            batch_size = 1
+
+        prompt_embeds, prompt_mask = self._get_t5_prompt_embeds_with_mask(
+            prompt=prompt,
+            num_motion_per_prompt=num_motion_per_prompt,
+            max_sequence_length=max_sequence_length,
+            device=device,
+            dtype=dtype,
+        )
+        negative_prompt_embeds = None
+        negative_prompt_mask = None
+
+        if do_classifier_free_guidance:
+            negative_prompt = negative_prompt or ""
+            negative_prompt = (
+                batch_size * [negative_prompt]
+                if isinstance(negative_prompt, str)
+                else negative_prompt
+            )
+
+            if prompt is not None and type(prompt) is not type(negative_prompt):
+                raise TypeError(
+                    f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
+                    f" {type(prompt)}."
+                )
+            elif batch_size != len(negative_prompt):
+                raise ValueError(
+                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
+                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
+                    " the batch size of `prompt`."
+                )
+
+            negative_prompt_embeds, negative_prompt_mask = self._get_t5_prompt_embeds_with_mask(
+                prompt=negative_prompt,
+                num_motion_per_prompt=num_motion_per_prompt,
+                max_sequence_length=max_sequence_length,
+                device=device,
+                dtype=dtype,
+            )
+
+        return prompt_embeds, negative_prompt_embeds, prompt_mask, negative_prompt_mask
 
 
 def main(

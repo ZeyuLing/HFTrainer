@@ -192,6 +192,67 @@ class PrismBundle(ModelBundle):
         )
         return prompt_embeds
 
+    @torch.no_grad()
+    def encode_prompt_with_mask(
+        self,
+        prompt: Union[str, List[str]],
+        max_sequence_length: int = 128,
+        prompt_drop_rate: float = 0.0,
+        dtype: Optional[torch.dtype] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Encode prompts and return embeddings with attention mask.
+        
+        Args:
+            prompt: Text prompt(s) to encode.
+            max_sequence_length: Maximum length for tokenization.
+            prompt_drop_rate: Rate for random prompt dropout.
+            dtype: Target dtype for embeddings.
+            
+        Returns:
+            Tuple of:
+                - prompt_embeds: Text embeddings [B, max_seq_len, hidden_dim]
+                - encoder_hidden_states_mask: Attention mask [B, max_seq_len]
+                  where 1 = valid token, 0 = padding token
+        """
+        device = next(self.text_encoder.parameters()).device
+        dtype = dtype or next(self.text_encoder.parameters()).dtype
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        if prompt_drop_rate > 0:
+            prompt = ['' if torch.rand(1).item() < prompt_drop_rate else p for p in prompt]
+
+        text_inputs = self.tokenizer(
+            prompt,
+            padding='max_length',
+            max_length=max_sequence_length,
+            truncation=True,
+            add_special_tokens=True,
+            return_attention_mask=True,
+            return_tensors='pt',
+        )
+        input_ids = text_inputs.input_ids.to(device)
+        attention_mask = text_inputs.attention_mask.to(device)
+        seq_lens = attention_mask.gt(0).sum(dim=1).long()
+
+        outputs = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
+        prompt_embeds = outputs.last_hidden_state.to(device=device, dtype=dtype)
+        prompt_embeds = [emb[:seq_len] for emb, seq_len in zip(prompt_embeds, seq_lens)]
+        prompt_embeds = torch.stack(
+            [
+                torch.cat([emb, emb.new_zeros(max_sequence_length - emb.size(0), emb.size(1))])
+                for emb in prompt_embeds
+            ],
+            dim=0,
+        )
+        
+        # Create attention mask: 1 for valid tokens, 0 for padding
+        encoder_hidden_states_mask = torch.zeros(
+            len(seq_lens), max_sequence_length, dtype=torch.long, device=device
+        )
+        for i, seq_len in enumerate(seq_lens):
+            encoder_hidden_states_mask[i, :seq_len] = 1
+            
+        return prompt_embeds, encoder_hidden_states_mask
+
     def create_padding_mask(
         self,
         num_frames: Optional[torch.Tensor],
