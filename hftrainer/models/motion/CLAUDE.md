@@ -755,6 +755,51 @@ axis_angle
 - Decoding (rot6d -> axis_angle): MUST reorder `[0,2,4,1,3,5]` first, then `rotation_6d_to_axis_angle`
 - NEVER mix `geometry.py` and `rotation_convert.py` rot6d functions
 
+### Rot6D Alignment Validation Tools (NEW — 2026-05-21)
+
+**Location**: `scripts/debug/rot6d_validation/`
+
+A comprehensive validation framework has been integrated to prevent rot6d convention mismatches. Use these tools to verify that your data pipeline is using row-major rot6d correctly throughout training and inference.
+
+**Three components**:
+1. **rot6d_validator.py** — Core validation framework
+   - `Rot6DValidator` class for orthonormality checks (row-major vs column-major)
+   - `PrismPipelineValidator` class for end-to-end validation
+   
+2. **test_alignment.py** — Executable test suite (6 tests, all passing ✅)
+   - Reordering indices correctness
+   - Orthonormality verification (R@R^T = I)
+   - Normalization roundtrip (error < 1e-5)
+   - Shape validation after rearrange
+   - Per-joint norm checks
+   - Reordering consistency
+   
+3. **README.md** — Complete usage guide with examples and troubleshooting
+
+**Quick Start**:
+```bash
+# Run validation tests
+python scripts/debug/rot6d_validation/test_alignment.py --verbose
+
+# Validate real motion data
+python scripts/debug/rot6d_validation/rot6d_validator.py \
+    --motion_npz /path/to/motion.npz --verbose
+
+# Import in code
+from scripts.debug.rot6d_validation import Rot6DValidator, PrismPipelineValidator
+```
+
+**Why this matters**: The critical reordering transformation `[0,3,1,4,2,5]` must be applied **per-joint** (all 22 joints), not globally. Common mistakes:
+- ❌ Reordering only first 6 dims → VAE output range [-10, 13]
+- ❌ Using backwards indices [0,2,4,1,3,5] → rot6d norms >> 1.0
+- ✅ Correct: Loop over all 22 joints and reorder each independently
+
+**See also**:
+- `docs/temp/rot6d_validation_integration_2026-05-21.md` — Full integration documentation
+- `docs/temp/rot6d_convention_verification_2026-05-20.md` — Detailed investigation
+
+
+
 ### ⚠️ Per-Dimension Normalization
 
 Controlled by `HyMotionM2MBundle.mean_std_dir`:
