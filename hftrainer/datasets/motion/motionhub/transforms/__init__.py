@@ -75,3 +75,18 @@ from hftrainer.datasets.motion.motionhub.transforms.load_editing_source import (
 )
 
 __all__.extend(['SmplTransToKimodoRootOnline', 'LoadEditingSourceMotion'])
+from hftrainer.datasets.motion.motionhub.transforms.compute_147dim import (
+    Compute147DimEndEffector,
+)
+
+__all__.append('Compute147DimEndEffector')
+from hftrainer.datasets.motion.motionhub.transforms.compute_151dim_contact import (
+    Compute151DimFootContact,
+)
+
+__all__.append('Compute151DimFootContact')
+from hftrainer.datasets.motion.motionhub.transforms.dimension_filter import (
+    EnsureDimensionFilter,
+)
+
+__all__.append('EnsureDimensionFilter')

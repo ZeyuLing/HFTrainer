@@ -783,6 +783,7 @@ class HunyuanMotionMMDiT(nn.Module):
         x_mask_temporal: Tensor,
         ctxt_mask_temporal: Tensor,
         pre_encoded_motion: Optional[Tensor] = None,
+        task_emb: Optional[Tensor] = None,
         **kwargs,
     ) -> Tensor:
         """
@@ -790,7 +791,7 @@ class HunyuanMotionMMDiT(nn.Module):
 
         This method performs the full diffusion transformer forward pass for motion denoising:
         1. Encode all inputs (motion, ctxt, vtxt, timestep) to hidden dimension
-        2. Create adapter signal (timestep + vtxt) for modulation
+        2. Create adapter signal (timestep + vtxt + task instruction) for modulation
         3. Optionally refine context text embeddings
         4. Build attention masks based on mask_mode
         5. Process through double stream blocks (motion + text parallel)
@@ -814,6 +815,11 @@ class HunyuanMotionMMDiT(nn.Module):
                 (B, L_motion, feat_dim). When provided, bypasses input_encoder and uses
                 these features directly. Used by UMO-style temporal fusion where the
                 caller fuses E_in(x_t) + E_ctx(source) externally. Default: None.
+            task_emb (Optional[Tensor]): Task instruction embeddings for M2M task awareness of shape (B, 1, 1024).
+                These are CLIP-encoded natural language task descriptions (e.g. "complete motion from sparse random cells")
+                that are added to the adapter signal to provide explicit task modulation.
+                When provided, injected into adapter = timestep_feat + vtxt_feat + task_emb.
+                Default: None.
             **kwargs: Additional unused arguments for compatibility.
 
         Returns:
@@ -853,6 +859,8 @@ class HunyuanMotionMMDiT(nn.Module):
         # Combine timestep and vtxt to form the adapter signal for modulation
         # adapter is broadcast to all sequence positions via ModulateDiT layers
         adapter = timestep_feat + vtxt_feat
+        if task_emb is not None:
+            adapter = adapter + task_emb
 
         # ============ Build Attention Masks ============
         # Convert boolean masks to attention-compatible format (0 for valid, -inf for masked)

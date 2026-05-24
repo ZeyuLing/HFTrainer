@@ -79,7 +79,11 @@ def _has_caption_from(model_name: str, parent: Dict[str, Any]) -> bool:
     return bool(parent.get("has_caption", False))
 
 
-def split_one(eval_v2_path: Path, out_dir: Path) -> List[Path]:
+def split_one(
+    eval_v2_path: Path,
+    out_dir: Path,
+    include_skipped: bool = False,
+) -> List[Path]:
     """Split a single eval_v2_*.json into per-(model, task, setting) JSONs."""
     with open(eval_v2_path, "r") as f:
         all_results = json.load(f)
@@ -106,9 +110,12 @@ def split_one(eval_v2_path: Path, out_dir: Path) -> List[Path]:
             slim = _slim_run(model_name, task_data, parent)
             if not slim["task_id"] or not slim["setting"]:
                 continue
-            if slim["task_id"] in SKIP_TASK_IDS:
+            if (not include_skipped) and slim["task_id"] in SKIP_TASK_IDS:
                 continue
-            if (slim["task_id"], slim["setting"]) in SKIP_SETTINGS:
+            if (
+                (not include_skipped)
+                and (slim["task_id"], slim["setting"]) in SKIP_SETTINGS
+            ):
                 continue
             fname = f"{model_name}__{slim['task_id']}_{slim['setting']}.json"
             fpath = out_dir / fname
@@ -125,6 +132,9 @@ def main() -> None:
     parser.add_argument("--db", default=None, help="Path to eval_dashboard.db (default: project default)")
     parser.add_argument("--no-import", action="store_true",
                         help="Only split JSONs (skip DB import).")
+    parser.add_argument("--include-skipped", action="store_true",
+                        help="Also split/import settings that this helper "
+                             "normally suppresses for routine dashboard runs.")
     parser.add_argument("--notes", default="", help="Notes attached to imported runs.")
     args = parser.parse_args()
 
@@ -136,7 +146,7 @@ def main() -> None:
     eval_files = sorted(args.run_root.rglob("eval_v2_*.json"))
     print(f"[split] found {len(eval_files)} eval_v2_*.json under {args.run_root}")
     for ef in eval_files:
-        new_files = split_one(ef, out_dir)
+        new_files = split_one(ef, out_dir, include_skipped=args.include_skipped)
         print(f"  {ef.relative_to(args.run_root)} -> {len(new_files)} slim files")
         written.extend(new_files)
 

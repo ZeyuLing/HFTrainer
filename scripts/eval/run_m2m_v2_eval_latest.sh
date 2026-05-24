@@ -32,7 +32,7 @@ python3 tools/eval_m2m_v2_all_tasks.py \
     --max-samples 80 \
     --num-steps 50 \
     --replacement-guidance skip_last \
-    --text-guidance-scale 5.0 \
+    --text-guidance-scale 1.0 \
     --save-npz \
     --output-dir "${OUTPUT_DIR}" \
     --device cuda

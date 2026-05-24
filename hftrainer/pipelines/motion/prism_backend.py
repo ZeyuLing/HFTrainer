@@ -697,12 +697,9 @@ class PrismARPipeline(DiffusionPipeline):
         pred_poses = x_dec[..., 6:]
 
         pred_poses = rearrange(pred_poses, "b t (j d)-> (b t) j d", d=6)
-
-        # Training data uses row-major 6D convention [R00,R01,R10,R11,R20,R21]
-        # (applied by LoadSmplx55: col_major[[0,3,1,4,2,5]] -> row_major).
-        # rotation_6d_to_axis_angle expects column-major [R00,R10,R20,R01,R11,R21],
-        # so we reverse the permutation: row_major[[0,2,4,1,3,5]] -> col_major.
-        pred_poses = pred_poses[..., [0, 2, 4, 1, 3, 5]]
+        # Training data already uses column-major 6D convention [R00,R10,R20,R01,R11,R21]
+        # (matrix_to_rotation_6d uses _stack_cols01 → columns of rotation matrix).
+        # rotation_6d_to_axis_angle expects column-major input — no permutation needed.
         pred_poses = rotation_6d_to_axis_angle(pred_poses)
         pred_poses = rearrange(pred_poses, "(b t) j d -> b t (j d)", b=1)
 

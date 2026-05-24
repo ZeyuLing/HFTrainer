@@ -187,6 +187,153 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
 
 
 @TRANSFORMS.register_module(force=True)
+class LoadPreExtractedT5Feature(BaseTransform):
+    """Load pre-extracted T5 (UMT5) text embeddings from .pt files.
+
+    Replaces online T5 encoding during PRISM training. At each call:
+    1. Map caption_path → .pt feature path (under feature_dir)
+    2. Load .pt, randomly select one variant's embedding
+    3. Pad to max_seq_length with zeros (matches encode_prompt_with_mask behavior)
+    4. Build attention mask (1s for valid tokens, 0s for padding)
+
+    Prompt dropout is handled by the trainer (replaces embedding with
+    pre-extracted null embedding at prompt_drop_rate probability).
+
+    The .pt file format expected::
+
+        {
+            'captions': ['text1', 'text2', ...],
+            'embeddings': [Tensor[L1, 4096], Tensor[L2, 4096], ...],  # bf16, unpadded
+            'seq_lens': [int, int, ...],
+        }
+
+    Output keys added to results:
+        ``t5_text_embeds``: Tensor[max_seq_length, 4096] bf16 (padded)
+        ``t5_text_mask``:   Tensor[max_seq_length] int64 (1=valid, 0=pad)
+        ``caption``:        str (the selected caption text, for logging)
+
+    Args:
+        feature_dir (str): Root directory of pre-extracted T5 features.
+        data_dir (str): The dataset's data_dir (for path remapping).
+        max_seq_length (int): Pad/truncate embeddings to this length.
+        allow_none (bool): If True, return None when caption_path is missing
+            (triggers dataset refetch). If False, raise error.
+        hidden_dim (int): T5 hidden dimension (default 4096).
+    """
+
+    def __init__(
+        self,
+        feature_dir: str = 'data/t5_feature',
+        data_dir: str = 'data/motionhub',
+        max_seq_length: int = 256,
+        allow_none: bool = True,
+        hidden_dim: int = 4096,
+    ):
+        self.feature_dir = feature_dir
+        self.data_dir = data_dir
+        self.max_seq_length = max_seq_length
+        self.allow_none = allow_none
+        self.hidden_dim = hidden_dim
+
+    def _caption_path_to_t5_path(self, caption_path: str) -> str:
+        """Map caption_path to the corresponding T5 feature .pt path.
+
+        Logic: normalize caption_path, strip the data_dir parent prefix,
+        replace 'motionhub/' (or data_dir basename) prefix if present,
+        change .json -> .pt, prepend feature_dir.
+        """
+        full_path = os.path.normpath(caption_path)
+        norm_data_dir = os.path.normpath(self.data_dir)
+        data_parent = os.path.dirname(norm_data_dir)
+
+        # Strip data_dir parent prefix to get relative path
+        if full_path.startswith(data_parent + '/'):
+            rel_path = full_path[len(data_parent) + 1:]
+        elif full_path.startswith(data_parent):
+            rel_path = full_path[len(data_parent):]
+            if rel_path.startswith('/'):
+                rel_path = rel_path[1:]
+        else:
+            # Fallback: use basename
+            rel_path = os.path.basename(full_path)
+
+        # Remove data_dir basename prefix (e.g. "motionhub/")
+        data_dir_basename = os.path.basename(norm_data_dir)
+        if rel_path.startswith(data_dir_basename + '/'):
+            rel_path = rel_path[len(data_dir_basename) + 1:]
+
+        # Change extension .json -> .pt
+        if rel_path.endswith('.json'):
+            rel_path = rel_path[:-5] + '.pt'
+
+        return os.path.join(self.feature_dir, rel_path)
+
+    def transform(self, results: Dict) -> Optional[Dict]:
+        caption_path = results.get('caption_path')
+        if caption_path is None:
+            if self.allow_none:
+                return None  # Trigger refetch
+            raise ValueError("LoadPreExtractedT5Feature: 'caption_path' not in results")
+
+        pt_path = self._caption_path_to_t5_path(caption_path)
+
+        if not os.path.exists(pt_path):
+            if self.allow_none:
+                return None  # Trigger refetch — .pt not yet extracted
+            raise FileNotFoundError(
+                f"LoadPreExtractedT5Feature: {pt_path} does not exist"
+            )
+
+        try:
+            data = torch.load(pt_path, map_location='cpu', weights_only=False)
+        except Exception as e:
+            if self.allow_none:
+                return None
+            raise RuntimeError(f"Failed to load {pt_path}: {e}")
+
+        embeddings = data.get('embeddings', [])
+        captions = data.get('captions', [])
+        seq_lens = data.get('seq_lens', [])
+
+        if not embeddings:
+            if self.allow_none:
+                return None
+            raise ValueError(f"No embeddings found in {pt_path}")
+
+        # Randomly select one variant (data augmentation, same as LoadCompatibleCaption)
+        idx = random.randint(0, len(embeddings) - 1)
+        emb = embeddings[idx]       # [seq_len_i, hidden_dim] bf16
+        seq_len = seq_lens[idx]
+        caption = captions[idx] if idx < len(captions) else ''
+
+        # Truncate if longer than max_seq_length (shouldn't happen if extracted
+        # with same max_seq_length, but defensive)
+        if emb.size(0) > self.max_seq_length:
+            emb = emb[:self.max_seq_length]
+            seq_len = self.max_seq_length
+
+        # Pad to max_seq_length with zeros (matches encode_prompt_with_mask)
+        if emb.size(0) < self.max_seq_length:
+            pad = torch.zeros(
+                self.max_seq_length - emb.size(0), self.hidden_dim,
+                dtype=emb.dtype
+            )
+            padded_emb = torch.cat([emb, pad], dim=0)
+        else:
+            padded_emb = emb
+
+        # Build attention mask: 1 for valid tokens, 0 for padding
+        mask = torch.zeros(self.max_seq_length, dtype=torch.long)
+        mask[:seq_len] = 1
+
+        results['t5_text_embeds'] = padded_emb       # [max_seq_length, 4096] bf16
+        results['t5_text_mask'] = mask               # [max_seq_length] int64
+        results['caption'] = caption                 # str for logging
+
+        return results
+
+
+@TRANSFORMS.register_module(force=True)
 class LoadHierarchicalCaption(BaseTransform):
     def __init__(self, key="caption", allow_none: bool = False):
         self.key = key

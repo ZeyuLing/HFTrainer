@@ -95,6 +95,17 @@ def _compute_spectral_coords(num_joints: int = 22, num_modes: int = 4) -> np.nda
     # eigenvectors[:, 0] corresponds to eigenvalue 0 (constant vector)
     spectral_coords = eigenvectors[:, 1:num_modes + 1]
 
+    
+    # ==================== FIX: CANONICALIZE EIGENVECTOR SIGNS ====================
+    # Eigenvectors are defined up to sign: if v is an eigenvector, so is -v.
+    # Different numpy/BLAS versions and CPU architectures can return opposite signs.
+    # Canonicalize by enforcing that the first joint (Pelvis, root) has a positive
+    # coordinate in each mode. This ensures deterministic, consistent signs across
+    # all runs, systems, and library versions.
+    for mode_idx in range(num_modes):
+        if spectral_coords[0, mode_idx] < 0:
+            spectral_coords[:, mode_idx] *= -1.0
+    
     return spectral_coords
 
 

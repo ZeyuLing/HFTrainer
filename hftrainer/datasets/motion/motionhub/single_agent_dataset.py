@@ -131,6 +131,33 @@ class MotionHubSingleAgentDataset(BaseDataset):
         try:
             sample = self.prepare_data(idx)
             sample = self.pipeline(sample)
+            
+            # If pipeline returns None, treat it as invalid sample and trigger refetch
+            if sample is None:
+                if not self.refetch:
+                    raise ValueError(f"Pipeline returned None for idx={idx} and refetch is disabled")
+                if _refetch_depth >= self.max_refetch:
+                    print_log(
+                        f"Refetch exceeded max_refetch={self.max_refetch} (failed idx={idx}, pipeline returned None), raising.",
+                        level=logging.ERROR,
+                    )
+                    raise ValueError(f"Pipeline returned None for idx={idx} after {self.max_refetch} refetch attempts")
+                if self.verbose:
+                    print_log(
+                        f"Pipeline returned None for idx={idx} (refetch {_refetch_depth + 1}/{self.max_refetch}): "
+                        f"fetching another instead",
+                        level=logging.WARNING,
+                    )
+                raw_idx, extra = self._split_index(idx)
+                if extra and hasattr(self, "sample_refetch_index"):
+                    new_raw_idx = self.sample_refetch_index(*extra)
+                else:
+                    new_raw_idx = random.randint(0, len(self.data_list) - 1)
+                    if new_raw_idx == raw_idx:
+                        new_raw_idx = (raw_idx + 1) % len(self.data_list)
+                new_idx = self._merge_index(new_raw_idx, extra)
+                return self.__getitem__(new_idx, _refetch_depth + 1)
+            
             return sample
 
         except Exception as e:

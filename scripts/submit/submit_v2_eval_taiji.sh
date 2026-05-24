@@ -54,7 +54,7 @@ INNEREOF
 # V2 Models: 4 main models, all tasks
 for MODEL in caption_local caption_global uncond_local uncond_global; do
     submit_job "m2m_v2_eval_${MODEL}_${TIMESTAMP}" \
-        "python3 tools/eval_m2m_v2_all_tasks.py --models ${MODEL} --all-tasks --max-samples 80 --num-steps 50 --replacement-guidance skip_last --text-guidance-scale 5.0 --save-npz --output-dir work_dirs/m2m_v2_eval_latest/${MODEL}"
+        "python3 tools/eval_m2m_v2_all_tasks.py --models ${MODEL} --all-tasks --max-samples 80 --num-steps 50 --replacement-guidance skip_last --text-guidance-scale 1.0 --save-npz --output-dir work_dirs/m2m_v2_eval_latest/${MODEL}"
 done
 
 # KIMODO: all comparable tasks

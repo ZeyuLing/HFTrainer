@@ -54,7 +54,7 @@ def main():
             f"--max-samples {args.max_samples} "
             f"--num-steps 50 "
             f"--replacement-guidance skip_last "
-            f"--text-guidance-scale 5.0 "
+            f"--text-guidance-scale 1.0 "
             f"--save-npz "
             f"--output-dir work_dirs/m2m_v2_eval_latest/{model} "
             f"--device cuda"

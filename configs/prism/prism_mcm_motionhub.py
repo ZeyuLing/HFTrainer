@@ -168,6 +168,7 @@ train_dataloader = dict(
                 rot_type="rotation_6d",
                 transl_type="abs_rel",
                 smpl_type="smpl_22",
+                rot6d_convention="column",
             ),
             dict(type="LoadAudio", key="audio", target_sr=16000, allow_none=True),
             dict(type="LoadAudio", key="music", target_sr=16000, allow_none=True),

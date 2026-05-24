@@ -500,6 +500,9 @@ class PrismMCMPipeline(BasePipeline):
         transl = bundle.smpl_pose_processor.inv_convert_transl(transl_abs_rel)
         pred_poses = x_dec[..., 6:]
         pred_poses = rearrange(pred_poses, 'b t (j d) -> (b t) j d', d=6)
+        # Training data already uses column-major 6D convention [R00,R10,R20,R01,R11,R21]
+        # (matrix_to_rotation_6d uses _stack_cols01 → columns of rotation matrix).
+        # rotation_6d_to_axis_angle expects column-major input — no permutation needed.
         pred_poses = rotation_6d_to_axis_angle(pred_poses)
         pred_poses = rearrange(pred_poses, '(b t) j d -> b t (j d)', b=1)
 

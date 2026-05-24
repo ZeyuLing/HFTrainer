@@ -331,6 +331,41 @@ class HyMotionM2MBundle(ModelBundle):
             'text_ctxt_raw_length': ctxt_len.to(device),
         }
 
+    @torch.no_grad()
+    def encode_task_instruction(self, task_instructions: List[str]) -> Dict[str, Tensor]:
+        """Encode task instructions to vtxt-like embeddings using CLIP.
+        
+        Task instructions (e.g., 'complete motion from sparse random cells') are
+        CLIP-encoded to the same space as caption sentence embeddings (768-dim),
+        then projected to 1024-dim via vtxt_encoder to match the adapter signal.
+        
+        Args:
+            task_instructions: List of task instruction strings (e.g., from mask_strategy)
+        
+        Returns:
+            Dict with key 'task_emb' containing (B, 1, 1024) embeddings ready to add to adapter.
+        """
+        device = _get_module_device(self)
+        if not hasattr(self, '_text_encoder') or self._text_encoder is None:
+            if self._text_encoder_cfg is None:
+                raise RuntimeError(
+                    'No text_encoder config provided; cannot encode task instructions.'
+                )
+            from hftrainer.models.motion.hymotion_m2m.network.text_encoder import (
+                HYTextModel,
+            )
+            cfg = deepcopy(self._text_encoder_cfg)
+            cfg.pop('type', None)
+            self._text_encoder = HYTextModel(**cfg)
+        
+        # Encode task instructions using CLIP (sentence_emb branch)
+        task_vtxt, _, _ = self._text_encoder.encode(task_instructions)
+        
+        # Project to 1024-dim to match vtxt_encoder output
+        task_emb = self.vtxt_encoder(task_vtxt.float().to(device))  # (B, 1, 1024)
+        
+        return {'task_emb': task_emb}
+
     def mask_text_cond(
         self,
         vtxt: Tensor,
@@ -511,6 +546,7 @@ class HyMotionM2MBundle(ModelBundle):
         x_mask_temporal: Optional[Tensor] = None,
         ctxt_mask_temporal: Optional[Tensor] = None,
         mask_density: Optional[Tensor] = None,
+        task_emb: Optional[Tensor] = None,
     ) -> Tensor:
         """Single forward pass through the MMDiT transformer.
 
@@ -522,6 +558,7 @@ class HyMotionM2MBundle(ModelBundle):
             x_mask_temporal: (B, L) boolean mask for motion sequence.
             ctxt_mask_temporal: (B, Lc) boolean mask for text tokens.
             mask_density: (B,) optional mask density for CDE (CRFM v3).
+            task_emb: (B, 1, 1024) optional task instruction embeddings to add to adapter.
 
         Returns:
             Model prediction, shape (B, L, D_motion).
@@ -534,6 +571,7 @@ class HyMotionM2MBundle(ModelBundle):
             x_mask_temporal=x_mask_temporal,
             ctxt_mask_temporal=ctxt_mask_temporal,
             mask_density=mask_density,
+            task_emb=task_emb,
         )
 
     def decode_motion_from_latent(

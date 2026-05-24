@@ -17,6 +17,7 @@ def process_smplx_pose(
     pose_55_axis_angle: np.ndarray,  # [T, 165] or [T, 55, 3]
     rot_type: str,
     out_type: str,
+    rot6d_convention: str = "row",
 ) -> np.ndarray:
     """
     Convert SMPL-X 55-joint axis-angle pose to target joint set & rotation representation.
@@ -25,6 +26,10 @@ def process_smplx_pose(
         pose_55_axis_angle: [T, 165] or [T, 55, 3], axis-angle in radians.
         rot_type: "axis_angle" | "rotation_6d" | "quaternion" | "euler"
         out_type: "smpl_22" | "smplh" | "smplx_55"
+        rot6d_convention: "row" (default, backward-compat) or "column".
+            Only affects rot_type="rotation_6d".
+            - "row": output is row-major [R00,R01, R10,R11, R20,R21] (HyMotion M2M convention)
+            - "column": output is column-major [R00,R10,R20, R01,R11,R21] (PRISM/VerMo convention)
 
     Returns:
         pose: [T, J * D], where D=3 (axis_angle/euler), 4 (quaternion), 6 (rotation_6d)
@@ -88,9 +93,11 @@ def process_smplx_pose(
     elif rot_type == "rotation_6d":
         out = axis_angle_to_rotation_6d(aa_flat).reshape(T, J, 6)
         # axis_angle_to_rotation_6d outputs column-major: [R00,R10,R20, R01,R11,R21]
-        # HyMotion convention is row-major: [R00,R01, R10,R11, R20,R21]
-        # Rearrange: col_major[0,3,1,4,2,5] -> row_major
-        out = out[:, :, [0, 3, 1, 4, 2, 5]]
+        if rot6d_convention == "row":
+            # HyMotion convention is row-major: [R00,R01, R10,R11, R20,R21]
+            # Rearrange: col_major[0,3,1,4,2,5] -> row_major
+            out = out[:, :, [0, 3, 1, 4, 2, 5]]
+        # else "column": keep as-is (PRISM/VerMo convention)
         D = 6
     elif rot_type == "quaternion":
         out = axis_angle_to_quaternion(aa_flat).reshape(T, J, 4)
@@ -231,6 +238,7 @@ class LoadSmplx55(BaseTransform):
         rot_type: str = "rotation_6d",
         transl_type: str = "abs",
         smpl_type: str = "smpl_22",
+        rot6d_convention: str = "row",
         # ===== Augmentation knobs (Y-up world) =====
         # Default OFF: augmentation changes data distribution (especially root rotation
         # and translation), so mean/std stats must be computed with matching aug settings.
@@ -255,11 +263,15 @@ class LoadSmplx55(BaseTransform):
             ROTATION_TYPE.EULER,
         ]
         assert transl_type in ["abs", "rel", "abs_rel"]
+        assert rot6d_convention in ("row", "column"), (
+            f"rot6d_convention must be 'row' or 'column', got '{rot6d_convention}'"
+        )
 
         self.key = key
         self.rot_type = rot_type
         self.smpl_type = smpl_type
         self.transl_type = transl_type
+        self.rot6d_convention = rot6d_convention
 
         # augmentation params
         self.transl_aug_prob = float(transl_aug_prob)
@@ -314,7 +326,8 @@ class LoadSmplx55(BaseTransform):
         if do_aug:
             poses_axis_angle = apply_root_yaw_to_axis_angle(poses_axis_angle, R_y)
         pose = process_smplx_pose(
-            poses_axis_angle, self.rot_type, self.smpl_type
+            poses_axis_angle, self.rot_type, self.smpl_type,
+            rot6d_convention=self.rot6d_convention,
         )  # [T, J*D]
 
         return transl, pose  # numpy

@@ -26,6 +26,7 @@ class PrismTrainer(BaseTrainer):
         num_val_inference_steps: int = 10,
         guidance_scale: float = 5.0,
         translation_loss_weight: float = 0.5,
+        null_embedding_path: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(bundle)
@@ -37,10 +38,38 @@ class PrismTrainer(BaseTrainer):
         self.num_val_inference_steps = num_val_inference_steps
         self.guidance_scale = guidance_scale
         self.translation_loss_weight = translation_loss_weight
+        self._null_embedding_path = null_embedding_path
+
+    def _load_null_t5_embedding(self):
+        """Load the pre-extracted null embedding (empty string '') for prompt dropout.
+
+        This is loaded lazily on first use and cached. The null embedding is what
+        T5 produces for '' input — a 1-token non-zero embedding (EOS special token).
+        """
+        if hasattr(self, '_null_text_embed'):
+            return
+        null_path = getattr(self, '_null_embedding_path', None)
+        if null_path is None:
+            # Derive from feature_dir in config (set by config)
+            null_path = 'data/t5_feature/_null_embedding.pt'
+        data = torch.load(null_path, map_location='cpu', weights_only=False)
+        emb = data['embedding']  # [seq_len, 4096] bf16 (typically seq_len=1)
+        seq_len = data['seq_len']
+        # Pad to max_text_length
+        if emb.size(0) < self.max_text_length:
+            pad = torch.zeros(
+                self.max_text_length - emb.size(0), emb.size(1), dtype=emb.dtype
+            )
+            emb = torch.cat([emb, pad], dim=0)
+        # Build mask
+        mask = torch.zeros(self.max_text_length, dtype=torch.long)
+        mask[:seq_len] = 1
+        self._null_text_embed = emb   # [max_text_length, 4096] bf16
+        self._null_text_mask = mask   # [max_text_length] int64
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         motion = batch['motion']
-        captions = batch['caption']
+        captions = batch.get('caption')
         num_frames = batch.get('num_frames')
 
         latents = self.bundle.encode_motion(motion)
@@ -53,12 +82,32 @@ class PrismTrainer(BaseTrainer):
             latent_joints=latent_joints,
             device=latents.device,
         )
-        text_states, text_mask = self.bundle.encode_prompt_with_mask(
-            captions,
-            max_sequence_length=self.max_text_length,
-            prompt_drop_rate=self.prompt_drop_rate,
-            dtype=next(self.bundle.transformer.parameters()).dtype,
-        )
+
+        # Use pre-extracted T5 features if available, otherwise encode online
+        if 't5_text_embeds' in batch:
+            transformer_dtype = next(self.bundle.transformer.parameters()).dtype
+            text_states = batch['t5_text_embeds'].to(
+                device=latents.device, dtype=transformer_dtype
+            )
+            text_mask = batch['t5_text_mask'].to(device=latents.device)
+            # Apply prompt dropout: replace with null (empty-string) embedding
+            if self.prompt_drop_rate > 0:
+                self._load_null_t5_embedding()
+                drop_mask = torch.rand(batch_size, device=latents.device) < self.prompt_drop_rate
+                if drop_mask.any():
+                    null_emb = self._null_text_embed.to(
+                        device=latents.device, dtype=transformer_dtype
+                    )
+                    null_mask = self._null_text_mask.to(device=latents.device)
+                    text_states[drop_mask] = null_emb
+                    text_mask[drop_mask] = null_mask
+        else:
+            text_states, text_mask = self.bundle.encode_prompt_with_mask(
+                captions,
+                max_sequence_length=self.max_text_length,
+                prompt_drop_rate=self.prompt_drop_rate,
+                dtype=next(self.bundle.transformer.parameters()).dtype,
+            )
         condition_frame_mask_vae = self.bundle.create_condition_mask(
             latents,
             frame_condition_rate=self.frame_condition_rate,

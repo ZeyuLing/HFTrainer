@@ -81,6 +81,7 @@ train_dataloader = dict(
                 rot_type='rotation_6d',
                 transl_type='abs_rel',
                 smpl_type='smpl_22',
+                rot6d_convention='column',
                 transl_aug_prob=0.75,
                 transl_aug_yaw_deg=180.0,
                 transl_aug_offset_std=(1.0, 0.0, 1.0),

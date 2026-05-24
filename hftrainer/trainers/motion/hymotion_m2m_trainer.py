@@ -65,10 +65,94 @@ class HyMotionM2MTrainer(BaseTrainer):
         """
         device = next(self.bundle.motion_transformer.parameters()).device
 
-        # Source and target motions
-        src_motion = batch['src_motion'].to(device)
-        tgt_motion = batch['tgt_motion'].to(device)
+        # Helper: Create zero-loss context for skipped batches with mixed dimensions
+        def _make_zero_loss_context(B=1, L=360, D=151, device=device):
+            """Return a complete context dict with all fields set to zeros/defaults.
+            This produces zero losses during _compute_base_loss, effectively skipping
+            the batch without causing KeyError."""
+            import logging
+            logger = logging.getLogger("hftrainer")
+            logger.info(f"Creating skip context for batch with B={B}, L={L}, D={D}")
+            # Return a marker dict that train_step can easily recognize
+            return {
+                '_skip_batch': True,  # Signal to train_step to skip this batch
+                'device': device,
+                'skip_reason': 'dimension_mismatch',
+            }
+
+
+        # Early dimension check: skip batches with mismatched motion dimensions
+        # (Some data files produce 198-dim instead of 151-dim due to data source inconsistency)
+        import logging
+        logger = logging.getLogger("hftrainer")
+        if isinstance(batch.get("src_motion"), (list, tuple)):
+            # Check ALL elements in the list for dimension consistency
+            if len(batch["src_motion"]) > 0:
+                dims = []
+                for item in batch["src_motion"]:
+                    if hasattr(item, "shape"):
+                        dims.append(item.shape[-1])
+                
+                # Check if all dims are 151
+                if any(d != 151 for d in dims):
+                    logger.warning(f"Skipping batch: found motion dims {set(dims)} != 151. Batch has mixed dimensions: {dims}")
+                    # Return zero-loss context to skip this batch
+                    B = len(batch["src_motion"])
+                    return _make_zero_loss_context(B=B, L=360, D=151, device=device)
+        elif isinstance(batch.get("src_motion"), torch.Tensor):
+            motion_dim = batch["src_motion"].shape[-1]
+            if motion_dim != 151:
+                logger.warning(f"Skipping batch: motion_dim={motion_dim} != 151. Shape: {batch['src_motion'].shape}")
+                # Return zero-loss context to skip this batch
+                B = batch['src_motion'].shape[0]
+                return _make_zero_loss_context(B=B, L=batch['src_motion'].shape[1], D=151, device=device)
+
+
+        # Helper: convert list of tensors to stacked tensor (or keep as list if shapes differ)
+        def _stack_if_list(data):
+            if isinstance(data, (list, tuple)) and len(data) > 0 and isinstance(data[0], Tensor):
+                try:
+                    return torch.stack(data, dim=0)
+                except RuntimeError as e:
+                    # Shapes differ - log the shapes for debugging
+                    shapes = [d.shape if isinstance(d, Tensor) else None for d in data]
+                    import logging
+                    logger = logging.getLogger('hftrainer')
+                    logger.warning(f"Cannot stack tensors with different shapes: {shapes}")
+                    # Pad to maximum shape
+                    max_shape = list(max(shapes, key=lambda s: tuple(s) if s else ()))
+                    padded = []
+                    for d in data:
+                        if isinstance(d, Tensor):
+                            # Pad to max_shape if needed
+                            pad_amounts = []
+                            for i in range(len(d.shape)):
+                                if i < len(max_shape):
+                                    pad_amounts.append(0)
+                                    pad_amounts.append(max_shape[i] - d.shape[i])
+                                else:
+                                    pad_amounts.append(0)
+                            pad_amounts = list(reversed(pad_amounts))
+                            if any(p > 0 for p in pad_amounts):
+                                d_padded = torch.nn.functional.pad(d, pad_amounts)
+                            else:
+                                d_padded = d
+                            padded.append(d_padded)
+                    if padded:
+                        return torch.stack(padded, dim=0)
+                    return data
+            return data
+
+        # Source and target motions: convert lists to stacked tensors if needed
+        src_motion = _stack_if_list(batch['src_motion'])
+        tgt_motion = _stack_if_list(batch['tgt_motion'])
         src_mask = batch.get('src_mask')
+        src_mask = _stack_if_list(src_mask) if src_mask is not None else None
+        
+
+        # Now convert to device
+        src_motion = src_motion.to(device)
+        tgt_motion = tgt_motion.to(device)
         if src_mask is not None:
             src_mask = src_mask.to(device)
 
@@ -77,12 +161,19 @@ class HyMotionM2MTrainer(BaseTrainer):
         # IMPORTANT: Only normalize valid frames; padded frames (zeros from
         # RandomCropPadding) must stay zero. We build a per-frame validity mask
         # from tgt_length and zero out padding frames after normalization.
-        tgt_length_list: List[int] = batch['tgt_length']
+        tgt_length_list = batch['tgt_length']
         if isinstance(tgt_length_list, Tensor):
             tgt_length_list = tgt_length_list.tolist()
+        elif isinstance(tgt_length_list, (list, tuple)) and len(tgt_length_list) > 0 and isinstance(tgt_length_list[0], Tensor):
+            # Stack 0-d tensors into a 1-d tensor, then convert to list
+            tgt_length_list = torch.stack(tgt_length_list).tolist()
+        
         src_length_list = batch.get('src_length', tgt_length_list)
         if isinstance(src_length_list, Tensor):
             src_length_list = src_length_list.tolist()
+        elif isinstance(src_length_list, (list, tuple)) and len(src_length_list) > 0 and isinstance(src_length_list[0], Tensor):
+            # Stack 0-d tensors into a 1-d tensor, then convert to list
+            src_length_list = torch.stack(src_length_list).tolist()
 
         src_motion = self.bundle.normalize_motion(src_motion)
         tgt_motion = self.bundle.normalize_motion(tgt_motion)
@@ -242,6 +333,24 @@ class HyMotionM2MTrainer(BaseTrainer):
             ctxt_length = torch.tensor([1], device=device).expand(B)
             ctxt_mask_temporal = _length_to_mask(ctxt_length, 1).expand(B, -1)
             text_available = torch.zeros(B, dtype=torch.bool, device=device)
+
+        # 2b. Prepare task instructions: encode mask strategy as natural language
+        # P0: Task Instruction Modulation - provide explicit task awareness
+        task_emb = None
+        if batch.get("mask_strategy") is not None:
+            from hftrainer.models.motion.hymotion_m2m.task_instruction import get_task_instruction
+            
+            strategies = batch["mask_strategy"]
+            if isinstance(strategies, torch.Tensor):
+                strategies = strategies.tolist()
+            
+            # Convert strategy indices/names to natural language instructions
+            task_instructions = [get_task_instruction(str(s)) for s in strategies]
+            
+            with torch.no_grad():
+                task_feats = self.bundle.encode_task_instruction(task_instructions)
+            task_emb = task_feats["task_emb"].to(device)  # (B, 1, 1024)
+
         # 3. Flow matching: sample t, build x_t
         x1 = tgt_motion
         if ref_pose is not None:
@@ -275,6 +384,7 @@ class HyMotionM2MTrainer(BaseTrainer):
         # 5. Forward
         x_input = torch.cat([x_t, vace_context], dim=-1)
         pred = self.bundle.predict_flow(
+            task_emb=task_emb,
             x_input=x_input,
             ctxt_input=ctxt_input,
             vtxt_input=vtxt_input,
@@ -353,11 +463,11 @@ class HyMotionM2MTrainer(BaseTrainer):
                     pred_x1_for_smooth, gt_x1_for_smooth
                 )
 
-            # FK consistency loss for 198-dim models
+            # FK consistency loss for 147-dim or 198-dim models
             fk_loss = None
             if (self.bundle.m2m_loss.fk_consistency_weight > 0.0
                     and pred_x1_for_smooth is not None
-                    and self.bundle.mean.shape[0] >= 198):
+                    and self.bundle.mean.shape[0] >= 147):
                 fk_loss = self._compute_fk_consistency_loss(
                     pred_x1_for_smooth, timesteps, tgt_padding_mask
                 )
@@ -419,6 +529,23 @@ class HyMotionM2MTrainer(BaseTrainer):
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         ctx = self._prepare_and_forward(batch)
+
+        # CRITICAL: Skip batches with dimension mismatches (returns special marker dict)
+        # This MUST happen before calling _compute_base_loss which will KeyError if ctx is incomplete
+        import logging
+        logger = logging.getLogger("hftrainer")
+        if isinstance(ctx, dict) and ctx.get("_skip_batch"):
+            # Return zero losses for this batch without backprop
+            logger.info(f"train_step: Skipping batch due to: {ctx.get('skip_reason', 'unknown')}")
+            device = next(self.bundle.motion_transformer.parameters()).device
+            zero_loss = torch.zeros(1, device=device, requires_grad=True).sum()  # scalar with requires_grad=True
+            return {"loss": zero_loss}
+        
+        # If we reach here, ctx must be a complete dict ready for loss computation
+        if not isinstance(ctx, dict) or '_skip_batch' in ctx:
+            logger.error(f"FATAL: train_step received invalid ctx: type={type(ctx)}, keys={ctx.keys() if isinstance(ctx, dict) else 'N/A'}")
+            raise RuntimeError("train_step received invalid context from _prepare_and_forward")
+
         losses = self._compute_base_loss(ctx)
         loss = sum(losses.values())
         result = {'loss': loss}
@@ -515,7 +642,7 @@ class HyMotionM2MTrainer(BaseTrainer):
         timesteps: Tensor,
         data_mask_temporal: Optional[Tensor] = None,
     ) -> Optional[Tensor]:
-        """Compute FK consistency loss for 198-dim models.
+        """Compute FK consistency loss for 147-dim or 198-dim models.
 
         Penalizes inconsistency between rotation/translation channels and
         position channels by running FK on the predicted rotation/translation
@@ -524,27 +651,46 @@ class HyMotionM2MTrainer(BaseTrainer):
         zeroed-out tgt frames do not contaminate the consistency signal.
 
         Args:
-            pred_x1_norm: (B, L, 198) predicted x1 in normalized space.
+            pred_x1_norm: (B, L, D) predicted x1 in normalized space (D=147 or 198).
             timesteps: (B,) diffusion timesteps.
             data_mask_temporal: (B, L) mask, 1 = valid frame, 0 = padded.
 
         Returns:
             Scalar FK consistency loss, or None on failure.
         """
-        from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
-            motion198_fk_loss,
-        )
+        motion_dim = pred_x1_norm.shape[-1]
         bone_offsets = self.bundle.get_bone_offsets()
         rotation_space = getattr(self.bundle, 'rotation_space', 'local')
-        return motion198_fk_loss(
-            pred_x1_norm,
-            self.bundle.mean,
-            self.bundle.std,
-            bone_offsets,
-            rotation_space=rotation_space,
-            timesteps=timesteps,
-            data_mask_temporal=data_mask_temporal,
-        )
+
+        if motion_dim == 147:
+            # 147-dim: end-effector positions in dims 135:147
+            from hftrainer.pipelines.motion.compute_147dim_fk_loss import motion147_fk_loss
+            return motion147_fk_loss(
+                pred_x1_norm,
+                self.bundle.mean,
+                self.bundle.std,
+                bone_offsets,
+                rotation_space=rotation_space,
+                timesteps=timesteps,
+                data_mask_temporal=data_mask_temporal,
+            )
+        elif motion_dim >= 198:
+            # 198-dim: end-effector positions in dims 198:... (or use KIMODO aux loss)
+            from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
+                motion198_fk_loss,
+            )
+            return motion198_fk_loss(
+                pred_x1_norm,
+                self.bundle.mean,
+                self.bundle.std,
+                bone_offsets,
+                rotation_space=rotation_space,
+                timesteps=timesteps,
+                data_mask_temporal=data_mask_temporal,
+            )
+        else:
+            # Motion dimension too small for FK consistency loss
+            return None
 
 
 # ---------------------------------------------------------------------------

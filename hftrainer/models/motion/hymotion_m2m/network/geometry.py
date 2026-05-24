@@ -343,15 +343,26 @@ def rot6d_to_rotation_matrix(rot6d):
     """
     Convert 6D rotation representation to 3x3 rotation matrix.
     Based on Zhou et al., "On the Continuity of Rotation Representations in Neural Networks", CVPR 2019
+    
+    IMPORTANT: This function expects ROW-MAJOR 6D format: [R00, R01, R10, R11, R20, R21]
+    This represents the first two columns of a 3x3 rotation matrix row by row:
+    - Elements [0,1,2]: first column rows [R00, R10, R20]
+    - Elements [3,4,5]: second column rows [R01, R11, R21]
+    
+    This is the HyMotion/training data convention (see load_smplx.py line 93).
+    Do NOT confuse with column-major format used by rotation_convert.py, which uses
+    [R00, R10, R20, R01, R11, R21] (first column, then second column).
+    
     Args:
-        rot6d: torch tensor of shape (batch_size, 6) of 6d rotation representations.
+        rot6d: torch tensor of shape (batch_size, 6) or (..., 6) of 6d rotation representations
+               in HyMotion row-major format [R00, R01, R10, R11, R20, R21]
     Returns:
-        rotation_matrix: torch tensor of shape (batch_size, 3, 3) of corresponding rotation matrices.
+        rotation_matrix: torch tensor of shape (batch_size, 3, 3) or (..., 3, 3) of rotation matrices
     """
     # x = rot6d.view(-1, 3, 2)
-    x = rot6d.view(*rot6d.shape[:-1], 3, 2)
-    a1 = x[..., 0]
-    a2 = x[..., 1]
+    x = rot6d.view(*rot6d.shape[:-1], 3, 2)  # Reshape to (batch, 3, 2) for column extraction
+    a1 = x[..., 0]  # First column: [R00, R10, R20]
+    a2 = x[..., 1]  # Second column: [R01, R11, R21]
     b1 = F.normalize(a1, dim=-1)
     b2 = F.normalize(a2 - torch.einsum("...i,...i->...", b1, a2).unsqueeze(-1) * b1, dim=-1)
     b3 = torch.cross(b1, b2, dim=-1)
@@ -360,11 +371,17 @@ def rot6d_to_rotation_matrix(rot6d):
 
 def rotation_matrix_to_rot6d(rotation_matrix):
     """
-    Convert 3x3 rotation matrix to 6D rotation representation.
+    Convert 3x3 rotation matrix to 6D rotation representation in ROW-MAJOR format.
+    
+    Output format: [R00, R01, R10, R11, R20, R21] (HyMotion/training data convention)
+    This represents the first two columns of the matrix row by row.
+    See rot6d_to_rotation_matrix docstring for format details.
+    
     Args:
-        rotation_matrix: torch tensor of shape (batch_size, 3, 3) of corresponding rotation matrices.
+        rotation_matrix: torch tensor of shape (batch_size, 3, 3) or (..., 3, 3) of rotation matrices.
     Returns:
-        rot6d: torch tensor of shape (batch_size, 6) of 6d rotation representations.
+        rot6d: torch tensor of shape (batch_size, 6) or (..., 6) of 6d rotation representations
+               in row-major format [R00, R01, R10, R11, R20, R21]
     """
     v1 = rotation_matrix[..., 0:1]
     v2 = rotation_matrix[..., 1:2]

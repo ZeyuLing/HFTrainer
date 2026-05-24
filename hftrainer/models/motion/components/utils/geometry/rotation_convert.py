@@ -431,7 +431,32 @@ def axis_angle_to_euler_deg(axis_angle: ArrayLike, order: str = "XYZ") -> ArrayL
 
 
 # ---------------- 6D (Zhou19) <-> Matrix ----------------
-def rotation_6d_to_matrix(d6: ArrayLike) -> ArrayLike:
+# Convention:
+#   "column" (default): d6 = [col0(3), col1(3)] = [R00,R10,R20, R01,R11,R21]
+#   "row":              d6 = [row0(3), row1(3)] = [R00,R01,R02, R10,R11,R12]
+#                       which after reshape is   [R00,R01, R10,R11, R20,R21]
+# Permutation between them (applied per 6-element vector):
+#   column_to_row: [..., [0, 3, 1, 4, 2, 5]]
+#   row_to_column: [..., [0, 2, 4, 1, 3, 5]]
+_COL_TO_ROW = [0, 3, 1, 4, 2, 5]
+_ROW_TO_COL = [0, 2, 4, 1, 3, 5]
+
+
+def rotation_6d_to_matrix(d6: ArrayLike, convention: str = "column") -> ArrayLike:
+    """Convert 6D rotation representation to rotation matrix.
+
+    Args:
+        d6: (..., 6) rotation 6D vector.
+        convention: "column" (default) or "row". Specifies the layout of the input d6.
+    """
+    assert convention in ("column", "row"), f"convention must be 'column' or 'row', got '{convention}'"
+    # If input is row-major, convert to column-major for internal processing
+    if convention == "row":
+        if _is_numpy(d6):
+            d6 = d6[..., _ROW_TO_COL]
+        else:
+            d6 = d6[..., _ROW_TO_COL]
+
     if _is_numpy(d6):
         assert d6.shape[-1] == 6, "Need (...,6)"
         x_raw = d6[..., 0:3]
@@ -452,12 +477,23 @@ def rotation_6d_to_matrix(d6: ArrayLike) -> ArrayLike:
         return torch.stack([x, y, z], dim=-1)
 
 
-def matrix_to_rotation_6d(matrix: ArrayLike) -> ArrayLike:
+def matrix_to_rotation_6d(matrix: ArrayLike, convention: str = "column") -> ArrayLike:
+    """Convert rotation matrix to 6D rotation representation.
+
+    Args:
+        matrix: (..., 3, 3) or (..., 9) rotation matrix.
+        convention: "column" (default) or "row". Specifies the layout of the output d6.
+    """
+    assert convention in ("column", "row"), f"convention must be 'column' or 'row', got '{convention}'"
     M = _reshape_matrix9(matrix)
     if _is_numpy(M):
-        return _stack_cols01_np(M)
+        d6 = _stack_cols01_np(M)
     else:
-        return _stack_cols01_torch(M)
+        d6 = _stack_cols01_torch(M)
+    # If row-major output is requested, permute from column to row
+    if convention == "row":
+        d6 = d6[..., _COL_TO_ROW]
+    return d6
 
 
 # Aliases
@@ -465,30 +501,62 @@ cont6d_to_matrix = rotation_6d_to_matrix
 matrix_to_cont6d = matrix_to_rotation_6d
 
 
-def quaternion_to_rotation_6d(quat: ArrayLike) -> ArrayLike:
-    return matrix_to_rotation_6d(quaternion_to_matrix(quat))
+def quaternion_to_rotation_6d(quat: ArrayLike, convention: str = "column") -> ArrayLike:
+    """Convert quaternion to 6D rotation representation.
+
+    Args:
+        quat: (..., 4) quaternion (w, x, y, z).
+        convention: "column" (default) or "row". Specifies the layout of the output d6.
+    """
+    return matrix_to_rotation_6d(quaternion_to_matrix(quat), convention=convention)
 
 
-def rotation_6d_to_quaternion(d6: ArrayLike) -> ArrayLike:
-    return matrix_to_quaternion(rotation_6d_to_matrix(d6))
+def rotation_6d_to_quaternion(d6: ArrayLike, convention: str = "column") -> ArrayLike:
+    """Convert 6D rotation representation to quaternion.
+
+    Args:
+        d6: (..., 6) rotation 6D vector.
+        convention: "column" (default) or "row". Specifies the layout of the input d6.
+    """
+    return matrix_to_quaternion(rotation_6d_to_matrix(d6, convention=convention))
 
 
-def axis_angle_to_rotation_6d(axis_angle: ArrayLike) -> ArrayLike:
-    return matrix_to_rotation_6d(axis_angle_to_matrix(axis_angle))
+def axis_angle_to_rotation_6d(axis_angle: ArrayLike, convention: str = "column") -> ArrayLike:
+    """Convert axis-angle to 6D rotation representation.
+
+    Args:
+        axis_angle: (..., 3) rotation vector.
+        convention: "column" (default) or "row". Specifies the layout of the output d6.
+    """
+    return matrix_to_rotation_6d(axis_angle_to_matrix(axis_angle), convention=convention)
 
 
-def rotation_6d_to_axis_angle(d6: ArrayLike) -> ArrayLike:
-    return matrix_to_axis_angle(rotation_6d_to_matrix(d6))
+def rotation_6d_to_axis_angle(d6: ArrayLike, convention: str = "column") -> ArrayLike:
+    """Convert 6D rotation representation to axis-angle.
+
+    Args:
+        d6: (..., 6) rotation 6D vector.
+        convention: "column" (default) or "row". Specifies the layout of the input d6.
+    """
+    return matrix_to_axis_angle(rotation_6d_to_matrix(d6, convention=convention))
 
 
 def rotation_6d_to_euler(
-    d6: ArrayLike, order: str = "XYZ", deg: bool = False
+    d6: ArrayLike, order: str = "XYZ", deg: bool = False, convention: str = "column"
 ) -> ArrayLike:
-    return matrix_to_euler(rotation_6d_to_matrix(d6), order=order, deg=deg)
+    """Convert 6D rotation representation to euler angles.
+
+    Args:
+        d6: (..., 6) rotation 6D vector.
+        order: Euler angle order.
+        deg: If True, return degrees.
+        convention: "column" (default) or "row". Specifies the layout of the input d6.
+    """
+    return matrix_to_euler(rotation_6d_to_matrix(d6, convention=convention), order=order, deg=deg)
 
 
-def rotation_6d_to_euler_deg(d6: ArrayLike, order: str = "XYZ") -> ArrayLike:
-    return rotation_6d_to_euler(d6, order=order, deg=True)
+def rotation_6d_to_euler_deg(d6: ArrayLike, order: str = "XYZ", convention: str = "column") -> ArrayLike:
+    return rotation_6d_to_euler(d6, order=order, deg=True, convention=convention)
 
 
 # old alias

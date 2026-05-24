@@ -1216,6 +1216,55 @@ def build_part_level_mask(
     return _grid_to_mask_np(grid)
 
 
+def build_semantic_style_edit_mask(
+    T: int,
+    D: int = 135,
+    **kwargs,
+) -> np.ndarray:
+    """E16 style editing: full-motion semantic edit.
+
+    The source motion is supplied through the editing/reactive channel, while
+    every output channel is generated. This mirrors the real PerMo
+    Neutral->Style training pairs loaded by ``LoadEditingSource``.
+    """
+    return np.ones((T, D), dtype=np.float32)
+
+
+def build_semantic_local_edit_mask(
+    T: int,
+    D: int = 135,
+    edit_part: str = 'upper_body',
+    **kwargs,
+) -> np.ndarray:
+    """E16 local semantic edit.
+
+    Current benchmark setting edits the upper body while preserving the
+    lower-body/root motion. Frames are still marked as generated in the
+    dashboard because this is a joint-level mask, analogous to E10.
+    """
+    grid = np.zeros((T, NUM_JOINT_GROUPS), dtype=np.float32)
+    if edit_part != 'upper_body':
+        raise ValueError(f"Unknown semantic local edit_part: {edit_part}")
+
+    for g in SPINE_HEAD + LEFT_ARM + RIGHT_ARM:
+        grid[:, g] = 1.0
+    return _grid_to_mask_np(grid)
+
+
+def build_semantic_edit_mask(
+    T: int,
+    D: int = 135,
+    edit_mode: str = 'style',
+    **kwargs,
+) -> np.ndarray:
+    """E16 semantic editing mask dispatcher."""
+    if edit_mode == 'style':
+        return build_semantic_style_edit_mask(T, D, **kwargs)
+    if edit_mode == 'local':
+        return build_semantic_local_edit_mask(T, D, **kwargs)
+    raise ValueError(f"Unknown semantic edit_mode: {edit_mode}")
+
+
 def build_multi_prompt_mask(
     T: int,
     D: int = 135,
@@ -2786,6 +2835,60 @@ def _build_tasks() -> Dict[str, EvalTask]:
         needs_gt=False,
         caption_aware=False,
         kimodo_comparable=True,
+    )
+
+    # --- E16: Semantic Editing ---
+    # Two caption-required editing settings:
+    #   style_edit: real PerMo Neutral->Style pairs. The eval loader reads
+    #       ``source_motion_path`` as the reactive input and ``motion_path`` as
+    #       the GT target. Mask is all-1, matching LoadEditingSource training.
+    #   local_edit: held-out E2 motions with synthetic upper-body edit prompts.
+    #       Root/lower body are fixed; spine/head/arms are generated in editing
+    #       mode so the model can use the original local pose as a hint.
+    tasks['E16'] = EvalTask(
+        task_id='E16',
+        name='Semantic Editing',
+        description='Caption-driven semantic motion editing. style_edit uses '
+                    'real PerMo neutral-to-style source/target pairs. '
+                    'local_edit preserves root/lower-body motion and edits '
+                    'the upper body from text.',
+        mask_builder=build_semantic_edit_mask,
+        data_file='eval_e16_semantic_style_edit.json',
+        settings={
+            'style_edit': TaskSetting(
+                'style_edit',
+                'PerMo neutral source -> styled target. All channels are '
+                'generated; source is provided through the editing/reactive '
+                'channel.',
+                {
+                    'edit_mode': 'style',
+                    '_data_file': 'eval_e16_semantic_style_edit.json',
+                    '_editing_mode': True,
+                },
+                use_caption=True,
+            ),
+            'local_edit': TaskSetting(
+                'local_edit',
+                'Upper-body semantic edit. Keep root translation, pelvis, '
+                'legs and feet; generate spine/head/arms from the edit text.',
+                {
+                    'edit_mode': 'local',
+                    'edit_part': 'upper_body',
+                    '_data_file': 'eval_e16_semantic_local_edit.json',
+                    '_editing_mode': True,
+                },
+                use_caption=True,
+            ),
+        },
+        default_metrics=[
+            'mpjpe_unmasked', 'jitter_pos', 'foot_skating_ratio',
+            'foot_penetration', 'fk_consistency_mae',
+        ],
+        needs_gt=True,
+        needs_caption=True,
+        caption_aware=True,
+        kimodo_comparable=False,
+        is_editing=True,
     )
 
     return tasks

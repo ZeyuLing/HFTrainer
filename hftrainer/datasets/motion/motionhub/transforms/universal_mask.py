@@ -512,6 +512,7 @@ class PrepareM2MUniversalMask(BaseTransform):
         results['src_mask'] = src_mask
         results['tgt_length'] = valid_length
         results['src_length'] = valid_length
+        results['mask_strategy'] = strategy  # P0: Task Instruction Modulation
 
         # Edit-repair mode: with probability edit_repair_prob, apply online corruption
         # to generate LQ motion. In this mode:

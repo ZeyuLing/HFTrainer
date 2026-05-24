@@ -21,6 +21,8 @@ class M2MLoss(nn.Module):
         velocity_loss_reduction: str = "element_mean",
         fk_consistency_weight: float = 0.0,
         fk_consistency_warmup_steps: int = 1000,
+        foot_contact_weight: float = 0.0,
+        foot_contact_warmup_steps: int = 0,
         spike_downweight_enabled: bool = True,
         spike_downweight_factor: float = 0.3,
         spike_detection_std_threshold: float = 2.0,
@@ -38,6 +40,8 @@ class M2MLoss(nn.Module):
         self.velocity_loss_reduction = velocity_loss_reduction
         self.fk_consistency_weight = fk_consistency_weight
         self.fk_consistency_warmup_steps = fk_consistency_warmup_steps
+        self.foot_contact_weight = foot_contact_weight
+        self.foot_contact_warmup_steps = foot_contact_warmup_steps
         
         # Spike detection parameters (Fix 2, P0)
         self.spike_downweight_enabled = spike_downweight_enabled
@@ -207,6 +211,8 @@ class M2MLoss(nn.Module):
         data_mask_temporal: Optional[Tensor] = None,
         generation_mask: Optional[Tensor] = None,
         fk_consistency_loss: Optional[Tensor] = None,
+        pred_contact: Optional[Tensor] = None,
+        gt_contact: Optional[Tensor] = None,
     ):
         """
         pred_vel: (B, L, D)
@@ -342,6 +348,36 @@ class M2MLoss(nn.Module):
                 warmup = global_step / self.fk_consistency_warmup_steps
             loss_dict["fk_consistency"] = (
                 self.fk_consistency_weight * warmup * fk_consistency_loss
+            )
+
+        # Foot contact BCE loss: penalizes inconsistency between foot contact
+        # prediction and ground truth. Passed in pre-computed by trainer.
+        if (self.foot_contact_weight > 0.0
+                and pred_contact is not None
+                and gt_contact is not None):
+            warmup = 1.0
+            if (self.foot_contact_warmup_steps > 0
+                    and global_step is not None
+                    and global_step < self.foot_contact_warmup_steps):
+                warmup = global_step / self.foot_contact_warmup_steps
+            
+            # pred_contact and gt_contact shape: (B, L, 4)
+            # Compute binary cross entropy (expects logits vs binary targets)
+            bce_loss = F.binary_cross_entropy_with_logits(
+                pred_contact, gt_contact, reduction='none'
+            )  # (B, L, 4)
+            
+            # Average over contact dimensions
+            bce_per_frame = bce_loss.mean(dim=-1)  # (B, L)
+            
+            # Apply temporal masking to exclude padded frames
+            data_mask_temporal_bce = data_mask_temporal.to(bce_per_frame.device).to(bce_per_frame.dtype)
+            bce_masked = bce_per_frame * data_mask_temporal_bce
+            mask_sum_bce = torch.clamp(data_mask_temporal_bce.sum(), min=1.0)
+            bce_loss_scalar = bce_masked.sum() / mask_sum_bce
+            
+            loss_dict["foot_contact"] = (
+                self.foot_contact_weight * warmup * bce_loss_scalar
             )
 
         return loss_dict

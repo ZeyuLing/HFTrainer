@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HyMotion M2M v2 comprehensive evaluation across E1-E15 (E16 removed).
+"""HyMotion M2M v2 comprehensive evaluation across E1-E16.
 
 Evaluates 4 model variants:
   - uncond_local:   No text, local rotation
@@ -154,7 +154,7 @@ V2_MODELS = {
         'rotation_space': 'global',
     },
     # Phase 0 root-representation ablations trained on the 2026-05-14 data.
-    'kimodo_caption_E4': {
+    'M2M_v2_KIMODO_root_caption_permo_resume_E4': {
         'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_permo_resume_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_resume_E4',
         'desc': 'v2 KIMODO Root + Caption + PerMo Resume (E4)',
@@ -175,7 +175,7 @@ V2_MODELS = {
         'has_caption': True,
         'rotation_space': 'local',
     },
-    'kimodo_uncond_E3': {
+    'M2M_v2_KIMODO_root_uncond_E3': {
         'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_uncond_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_uncond_E3',
         'desc': 'v2 KIMODO Root + Unconditioned (E3)',
@@ -479,7 +479,7 @@ def _load_adaptive_mask_for_motion(
     if D not in (135, 198):
         raise ValueError(f'Unsupported motion dim for adaptive mask: {D}')
 
-    project_root = Path(__file__).resolve().parent.parent
+    project_root = Path(__file__).resolve().parents[2]
     mp_cache_rel = motion_path
     prefix = 'data/hymotion_data/'
     if mp_cache_rel.startswith(prefix):
@@ -1036,13 +1036,16 @@ def load_motion_135d(
             process_transl, process_smplx_pose,
         )
         data = np.load(npz_path, allow_pickle=True)
-        trans_key = 'trans' if 'trans' in data else 'transl'
-        abs_trans = data[trans_key].astype(np.float32)
-        poses_key = 'poses' if 'poses' in data else 'body_pose'
-        poses = data[poses_key].astype(np.float32)
-        transl = process_transl(abs_trans, 'abs')
-        pose = process_smplx_pose(poses, 'rotation_6d', 'smpl_22')
-        motion = np.concatenate([transl, pose], axis=-1).astype(np.float32)
+        if 'motion_135' in data.files:
+            motion = data['motion_135'].astype(np.float32)
+        else:
+            trans_key = 'trans' if 'trans' in data else 'transl'
+            abs_trans = data[trans_key].astype(np.float32)
+            poses_key = 'poses' if 'poses' in data else 'body_pose'
+            poses = data[poses_key].astype(np.float32)
+            transl = process_transl(abs_trans, 'abs')
+            pose = process_smplx_pose(poses, 'rotation_6d', 'smpl_22')
+            motion = np.concatenate([transl, pose], axis=-1).astype(np.float32)
 
         if canonical and bone_offsets is not None and motion.shape[0] > 0:
             from hftrainer.evaluation.motion.m2m_eval_metrics import (
@@ -1207,10 +1210,48 @@ def load_eval_samples(
             'num_frames_orig': item.get('num_frames', T),
         }
 
-        # Preserve extra paths for transition/target tasks (E14/E15/E16)
-        for extra_key in ('motion_a_path', 'motion_b_path', 'target_motion_path'):
+        # Preserve extra paths for transition/target/editing tasks.
+        for extra_key in (
+            'motion_a_path',
+            'motion_b_path',
+            'target_motion_path',
+            'source_motion_path',
+        ):
             if extra_key in item:
                 sample[extra_key] = item[extra_key]
+
+        # Real semantic-editing pairs (E16 style_edit) provide a separate
+        # source motion. The target ``motion_path`` remains the GT for metrics;
+        # ``source_motion_path`` is the motion shown to the model through the
+        # editing/reactive channel. This mirrors LoadEditingSource in training.
+        source_motion_path = item.get('source_motion_path', '')
+        if source_motion_path:
+            if os.path.isabs(source_motion_path):
+                source_full_path = source_motion_path
+            else:
+                source_full_path = os.path.join(motion_data_dir, source_motion_path)
+                if not os.path.exists(source_full_path):
+                    source_full_path = os.path.abspath(source_motion_path)
+            if os.path.exists(source_full_path):
+                source_motion = load_motion_135d(
+                    source_full_path, bone_offsets=bone_offsets)
+                if source_motion is not None and source_motion.shape[0] >= min_frames:
+                    # Match LoadEditingSource training behavior: source
+                    # motion is cropped/padded to the target clip length,
+                    # while the target remains the metric reference.
+                    if source_motion.shape[0] >= T:
+                        source_motion = source_motion[:T]
+                    else:
+                        pad = np.repeat(
+                            source_motion[-1:, :],
+                            T - source_motion.shape[0],
+                            axis=0,
+                        )
+                        source_motion = np.concatenate([source_motion, pad], axis=0)
+                    sample['source_motion'] = source_motion
+                    if convert_to_198 and bone_offsets is not None:
+                        sample['source_motion_198'] = motion_135_to_198(
+                            source_motion, bone_offsets)
 
         if convert_to_198 and bone_offsets is not None:
             sample['motion_198'] = motion_135_to_198(motion, bone_offsets)
@@ -1689,6 +1730,17 @@ def evaluate_sample(
             motion_raw = motion_135_to_198(motion_135, bone_offsets)
     else:
         motion_raw = motion_135
+
+    source_motion_raw = None
+    if 'source_motion' in sample:
+        source_135 = sample['source_motion'][:T]
+        if motion_dim == 198:
+            source_motion_raw = sample.get('source_motion_198')
+            if source_motion_raw is None:
+                source_motion_raw = motion_135_to_198(source_135, bone_offsets)
+            source_motion_raw = source_motion_raw[:T]
+        else:
+            source_motion_raw = source_135
 
     # ---- Special handling for E8-B/C/D: loop completion ----
     setting_kwargs = task.settings[setting_name].mask_kwargs
@@ -2680,9 +2732,20 @@ def evaluate_sample(
             # Position channels (135:198) don't change with rotation space
             pass
         motion_raw = _mr
+        if source_motion_raw is not None:
+            _sr = source_motion_raw.copy()
+            _src_rot_local = _torch.from_numpy(
+                _sr[:, 3:135].reshape(_sr.shape[0], 22, 6)).float()
+            _src_rot_global = _l2g(_src_rot_local)
+            _sr[:, 3:135] = _src_rot_global.reshape(_sr.shape[0], 132).numpy()
+            source_motion_raw = _sr
 
     motion_norm = bundle.normalize_motion(
         torch.from_numpy(motion_raw).float().unsqueeze(0).to(device))
+    source_motion_norm = None
+    if source_motion_raw is not None:
+        source_motion_norm = bundle.normalize_motion(
+            torch.from_numpy(source_motion_raw).float().unsqueeze(0).to(device))
     src_mask = torch.from_numpy(mask).float().unsqueeze(0).to(device)
 
     # Pad to 360 frames (training always pads to 360). For E9 repair, motions
@@ -2712,6 +2775,9 @@ def evaluate_sample(
         # variable when debugging boundary artifacts.
         motion_norm = torch.nn.functional.pad(
             motion_norm, (0, 0, 0, pad_len), mode='constant', value=0.0)
+        if source_motion_norm is not None:
+            source_motion_norm = torch.nn.functional.pad(
+                source_motion_norm, (0, 0, 0, pad_len), mode='constant', value=0.0)
         src_mask = torch.nn.functional.pad(
             src_mask, (0, 0, 0, pad_len), mode='constant', value=0.0)
 
@@ -2720,7 +2786,13 @@ def evaluate_sample(
     # task-level task.is_editing default (used by E9 to test inpaint vs edit).
     is_editing_effective = setting_kwargs.get('_editing_mode', task.is_editing)
     if is_editing_effective:
-        src_motion_norm = motion_norm.clone()  # editing: keep LQ values
+        # editing: keep source/LQ values in the reactive channel. For real
+        # style-edit pairs this is the neutral source motion; for synthetic
+        # local edits it falls back to the GT/source motion itself.
+        src_motion_norm = (
+            source_motion_norm.clone()
+            if source_motion_norm is not None else motion_norm.clone()
+        )
     else:
         src_motion_norm = motion_norm * (1 - src_mask)
 
@@ -3668,9 +3740,9 @@ def main():
                         default=list(V2_MODELS.keys()),
                         help='Models to evaluate')
     parser.add_argument('--tasks', nargs='+',
-                        help='Task IDs to evaluate (E1-E12)')
+                        help='Task IDs to evaluate (E1-E16)')
     parser.add_argument('--all-tasks', action='store_true',
-                        help='Run all 12 tasks')
+                        help='Run all registered tasks')
     parser.add_argument('--settings', nargs='+',
                         help='Sub-settings to run (A, B, C, D, default)')
     parser.add_argument('--max-samples', type=int, default=50,
@@ -3680,8 +3752,10 @@ def main():
     parser.add_argument('--replacement-guidance', type=str, default='skip_last',
                         choices=['none', 'all', 'skip_last', 'flow_interp'],
                         help='Replacement guidance mode for MAN imputation')
-    parser.add_argument('--text-guidance-scale', type=float, default=5.0,
-                        help='CFG scale for text-conditioned models (5.0 standard for flow matching)')
+    parser.add_argument('--text-guidance-scale', type=float, default=1.0,
+                        help='CFG scale for text-conditioned M2M models. '
+                             'Default 1.0 avoids over-guidance artifacts in '
+                             'motion-conditioned completion/editing tasks.')
     parser.add_argument('--output-dir', type=str,
                         default='work_dirs/m2m_v2_eval_report')
     parser.add_argument('--device', type=str, default='cuda')
@@ -3953,6 +4027,12 @@ def main():
                                     positions=pos_np,
                                     translation=output_135[:, :3],
                                 )
+                                if 'source_motion' in sample:
+                                    _save_kw['source_motion_135'] = np.asarray(
+                                        sample['source_motion'], dtype=np.float32)
+                                    _save_kw['source_translation'] = np.asarray(
+                                        sample['source_motion'][:, :3],
+                                        dtype=np.float32)
                                 _layout = metrics.get('_layout', None)
                                 if _layout is not None:
                                     # Serialize layout as JSON bytes (uint8
