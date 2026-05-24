@@ -7,6 +7,8 @@ work_dirs/
 data/
 checkpoints/
 ckpts/
+outputs/
+output/
 *.pt
 *.bin
 *.safetensors
