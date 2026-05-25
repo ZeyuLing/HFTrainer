@@ -1,0 +1,228 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    KT-RoPE CONFIG PARAMETER FLOW DIAGRAM
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 1: CONFIG FILE (configs/prism/prism_1b_tp2m_1frame.py)                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  model = dict(                                                              │
+│      type="PrismBundle",                                                    │
+│      transformer=dict(                                                      │
+│          type="PrismTransformerMotionModel",                               │
+│          ...                                                               │
+│          # RoPE Parameters                                                │
+│          attention_head_dim=128,      ◄── Split: 64 temporal, 64 spatial  │
+│          patch_size=(1, 1),           ◄── (temporal, spatial)             │
+│          rope_max_seq_len=1024,       ◄── Pre-compute for max 1024 tokens │
+│                                                                             │
+│          # NEW KT-RoPE Parameters to Add                                   │
+│          rope_theta=10000.0,          ◄── RoPE frequency base             │
+│          joint_pos_mode="sequential", ◄── Position encoding scheme        │
+│          num_spectral_modes=4,        ◄── Laplacian eigenvectors          │
+│          spectral_scale=None,         ◄── Scaling for spectral coords     │
+│          ...                                                               │
+│      )                                                                      │
+│  )                                                                           │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                            [Registry.build_from_cfg]
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 2: PrismTransformerMotionModel.__init__()                             │
+│  (hftrainer/models/motion/prism/network/transformer_prism.py, L132-149)    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  def __init__(                                                              │
+│      self,                                                                  │
+│      patch_size: Tuple[int] = (1, 1),                                      │
+│      attention_head_dim: int = 128,                                        │
+│      rope_max_seq_len: int = 1024,       ◄── Already config'd param       │
+│                                                                              │
+│      # NEW Parameters                                                       │
+│      rope_theta: float = 10000.0,        ◄── Need to add                  │
+│      joint_pos_mode: str = "sequential", ◄── Need to add                  │
+│      num_spectral_modes: int = 4,        ◄── Need to add                  │
+│      spectral_scale: Optional[int] = None, ◄── Need to add                │
+│  ) -> None:                                                                 │
+│      super().__init__()                                                     │
+│      ...                                                                    │
+│                                                                              │
+│      # Store config params                                                  │
+│      self.config.patch_size = patch_size                                    │
+│      self.config.attention_head_dim = attention_head_dim                    │
+│      self.config.rope_max_seq_len = rope_max_seq_len                       │
+│      ...                                                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                        [Line 164-166: Instantiate RoPE]
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 3: MotionWanRotaryPosEmbed Instantiation                              │
+│  (hftrainer/models/motion/prism/network/transformer_prism.py, L164-166)    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  self.rope = MotionWanRotaryPosEmbed(                                       │
+│      attention_head_dim=attention_head_dim,  # 128 ◄─ From config         │
+│      patch_size=patch_size,                  # (1,1) ◄─ From config       │
+│      rope_max_seq_len=rope_max_seq_len,      # 1024 ◄─ From config        │
+│      theta=rope_theta,                       # NEW! ◄─ From config         │
+│      joint_pos_mode=joint_pos_mode,          # NEW! ◄─ From config         │
+│      num_spectral_modes=num_spectral_modes,  # NEW! ◄─ From config         │
+│      spectral_scale=spectral_scale,          # NEW! ◄─ From config         │
+│  )                                                                           │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 4: MotionWanRotaryPosEmbed.__init__()                                 │
+│  (hftrainer/models/motion/prism/network/motion_rope.py, L69-111)           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  def __init__(                                                              │
+│      self,                                                                  │
+│      attention_head_dim: int,                                               │
+│      patch_size: Tuple[int, int],                                           │
+│      max_seq_len: int,                                                      │
+│      theta: float = 10000.0,                 ◄── CRITICAL: Was hardcoded! │
+│      joint_pos_mode: str = "sequential",     ◄── NEW KT-RoPE param       │
+│      num_spectral_modes: int = 4,            ◄── NEW KT-RoPE param       │
+│      spectral_scale: Optional[int] = None,   ◄── NEW KT-RoPE param       │
+│  ):                                                                         │
+│      super().__init__()                                                     │
+│                                                                              │
+│      # Split head dimension between temporal and spatial                    │
+│      j_dim = attention_head_dim // 2         # 64 (spatial/joint)         │
+│      t_dim = attention_head_dim - j_dim      # 64 (temporal)              │
+│                                                                              │
+│      # Pre-compute RoPE frequencies for max sequence length                 │
+│      for dim in [t_dim, j_dim]:                                             │
+│          freq_cos, freq_sin = get_1d_rotary_pos_embed(                     │
+│              dim,                                                           │
+│              max_seq_len,                                                   │
+│              theta,                 ◄── Uses passed theta! NOW CONFIGURABLE│
+│              use_real=True,                                                 │
+│              repeat_interleave_real=True,                                   │
+│          )                                                                   │
+│                                                                              │
+│      # Store buffers                                                        │
+│      self.register_buffer("freqs_cos", torch.cat(...))                     │
+│      self.register_buffer("freqs_sin", torch.cat(...))                     │
+│                                                                              │
+│      # Store configuration for KT-RoPE logic                                │
+│      self.joint_pos_mode = joint_pos_mode                                  │
+│      self.num_spectral_modes = num_spectral_modes                          │
+│      self.spectral_scale = spectral_scale                                  │
+│      # TODO: Implement KT-RoPE logic based on these params                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                        [Store as self.rope]
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 5: forward() Method (Runtime)                                         │
+│  (hftrainer/models/motion/prism/network/transformer_prism.py, L307)        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  def forward(self, hidden_states, ...):                                    │
+│      # ...                                                                  │
+│                                                                              │
+│      # Compute RoPE embeddings (line 307)                                   │
+│      rotary_emb = self.rope(hidden_states)                                 │
+│                     ↓                                                        │
+│      [Output: (freqs_cos, freqs_sin) with shape (1, N, 1, head_dim)]      │
+│                     ↓                                                        │
+│      # Pass to transformer blocks (lines 433-438)                           │
+│      for block in self.blocks:                                             │
+│          hidden_states = block(                                             │
+│              hidden_states,                                                │
+│              encoder_hidden_states,                                        │
+│              timestep_proj,                                                │
+│              rotary_emb,  ◄── Used by attention layers inside block       │
+│              ...                                                           │
+│          )                                                                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+                              PARAMETER SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+EXISTING PARAMETERS (Already Configurable):
+  ✓ attention_head_dim (default: 128)
+  ✓ patch_size (default: (1, 1))
+  ✓ rope_max_seq_len (default: 1024)
+
+PARAMETERS TO ADD (New KT-RoPE Support):
+  ✗ rope_theta → Currently HARDCODED as 10000.0
+  ✗ joint_pos_mode → Not yet supported
+  ✗ num_spectral_modes → Not yet supported
+  ✗ spectral_scale → Not yet supported
+
+═══════════════════════════════════════════════════════════════════════════════
+                        FILES TO MODIFY (Summary)
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ FILE 1: configs/prism/prism_1b_tp2m_1frame.py                               │
+│ CHANGE: Add 4 new parameters to transformer dict (around line 36)           │
+│                                                                              │
+│    rope_theta=10000.0,                                                      │
+│    joint_pos_mode="sequential",                                             │
+│    num_spectral_modes=4,                                                    │
+│    spectral_scale=None,                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ FILE 2: hftrainer/models/motion/prism/network/transformer_prism.py          │
+│ CHANGE 1: Add parameters to __init__ signature (lines 132-149)              │
+│                                                                              │
+│    rope_theta: float = 10000.0,                                             │
+│    joint_pos_mode: str = "sequential",                                      │
+│    num_spectral_modes: int = 4,                                             │
+│    spectral_scale: Optional[int] = None,                                    │
+│                                                                              │
+│ CHANGE 2: Pass to RoPE instantiation (lines 164-166)                        │
+│                                                                              │
+│    self.rope = MotionWanRotaryPosEmbed(                                     │
+│        attention_head_dim=attention_head_dim,                               │
+│        patch_size=patch_size,                                               │
+│        rope_max_seq_len=rope_max_seq_len,                                   │
+│        theta=rope_theta,                   ◄── ADD THIS                     │
+│        joint_pos_mode=joint_pos_mode,      ◄── ADD THIS                     │
+│        num_spectral_modes=num_spectral_modes,  ◄── ADD THIS                 │
+│        spectral_scale=spectral_scale,      ◄── ADD THIS                     │
+│    )                                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ FILE 3: hftrainer/models/motion/prism/network/motion_rope.py                │
+│ CHANGE 1: Update __init__ signature (lines 69-75)                           │
+│                                                                              │
+│    def __init__(                                                            │
+│        self,                                                                │
+│        attention_head_dim: int,                                             │
+│        patch_size: Tuple[int, int],                                         │
+│        max_seq_len: int,                                                    │
+│        theta: float = 10000.0,             ◄── MAKE CONFIGURABLE           │
+│        joint_pos_mode: str = "sequential", ◄── ADD THIS                     │
+│        num_spectral_modes: int = 4,        ◄── ADD THIS                     │
+│        spectral_scale: Optional[int] = None, ◄── ADD THIS                   │
+│    ):                                                                       │
+│                                                                              │
+│ CHANGE 2: Use theta parameter in RoPE generation (lines 96-106)             │
+│        Already uses theta, so just make sure it's the parameter!            │
+│                                                                              │
+│ CHANGE 3: Store KT-RoPE parameters (new code)                               │
+│        self.joint_pos_mode = joint_pos_mode                                 │
+│        self.num_spectral_modes = num_spectral_modes                         │
+│        self.spectral_scale = spectral_scale                                 │
+│                                                                              │
+│ CHANGE 4: Implement KT-RoPE logic in forward() method                       │
+│        Add logic to modify positional embeddings based on                   │
+│        kinematic tree structure when joint_pos_mode != "sequential"         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════

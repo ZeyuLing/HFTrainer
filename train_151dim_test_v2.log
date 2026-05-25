@@ -1,0 +1,121 @@
+/usr/local/lib/python3.9/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-05-19 19:35:08,491] [INFO] [real_accelerator.py:191:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+[2026/05/19 19:35:11] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_151dim_uncond_fm_046b.py
+[2026/05/19 19:35:11] hftrainer INFO: Work dir: work_dirs/hymotion_m2m_completion_151dim_uncond_fm_046b
+Detected kernel version 5.4.119, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+[2026/05/19 19:35:11] hftrainer INFO: Config saved to: work_dirs/hymotion_m2m_completion_151dim_uncond_fm_046b/20260519_193511/config.py
+[2026/05/19 19:35:11] hftrainer INFO: Work dir: work_dirs/hymotion_m2m_completion_151dim_uncond_fm_046b
+[2026/05/19 19:35:11] hftrainer INFO: Run dir (logs/tb): work_dirs/hymotion_m2m_completion_151dim_uncond_fm_046b/20260519_193511
+[2026/05/19 19:35:11] hftrainer INFO: Environment info:
+Platform: Linux-5.4.119-19.0009.56-x86_64-with-glibc2.28
+Python: 3.9.16 (main, Sep 22 2023, 12:15:56) 
+[GCC 8.5.0 20210514 (TencentOS 8.5.0-18)]
+PyTorch: 2.5.0+cu118
+CUDA available: True
+CUDA version: 11.8
+GPU count: 1
+  GPU 0: Tesla T4
+accelerate: 1.10.1
+transformers: 4.57.3
+diffusers: 0.36.0
+peft: 0.17.1
+mmengine: 0.10.7
+safetensors: 0.7.0
+[2026/05/19 19:35:17] hftrainer INFO: 
+Model Summary:
+  Module              Total Params  Trainable Params  Trainable  Save Ckpt
+  ------------------  ------------  ----------------  ---------  ---------
+  motion_transformer   461,203,095       461,203,095  True       True     
+  m2m_loss                       0                 0  False      False    
+  kimodo_aux_loss                0                 0  False      False    
+  <bundle-orphan>            4,864             4,864  True       True     
+  ------------------  ------------  ----------------  ---------  ---------
+  TOTAL                461,207,959       461,207,959
+  Trainable ratio: 100.00%
+  Bundle orphan tensors:
+  <bundle-orphan> null_vtxt_feat           param shape=(1, 1, 768) norm=0.2711 requires_grad=True
+  <bundle-orphan> null_ctxt_input          param shape=(1, 1, 4096) norm=0.6416 requires_grad=True
+  <bundle-orphan> mean                     buffer shape=(151,) norm=6.4277
+  <bundle-orphan> std                      buffer shape=(151,) norm=2.8737
+
+[2026/05/19 19:35:17] hftrainer INFO: Building trainer...
+[2026/05/19 19:35:17] hftrainer INFO: Building dataloaders...
+Loading data_list:   0%|          | 0/407552 [00:00<?, ?it/s]Loading data_list:  24%|██▍       | 98110/407552 [00:00<00:00, 981033.11it/s]Loading data_list:  52%|█████▏    | 212534/407552 [00:00<00:00, 1076995.80it/s]Loading data_list:  79%|███████▊  | 320234/407552 [00:00<00:00, 1007774.74it/s]Loading data_list: 100%|██████████| 407552/407552 [00:00<00:00, 974797.44it/s] 
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+[2026/05/19 19:35:22] hftrainer INFO: Building optimizers...
+[2026/05/19 19:35:22] hftrainer INFO: Starting accelerator.prepare()...
+[2026/05/19 19:35:49] hftrainer WARNING: Skipped 3 shape-mismatched params in module 'motion_transformer': ['input_encoder.weight: ckpt (1024, 201) vs model (1024, 604)', 'final_layer.linear.weight: ckpt (201, 1024) vs model (151, 1024)', 'final_layer.linear.bias: ckpt (201,) vs model (151,)']
+[2026/05/19 19:35:50] hftrainer WARNING: Missing keys in module 'motion_transformer': ['input_encoder.weight', 'final_layer.linear.weight', 'final_layer.linear.bias']...
+[2026/05/19 19:35:50] hftrainer INFO: ============================================================
+[2026/05/19 19:35:50] hftrainer INFO: Loaded model weights from: checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt
+[2026/05/19 19:35:50] hftrainer INFO: Optimizer and training state reset to initial.
+[2026/05/19 19:35:50] hftrainer INFO: ============================================================
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] train(): entering before_run hooks
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] before_run -> LoggerHook
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] before_run done -> LoggerHook
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] before_run -> EMAHook
+[2026/05/19 19:35:50] hftrainer INFO: EMA hook initialized.
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] before_run done -> EMAHook
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] all before_run hooks done; entering main training loop (by_epoch=True)
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] _train_by_epoch: starting from current_epoch=0, max_epochs=1000
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] epoch=0: bundle.train()
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] before_train_epoch -> LoggerHook
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] before_train_epoch done -> LoggerHook
+[2026/05/19 19:35:50] hftrainer INFO: [Rank 0] starting dataloader iter for epoch=0
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+[2026/05/19 19:35:54] hftrainer INFO: [Rank 0] first batch received for epoch=0
+[2026/05/19 19:35:54] hftrainer ERROR: [Rank 0] Exception in train_step at epoch=0 batch=0 global_step=0:
+Traceback (most recent call last):
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1610, in _train_by_epoch
+    output = self.trainer.train_step(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 439, in train_step
+    ctx = self._prepare_and_forward(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 75, in _prepare_and_forward
+    src_motion = _stack_if_list(batch['src_motion'])
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 71, in _stack_if_list
+    return torch.stack(data, dim=0)
+RuntimeError: stack expects each tensor to be equal size, but got [360, 151] at entry 0 and [360, 198] at entry 9
+
+[2026/05/19 19:35:57] hftrainer ERROR: Training failed with exception:
+Traceback (most recent call last):
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/tools/train.py", line 87, in main
+    runner.train()
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1494, in train
+    self._train_by_epoch(train_cfg, val_interval)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1610, in _train_by_epoch
+    output = self.trainer.train_step(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 439, in train_step
+    ctx = self._prepare_and_forward(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 75, in _prepare_and_forward
+    src_motion = _stack_if_list(batch['src_motion'])
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 71, in _stack_if_list
+    return torch.stack(data, dim=0)
+RuntimeError: stack expects each tensor to be equal size, but got [360, 151] at entry 0 and [360, 198] at entry 9
+Traceback (most recent call last):
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/tools/train.py", line 112, in <module>
+    main()
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/tools/train.py", line 87, in main
+    runner.train()
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1494, in train
+    self._train_by_epoch(train_cfg, val_interval)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1610, in _train_by_epoch
+    output = self.trainer.train_step(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 439, in train_step
+    ctx = self._prepare_and_forward(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 75, in _prepare_and_forward
+    src_motion = _stack_if_list(batch['src_motion'])
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 71, in _stack_if_list
+    return torch.stack(data, dim=0)
+RuntimeError: stack expects each tensor to be equal size, but got [360, 151] at entry 0 and [360, 198] at entry 9

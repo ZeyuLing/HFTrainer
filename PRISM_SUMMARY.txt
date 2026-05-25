@@ -1,0 +1,215 @@
+════════════════════════════════════════════════════════════════════════════════
+                    PRISM FLOW MATCHING TRAINING - SUMMARY
+════════════════════════════════════════════════════════════════════════════════
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ QUESTION 1: HOW NOISE IS ADDED TO LATENTS (THE NOISING EQUATION)             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+EXACT EQUATION:
+    x_t = (1 - σ_t) · x_0 + σ_t · ε
+
+PYTHON CODE (bundle.py, lines 257-262):
+    def add_flow_noise(self, latents, timesteps):
+        noise = torch.randn_like(latents)
+        sigmas = _get_sigmas(self.scheduler, timesteps, n_dim=latents.ndim, ...)
+        noisy_latents = (1 - sigmas) * latents + sigmas * noise
+        targets = noise - latents
+        return noisy_latents, targets
+
+VARIABLE MAPPING:
+    x_t            → noisy_latents (corrupted latent at step t)
+    x_0            → latents (original clean latent)
+    σ_t            → sigmas (noise schedule value)
+    ε              → noise (random Gaussian: torch.randn_like)
+
+SIGMA RETRIEVAL (bundle.py, lines 19-27):
+    • Get all sigmas from scheduler: scheduler.sigmas
+    • Get all timesteps from scheduler: scheduler.timesteps
+    • For each sampled timestep, find its index in the schedule
+    • Extract and reshape sigma to match latent dimensionality [B,1,1,1]
+    • Scheduler type: FlowMatchEulerDiscreteScheduler
+
+SIGMAS RANGE:
+    • Low noise (early in schedule):  σ_t ≈ 0.001
+    • High noise (late in schedule):  σ_t ≈ 0.999
+
+════════════════════════════════════════════════════════════════════════════════
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ QUESTION 2: WHAT THE MODEL LEARNS TO PREDICT (THE TRAINING TARGET)           ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+TRAINING TARGET: VELOCITY
+    v_t = ε - x_0
+
+PYTHON CODE (bundle.py, line 261):
+    targets = noise - latents
+
+INTERPRETATION:
+    • The model predicts the VELOCITY FIELD
+    • Velocity = direction to move from noisy sample toward clean sample
+    • Each training step: model_pred ≈ (noise - original_latent)
+    • This guides the iterative denoising process during inference
+
+LOSS COMPUTATION (prism_trainer.py, line 95):
+    mse = F.mse_loss(model_pred, targets.float(), reduction='none')
+    
+    Loss measures: how well model predicts the velocity field
+
+ALTERNATIVE FORM (mathematically equivalent):
+    v_t = (x_t - (1-σ_t)x_0) / σ_t
+    
+    Where:
+        x_t = the noisy latent (what model sees)
+        x_0 = the original clean latent
+
+SPECIAL FEATURES:
+    • Translation vs Rotation Loss Weighting:
+      - Output has 23 joints: 1 translation + 22 rotations
+      - Without weighting: 22/23 ≈ 95.7% rotation, 1/23 ≈ 4.3% translation
+      - With weighting: 50% translation, 50% rotation (prevents dilution)
+    
+    • Frame Conditioning:
+      - 10% of batches condition on first N frames (keep original)
+      - Other 90% have all frames noised
+      - Helps model learn guided generation
+
+════════════════════════════════════════════════════════════════════════════════
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ QUESTION 3: HOW TIMESTEPS/SIGMAS ARE SAMPLED DURING TRAINING                 ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+TIMESTEP SAMPLING (prism_trainer.py, lines 68-75):
+
+    # Step 1: Sample random indices
+    step_indices = torch.randint(
+        0,                                          # min index
+        len(self.bundle.scheduler.timesteps),      # max index (e.g., 100)
+        (batch_size,),                             # shape: [32]
+        device=latents.device
+    )
+    
+    # Step 2: Map indices to timesteps
+    scheduler_timesteps = self.bundle.scheduler.timesteps.to(device)
+    timesteps = scheduler_timesteps[step_indices]  # [32]
+
+SAMPLING STRATEGY:
+    • UNIFORM RANDOM: Each sample gets random index from [0, num_timesteps)
+    • PER-SAMPLE: Each sample in batch has its own timestep
+    • DIFFERENT NOISE LEVELS: Same batch trains at different noise levels
+    • EFFICIENT: Single forward pass covers full noise spectrum
+
+EXAMPLE:
+    scheduler.timesteps = [0, 10, 20, 30, ..., 990]  # 100 steps
+    step_indices = [5, 87, 2, 45, ...]  # Sampled from [0,100)
+    timesteps = [50, 870, 20, 450, ...]  # Mapped to actual values
+
+SIGMA RETRIEVAL AFTER TIMESTEP SAMPLING:
+
+    sigmas = _get_sigmas(self.scheduler, timesteps, n_dim=4, dtype=float32)
+    
+    Process:
+        1. Get scheduler.sigmas: [σ_0, σ_1, σ_2, ..., σ_99]
+        2. Get scheduler.timesteps: [0, 10, 20, ..., 990]
+        3. For each timestep in [50, 870, 20, 450, ...]:
+           - Find its index in the scheduler's timestep array
+           - Extract the corresponding sigma
+        4. Reshape to [B, 1, 1, 1] for broadcasting
+        5. Use in noising equation: x_t = (1-σ)x_0 + σε
+
+════════════════════════════════════════════════════════════════════════════════
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ COMPLETE FLOW MATCHING TRAINING STEP                                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+1. ENCODE MOTION TO LATENTS
+   motion [B, T, J*6] → VAE → latents [B, C, T', J]
+
+2. SAMPLE RANDOM TIMESTEPS
+   step_indices = randint(0, num_steps, (batch_size,))
+   timesteps = scheduler.timesteps[step_indices]
+
+3. ADD FLOW MATCHING NOISE
+   x_t = (1-σ) * x_0 + σ * ε
+   targets = ε - x_0 (velocity)
+
+4. APPLY FRAME CONDITIONING (optional)
+   noisy_latents = where(condition_mask, noisy_latents, latents)
+   → Keep selected frames clean, noise others
+
+5. ENCODE TEXT PROMPT
+   text → Tokenizer & TextEncoder → text_states [B, seq_len, 768]
+
+6. FORWARD PASS
+   model_pred = transformer(noisy_latents, text_states, timesteps)
+
+7. COMPUTE LOSS
+   mse = MSE(model_pred, targets)
+   Apply masks (don't penalize conditioned/padded frames)
+
+8. SEPARATE TRANSLATION vs ROTATION LOSS
+   loss_transl = mean(mse_transl)  # First joint
+   loss_rot = mean(mse_rot)        # Other 22 joints
+   
+9. WEIGHTED COMBINATION
+   loss = 0.5 * loss_transl + 0.5 * loss_rot
+
+════════════════════════════════════════════════════════════════════════════════
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ KEY FILES AND LOCATIONS                                                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+MAIN TRAINERS:
+    hftrainer/trainers/motion/prism_trainer.py
+        • PrismTrainer.train_step() - text-to-motion training
+    
+    hftrainer/trainers/motion/prism_mcm_trainer.py
+        • PrismMCMTrainer.train_step() - audio-conditioned training
+
+BUNDLE (NOISING LOGIC):
+    hftrainer/models/motion/prism/bundle.py
+        • PrismBundle.add_flow_noise() - noising equation
+        • _get_sigmas() - sigma retrieval
+        • encode_motion() - VAE encoding
+        • encode_prompt() - text encoding
+
+KEY METHODS:
+    add_flow_noise(latents, timesteps)
+        Returns: (noisy_latents, targets)
+        Lines 257-262
+
+    _get_sigmas(scheduler, timesteps, n_dim, dtype)
+        Returns: sigmas [B, 1, 1, 1] (broadcasts to match latent dims)
+        Lines 19-27
+
+    PrismTrainer.train_step(batch)
+        Complete training step
+        Lines 41-118
+
+════════════════════════════════════════════════════════════════════════════════
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ MATHEMATICAL EQUATIONS SUMMARY                                               ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+NOISING:          x_t = (1-σ_t)x_0 + σ_t·ε
+VELOCITY:         v_t = ε - x_0
+ALT VELOCITY:     v_t = (x_t - (1-σ_t)x_0) / σ_t
+LOSS:             L = MSE(f_θ(x_t, t), v_t)
+TIMESTEP SAMPLE:  t_i ~ Uniform(scheduler.timesteps)
+SIGMA LOOKUP:     σ_i = scheduler.sigmas[index(t_i)]
+
+════════════════════════════════════════════════════════════════════════════════
+
+Generated from: /apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
+See the following documentation files for more details:
+  - PRISM_FLOW_MATCHING_ANALYSIS.md (comprehensive analysis)
+  - PRISM_CODE_REFERENCE.md (code examples and details)
+  - PRISM_QUICK_REFERENCE.txt (quick lookup)
+
+════════════════════════════════════════════════════════════════════════════════

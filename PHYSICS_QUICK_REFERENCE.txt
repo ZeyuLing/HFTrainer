@@ -1,0 +1,473 @@
+================================================================================
+PHYSICS SIMULATION QUICK REFERENCE
+================================================================================
+
+File: scripts/embodied/run_smpl_physics_sim.py (1100+ lines)
+Purpose: Convert HyMotion motion_135 → Physics-corrected SMPL motion
+Status: Production-ready, full pipeline + error handling
+
+================================================================================
+QUICK START
+================================================================================
+
+# Single motion file
+python3 scripts/embodied/run_smpl_physics_sim.py \
+    --npz-file /path/to/walk_forward.npz \
+    --output-dir /path/to/output \
+    --xml-path ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml
+
+# Batch processing with statistics
+python3 scripts/embodied/run_smpl_physics_sim.py \
+    --npz-dir /path/to/motions \
+    --output-dir /path/to/output \
+    --xml-path ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml \
+    --stats-dir /path/to/stats
+
+# Quick check (flat ground only)
+python3 scripts/embodied/run_smpl_physics_sim.py \
+    --npz-dir /path/to/motions \
+    --output-dir /path/to/output \
+    --xml-path ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml \
+    --filter-flat-ground
+
+================================================================================
+DATA FORMAT CONVERSIONS
+================================================================================
+
+INPUT: motion_135 (HyMotion internal format)
+  └─ Shape: (T, 135)
+  └─ [0-2]:    Translation (3D, Y-up)
+  └─ [3-134]:  22 joints × 6D rotations (row-major, needs reorder)
+  └─ Format:   motion_135 = [rot6d_to_rotmat] → [rotmat_to_axis_angle]
+
+INTERMEDIATE: SMPL 72D axis-angle (Y-up)
+  └─ Shape: (T, 72) = (T, [root(3), body(69)])
+  └─ Convention: Y-up world, Z-up depth
+  └─ Used by: Motion capture tools, visualization
+
+INTERMEDIATE: qpos 76D (Z-up MuJoCo)
+  └─ Shape: (T, 76) = (T, [root_trans(3), root_quat(4), body_euler(69)])
+  └─ Convention: Z-up world, local intrinsic XYZ Euler angles
+  └─ Physical meaning: MuJoCo configuration space
+
+OUTPUT: Smoothed SMPL 72D (Y-up)
+  └─ Shape: (T, 72)
+  └─ Back in motion capture convention
+  └─ Physics-corrected: No penetration, natural ground contact
+
+================================================================================
+KEY FUNCTIONS (LINE NUMBERS)
+================================================================================
+
+[1] DECODING (motion_135 → SMPL)
+    └─ rot6d_to_rotmat() ................. Line 173
+       • Gram-Schmidt orthogonalization
+       • Input: (..., 6) row-major rot6d
+       • Output: (..., 3, 3) rotation matrix
+       • Reorder: [0,2,4,1,3,5] (row → col major)
+
+    └─ decode_motion_135() .............. Line 193
+       • Extract from NPZ, decode all joints
+       • Handles rot6d reordering automatically
+       • Returns: smpl_pose(T,72), transl(T,3), fps(int)
+
+[2] COORDINATE TRANSFORMS
+    └─ yup_to_zup() ..................... Line 245
+       • Motion capture → Physics engine
+       • Rotate 90° around X-axis
+       • Also: X→X, Y→Z, Z→-Y
+
+    └─ zup_to_yup() ..................... Line 289
+       • Physics engine → Motion capture (inverse)
+
+[3] SMPL ↔ MuJoCo CONVERSION
+    └─ smpl_to_qpos() ................... Line 321
+       • SMPL (T,72) axis-angle → qpos (T,76)
+       • Converts axis-angle → quat (root) + Euler (body)
+       • Reorders SMPL joints → MuJoCo tree order
+       • Optional: Joint limit clamping to prevent chatter
+       • Guard axes (< 15°): Centered
+       • Main axes (≥ 15°): Clamped to limits
+
+    └─ qpos_to_smpl() ................... Line 429
+       • Inverse: qpos (T,76) → SMPL (T,72)
+       • Quaternion → axis-angle, Euler → axis-angle
+
+[4] GROUND OFFSET
+    └─ compute_ground_offset() .......... Line 471
+       • Find Z-offset to align feet to ground at frame 0
+       • Handles motion generated for different body models
+       • Returns: scalar offset to subtract from all frames
+
+[5] PHYSICS SIMULATION
+    └─ run_physics_sim() ................ Line 609
+       • Core PD-tracking loop
+       • Kinematic root + physics body joints
+       • Returns: sim_qpos(T',76), stats(dict)
+       • Stats include: joint error, root drift, fall frame
+
+[6] POST-PROCESSING
+    └─ smooth_simulated_qpos() .......... Line 720
+       • Remove PD oscillation via Savitzky-Golay filter
+       • Blend filtered result with kinematic reference
+       • Returns: smoothed_qpos(T,76)
+       • Prints: Jerk reduction % and statistics
+
+[7] ORCHESTRATION
+    └─ process_single_motion() .......... Line 950
+       • Full pipeline: decode → transform → sim → smooth
+       • Returns: stats dict
+
+================================================================================
+EULER ANGLE CONVENTION: CRITICAL DETAIL
+================================================================================
+
+MuJoCo uses LOCAL/INTRINSIC coordinate frame:
+  └─ R_total = Rx(θx) * Ry(θy) * Rz(θz)  [intrinsic XYZ]
+
+scipy.spatial.transform.Rotation has TWO conventions:
+  └─ as_euler("xyz"):  Intrinsic XYZ → output [θx, θy, θz]  [CORRECT ✓]
+  └─ as_euler("ZYX"):  Extrinsic ZYX → output [θz, θy, θx]  [WRONG ✗]
+
+For PD position control (direct tracking), MUST use "xyz".
+PHC uses "ZYX" but doesn't do PD tracking (uses learned RL policy).
+
+⚠️ Using "ZYX" will swap X/Z joint angles in qpos → broken PD tracking!
+
+================================================================================
+JOINT ORDER MAPPING
+================================================================================
+
+SMPL Standard Order (24 joints):
+  0: Pelvis           12: Neck
+  1-2: L/R Hip        13-14: L/R Collar
+  3-6: Spine1, L/R Knee, Spine2
+  7-8: L/R Ankle      15: Head
+  9: Spine3           16-17: L/R Shoulder
+  10-11: L/R Foot     18-19: L/R Elbow
+                      20-21: L/R Wrist
+                      22-23: L/R Hand
+
+MuJoCo Tree Order (depth-first from smpl_humanoid.xml):
+  Traverse body hierarchy:
+    Pelvis → L_Hip → L_Knee → L_Ankle → L_Toe → ...
+                 → R_Hip → ...
+           → Spine1 → ...
+
+Mapping: SMPL_2_MUJOCO and MUJOCO_2_SMPL lookup tables (lines 110-170)
+
+================================================================================
+JOINT LIMIT HANDLING: PD CHATTER PREVENTION
+================================================================================
+
+Problem:
+  • Euler decomposition of large rotations (deep knee bends) spreads rotation
+    across "guard" axes — narrow-limit joints (e.g., knee X: ±5.6°)
+  • Euler output might be ±180° on X-axis
+  • PD controller then "chatters" against joint stop
+
+Solution (two-tier):
+  1. Guard axes (range < 15°):
+     → Center to 0 (loss: ≤ 5.6° on minor axis — imperceptible)
+     → Result: No chatter
+
+  2. Main axes (range ≥ 15°):
+     → Clamp to [lo, hi] limits
+     → Result: Joint limits respected
+
+Code snippet (lines 395-424):
+  ┌─────────────────────────────────────────────────────────┐
+  │ GUARD_AXIS_THRESHOLD = np.radians(15.0)                 │
+  │                                                         │
+  │ for jid in range(model.njnt):                           │
+  │     if model.jnt_type[jid] != 3:  # hinge only         │
+  │         continue                                        │
+  │     lo, hi = model.jnt_range[jid]                       │
+  │     joint_range = hi - lo                               │
+  │                                                         │
+  │     if joint_range < GUARD_AXIS_THRESHOLD:              │
+  │         qpos[:, qi] = (lo + hi) / 2  # Center           │
+  │     else:                                               │
+  │         qpos[:, qi] = np.clip(qpos[:, qi], lo, hi)      │
+  └─────────────────────────────────────────────────────────┘
+
+================================================================================
+PHYSICS SIMULATION LOOP PSEUDOCODE
+================================================================================
+
+def run_physics_sim(model, data, ref_qpos, fps=30):
+    """PD-tracking with kinematic root + physics body joints."""
+    
+    T = ref_qpos.shape[0]
+    sim_dt = model.opt.timestep   # Typically 0.005s
+    ctrl_dt = 1.0 / fps           # Typically 0.033s @ 30fps
+    decimation = int(ctrl_dt / sim_dt)  # Sub-steps per frame
+    
+    for t in range(T):
+        # [1] ROOT POSITION: kinematic (tracked from reference)
+        data.qpos[:7] = ref_qpos[t, :7]
+        
+        # [2] ROOT VELOCITY: finite difference for smooth physics
+        if t + 1 < T:
+            data.qvel[:3] = (ref_qpos[t+1, :3] - ref_qpos[t, :3]) / ctrl_dt
+            # Angular velocity from quaternion difference
+            q_cur = Rotation.from_quat(ref_qpos[t, 3:7])
+            q_next = Rotation.from_quat(ref_qpos[t+1, 3:7])
+            R_diff = q_cur.inv() * q_next
+            data.qvel[3:6] = R_diff.as_rotvec() / ctrl_dt
+        else:
+            data.qvel[:6] = 0.0
+        
+        # [3] BODY JOINT TARGETS: PD actuators track these
+        data.ctrl[:] = ref_qpos[t, 7:]  # All 69 body joint angles
+        
+        # [4] PHYSICS STEPS: Run decimation sub-steps
+        for _ in range(decimation):
+            mujoco.mj_step(model, data)
+        
+        # [5] RECORD + CHECK
+        sim_qpos_list.append(data.qpos.copy())
+        
+        # Fall detection
+        if data.qpos[2] < 0.3 or np.any(np.isnan(data.qpos)):
+            break
+    
+    # Compute statistics
+    joint_error = mean(|sim_body_angles - ref_body_angles|)
+    root_drift = norm(sim_pos_end - ref_pos_end)
+    
+    return sim_qpos, {
+        "total_frames": T,
+        "simulated_frames": len(sim_qpos),
+        "completed": fall_frame is None,
+        "joint_tracking_error_rad": joint_error,
+        "root_position_drift_m": root_drift,
+        ...
+    }
+
+Key insights:
+  • Root POSITION reset each frame (kinematic tracking)
+  • Root VELOCITY set to finite-difference for smooth interpolation
+  • Body ANGLES tracked via PD actuators (physics-enforced)
+  • Decimation: sub-step to maintain numerical stability
+  • Fall detection: catch physics explosions early
+
+================================================================================
+POST-SIMULATION SMOOTHING
+================================================================================
+
+def smooth_simulated_qpos(sim_qpos, ref_qpos, fps=30,
+                         window_ms=333.0, blend_alpha=0.5):
+    """Remove PD oscillation, blend with kinematic reference."""
+    
+    # Savitzky-Goyal (local polynomial fitting)
+    window_frames = max(3, int(window_ms / 1000.0 * fps))
+    if window_frames % 2 == 0:
+        window_frames += 1
+    
+    smooth_sim = savgol_filter(sim_qpos[:, 7:], window_frames, 3, axis=0)
+    
+    # Blend: some physics, some kinematic reference
+    result = blend_alpha * smooth_sim + (1 - blend_alpha) * ref_qpos[:, 7:]
+    
+    return result
+
+Parameters:
+  • window_ms: Smoothing window (larger = more smoothing)
+              Default 333ms ≈ 10 frames @ 30fps
+  
+  • blend_alpha: Physics weight (1.0 = all physics, 0.0 = all kinematic)
+                Default 0.5 = equal blend
+                
+                Tuning:
+                  Too much jitter? Increase α toward 1.0
+                  Too much deviation from ref? Decrease α toward 0.5
+
+Output quality metrics:
+  • raw_jerk: Jitter in raw simulation (m/s³)
+  • smooth_jerk: After filtering
+  • jerk_reduction: (1 - smooth/raw) * 100 %
+  
+  Typical values (m/s³):
+    - Kinematic: 50-200
+    - Raw physics: 100-500
+    - After smooth: 50-150
+
+================================================================================
+STATISTICS OUTPUT
+================================================================================
+
+stats = {
+    "total_frames": int,                  # Requested frames
+    "simulated_frames": int,              # Actually completed
+    "fall_frame": int or None,            # Where fall detected (None = success)
+    "completed": bool,                    # No fall = True
+    
+    "joint_tracking_error_rad": float,    # Mean |sim - ref| per angle
+                                          # Good: < 0.05 rad (3°)
+    
+    "root_position_drift_m": float,       # ||final_pos - ref_final||
+                                          # Should be ~0 (kinematic root)
+    
+    "min_root_height_m": float,           # Lowest root Z during sim
+                                          # Should be > 0.3m (not underground)
+    
+    "ground_offset_m": float,             # Correction applied for feet alignment
+                                          # Typically 0.0-0.2m
+    
+    "fps": int,                           # Control frame rate
+    "decimation": int,                    # Physics substeps per frame
+}
+
+Interpretation guide:
+  ✓ completed=True, joint_error < 0.05: Excellent tracking
+  ✓ min_height > 0.3: Feet not penetrating ground
+  ✓ root_drift ~0: Kinematic root working
+  ✗ completed=False: Motion fell or exploded
+  ✗ joint_error > 0.1: Poor PD tracking (check gains)
+  ✗ min_height < 0.2: Physics instability
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: Feet floating above ground
+  Cause: Motion generated for different body height
+  Fix: compute_ground_offset() auto-applies correction
+  Check: "Ground offset: Xm" in output
+
+Issue: High-frequency jitter in output
+  Cause: PD control oscillation
+  Solutions:
+    1) Increase blend_alpha in smooth_simulated_qpos()
+       smooth_qpos(sim, ref, blend_alpha=0.7)
+    
+    2) Increase smoothing window:
+       smooth_qpos(sim, ref, window_ms=500.0)
+    
+    3) Check PD gains in MuJoCo XML (if configurable)
+
+Issue: Motion falls / simulation aborts early
+  Causes:
+    - Unphysical input (joint limits exceeded)
+    - Reference trajectory too jerky
+    - PD gains too aggressive
+  
+  Diagnostics:
+    - Check input qpos validity: all angles within joint limits
+    - Validate reference motion before simulation
+    - Print: "FALL at frame X/T: reason"
+
+Issue: Simulation too slow
+  Cause: Too many sub-steps (high decimation)
+  
+  Check: "sim_dt=Xs, decimation=N"
+    If decimation > 10, consider:
+    1) Increase MuJoCo timestep in XML (faster but less accurate)
+    2) Profile compute, focus on hot loop
+  
+  Typical timing:
+    - 30fps, 30s motion, decimation=6 ≈ 60 seconds wall-clock
+
+Issue: Random seed not reproducible
+  Note: MuJoCo physics is deterministic; numpy randomness for initial shuffle
+  Solution: Set numpy.random.seed() before batch processing
+
+================================================================================
+INTEGRATION: SOAR + PHYSICS
+================================================================================
+
+Physics simulation can enhance SOAR post-training:
+
+Standard SOAR correction target (clean motion):
+  v_corr_clean = (x1_clean - z_re) / (1 - t')
+
+Physics-enhanced correction target:
+  v_corr_physics = (x1_simulated - z_re) / (1 - t')
+
+Replace x1_clean with physics-corrected motion:
+  • Enforces physical constraints (no penetration)
+  • Natural ground contact, gravity
+  • Reduces exposure bias in embodied scenarios
+  • Maintains SOAR's exposure bias correction
+
+See: SOAR_PHYSICS_INTEGRATION_ANALYSIS.md
+
+================================================================================
+FILE LOCATIONS
+================================================================================
+
+Main script:
+  └─ scripts/embodied/run_smpl_physics_sim.py (1100 lines)
+
+Companion (simpler, physics-free):
+  └─ scripts/embodied/motion135_to_smplx.py (130 lines)
+     • Converts motion_135 → SMPL-X NPZ
+     • Useful for external tools (GMR, retargeting)
+
+MuJoCo model:
+  └─ ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml
+     • 24-body SMPL-X humanoid
+     • Free joint (root), hinge joints (body), PD actuators
+
+Config examples (if using with training pipeline):
+  └─ configs/hymotion_m2m_v2/soar/*.py
+     • Various SOAR training configs
+     • Can integrate physics as post-processing
+
+Documentation:
+  └─ PHYSICS_SIMULATION_GUIDE.md (this detailed guide, 834 lines)
+  └─ SOAR_PHYSICS_INTEGRATION_ANALYSIS.md (physics + SOAR, 650+ lines)
+
+================================================================================
+COPY-PASTE COMMANDS
+================================================================================
+
+# Minimal test (single file)
+python3 scripts/embodied/run_smpl_physics_sim.py \
+    --npz-file motion_test.npz \
+    --output-dir out/physics_test \
+    --xml-path ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml
+
+# Full batch with stats
+python3 scripts/embodied/run_smpl_physics_sim.py \
+    --npz-dir /data/motions \
+    --output-dir /data/output \
+    --xml-path ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml \
+    --stats-dir /data/stats
+
+# Debug mode (single file + verbose)
+python3 scripts/embodied/run_smpl_physics_sim.py \
+    --npz-file walk.npz \
+    --output-dir out/ \
+    --xml-path ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml \
+    2>&1 | tee physics_debug.log
+
+================================================================================
+KEY TAKEAWAYS
+================================================================================
+
+1. Format chain matters: motion_135 has implicit 6D rotation encoding that must
+   be decoded (Gram-Schmidt), reordered (row→col major), and converted properly.
+
+2. Coordinate systems: Motion capture uses Y-up; physics engines use Z-up.
+   Must transform each step; easy to miss → wrong physics.
+
+3. Euler convention: For PD tracking, MUST use intrinsic "xyz", not "ZYX".
+   Wrong convention → swapped joint angles → broken control.
+
+4. Joint limits prevent chatter: Guard axes (< 15° range) centered; main axes
+   clamped. Eliminates PD oscillation at joint stops.
+
+5. Kinematic root + physics body: Root position/orientation matched exactly to
+   reference (no tracking error); body joints get physics-enforced corrections.
+
+6. Post-smoothing is essential: Raw PD control is jittery (100-500 m/s³ jerk).
+   Savitzky-Golay + blending with kinematic reference → smooth output.
+
+7. Statistics indicate success: joint_error < 0.05 rad, root_drift ~0 m, height
+   > 0.3 m, completed=True.
+
+8. Integration ready: Output feeds into visualization, external tools (GMR,
+   retargeting), or SOAR post-training for embodied refinement.
+

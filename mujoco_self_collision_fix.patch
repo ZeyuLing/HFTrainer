@@ -1,0 +1,38 @@
+--- a/protomotions/simulator/mujoco/simulator.py
++++ b/protomotions/simulator/mujoco/simulator.py
+@@ -318,6 +318,10 @@ class MujocoSimulator(Simulator):
+         # Override armature and frictionloss from robot config
+         self._override_joint_properties()
+ 
++        # Disable robot self-collisions if configured (prevents contact forces
++        # from natural interpenetration in rest pose, e.g., shoulders, hips)
++        if not self.robot_config.asset.self_collisions:
++            self._disable_self_collisions()
++
+         # Build actuator-to-DOF mapping
+         self._build_actuator_mapping()
+ 
+@@ -1153,6 +1157,23 @@ class MujocoSimulator(Simulator):
+             self.model.geom_contype[gid] = 1
+             self.model.geom_conaffinity[gid] = 1
+ 
++    def _disable_self_collisions(self) -> None:
++        """Disable collisions between robot body parts.
++
++        Sets geom_conaffinity to 0 for all robot geoms. This prevents contact
++        forces from arising due to natural interpenetration in the rest pose
++        (e.g., shoulders, hips). The SMPL humanoid has interpenetrating
++        geometry that would cause unstable repulsive forces if left enabled.
++
++        Body 0 is the floor (world), bodies 1+ are robot bodies with geoms.
++        We use geom_bodyid to identify which body each geom belongs to.
++        """
++        for gid in range(self.model.ngeom):
++            body_id = self.model.geom_bodyid[gid]
++            # Only disable for robot bodies (skip floor/world)
++            if 0 < body_id < self._num_bodies:
++                self.model.geom_conaffinity[gid] = 0
++
+     def _set_projectile_root_states(
+         self,
+         proj_indices: torch.Tensor,

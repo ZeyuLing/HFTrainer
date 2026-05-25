@@ -1,0 +1,399 @@
+════════════════════════════════════════════════════════════════════════════════
+ARCHITECTURE COMPARISON: UMO vs MotionLab vs M2M (Visual Diagrams)
+════════════════════════════════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────────────────────────────
+1. CONTROL SIGNAL FLOW
+─────────────────────────────────────────────────────────────────────────────
+
+UMO: Frame-Level Meta-Operation + Element-wise Add
+┌──────────────────────────────────────────────────────────────────────────┐
+│ INFERENCE PIPELINE:                                                       │
+│                                                                           │
+│   source_motion(T,201)      meta_op_τ(T,)                               │
+│        │                         │                                      │
+│        └──────┬──────────────────┘                                      │
+│              ↓                                                           │
+│         s̃_i = source_i + Emb(τ_i)    [Add embeddings]                 │
+│              │                                                           │
+│         ┌────┴──────────────────────────────────────────────────┐      │
+│         ↓                                                        ↓      │
+│    x_t (T,201)                                          E_ctx(s̃)     │
+│       noisy                                              (0.207M)      │
+│         │                                                        │      │
+│         └──────────────────┬──────────────────────────────────┘      │
+│                            ↓                                           │
+│                     x'_emb = E_in(x_t) + E_ctx(s̃)                   │
+│                     [Element-wise ADD at embedding level]             │
+│                            │                                           │
+│                            ↓                                           │
+│                    HY-Motion-Lite (FROZEN)                            │
+│                    [Backbone NOT modified]                            │
+│                            │                                           │
+│                            ↓                                           │
+│                     Output: x̂_0 (T,201)                              │
+│                                                                           │
+│ KEY: Temporal fusion = minimal params, no architecture change          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+
+MotionLab: 5 Modality Paths + JointAttention + Aligned 1D RoPE
+┌──────────────────────────────────────────────────────────────────────────┐
+│ INFERENCE PIPELINE:                                                       │
+│                                                                           │
+│  source(T,263) target(T,263)  text(768)  hint(T,66)  style(768)        │
+│      │              │            │          │           │              │
+│      └─────┬────────┴────────────┼──────────┼───────────┘              │
+│            │  [Independent Embeddings]     │                           │
+│            ↓                               ↓                           │
+│  ┌─────────────────────┐  ┌──────────────────────────┐                │
+│  │  Source Path        │  │  Target Path             │                │
+│  ├─────────────────────┤  ├──────────────────────────┤                │
+│  │ embed_source()      │  │ embed_target()           │                │
+│  │ adaLN(y)            │  │ adaLN(y)                 │  (y = timestep)│
+│  │ FFN (independent)   │  │ FFN (independent)        │  (y += task)   │
+│  │ LayerNorm           │  │ LayerNorm                │                │
+│  └─────────────────────┘  └──────────────────────────┘                │
+│  ┌─────────────────────┐  ┌──────────────────────────┐                │
+│  │  Text Path          │  │  Hint Path               │                │
+│  ├─────────────────────┤  ├──────────────────────────┤                │
+│  │ CLIP_encode(text)   │  │ embed_trajectory_hint()  │                │
+│  │ adaLN(y)            │  │ adaLN(y)                 │                │
+│  │ FFN (independent)   │  │ FFN (independent)        │                │
+│  │ LayerNorm           │  │ LayerNorm                │                │
+│  └─────────────────────┘  └──────────────────────────┘                │
+│  ┌─────────────────────┐                                              │
+│  │  Style Path         │  [Style is optional modality]                │
+│  ├─────────────────────┤                                              │
+│  │ motion_encoder()    │                                              │
+│  │ adaLN(y)            │                                              │
+│  │ FFN (independent)   │                                              │
+│  │ LayerNorm           │                                              │
+│  └─────────────────────┘                                              │
+│            │                                                            │
+│            └────────────────────┬─────────────────────────────────────┘
+│                                 ↓                                       │
+│                      JointAttention Layer                               │
+│                      ┌─────────────────────────────────────────────┐  │
+│                      │ QKV = concat([Q_src, Q_tgt, Q_text, ...])  │  │
+│                      │ Attention Output (all modalities interact) │  │
+│                      │ Split back to 5 outputs                    │  │
+│                      │ ★ All share ALIGNED 1D RoPE ★             │  │
+│                      │   (forces source[i] ↔ target[i] sync)     │  │
+│                      └─────────────────────────────────────────────┘  │
+│                                 ↓                                       │
+│                      MFT Backbone (TRAINED)                            │
+│                                 ↓                                       │
+│                        Output: x̂_0 (T,263)                            │
+│                                                                           │
+│ KEY: Modality paths decouple input types, Joint Attention forces sync  │
+└──────────────────────────────────────────────────────────────────────────┘
+
+
+M2M: Binary Mask + VACE 3-Channel + Channel Concatenation
+┌──────────────────────────────────────────────────────────────────────────┐
+│ INFERENCE PIPELINE:                                                       │
+│                                                                           │
+│  x_t(T,138)  src_motion(T,138)  src_mask(T,138)                         │
+│    noisy         full source       binary 0/1                           │
+│      │                │                │                               │
+│      │                └────────┬───────┘                               │
+│      │                         ↓                                       │
+│      │                [Compute inactive/reactive]                     │
+│      │                         │                                       │
+│      │          ┌──────────────┼──────────────┐                       │
+│      │          ↓              ↓              ↓                       │
+│      │   inactive        reactive        src_mask                     │
+│      │   (src*(1-m))     (src*m)         (binary)                     │
+│      │          │              │              │                       │
+│      └──────┬───┴──────────┬───┴──────────┬───┘                       │
+│             │              │              │                           │
+│             └──────────────┼──────────────┘                           │
+│                            ↓                                           │
+│            x_input = [x_t | inactive | reactive | mask]              │
+│                      (T, 138) (T, 138) (T, 138) (T, 138)             │
+│                      ───────────────────────────────────              │
+│                            (T, 552)                                   │
+│                                │                                       │
+│                                ↓                                       │
+│                     input_encoder(552 → hidden)                       │
+│                     [Retrained for 4× input dim]                      │
+│                                │                                       │
+│                                ↓                                       │
+│                   HunyuanMotion Backbone (TRAINED)                    │
+│                                │                                       │
+│                                ↓                                       │
+│                         Output: x̂_0 (T, 138)                         │
+│                                                                           │
+│ KEY: All conditions explicit in input space, no per-joint hiding      │
+└──────────────────────────────────────────────────────────────────────────┘
+
+─────────────────────────────────────────────────────────────────────────────
+2. MASK GRANULARITY VISUALIZATION
+─────────────────────────────────────────────────────────────────────────────
+
+Example Task: Regenerate LEFT ARM ONLY (keep body, keep right arm)
+
+UMO (Frame-Level Meta-Op) — CANNOT DISTINGUISH
+────────────────────────────────────────────────
+τ[t] = [E] for all t    ← "Edit" this frame
+        ↓
+ALL 22 JOINTS edited simultaneously
+(No way to say "left arm only")
+
+Result: Cannot do partial per-joint editing ❌
+
+
+MotionLab (Modality Level) — Can use trajectory hint
+─────────────────────────────────────────────────
+source[t, joints 0-22]       ← Full source (including left arm)
+hint[t, left_arm_joints]     ← Explicit trajectory constraint
+
+In attention, left_arm dims in trajectory hint get stronger weight
+But NOT native per-joint masking—via semantic constraint ⚠️
+
+
+M2M (Dimension Level) — NATIVE PER-JOINT MASKING ✅
+───────────────────────────────────────────────────
+Left arm in 138D vector occupies dims 30-42 (example)
+
+Binary mask:
+mask[t, 0:30]   = 0    ← Keep body/root unchanged
+mask[t, 30:42]  = 1    ← LEFT ARM: regenerate
+mask[t, 42:138] = 0    ← Keep right arm + legs unchanged
+
+VACE encoding:
+inactive[t, 30:42] = 0  ← "I have no known values here"
+reactive[t, 30:42] = 0  ← "I'm not ignoring known values"
+
+Result: Model ONLY regenerates dims 30-42, keeps rest ✅ NATIVE
+
+
+─────────────────────────────────────────────────────────────────────────────
+3. PARAMETER OVERHEAD COMPARISON
+─────────────────────────────────────────────────────────────────────────────
+
+UMO Setup:
+┌─────────────────────────────────────────────┐
+│ HY-Motion-Lite (460M) ──→ FROZEN            │
+│                                             │
+│ E_ctx Adapter (0.207M):                     │
+│   Linear1: 201 → 2048  (0.412M → shrink)   │
+│   GELU                                      │
+│   Linear2: 2048 → 201  (0.412M → shrink)   │
+│                                             │
+│ Meta-op embeddings: 3 × 201D (tiny)         │
+│                                             │
+│ TOTAL NEW: ~0.207M                          │
+│ BACKBONE: FROZEN (not counted)              │
+│ Overhead: <0.05% of backbone                │
+└─────────────────────────────────────────────┘
+
+
+MotionLab Setup:
+┌──────────────────────────────────────────────┐
+│ MFT Backbone:                                │
+│   5 modality paths × (embed + adaLN + FFN)  │
+│   JointAttention                             │
+│   ALL TRAINED FROM SCRATCH                   │
+│                                              │
+│ Typical: 50-100M parameters depending on     │
+│ token_dim (they use 512, lite version)       │
+│                                              │
+│ Overhead: Full training cost                 │
+└──────────────────────────────────────────────┘
+
+
+M2M Setup:
+┌──────────────────────────────────────────────┐
+│ HunyuanMotion (0.46B or 1.5B) ──→ TRAINED    │
+│                                              │
+│ input_encoder modified:                      │
+│   Original input: 138D                       │
+│   New input: 552D (4×)                       │
+│   Weight shape changes: needs reinit         │
+│                                              │
+│ Overhead: input_encoder retraining           │
+│           (fraction of total training cost)  │
+└──────────────────────────────────────────────┘
+
+─────────────────────────────────────────────────────────────────────────────
+4. TRAINING SCHEDULE TIMELINE
+─────────────────────────────────────────────────────────────────────────────
+
+UMO Training:
+┌─────────────────────────────────────────────────────────────┐
+│ Epoch    0 ─────────────────── 100K steps ───────────────── │
+│          │                                                  │
+│ Tasks   [T2M] [Keyframe] [Inpaint] [Edit] [Reaction] ...   │
+│          25%     15%        25%      15%     10%  ...       │
+│          │                                                  │
+│          ├─ All tasks mixed from day 1                     │
+│          ├─ No curriculum                                  │
+│          └─ Frozen backbone, only E_ctx trains             │
+│                                                             │
+│ Result: Uniform task distribution throughout              │
+└─────────────────────────────────────────────────────────────┘
+
+
+MotionLab Training:
+┌─────────────────────────────────────────────────────────────┐
+│ STAGE 1: Pre-train (1000 epochs)                            │
+│          [Masked Reconstruction Only]                       │
+│          (Self-supervised prior learning)                   │
+│                                                             │
+│ STAGE 2: Fine-tune (1400 epochs, 7 stages × 200ep)         │
+│          ┌──────────────────────────────────────────────┐  │
+│          │ Ep 0-200:    [T2M]                           │  │
+│          │              + 45% old + 10% other           │  │
+│          │              45% new task                    │  │
+│          ├──────────────────────────────────────────────┤  │
+│          │ Ep 200-400:  [T2M] + [StyleGen]              │  │
+│          │              + FID-weighted old task mix      │  │
+│          │              ↑ If T2M FID went up, resample   │  │
+│          ├──────────────────────────────────────────────┤  │
+│          │ Ep 400-600:  ...add [TrajEdit]               │  │
+│          ├──────────────────────────────────────────────┤  │
+│          │ Ep 600-800:  ...add [TextEdit]               │  │
+│          ├──────────────────────────────────────────────┤  │
+│          │ Ep 800-1000: ...add [StyleTransfer]          │  │
+│          ├──────────────────────────────────────────────┤  │
+│          │ Ep 1000-1200: ...add [InBetween+TrajGen]     │  │
+│          ├──────────────────────────────────────────────┤  │
+│          │ Ep 1200-1400: ...add [TrajEdit] (final)      │  │
+│          │              All 7 tasks with anti-forget    │  │
+│          └──────────────────────────────────────────────┘  │
+│                                                             │
+│ Result: Staged introduction, FID-based anti-forgetting    │
+│ Ablation: Remove curriculum → 11.7× FID degradation      │
+└─────────────────────────────────────────────────────────────┘
+
+
+M2M Training:
+┌─────────────────────────────────────────────────────────────┐
+│ Epoch    0 ──────────────── N (unknown) ─────────────────── │
+│          │                                                  │
+│ Tasks   M1  M2  M3  M4  M5  M6                             │
+│        25% 15% 25% 15%  5% 15%                             │
+│          │                                                  │
+│          ├─ Fixed ratio from day 1                         │
+│          ├─ No curriculum                                  │
+│          ├─ No task awareness token                        │
+│          └─ M5 (pure T2M) only 5% ← Potential bottleneck? │
+│                                                             │
+│ Result: Uniform distribution, potential T2M quality loss  │
+│ Opportunity: Add curriculum → potential 2-10× gain        │
+└─────────────────────────────────────────────────────────────┘
+
+─────────────────────────────────────────────────────────────────────────────
+5. ATTENTION MECHANISM COMPARISON
+─────────────────────────────────────────────────────────────────────────────
+
+UMO: Backbone Self-Attention (No Explicit Cross-Modal)
+──────────────────────────────────────────────────────
+        Input Embedding (modified)
+        x'_emb = E_in(x_t) + E_ctx(s̃)
+             ↓
+        Backbone Blocks
+        ├─ Self-Attention (attends to all positions in modified embedding)
+        │  (Implicitly learns to separate noisy target from context)
+        └─ FFN
+             ↓
+        Output
+
+Problem: No explicit interaction signal for source vs target
+Solution: Model must infer from modified embedding implicitly
+
+
+MotionLab: Explicit Joint Attention (Cross-Modal)
+─────────────────────────────────────────────────
+        Separate embeddings for 5 modalities
+        ├─ source_emb:  (L, D)
+        ├─ target_emb:  (L, D)
+        ├─ text_emb:    (L, D)
+        ├─ hint_emb:    (L, D)
+        └─ style_emb:   (L, D)
+             ↓
+        JointAttention:
+        Q = [Q_src | Q_tgt | Q_txt | Q_hint | Q_style]  (5L, D)
+        K = [K_src | K_tgt | K_txt | K_hint | K_style]  (5L, D)
+        V = [V_src | V_tgt | V_txt | V_hint | V_style]  (5L, D)
+        
+        Attention matrix shape: (5L, 5L)
+        - src→tgt: Learn to copy/modify source to target
+        - txt→tgt: Learn to incorporate text guidance
+        - hint→tgt: Learn to follow trajectory
+        - style→tgt: Learn to apply style
+             ↓
+        Split back to 5 outputs
+             ↓
+        Backbone
+
+Advantage: Explicit cross-modal interaction signals
+
+
+M2M: Single Input Encoder (Implicit Modality Handling)
+──────────────────────────────────────────────────────
+        Concatenated input
+        [x_t | inactive | reactive | mask]  (T, 552)
+             ↓
+        input_encoder (552 → hidden_dim)
+        ├─ Learns to separate channels implicitly
+        └─ All dims processed together
+             ↓
+        Backbone Self-Attention
+        (Attends over all 552-dim features)
+             ↓
+        Output
+
+Trade-off: Simpler, but channels not explicitly separated like MotionLab
+
+─────────────────────────────────────────────────────────────────────────────
+6. MOTION REPRESENTATION: What Information Each Carries
+─────────────────────────────────────────────────────────────────────────────
+
+Per-frame vector (1 timestep, T=1):
+
+UMO (201D):
+┌────────────────────────────────────────────────────────────────┐
+│ Root Translation (3D)         [3]    ──→ Root XYZ position    │
+│ Root Orientation (6D)         [6]    ──→ 6D rotation vector   │
+│ 21 Joint Rotations (126D)     [126]  ──→ 21×6D rot vectors    │
+│ 22 Joint Positions (66D)      [66]   ──→ 22×3D local xyz      │
+│ ────────────────────────────────────                           │
+│ TOTAL: 201D                                                     │
+│                                                                  │
+│ Enables: Direct trajectory control (via joint positions)       │
+│ Example: Can say "constraint elbow to (x,y,z)"                 │
+└────────────────────────────────────────────────────────────────┘
+
+MotionLab (263D):
+┌────────────────────────────────────────────────────────────────┐
+│ Root Translation (3D)         [3]    ──→ Root XYZ             │
+│ Root Velocity (3D)            [3]    ──→ Root velocity        │
+│ Root Orientation (6D)         [6]    ──→ 6D rotation          │
+│ 22 Joint Positions (66D)      [66]   ──→ 22×3D local xyz      │
+│ 22 Joint Velocities (66D)     [66]   ──→ 22×3D velocity       │
+│ 22 Joint Rotations (132D)     [132]  ──→ 22×6D rot vectors    │
+│ Foot Contact (4D)             [4]    ──→ Binary foot contacts │
+│ ────────────────────────────────────                           │
+│ TOTAL: 263D                                                     │
+│                                                                  │
+│ Enables: All of UMO + velocity info + foot contact awareness  │
+│ Example: Model learns walking patterns from contact signal    │
+└────────────────────────────────────────────────────────────────┘
+
+M2M (138D):
+┌────────────────────────────────────────────────────────────────┐
+│ Root Translation (3D or 6D)   [3/6]   ──→ Root position       │
+│ 22 Joint Rotations (132D)     [132]   ──→ 22×6D rot vectors   │
+│ ────────────────────────────────────                           │
+│ TOTAL: 138D (or 141D with abs+rel translation)                │
+│                                                                  │
+│ Missing: Joint positions, velocity, foot contact              │
+│ Impact: Cannot directly control xyz trajectory                │
+│ Workaround: Would need to add position dims + FK loss        │
+│ Effort: Medium (2 weeks + retrain)                            │
+└────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════

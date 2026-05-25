@@ -1,0 +1,268 @@
+═══════════════════════════════════════════════════════════════════════════════
+KIMODO vs. HyMotion M2M: EXACT TECHNICAL COMPARISON
+═══════════════════════════════════════════════════════════════════════════════
+
+1. INPUT REPRESENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  - 333 dimensions per frame (27-joint Bones Rigplay / SOMA-30)
+  - [0:3]       smooth_root_pos (x smooth, z smooth, y absolute)
+  - [3:5]       global_root_heading [cos(ψ), sin(ψ)]
+  - [5:86]      local_joints_positions (27×3, relative to smooth root)
+  - [86:248]    global_rot_data (27×6, GLOBAL world-frame rotations)
+  - [248:329]   velocities (27×3, computed post-hoc)
+  - [329:333]   foot_contacts (4, computed post-hoc)
+  - Model predicts ONLY 248 dims; rest computed after
+
+HyMotion M2M:
+  - 135 dimensions per frame (SMPL-22)
+  - [0:3]       abs_rel translation (3 absolute root + 3 relative)
+  - [3:135]     rot_6d (22 joints × 6D, LOCAL parent-relative rotations)
+  - Model predicts all 135 dims
+  - NO explicit joint positions
+  - NO foot contacts
+
+KEY DIFFERENCE: KIMODO uses GLOBAL coordinates (IK-free), M2M uses LOCAL coordinates (SMPL-style)
+
+
+2. CONSTRAINT MECHANISM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  - IMPUTATION-based (hard replace during diffusion)
+  - Per-denoising step: x_t = x_t * (1 - mask) + observed_motion * mask
+  - Input = [motion (333), mask (333)] = 666 dims to transformer
+  - Constrained dims locked throughout sampling
+  - Position constraints = GLOBAL world-space (no IK needed)
+  - 5 constraint types: Root2D, FullBody, EndEffector, RootY, RootHeading
+
+HyMotion M2M:
+  - VACE conditioning (soft concat as additional channels)
+  - Input = [x_t (135), inactive (135), reactive (135), mask (135)] = 540 dims
+  - Constrained dims NOT hard-locked, subject to diffusion
+  - Position constraints = NOT SUPPORTED (no position dims)
+  - Rotation constraints = LOCAL (requires parent chain knowledge)
+  - 6 mask strategies: M1-M6 (random cell, block, temporal, joint, full, keyframe)
+
+KEY DIFFERENCE: KIMODO = aggressive imputation, M2M = soft conditioning
+
+
+3. TRAINING PROCEDURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  - TWO-PHASE curriculum:
+    * Phase 1: 500k steps pure T2M (no constraints seen)
+    * Phase 2: 500k steps constraint-aware (mask/motion_mask input)
+  - Loss: Weighted smooth L1 (γ_pos=10, γ_vel=2, γ_rot=10, γ_contact=3, γ_fk=5)
+  - Includes FK consistency loss (rotation → position check)
+  - Foot contact loss (4-dim binary classification)
+  - DDPM framework: 1000 training steps, DDIM 100-step inference
+  - Batch size: 2048 (16 A100-80GB GPUs)
+
+HyMotion M2M:
+  - SINGLE-PHASE training:
+    * All tasks (T2M, completion) trained simultaneously
+    * M1-M6 masks sampled with fixed probabilities (25%, 15%, 25%, 15%, 5%, 15%)
+  - Loss: Not open-sourced (internal)
+  - Likely includes position smoothness, rotation smoothness
+  - Flow Matching framework: rectified flow, 50-step ODE inference
+  - Batch size: (not public)
+
+KEY DIFFERENCE: KIMODO separates T2M and constraint learning; M2M unifies them
+
+
+4. ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  - TWO-STAGE denoiser:
+    * Stage 1: Root (5 dims) via 16-layer Transformer
+    * Stage 2: Body (328 dims) conditioned on local root
+    * Total: 282M parameters
+  - Backbone: TransformerEncoderBlock
+    - Input dim: 333 or 666 (with mask)
+    - Latent dim: 1024
+    - 16 layers, 8 heads
+    - FF: 1024 → 4096 → 1024
+    - Prefix mode attention (text + timestep + motion tokens)
+  - Text encoder: LLM2Vec (bidirectional LLaMA, 4096-dim, frozen)
+
+HyMotion M2M:
+  - SINGLE-STAGE architecture:
+    * MMDiT backbone (multi-modality diffusion transformer)
+    * 460M-1.5B parameters (depending on variant)
+  - Dual-stream architecture (ctxt + prompt streams)
+  - Input encoder adapted for 4×135=540 dims
+  - Text encoders: Dual (Qwen3-8B ctxt + CLIP-L text)
+
+KEY DIFFERENCE: KIMODO = two-stage separation, M2M = unified single-stage
+
+
+5. SUPPORTED TASKS & MASKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  ✅ Text-to-Motion
+  ✅ Motion In-Betweening (full-body keyframes)
+  ✅ Waypoint Following (2D root trajectory)
+  ✅ End-Effector IK (hand/foot world-space)
+  ✅ Full-Body Keyframes
+  ✅ Foot Contact Patterns
+  ✅ Multi-Prompt Blending
+  ✅ Robotics Retarget (SOMA, Unitree G1)
+
+HyMotion M2M:
+  ✅ Text-to-Motion (M5: 5% of training)
+  ✅ Motion Completion (M1-M4: 65% of training)
+  ✅ Temporal Inpainting
+  ✅ Joint-Level Editing (M4)
+  ✅ Keyframe Infilling (M6)
+  ❌ Direct Position/XYZ Control
+  ❌ Trajectory Following (no position dims)
+  ❌ Foot Contact Constraints
+  ❌ Multi-Person
+
+KEY DIFFERENCE: KIMODO targets spatial control (positions, trajectories); M2M targets temporal patterns
+
+
+6. INFERENCE PIPELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  1. Encode text via LLM2Vec → 4096-dim → project to 1024
+  2. Build constraint tensors (observed_motion, motion_mask from FullBodyConstraintSet, etc.)
+  3. Initialize noise: x_T ~ N(0,1) [B, T, 333]
+  4. DDIM loop (100 steps, t=99 → 0):
+     - Impute: x_t = x_t * (1 - mask) + observed * mask
+     - Extend: x_ext = cat([x_t, mask]) → [B, T, 666]
+     - Denoise: pred_x0 = TwostageDenoiser(x_ext, text, t)
+     - CFG (separated): x̂_0 = cfg + w_text*(t_pred - cfg) + w_constr*(c_pred - cfg)
+     - DDIM: x_{t-1} = compute_x_tm1(x_t, pred_x0, t)
+     - [Optional] Re-impute constraints
+  5. Denormalize
+  6. Inverse: 6D rot → matrices → local rot → FK → posed_joints
+  7. [Optional] Post-process: foot lock, IK corrections
+  8. Output: local_rot_mats, posed_joints, root_positions, foot_contacts, heading
+
+HyMotion M2M:
+  1. Encode text via Qwen3-8B (ctxt) + CLIP-L (vtxt)
+  2. Build constraint conditioning: [x_t, inactive, reactive, mask]
+  3. Initialize noise: x_T ~ N(0,1) [B, T, 135]
+  4. ODE loop (50 steps, rectified flow):
+     - [No imputation; constraints soft-encoded]
+     - Input: [x_t, inactive, reactive, mask] → [B, T, 540]
+     - Denoise: pred_x = MMDiT(input, text_embs, t)
+     - [Optional] Post-process exact_match (hard override M5)
+  5. Denormalize
+  6. Inverse: 6D rot → matrices → SMPL fk → posed_joints
+  7. Output: local_rot_mats, posed_joints, root_positions
+
+KEY DIFFERENCE: KIMODO uses aggressive per-step imputation; M2M uses soft channel conditioning
+
+
+7. LOSS FUNCTIONS (EXACT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  L_total = γ_pos*L1_pos + γ_vel*L1_vel + γ_rot*L1_rot + γ_contact*L_contact + γ_fk*L_fk + γ_rot_cons*L_rot_cons
+  
+  γ_pos = 10          smooth_L1(pred_pos - target_pos)
+  γ_vel = 2           smooth_L1(pred_vel - target_vel)
+  γ_rot = 10          smooth_L1(pred_rot_6d - target_rot_6d)
+  γ_contact = 3       BCE(pred_contact - target_contact)
+  γ_fk = 5            smooth_L1(FK(pred_rot) - target_pos)
+  γ_rot_cons = 5      smooth_L1(pred_rot - FK_derived_rot)
+  
+  Diffusion: DDPM with 1000 steps, L2 noise prediction loss
+
+HyMotion M2M:
+  [Not open-sourced]
+  Likely includes:
+  - Position smoothness (L1 or L2)
+  - Rotation smoothness
+  - Jitter penalty
+  
+  Diffusion: Flow Matching (rectified flow) with likely v-prediction or x1-prediction
+
+KEY DIFFERENCE: KIMODO has explicit FK consistency; M2M's loss composition unknown
+
+
+8. DATA & SCALE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KIMODO:
+  - 700 hours optical mocap (Bones Rigplay dataset)
+  - High quality, professional production-level mocap
+  - Native 27-joint skeleton
+  - Human-annotated text (one description per sequence)
+
+HyMotion M2M:
+  - MotionHub (proprietary, internal)
+  - Mixed quality: mocap + reconstruction + synthetic
+  - SMPL-22 representation
+  - Multiple text descriptions per motion (augmented)
+
+KEY DIFFERENCE: KIMODO = high-quality single-source; M2M = diverse multi-source
+
+
+═══════════════════════════════════════════════════════════════════════════════
+POSITIONING FOR YOUR M2M SYSTEM
+═══════════════════════════════════════════════════════════════════════════════
+
+What M2M does BETTER:
+  ✓ Flexible per-dim mask patterns (M1-M6)
+  ✓ Soft conditioning (VACE) avoids aggressive imputation artifacts
+  ✓ Unified single-stage training (faster convergence?)
+  ✓ Flow Matching (potentially faster than DDPM)
+  ✓ Simultaneous T2M + completion (no dilution concern)
+
+What KIMODO does BETTER:
+  ✓ Global coordinates → no IK needed for world-space constraints
+  ✓ Explicit foot contact modeling
+  ✓ Smooth root → animator-friendly trajectories
+  ✓ Two-phase curriculum → strong T2M foundation (Phase 1)
+  ✓ FK consistency loss → better rotation-position coherence
+  ✓ Separated CFG (text vs. constraint guidance)
+  ✓ Higher data quality (700h optical)
+
+M2M's VULNERABILITIES vs KIMODO:
+  ✗ No global position control (need to add position dims)
+  ✗ No foot contact modeling
+  ✗ No FK consistency loss
+  ✗ Single unified training (possible T2M dilution)
+  ✗ Soft conditioning (softer than hard imputation; less precise constraints)
+  ✗ Mixed-quality training data
+
+
+KEY TECHNICAL INSIGHTS FOR M2M IMPROVEMENTS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ADD GLOBAL JOINT POSITIONS TO REPRESENTATION
+   - Extend 135 → 138+ dims with explicit xyz positions at keyframes?
+   - Or introduce optional global_rot representation alongside local?
+
+2. EXPLICIT FOOT CONTACT MODELING
+   - Add 4-dim foot contact channel
+   - Include contact loss during training
+   - Use post-process foot lock like KIMODO
+
+3. FK CONSISTENCY LOSS
+   - During training, apply FK check: ||FK(local_rot) - stored_positions|| penalty
+   - Improves rotation-position coherence
+
+4. CONSIDER TWO-PHASE OR CURRICULUM LEARNING
+   - Phase 1: Pure T2M (no masks)
+   - Phase 2: Constraint-aware (with M1-M6)
+   - Avoids potential T2M dilution from 5% M5 sampling
+
+5. SMOOTH ROOT TRAJECTORY
+   - Post-process root smoothing like KIMODO's smooth_root_pos
+   - Or jointly learn smooth+residual decomposition
+
+6. SEPARATED CFG
+   - Decouple text guidance weight from constraint guidance weight
+   - Allows finer control at inference time
+
+═══════════════════════════════════════════════════════════════════════════════

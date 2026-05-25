@@ -1,0 +1,143 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║           PRISM FLOW MATCHING TRAINING - QUICK REFERENCE                   ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌─ 1. NOISING EQUATION ─────────────────────────────────────────────────────┐
+│                                                                             │
+│  x_t = (1 - σ_t) * x_0 + σ_t * ε                                          │
+│                                                                             │
+│  Where:                                                                     │
+│    x_t          = noisy_latents (corrupted latent at step t)               │
+│    x_0          = latents (original clean latent)                          │
+│    σ_t          = sigmas (from scheduler, at step t)                       │
+│    ε            = noise (torch.randn_like(latents))                        │
+│                                                                             │
+│  File: bundle.py, lines 257-262                                            │
+│  Method: add_flow_noise()                                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 2. TRAINING TARGET ──────────────────────────────────────────────────────┐
+│                                                                             │
+│  v_t = ε - x_0                                                             │
+│                                                                             │
+│  Where:                                                                     │
+│    v_t = targets (velocity — the model prediction target)                  │
+│    ε   = noise                                                              │
+│    x_0 = clean latent                                                       │
+│                                                                             │
+│  The model predicts: model_pred ≈ v_t                                      │
+│  Loss computed as:   MSE(model_pred, targets)                              │
+│                                                                             │
+│  Files: bundle.py line 261, prism_trainer.py line 95                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 3. TIMESTEP SAMPLING ────────────────────────────────────────────────────┐
+│                                                                             │
+│  # Sample random timestep indices (one per batch sample)                   │
+│  step_indices = torch.randint(                                              │
+│      0,                                                                     │
+│      len(scheduler.timesteps),  # total number of timesteps                │
+│      (batch_size,),                                                         │
+│      device=latents.device                                                  │
+│  )                                                                           │
+│                                                                             │
+│  # Map indices to actual timesteps from scheduler                          │
+│  timesteps = scheduler.timesteps[step_indices]                             │
+│                                                                             │
+│  Sampling Strategy:                                                         │
+│    • Uniform random selection from scheduler's timesteps                   │
+│    • Per-sample: each sample in batch gets its own random timestep         │
+│    • Different timesteps = different noise levels in same batch            │
+│    • Allows training across full noise spectrum in one forward pass        │
+│                                                                             │
+│  File: prism_trainer.py, lines 68-75                                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 4. SIGMA RETRIEVAL ──────────────────────────────────────────────────────┐
+│                                                                             │
+│  sigmas = _get_sigmas(scheduler, timesteps, n_dim=4, dtype=torch.float32) │
+│                                                                             │
+│  Implementation:                                                            │
+│    1. Get scheduler.sigmas (array of all sigma values)                     │
+│    2. Match each timestep to its index in scheduler.timesteps              │
+│    3. Extract corresponding sigma values                                   │
+│    4. Reshape to match latent dimensionality (4D: [B, C, T, J])            │
+│                                                                             │
+│  File: bundle.py, lines 19-27                                              │
+│  Function: _get_sigmas()                                                    │
+│                                                                             │
+│  Scheduler Type: FlowMatchEulerDiscreteScheduler                            │
+│    • Provides timesteps array and sigmas array                             │
+│    • Sigmas range from ~0 (low noise) to ~1 (high noise)                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 5. COMPLETE TRAINING STEP FLOW ──────────────────────────────────────────┐
+│                                                                             │
+│  1. Encode motion to latents: x_0 = VAE.encode(motion)                    │
+│  2. Create masks (padding + conditioning)                                  │
+│  3. Encode text prompt to text_states                                      │
+│  4. Sample random timesteps uniformly                                      │
+│  5. Add flow noise: x_t = (1-σ)x_0 + σε, targets = ε - x_0                │
+│  6. Zero out conditioned frames (keep original)                            │
+│  7. Create sequence timesteps for transformer patches                      │
+│  8. Forward pass: pred = transformer(x_t, text_states, timesteps)          │
+│  9. Compute loss: MSE(pred, targets)                                       │
+│  10. Apply masks (exclude conditioned/padded frames)                       │
+│  11. Split loss: separate translation (1) vs rotation (22 joints)          │
+│  12. Weighted combination: loss = 0.5*loss_transl + 0.5*loss_rot           │
+│                                                                             │
+│  File: prism_trainer.py, lines 41-118                                     │
+│  Method: train_step()                                                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 6. KEY MATHEMATICAL RELATIONSHIPS ───────────────────────────────────────┐
+│                                                                             │
+│  Noising:        x_t = (1-σ)x_0 + σε                                       │
+│  Velocity:       v = ε - x_0                                               │
+│  Alternative:    v = (x_t - (1-σ)x_0) / σ - x_0  [alternative form]       │
+│  Loss:           L = MSE(f_θ(x_t, t), v)                                   │
+│                                                                             │
+│  Model learns to predict the velocity field that guides the denoising      │
+│  process, enabling high-quality motion generation at inference time.       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 7. SPECIAL FEATURES ─────────────────────────────────────────────────────┐
+│                                                                             │
+│  Translation vs Rotation Loss Weighting:                                   │
+│    • Model output: 23 joints (1 translation + 22 rotations)                │
+│    • Prevent translation dilution (1/23 ≈ 4.3%)                            │
+│    • Separate loss: loss = 0.5 * loss_transl + 0.5 * loss_rot             │
+│    • Configurable: translation_loss_weight (default: 0.5)                  │
+│                                                                             │
+│  Frame Conditioning:                                                        │
+│    • Keep first N frames as clean latents (not noised)                     │
+│    • 10% of batches use conditioning (frame_condition_rate=0.1)            │
+│    • Helps learn guided generation from real motion starts                 │
+│                                                                             │
+│  Audio-Conditioned Variant (MCM Trainer):                                  │
+│    • Same flow matching logic + audio encoding                             │
+│    • Audio dropout for classifier-free guidance                            │
+│    • Control transformer branch for multi-modal conditioning               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 8. FILE LOCATIONS ───────────────────────────────────────────────────────┐
+│                                                                             │
+│  Trainer:  /hftrainer/trainers/motion/prism_trainer.py                    │
+│  MCM:      /hftrainer/trainers/motion/prism_mcm_trainer.py                 │
+│  Bundle:   /hftrainer/models/motion/prism/bundle.py                       │
+│                                                                             │
+│  Key Methods:                                                               │
+│    • bundle.add_flow_noise()           — Noising logic                     │
+│    • bundle._get_sigmas()              — Sigma lookup                      │
+│    • trainer.train_step()              — Complete training step            │
+│    • trainer.val_step()                — Validation step                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+

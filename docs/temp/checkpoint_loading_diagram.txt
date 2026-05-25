@@ -1,0 +1,233 @@
+═══════════════════════════════════════════════════════════════════════════════
+ E2/E4 CHECKPOINT LOADING FLOW: FROM UNCONDITIONAL → CAPTION-CONDITIONED
+═══════════════════════════════════════════════════════════════════════════════
+
+INITIALIZATION STATE (Before Any Loading)
+──────────────────────────────────────────
+  Model initialized with NEW random weights for all layers:
+  
+  ┌─────────────────────────────────────────────┐
+  │ HyMotionM2MBundle (caption-conditioned)     │
+  ├─────────────────────────────────────────────┤
+  │ ├─ motion_transformer: RANDOM               │
+  │ ├─ text_refiner: RANDOM                     │
+  │ ├─ null_vtxt_feat (Parameter): RANDOM       │
+  │ ├─ null_ctxt_input (Parameter): RANDOM      │
+  │ ├─ mean (Buffer): RANDOM / DEFAULT          │
+  │ └─ std (Buffer): RANDOM / DEFAULT           │
+  └─────────────────────────────────────────────┘
+
+
+CHECKPOINT LOADING PHASE 1: Model-Only Loading (Pre-FSDP)
+──────────────────────────────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ SOURCE: work_dirs/hymotion_m2m_v2_caption_local_phase2/         │
+  │         checkpoint-epoch_3370  (Unconditional model)            │
+  │                                                                  │
+  │ This is a caption-conditioned checkpoint, so it DOES contain:   │
+  │   ✅ motion_transformer (22 blocks)                             │
+  │   ✅ timestep_encoder                                           │
+  │   ✅ input_encoder, output_encoder                              │
+  │   ❌ NO text_refiner (wasn't needed for uncond)                 │
+  │   ❌ NO null_vtxt_feat, null_ctxt_input (not in checkpoint)    │
+  │   ✅ __bundle_params__: mean, std (from training)               │
+  └─────────────────────────────────────────────────────────────────┘
+                                ↓
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ ACCELERATE_RUNNER._PRE_PREPARE_LOAD()                           │
+  │                                                                  │
+  │ 1. load_checkpoint(path) → Auto-detect format:                  │
+  │    Try: model.pt > model.safetensors > pytorch_model.bin        │
+  │                                                                  │
+  │ 2. bundle.load_state_dict_selective(state_dict, strict=False)   │
+  │    ✅ KEY: strict=False allows MISSING keys                     │
+  │                                                                  │
+  │ 3. For each key in state_dict:                                  │
+  │    ├─ motion_transformer.* → LOAD ✅                            │
+  │    ├─ timestep_encoder.* → LOAD ✅                              │
+  │    ├─ text_refiner.* → NOT IN DICT → LOG WARNING → SKIP         │
+  │    ├─ null_vtxt_feat → NOT IN DICT → SKIP (stays RANDOM)        │
+  │    ├─ __bundle_params__.mean → LOAD → copy_() to self.mean      │
+  │    └─ __bundle_params__.std → LOAD → copy_() to self.std        │
+  └─────────────────────────────────────────────────────────────────┘
+                                ↓
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ STATE AFTER PHASE 1:                                            │
+  │                                                                  │
+  │ ├─ motion_transformer: ✅ LOADED from checkpoint                │
+  │ ├─ text_refiner: ❌ STILL RANDOM (not in source)                │
+  │ ├─ null_vtxt_feat: ❌ STILL RANDOM                              │
+  │ ├─ null_ctxt_input: ❌ STILL RANDOM                             │
+  │ ├─ mean: ✅ LOADED from __bundle_params__                       │
+  │ └─ std: ✅ LOADED from __bundle_params__                        │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+CHECKPOINT LOADING PHASE 1B: Null Embedding Fallback (POST-LOAD)
+─────────────────────────────────────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ _PATCH_ZERO_NULL_EMBEDDINGS_FROM_PRETRAINED()                   │
+  │                                                                  │
+  │ 1. Check: Are null embeddings still at random init?             │
+  │    if (null_vtxt_feat.abs().sum() < 1e-5)  # Trigger threshold  │
+  │      → YES, they are (random init, small magnitude)             │
+  │                                                                  │
+  │ 2. Load from fallback source:                                   │
+  │    path = load_from.get('null_embedding_source')                │
+  │        or DEFAULT: 'checkpoints/HY-Motion-1.0/.../latest.ckpt'  │
+  │                                                                  │
+  │ 3. Extract from source checkpoint:                              │
+  │    source_ckpt = torch.load(null_embedding_source)              │
+  │    null_vtxt_src = source_ckpt['bundle']['null_vtxt_feat']      │
+  │    null_ctxt_src = source_ckpt['bundle']['null_ctxt_input']     │
+  │                                                                  │
+  │ 4. Copy into current model:                                     │
+  │    bundle.null_vtxt_feat.copy_(null_vtxt_src)  ✅               │
+  │    bundle.null_ctxt_input.copy_(null_ctxt_src)  ✅              │
+  └─────────────────────────────────────────────────────────────────┘
+                                ↓
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ STATE AFTER PHASE 1B:                                           │
+  │                                                                  │
+  │ ├─ motion_transformer: ✅ LOADED                                │
+  │ ├─ text_refiner: ❌ RANDOM (will be trained)                    │
+  │ ├─ null_vtxt_feat: ✅ PATCHED from HY-Motion-1.0 pretrained     │
+  │ ├─ null_ctxt_input: ✅ PATCHED from HY-Motion-1.0 pretrained    │
+  │ ├─ mean: ✅ LOADED                                              │
+  │ └─ std: ✅ LOADED                                               │
+  │                                                                  │
+  │ 🎯 RESULT: Model is now READY FOR TRAINING                      │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+TRAINING PHASE: Convergence of Randomly-Initialized Text Layers
+────────────────────────────────────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ accelerator.prepare(model)  → Wraps with FSDP/DDP              │
+  └─────────────────────────────────────────────────────────────────┘
+                                ↓
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ TRAINING LOOP BEGINS                                            │
+  │                                                                  │
+  │ For each batch:                                                 │
+  │   1. Sample captions from data                                  │
+  │   2. Encode with lazy-loaded text encoder (CLIP-L + Qwen3)      │
+  │   3. Get real text embeddings: vtxt, ctxt                       │
+  │   4. Randomly mask 10% (cond_mask_prob=0.1):                    │
+  │      └─ Replace with null embeddings (now valid! ✅)            │
+  │   5. Forward through model:                                     │
+  │      ├─ text_refiner(ctxt) → Uses RANDOM weights initially     │
+  │      ├─ cross_attn(text_refined, motion) → RANDOM projections  │
+  │      └─ Generates motion prediction                            │
+  │   6. Compute loss (FK loss + velocity loss + smoothness)        │
+  │   7. Backprop gradient through RANDOM text layers               │
+  │      ├─ Gradient tells: "these random projections are WRONG"    │
+  │      ├─ Gradient tells: "text_refiner should map text → signal" │
+  │      └─ Weights update toward USEFUL values                    │
+  │   8. Optimizer step                                             │
+  │                                                                  │
+  │ EPOCH 0→1: Text layers converge from RANDOM → USEFUL            │
+  │ EPOCH 1→N: Text layers continue refining, converge to optimum   │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+THREE SAFEGUARDS AGAINST "GARBAGE OUTPUT"
+──────────────────────────────────────────
+
+  SAFEGUARD 1: Null Embedding Source Fallback
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ Even if null embeddings are RANDOM after loading, they get      │
+  │ patched from HY-Motion-1.0 pretrained. CFG inference will see   │
+  │ VALID null embeddings, not garbage.                             │
+  │                                                                  │
+  │ CFG equation: pred = pred_uncond + scale * (pred_cond - uncond)│
+  │                    ✅ valid         ✅ random→trained           │
+  │                                                                  │
+  │ RISK WITHOUT THIS: CFG would amplify garbage nulls → explodes   │
+  └─────────────────────────────────────────────────────────────────┘
+
+  SAFEGUARD 2: CFG Training (10% unconditional batches)
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ 10% of training batches use ONLY null embeddings. Model learns  │
+  │ to generate reasonable motion even without real text. This      │
+  │ trains the "unconditional path" properly.                       │
+  │                                                                  │
+  │ RESULT: null embeddings get gradient updates → converge to      │
+  │ useful values beyond just "from T2M pretrained"                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+  SAFEGUARD 3: Training Loss Supervision
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ RANDOM text layers produce WRONG predictions initially:         │
+  │   pred_random = random_text_refiner(text)  → Garbage signal     │
+  │   pred_cross_attn = garbage_proj(garbage_signal)  → Wrong       │
+  │                                                                  │
+  │ BUT: Loss is computed against GROUND TRUTH motion               │
+  │   loss = MSE(pred_wrong, gt_motion)  → LARGE                    │
+  │   gradient = ∂loss/∂random_weights  → Tells model to improve    │
+  │   weights ← weights + lr * gradient  → Moves toward GOOD values │
+  │                                                                  │
+  │ After 1-2 epochs: random layers have converged far from random  │
+  │ RESULT: Text layers now actually USEFUL                         │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+INFERENCE PHASE: CFG with Valid Null Embeddings
+────────────────────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ At inference time:                                              │
+  │                                                                  │
+  │ 1. Encode user caption: vtxt, ctxt (from CLIP-L + Qwen3)        │
+  │ 2. Forward with text:                                           │
+  │    pred_cond = model(x_t, vtxt, ctxt)  ✅ Valid text            │
+  │ 3. Forward without text:                                        │
+  │    pred_uncond = model(x_t, null_vtxt, null_ctxt)               │
+  │                         ✅ Valid (from fallback patch)          │
+  │ 4. CFG guidance:                                                │
+  │    output = pred_uncond + scale * (pred_cond - pred_uncond)     │
+  │                                                                  │
+  │ RESULT: Motion influenced by caption, no garbage amplification  │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+ANSWER TO ORIGINAL 5 QUESTIONS
+───────────────────────────────
+
+1. CHECKPOINT LOADING LOGIC
+   ├─ Phase 1: AccelerateRunner._pre_prepare_load() (pre-FSDP)
+   ├─ Phase 1B: _patch_zero_null_embeddings_from_pretrained()
+   ├─ Phase 2: AccelerateRunner._handle_load() (post-FSDP)
+   └─ Entry: BaseModelBundle.load_state_dict_selective(strict=False)
+
+2. TEXT-RELATED LAYERS INIT
+   ├─ Cross-attention: RANDOMLY INITIALIZED (not in uncond ckpt)
+   ├─ Text refiner: RANDOMLY INITIALIZED (not in uncond ckpt)
+   ├─ null_vtxt_feat: PATCHED from HY-Motion-1.0 (via fallback)
+   ├─ null_ctxt_input: PATCHED from HY-Motion-1.0 (via fallback)
+   └─ Text encoder: LAZY-LOADED fresh on first use
+
+3. IF SOURCE LACKS TEXT LAYERS
+   ├─ Missing keys logged as warnings (strict=False prevents error)
+   ├─ Layers stay randomly initialized
+   ├─ Training trains them from random → convergence
+   └─ No model crash, just slower convergence initially
+
+4. STRICT=FALSE MECHANISM
+   ├─ Returns (missing_keys, unexpected_keys) instead of raising
+   ├─ Allows partial loading of state dicts
+   ├─ Shape mismatches filtered gracefully (lines 744-760)
+   ├─ Bundle orphan params restored from __bundle_params__
+   └─ Training proceeds even with missing text layers
+
+5. NULL_EMBEDDING_SOURCE FALLBACK
+   ├─ After model load, detects if null embeddings are zero
+   ├─ Loads from: null_embedding_source config or T2M pretrained
+   ├─ Patches: null_vtxt_feat, null_ctxt_input with valid values
+   ├─ Ensures: CFG inference always sees valid unconditional signal
+   └─ Prevents: Garbage output from random null embeddings
+
+═══════════════════════════════════════════════════════════════════════════════

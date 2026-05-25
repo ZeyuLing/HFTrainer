@@ -1,0 +1,114 @@
+═══════════════════════════════════════════════════════════════════════════════
+HyMotion M2M v2 - Z-NORMALIZATION STATISTICS QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+📂 FILES LOCATION
+─────────────────────────────────────────────────────────────────────────────
+  data/hymotion_m2m_data/_stats_198dim/
+    ├── Mean.npy  (920 bytes, shape: (198,), float32)
+    └── Std.npy   (920 bytes, shape: (198,), float32)
+
+🏗️ DIMENSION LAYOUT (198 total)
+─────────────────────────────────────────────────────────────────────────────
+  [  0:  3]  TRANSLATION     (3 dims)   - Global movement (x,y,z)
+  [  3:135]  ROT6D          (132 dims)  - 22 joints × 6D rotation
+  [135:198]  POSITION        (63 dims)  - 21 joint positions
+
+📊 CORE STATISTICS
+─────────────────────────────────────────────────────────────────────────────
+  Mean std:       0.1806
+  Median std:     0.1632
+  Min std:        0.0051  (Rot6D dim 57, nearly frozen)
+  Max std:        0.8690  (Translation dim 2)
+  Std of stds:    0.1159
+  Coefficient of Variation: 0.643 (moderate consistency)
+
+🎯 BY COMPONENT
+─────────────────────────────────────────────────────────────────────────────
+  
+  TRANSLATION (3 dims):
+    Mean std:     0.5696
+    Motion range: ±1.71σ per frame
+    ✓ Healthy - good movement capacity
+  
+  ROT6D (132 dims):
+    Mean std:     0.1790
+    Motion range: ±0.537σ per frame
+    ⚠️  11 dims with std < 0.05 (anchored/constrained)
+  
+  POSITION (63 dims):
+    Mean std:     0.1654
+    Motion range: ±0.496σ per frame
+    ⚠️  8 dims with std < 0.05
+
+🔬 DISTRIBUTION
+─────────────────────────────────────────────────────────────────────────────
+  Std < 0.01:    1/198   (0.5%)   - Extremely small
+  Std < 0.05:    19/198  (9.6%)   - Very small
+  Std < 0.10:    54/198  (27.3%)  - Small
+  Std < 0.20:   115/198  (58.1%)  - Medium
+  Std ≥ 0.20:    83/198  (41.9%)  - Large
+
+❓ IS STD SUPPRESSING MOTION?
+─────────────────────────────────────────────────────────────────────────────
+  
+  VERDICT: NO ✓
+  
+  Why:
+    • Mean std = 0.1806 is NOT small
+    • Only 1/198 dims have std < 0.01
+    • Motion capacity is adequate:
+      - Translation: ±1.71 units/frame (good)
+      - Rotation: ±0.537 units/frame (adequate)
+      - Position: ±0.496 units/frame (adequate)
+  
+  Conclusion: The normalization stats are healthy and not the problem.
+
+🔍 IF MODEL GENERATES NEAR-STATIC MOTIONS
+─────────────────────────────────────────────────────────────────────────────
+  
+  Probability ranking of root causes:
+  
+  1. HIGH   - Model optimization issue
+             (decoder ignoring text signal, posterior collapse)
+  
+  2. MEDIUM - Decoding bottleneck
+             (text embeddings not conditioning motion)
+  
+  3. MEDIUM - Training data bias
+             (limited motion diversity in training)
+  
+  4. LOW    - Std value suppression
+             (we confirmed this is NOT the issue)
+
+✅ VERIFICATION CHECKLIST
+─────────────────────────────────────────────────────────────────────────────
+  
+  [ ] Sample z multiple times from same text prompt
+      → Does motion vary each time?
+  
+  [ ] Inspect cross-attention weights
+      → Is text actually influencing motion generation?
+  
+  [ ] Monitor KL divergence during training
+      → Is posterior collapsing to prior?
+  
+  [ ] Analyze training data motion variance
+      → How diverse is the training motion?
+  
+  [ ] Check if decoder uses latent z meaningfully
+      → Add hooks to verify z affects output
+
+🚀 QUICK STATS LOADING
+─────────────────────────────────────────────────────────────────────────────
+  
+  import numpy as np
+  mean = np.load('data/hymotion_m2m_data/_stats_198dim/Mean.npy')
+  std = np.load('data/hymotion_m2m_data/_stats_198dim/Std.npy')
+  
+  # Denormalize motion: x_original = x_normalized * std + mean
+  motion_denorm = z_sample * std + mean
+
+═══════════════════════════════════════════════════════════════════════════════
+Bottom line: Normalization stats are FINE. Look at model conditioning instead.
+═══════════════════════════════════════════════════════════════════════════════

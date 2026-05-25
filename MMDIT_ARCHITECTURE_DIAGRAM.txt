@@ -1,0 +1,274 @@
+╔════════════════════════════════════════════════════════════════════════════════════════╗
+║                     HunyuanMotionMMDiT Complete Architecture                          ║
+╚════════════════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                           INPUT ENCODING & ADAPTER CREATION                        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+   Motion Input          ctxt_input (Qwen3)      vtxt_input (CLIP)     Timestep
+   (B,L_motion,201)     (B,L_text,4096)         (B,1,768)             (B,)
+        │                      │                       │                  │
+        │                      │                       │                  │
+   input_encoder          ctxt_encoder            vtxt_encoder      timestep_encoder
+   Linear(201→D)          Linear(4096→D)          MLPEncoder(768→D)  Sinusoidal+MLP
+        │                      │                       │                  │
+        ▼                      ▼                       ▼                  ▼
+   motion_feat           ctxt_feat          vtxt_feat         timestep_feat
+   (B,L_motion,D)        (B,L_text,D)       (B,1,D)            (B,1,D)
+                              │                  │                  │
+                              │              ┌───┴───────────────────┘
+                              │              │
+                    [Optional]              │
+                    text_refiner            │
+                  Self-Attn over           │
+                   text tokens             │
+                              │              │
+                              ▼              ▼
+                        ctxt_refined    adapter = timestep_feat + vtxt_feat
+                        (B,L_text,D)    (B,1,D) ← Used for AdaLN modulation only
+
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│         DOUBLE-STREAM BLOCKS (First 1/3 of Layers) - CROSS-MODAL ATTENTION        │
+│                      Both modalities compute separate Q,K,V                        │
+│                      Then CONCATENATE for joint attention                          │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+motion_feat          ctxt_refined           adapter
+(B,L_motion,D)       (B,L_text,D)         (B,1,D)
+     │                    │                  │
+     │                    │                  │
+┌────┴────┐          ┌────┴────┐          ┌─┴─┐
+│  Motion │          │   Text  │          │ A │ ← Adapter uses ModulateDiT
+│ Stream  │          │ Stream  │          │ d │   to create modulation params
+└────┬────┘          └────┬────┘          └─┬─┘
+     │                    │                  │
+     │ LayerNorm         │ LayerNorm        │ ModulateDiT(factor=6)
+     │ Modulate(a)       │ Modulate(a)      │
+     │                    │                  │
+     ▼                    ▼                  │
+  QKV_proj            QKV_proj              │
+     │                    │                  │
+     ▼ Reshape            ▼ Reshape          │
+  [Q,K,V]m            [Q,K,V]t              │
+  motion              text                  │
+     │                    │                 │
+     └────────┬───────────┘                 │
+              │                             │
+              ▼ CONCATENATE                 │
+        [Q,K,V]_combined                    │
+        All motion & text in one matrix     │
+              │                             │
+              ├─────────────────────────────┤
+              │ Joint Scaled Dot-Product    │
+              │ Attention                   │
+              │ - Motion can see Text ✓     │
+              │ - Text CAN see Motion ✓     │ ← Important: bidirectional!
+              │ - But T→M is BLOCKED! ✓     │
+              └─────────────────────────────┤
+              │                             │
+              ▼                             │
+        attn_output                        │
+        (concatenated result)              │
+              │                             │
+        ┌─────┴─────┐                       │
+        │           │                       │
+   [motion] [text]  │                       │
+   outputs          │                       │
+        │           │                       │
+        ▼           ▼                       │
+   Out_Proj    Out_Proj                     │
+        │           │                       │
+        │ gate_msa   │ gate_msa             │
+        ▼ (from a)   ▼ (from a)             │ ← Gating also from adapter!
+   residual    residual                     │
+        │           │                       │
+        ▼           ▼                       │
+   MLP(LayerNorm+Modulate+act+proj)         │
+        │           │                       │
+        └─────┬─────┘                       │
+              ▼                             │
+        Updated [motion, text] features    │
+
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│         SINGLE-STREAM BLOCKS (Last 2/3 of Layers) - SHARED PROCESSING              │
+│                Motion and text concatenated into single sequence                    │
+│                Modulation still from adapter, but T→M BLOCKED                       │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+Updated motion_feat + ctxt_refined
+    │           │
+    └─────┬─────┘
+          │
+    CONCATENATE
+    x = [motion | text]
+    (B, L_motion+L_text, D)
+          │
+          │ LayerNorm + ModulateDiT(adapter)
+          ▼
+    Fused Linear1: QKV + MLP_hidden projection
+          │
+          ▼ Reshape
+    [Q, K, V, mlp_hidden]
+          │
+          │ Split-aware RoPE application
+          │ (RoPE only on motion portion if apply_rope_to_single_branch=True)
+          ▼
+    Joint Attention + MLP
+    [attn_output || mlp_act(mlp_hidden)]
+          │
+          ▼ Linear2 projection
+    output
+          │
+          ├─────────────────────────────────────────────────────────┐
+          │ ATTENTION MASK APPLICATION:                            │
+          │ ┌─────────────────────────────────────┐                │
+          │ │ M→M [allowed]  M→T [allowed]   │ │                │
+          │ │ T→M [-inf]     T→T [allowed]   │ │                │
+          │ └─────────────────────────────────────┘                │
+          │                                       │
+          │ Text queries CANNOT attend to motion!│
+          │ (Explicitly set to -inf in mask)     │
+          └─────────────────────────────────────────────────────────┘
+          │
+          ▼ Residual + Gate (from adapter)
+    Updated x = x + gate * output
+    (B, L_motion+L_text, D)
+
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                            OUTPUT PROJECTION                                        │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+Updated x
+(B, L_motion+L_text, D)
+     │
+     │ Extract motion portion only
+     ▼
+motion_out = x[:, :split_len, :]
+(B, L_motion, D)
+     │
+     │ FinalLayer with adapter modulation
+     ▼
+predicted_output
+(B, L_motion, output_dim)
+
+
+╔════════════════════════════════════════════════════════════════════════════════════════╗
+║                            KEY ARCHITECTURAL INSIGHTS                               ║
+╠════════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                      ║
+║  1. TEXT EMBEDDINGS PATHWAYS:                                                        ║
+║     ├─ ctxt (4096-dim):  Linear encoder → text_refiner (optional) → joint attention  ║
+║     └─ vtxt (768-dim):   MLP encoder → adapter → AdaLN modulation (all layers)      ║
+║                                                                                      ║
+║  2. CROSS-MODAL COMMUNICATION:                                                       ║
+║     ├─ Motion → Text:   ✓ Motion queries attend to text K,V                        ║
+║     ├─ Text → Motion:   ✗ BLOCKED! (T→M set to -inf in mask)                       ║
+║     └─ Effect:          Motion benefits from text; text protected from motion noise  ║
+║                                                                                      ║
+║  3. MODULATION PATHWAY:                                                              ║
+║     ├─ Adapter = timestep + vtxt (combines global context + diffusion time)         ║
+║     ├─ ModulateDiT generates shift, scale, gate parameters                         ║
+║     ├─ Applied in ALL layers (double + single stream)                              ║
+║     └─ Zero-initialized for stable training                                         ║
+║                                                                                      ║
+║  4. LAYER COMPOSITION:                                                               ║
+║     ├─ Double-stream blocks (1/3):  Motion + Text in parallel → joint attention     ║
+║     └─ Single-stream blocks (2/3):  Motion + Text concatenated → fused attention    ║
+║                                                                                      ║
+║  5. INFORMATION BOTTLENECK:                                                           ║
+║     ├─ Text refiner: Only on ctxt, uses self-attention (token refinement)           ║
+║     ├─ No text loss: All ctxt tokens flow through to attention layers               ║
+║     └─ Sufficient capacity: 1/3 + 2/3 layers process both modalities               ║
+║                                                                                      ║
+╚════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+ATTENTION PATTERN VISUALIZATION (Double-Stream Block):
+
+                        Motion Keys    Text Keys
+                        (L_m tokens)  (L_t tokens)
+                             ↑            ↑
+    Motion Queries   [████████████   ████████████]   ← Motion can attend to all
+    (L_m tokens)                   
+                     [████████████   ████████████]   ← Text CAN attend to motion
+    Text Queries
+    (L_t tokens)                    BUT THIS IS BLOCKED!
+                           │            │
+                           │            │
+                     base[:,:,m:,:m] = -inf  (line 1169)
+                           │            │
+                           ▼            ▼
+                     Practical Effect:
+                     - Motion: M→M works, M→T works
+                     - Text:   T→T works, T→M blocked
+
+
+FORWARD PASS INFORMATION FLOW:
+
+ctxt_input ──────────┐
+  4096-dim           │
+  (token-level)      │
+                     ├─→ ctxt_encoder (Linear) ──→ [optional: text_refiner] ──┐
+                     │                                                        │
+                     │                              DOUBLE-STREAM BLOCKS      │
+                     └──────────────────────────────► Joint Attention ◄──────┘
+                                                         ↑
+                                                    [motion_q | text_q]
+                                                    [motion_k | text_k]  ← Text as K,V
+                                                    [motion_v | text_v]
+
+vtxt_input ──┐
+  768-dim    │
+  (global)   ├─→ vtxt_encoder (MLPEncoder) ──┐
+             │                               ├─→ adapter ──→ ModulateDiT
+             │                               │
+timestep ────┴──→ timestep_encoder ──────────┘
+  (scalar)
+
+            adapter (B, 1, D)
+                ↓
+            ModulateDiT (factor=6)
+                ↓
+        ┌───────┼───────┐
+        ▼       ▼       ▼
+    [shift] [scale] [gate]  ← Used in EVERY layer!
+                
+            Double-stream blocks  →  Single-stream blocks  →  Final layer
+            (shift, scale, gate)     (shift, scale, gate)      (shift, scale, gate)
+
+
+QUESTION ANSWERS:
+
+(a) How ctxt_input enters:
+    → Linear encoder → [optional text_refiner] → as K,V in joint attention
+    → Double-stream blocks concatenate motion_q with text_q for joint attention
+    → Motion queries can attend to text embeddings
+
+(b) How vtxt_input enters:
+    → MLPEncoder → combined with timestep → adapter
+    → Adapter used ONLY for AdaLN modulation (shift, scale, gate)
+    → NOT as cross-attention K,V,Q tokens
+    → Broadcast to ALL transformer blocks
+
+(c) Text refiner exists?
+    → YES: SingleTokenRefiner
+    → Optional (configurable)
+    → Self-attention over text tokens only
+    → Timestep-aware conditioning
+
+(d) Separate projections?
+    → YES: ctxt_encoder (Linear) vs vtxt_encoder (MLPEncoder)
+    → Different architectures for different semantics
+    → ctxt: preserves token structure; vtxt: global aggregation
+
+(e) Attention collapse?
+    → NO: Math is stable
+    → Zero ctxt: motion self-attention continues
+    → Zero vtxt: modulation becomes timestep-only
+    → Softmax is numerically stable (no NaN/Inf issues)
+    → Information flow degrades but never collapses
+

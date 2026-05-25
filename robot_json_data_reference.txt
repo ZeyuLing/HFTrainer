@@ -1,0 +1,315 @@
+================================================================================
+ROBOT ANIMATION JSON - DATA FORMAT REFERENCE
+================================================================================
+
+This document describes the formats of motion data as it flows through the
+PhysFlow embodied agent pipeline.
+
+================================================================================
+1. INPUT: motion_135 NPZ (SMPL Human Kinematics)
+================================================================================
+
+File Location: output/physflow/eval_demo/data/npz/*.npz
+
+Array Name:    motion_135
+Shape:         (T, 135) where T = number of frames
+Data Type:     float32
+
+Structure:
+  Columns 0-2:    Root translation [X, Y, Z]
+  Columns 3-134:  22 joints × 6 DOF rotation (rot6d)
+
+Coordinate System (SMPL):
+  - Z-axis: vertical (up)
+  - Y-axis: forward
+  - X-axis: right
+  - Root position: ~1.14m height (human pelvis in SMPL)
+
+Frame Rate: 30 fps (from npz metadata)
+
+Typical Ranges:
+  Root X: -0.05 to +0.05 m (horizontal)
+  Root Y: 1.10 to 1.15 m (HEIGHT - NOT what robot expects!)
+  Root Z: -0.03 to +2.38 m (typically very small, except walking shows 2.36m!)
+
+Example Data (first 3 frames of "stands still"):
+  Frame 0: [0.001934, 1.162407, -0.018396, rot6d_data...]
+  Frame 1: [0.003090, 1.162217, -0.016518, rot6d_data...]
+  Frame 2: [0.004004, 1.162817, -0.017460, rot6d_data...]
+
+Key Points:
+  - Y coordinate ~1.16m is CORRECT for human in SMPL frame
+  - Z displacement +2.36m in walking is UPWARD motion (coordinate issue)
+  - This data needs retargeting to G1 robot frame and scale
+
+================================================================================
+2. INTERMEDIATE: PyRoki Keypoints (.npy)
+================================================================================
+
+File Location: output/physflow/eval_demo/data/robot_mesh_rl/
+                 motion_files/intermediates/keypoints/*.npy
+
+Array Name:    (stored as numpy .npy file)
+Shape:         (T, 18, 3) where T = number of frames
+Data Type:     float32
+
+Structure:
+  18 keypoints extracted from SMPL skeleton:
+    - Root (pelvis)
+    - Head
+    - Left/Right shoulders, elbows, wrists
+    - Spine, chest
+    - Left/Right hips, knees, ankles
+    - Left/Right feet
+    - (Auxiliary points for better retargeting)
+
+Coordinate System (Z-up):
+  - Z-axis: vertical (up)
+  - Y-axis: forward
+  - X-axis: right
+  - Transformed from SMPL to be more suitable for G1
+
+Example:
+  frames shape: (90, 18, 3)
+  Each frame has 18 keypoints, each with [X, Y, Z] position
+
+Metadata (also stored):
+  - positions: (T, 18, 3)
+  - orientations: (T, 18, 3, 3)
+  - left_foot_contacts: (T, 2)
+  - right_foot_contacts: (T, 2)
+
+Status in Current Run:
+  ✓ Successfully generated for all motions
+  ✗ But retargeting step failed before using these keypoints
+
+================================================================================
+3. INTERMEDIATE: Robot NPZ (After Retargeting)
+================================================================================
+
+File Location: output/physflow/eval_demo/data/robot_mesh_rl/
+                 motion_files/intermediates/retargeted/*.npz
+
+Expected Array Names:
+  - dof_pos: (T, num_dofs) - joint angles for G1 robot
+  - dof_vel: (T, num_dofs) - joint velocities
+  - body_pos: (T, num_bodies, 3) - body positions
+  - body_rot: (T, num_bodies, 3, 3) - body rotations
+  - contact_labels: (T, 2) - left/right foot contact
+
+Coordinate System (Y-up, G1 frame):
+  - Y-axis: vertical (up)
+  - X-axis: forward
+  - Z-axis: right
+  - Root height: ~0.78m (G1 standing height)
+
+Status in Current Run:
+  ✗ NEVER GENERATED - PyRoki retargeting failed (missing JAX)
+
+Expected Properties After Retargeting:
+  - Root height (Y): ~0.78m (NOT 1.16m like input)
+  - Joint angles: feasible for G1 actuators
+  - Smooth motion tracking: matches SMPL intent with robot constraints
+
+================================================================================
+4. INTERMEDIATE: ProtoMotions .motion Format
+================================================================================
+
+File Location: output/physflow/eval_demo/data/robot_mesh_rl/
+                 motion_files/*.motion
+
+Format:    Custom binary format (ProtoMotions library)
+
+Contains (typically):
+  - Frame rate: 30 fps (from input)
+  - Control framerate: 50 Hz
+  - Number of frames: T
+  - Per-frame data:
+    - Root position (X, Y, Z) [Y ~0.78m after retargeting]
+    - Root quaternion (w, x, y, z)
+    - Joint angles (num_dofs,) in radians
+    - Joint velocities (num_dofs,)
+    - Contact labels (left, right)
+
+Status in Current Run:
+  ✗ NEVER GENERATED - Blocked by retargeting failure
+
+================================================================================
+5. OUTPUT: robot_frames JSON
+================================================================================
+
+File Location: output/physflow/eval_demo/data/robot_mesh_rl/*.json
+
+JSON Structure:
+{
+  "type": "robot_frames",
+  "robot": "g1",
+  "fps": 25,                          # Output FPS (50Hz / subsample=2)
+  "num_frames": 45,                   # Number of exported frames
+  "num_bodies": 17,                   # G1 has 17 rigid bodies
+  "bodies": [
+    {
+      "name": "pelvis",
+      "meshes": ["pelvis.stl", "pelvis_contour_link.stl"]
+    },
+    {
+      "name": "left_hip_pitch_link",
+      "meshes": ["left_hip_pitch_link.stl"]
+    },
+    // ... 15 more bodies
+  ],
+  "frames": [
+    {
+      "body_pos": [
+        [0.0, 0.78, 0.0],      # pelvis position [x, y, z]
+        [0.1, 0.75, 0.0],      # left_hip_pitch_link position
+        // ... 15 more body positions
+      ],
+      "body_quat": [
+        [1.0, 0.0, 0.0, 0.0],  # pelvis quaternion [w, x, y, z]
+        [1.0, 0.0, 0.0, 0.0],  # left_hip_pitch_link quaternion
+        // ... 15 more body quaternions
+      ]
+    },
+    // ... more frames
+  ]
+}
+
+Coordinate System (MuJoCo World Frame, Y-up):
+  - Y-axis: vertical (up)
+  - X-axis: forward
+  - Z-axis: right
+  - All values in meters
+
+Key Values to Verify:
+  - body_pos[0][1] (pelvis Y): ~0.78m for standing
+  - body_pos[0][1] (pelvis Y): ~0.75-0.80m for walking (slight oscillation)
+  - Motions should be small for "stands_still" (< 5cm displacement)
+  - Motions should show forward movement for "walks_forward"
+
+Status in Current Run:
+  ✗ NEVER GENERATED - Blocked by retargeting failure
+
+================================================================================
+COMPARISON: Expected vs Actual Root Heights
+================================================================================
+
+Motion:              Expected (Robot)    Actual (motion_135)    Difference
+-----|-------------|------------------|-----|
+
+Stands Still:
+  Y-coordinate:      ~0.78m             ~1.16m                 +38cm ❌
+  Interpretation:    G1 standing        Human standing         Human scale!
+
+Weight Shift:
+  Y-coordinate:      ~0.78m             ~1.12m                 +34cm ❌
+  Interpretation:    Weight shift       Weight shift           Human scale!
+
+Walks Forward:
+  Y-coordinate:      ~0.78m (const)     ~1.14m (avg)           +36cm ❌
+  Z-coordinate:      varies (locomotion) +2.36m (vertical!)     Wrong axis!
+  Interpretation:    Forward walking    Upward motion          Axis swap!
+
+VERDICT:
+  ✗ motion_135 data is in HUMAN scale and SMPL frame
+  ✓ This is INTENTIONAL - it will be converted by the retargeting pipeline
+  ✗ But retargeting is broken (missing JAX), so conversion never happens
+
+================================================================================
+PIPELINE DATA FLOW DIAGRAM
+================================================================================
+
+motion_135 NPZ                          (SMPL Human Frame, ~1.16m height)
+(shape: T x 135)                        Input: 12 files, 44-59 KB each
+  │
+  ├─► motion135_to_pyroki_keypoints.py
+  │   (✓ WORKS)
+  │
+  ▼
+PyRoki Keypoints .npy                   (Z-up, ready for retargeting)
+(shape: T x 18 x 3)                     Generated but unused
+  │
+  ├─► batch_retarget_to_g1_from_keypoints.py
+  │   (✗ BROKEN - missing JAX)
+  │   This is the BLOCKAGE POINT
+  │
+  ✗ PIPELINE STOPS HERE
+  
+[Expected continuation if JAX were installed:]
+  │
+  ▼
+Robot NPZ (after PyRoki optimization)    (G1 Frame, ~0.78m height)
+(dof_pos, dof_vel, body_pos, body_rot)  Never generated
+  │
+  ├─► convert_pyroki_retargeted_robot_motions_to_proto.py
+  │   (Would create .motion files)
+  │
+  ▼
+.motion Files                            (ProtoMotions format)
+(G1 joint trajectories)                 Never generated
+  │
+  ├─► run_g1_rl_tracker_export.py
+  │   1. Load .motion file
+  │   2. Run MuJoCo simulation with G1 MJCF
+  │   3. Apply ONNX control policy
+  │   4. Extract body positions & quaternions
+  │
+  ▼
+robot_frames JSON                        (MuJoCo World Frame, ~0.78m height)
+{type: robot_frames, robot: g1, ...}   Never generated (would be correct!)
+
+================================================================================
+ERROR EVIDENCE
+================================================================================
+
+From _export_summary.json:
+[
+  {
+    "name": "original_000_a_person_stands_still",
+    "error": "Retargeting failed: original_000_a_person_stands_still.npz"
+  }
+]
+
+From pipeline execution:
+  Step 1: motion_135 -> PyRoki keypoints (.npy)
+  Status: ✓ Completed successfully
+  
+  Step 2: Extract foot contact labels
+  Error: ModuleNotFoundError: No module named 'jax'
+  Location: ref_repo/ProtoMotions/pyroki/batch_retarget_to_g1_from_keypoints.py:23
+
+  Traceback:
+    File "...batch_retarget_to_g1_from_keypoints.py", line 23, in <module>
+      import jax
+    ModuleNotFoundError: No module named 'jax'
+
+================================================================================
+HOW TO FIX
+================================================================================
+
+1. Install missing dependency:
+   $ pip install jax jaxlib
+
+2. Re-run export:
+   $ python3 scripts/embodied/run_g1_rl_tracker_export.py \
+       --input-dir output/physflow/eval_demo/data/npz/ \
+       --output-dir output/physflow/eval_demo/data/robot_mesh_rl/
+
+3. Verify output:
+   $ ls -lh output/physflow/eval_demo/data/robot_mesh_rl/*.json
+   (Should show JSON files with robot animations)
+
+4. Validate data:
+   $ python3 << 'PYEOF'
+   import json
+   with open('output/physflow/eval_demo/data/robot_mesh_rl/original_000_a_person_stands_still.json') as f:
+     data = json.load(f)
+   
+   # Check first frame pelvis height (should be ~0.78m, not 1.16m)
+   pelvis_y = data['frames'][0]['body_pos'][0][1]
+   print(f"Pelvis Y-coordinate: {pelvis_y:.3f}m")
+   print(f"Expected: 0.78m (robot standing height)")
+   print(f"Actual motion_135 was: 1.162m (human height)")
+   PYEOF
+
+================================================================================

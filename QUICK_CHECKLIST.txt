@@ -1,0 +1,192 @@
+================================================================================
+MuJoCo + Gymnasium + Stable-Baselines3 Feasibility Assessment
+Date: 2026-05-18
+Working Directory: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+================================================================================
+
+ASSESSMENT: ✅ FEASIBLE — READY TO PROCEED
+
+================================================================================
+1. PACKAGE STATUS
+================================================================================
+
+[✅] MuJoCo 3.1.6              → INSTALLED & VERIFIED
+[❌] gymnasium                 → NOT INSTALLED (need to install)
+[❌] gym (legacy)              → NOT INSTALLED (avoid — use gymnasium instead)
+[❌] stable-baselines3         → NOT INSTALLED (need to install)
+
+ACTION:
+  pip install gymnasium stable-baselines3
+  pip install gymnasium[classic_control] pygame  # Optional: rendering
+
+================================================================================
+2. SMPL HUMANOID MODEL
+================================================================================
+
+[✅] File Exists:
+  /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+  ref_repo/OmniH2O/phc/phc/data/assets/mjcf/smpl_humanoid.xml
+
+[✅] Model Structure:
+  • Total DOF: 76 (Pelvis free joint: 7 DOF, 24 bodies × 3 hinge DOFs: 72)
+  • Actuators: 75 (all motor-controlled except root position)
+  • Skeleton: Full SMPL (legs, torso, arms, head)
+  • Joint stiffness/damping: Pre-configured per-body
+  • Contact: Enabled for feet (L_Toe, R_Toe)
+
+[✅] Tested By:
+  • scripts/embodied/run_smpl_physics_sim.py (PD-tracking baseline)
+  • scripts/embodied/run_smpl_rl_tracker.py (RL inference)
+  • 20+ diagnostic scripts validate physics correctness
+
+================================================================================
+3. EXISTING IMPLEMENTATIONS
+================================================================================
+
+[✅] ProtoMotions Framework:
+  Location: ref_repo/ProtoMotions/
+  Status: Full RL training pipeline with MuJoCo backend
+  Contains: PPO, AMP, ASE agents (custom, not stable-baselines3)
+  Reference Value: Study simulator abstraction + reward design
+
+[✅] Embodied Scripts:
+  Location: scripts/embodied/ (26 core files, 666 total files)
+  Key Files:
+    • run_smpl_physics_sim.py (47 KB) — PD-tracking pipeline reference
+    • run_smpl_rl_tracker.py (47 KB) — RL inference with ONNX
+  Note: None use gymnasium directly; all use raw MuJoCo API
+
+[❌] Gymnasium Wrapper:
+  Status: NOT FOUND — will need to create one
+
+================================================================================
+4. INTEGRATION ROADMAP
+================================================================================
+
+Phase 1: Gymnasium Wrapper (1-2 days)
+  □ Create SMPLHumanoidEnv class (gymnasium.Env)
+  □ Implement observation space (151 dims: qpos + qvel)
+  □ Implement action space (75 dims: motor torques)
+  □ Implement step(), reset(), render()
+  □ Define reward function (tracking + regularization)
+  □ Define termination conditions (fall, timeout)
+
+Phase 2: Stable-Baselines3 Integration (1 day)
+  □ Create training script with PPO
+  □ Verify environment compatibility
+  □ Baseline convergence on simple task
+
+Phase 3: Reward Engineering (2-3 days)
+  □ FK-based tracking loss (reuse from run_smpl_physics_sim.py)
+  □ Joint angle regularization
+  □ Foot contact encouragement
+  □ Energy cost minimization
+
+Phase 4: Validation (1-2 days)
+  □ Compare SB3 PPO vs ProtoMotions reference
+  □ Debug physics discrepancies
+  □ Performance benchmarking
+
+Total Estimated Effort: 4-7 days (including testing & optimization)
+
+================================================================================
+5. KEY DESIGN DECISIONS
+================================================================================
+
+[REQUIRED] Root DOF Handling:
+  Question: Should RL policy control root position/rotation?
+  Options:
+    A) RL controls root → high-dimensional, needs careful reward design
+    B) Environment provides root trajectory → simpler, motion-conditioned
+    C) RL controls root rotation only, environment provides translation
+  Recommendation: Option B for initial implementation (follow run_smpl_physics_sim.py)
+
+[REQUIRED] Observation Representation:
+  Question: What features in obs space?
+  Options:
+    A) Raw qpos/qvel (151 dims) — simple, but less semantic
+    B) Computed features (FK output, joint angles) — richer, requires engineering
+    C) Mixed: qpos/qvel + computed features
+  Recommendation: Option C (start with A, add B iteratively)
+
+[OPTIONAL] Reference Motion:
+  Question: Should reward track motion clips from dataset?
+  Options:
+    A) Random reference initialization each episode
+    B) Load motion from NPZ files (output/embodied_t2m_v4/data/npz/)
+    C) Both: curriculum learning with increasing motion complexity
+  Recommendation: Option B (motion-conditioned training)
+
+================================================================================
+6. RISK MITIGATION
+================================================================================
+
+Risk: Root DOF control ambiguity
+  Impact: HIGH
+  Mitigation: Decide before implementation; document in env config
+
+Risk: Physics instability
+  Impact: LOW
+  Mitigation: Reuse timestep/control scheme from run_smpl_physics_sim.py
+
+Risk: Observation space design
+  Impact: MEDIUM
+  Mitigation: Start simple (raw qpos/qvel); iterate based on learning curves
+
+Risk: Reward hacking
+  Impact: MEDIUM
+  Mitigation: Monitor auxiliary metrics (energy, ground contact, stability)
+
+================================================================================
+7. QUICK START SCRIPT
+================================================================================
+
+Installation:
+  pip install gymnasium stable-baselines3
+  pip install gymnasium[classic_control] pygame
+
+Verification:
+  python3 -c "import gymnasium; print(f'gymnasium {gymnasium.__version__}')"
+  python3 -c "import stable_baselines3; print(f'stable-baselines3 {stable_baselines3.__version__}')"
+  python3 -c "import mujoco; print(f'mujoco {mujoco.__version__}')"
+
+Reference Documentation:
+  • Gymnasium: https://gymnasium.farama.org/
+  • Stable-Baselines3: https://stable-baselines3.readthedocs.io/
+  • MuJoCo Python API: https://mujoco.readthedocs.io/
+
+================================================================================
+8. FILES GENERATED
+================================================================================
+
+✅ MuJoCo_Gymnasium_SB3_Feasibility_Assessment.md (11 KB)
+   → Comprehensive technical assessment with code examples
+   → Location: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
+✅ QUICK_CHECKLIST.txt (this file)
+   → Quick reference summary
+   → Location: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
+================================================================================
+RECOMMENDATION
+================================================================================
+
+✅ PROCEED WITH IMPLEMENTATION
+
+Rationale:
+  1. All foundational pieces in place (MuJoCo 3.1.6, SMPL model, reference code)
+  2. Gymnasium + stable-baselines3 are low-risk dependencies
+  3. Existing codebase provides implementation patterns + validation tools
+  4. Estimated effort (4-7 days) is reasonable for a proof-of-concept
+  5. Downside risk is minimal: worst case, falls back to ProtoMotions
+
+Next Steps:
+  1. Install gymnasium + stable-baselines3
+  2. Review run_smpl_physics_sim.py and ProtoMotions/simulator/mujoco_simulator.py
+  3. Prototype SMPLHumanoidEnv wrapper
+  4. Train baseline PPO policy
+  5. Compare with ProtoMotions reference
+
+================================================================================
+Generated: 2026-05-18 (Plan mode - no execution yet)
+================================================================================

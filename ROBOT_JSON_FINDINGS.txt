@@ -1,0 +1,226 @@
+================================================================================
+PHYSFLOW ROBOT ANIMATION JSON - INVESTIGATION SUMMARY
+================================================================================
+
+QUESTION: How are robot animation JSON files generated for the PhysFlow demo?
+
+ANSWER: The pipeline has 3 stages, but is currently BROKEN at stage 2.
+
+================================================================================
+STAGE 1: Human Kinematic Generation (✓ WORKING)
+================================================================================
+
+Input:  SMPL human motion_135 NPZ files (shape: T x 135)
+        - 3 DOF translation (X, Y, Z)
+        - 22 joints × 6 DOF rot6d rotations
+        - Coordinate: SMPL frame (Z-up, ~1.14m pelvis height)
+
+Key Script: motion135_to_pyroki_keypoints.py
+Output: PyRoki keypoints (T, 18, 3) in Z-up frame
+
+Status: ✓ WORKS - Successfully converts SMPL to keypoints
+        - Detects foot contacts
+        - Transforms coordinates
+        - Ready for retargeting
+
+================================================================================
+STAGE 2: Robot Retargeting (✗ BROKEN - MISSING JAX)
+================================================================================
+
+Input:  PyRoki keypoints (T, 18, 3)
+        
+Key Script: batch_retarget_to_g1_from_keypoints.py
+Operation: Uses PyRoki trajectory-level optimization to convert:
+           - Human skeleton → G1 robot joint angles
+           - Optimizes for: bone alignment, keypoint alignment, foot contacts,
+             joint smoothness, actuator limits
+Output: Robot NPZ (G1 joint positions/velocities)
+
+Status: ✗ BROKEN - Missing dependency
+        Error: ModuleNotFoundError: No module named 'jax'
+        
+This is FATAL - the entire downstream pipeline is blocked!
+
+================================================================================
+STAGE 3: Physics Simulation & Export (✗ BLOCKED - can't run without Stage 2)
+================================================================================
+
+Would take: Robot NPZ files
+            
+Key Scripts:
+  1. convert_pyroki_retargeted_robot_motions_to_proto.py
+     - Converts NPZ → ProtoMotions .motion files
+     
+  2. run_g1_rl_tracker_export.py
+     - Loads ONNX G1 control policy
+     - Runs MuJoCo simulation with robot MJCF
+     - Extracts per-frame body positions (xpos) and quaternions (xquat)
+     
+Output: robot_frames JSON
+        {
+          "type": "robot_frames",
+          "robot": "g1",
+          "fps": 25,
+          "num_bodies": 17,
+          "bodies": [body definitions],
+          "frames": [
+            {"body_pos": [[x,y,z], ...], "body_quat": [[w,x,y,z], ...]},
+            ...
+          ]
+        }
+
+Status: ✗ BLOCKED - Never reaches this stage due to Stage 2 failure
+
+================================================================================
+CRITICAL FINDING: ROOT TRANSLATION VALUES
+================================================================================
+
+What the motion_135 data contains (INPUT):
+
+  Motion 1: "Stands Still"
+    - Pelvis height (Y-coordinate): ~1.16 m
+    - Root displacement: ~6 mm (kinematic jitter) ✓
+    - Duration: 3 seconds
+    - Interpretation: Human standing still, SMPL frame
+
+  Motion 2: "Weight Shift"  
+    - Pelvis height: ~1.12-1.13 m
+    - Root displacement: ~20 mm (weight shift)
+    - Duration: 3 seconds
+    - Interpretation: Human shifting weight, SMPL frame
+
+  Motion 3: "Walks Forward"
+    - Pelvis height: ~1.14 m (average)
+    - Z displacement: +2.36 m (!!!)
+    - Duration: 4 seconds
+    - Interpretation: UPWARD motion in SMPL, not forward walking!
+
+KEY INSIGHT: The motion_135 values are NOT physically plausible for G1 robot!
+
+  Problem 1: Pelvis height ~1.14-1.16m
+    - Expected for G1: ~0.78m (robot standing height)
+    - These are HUMAN heights in SMPL coordinate system
+    - Difference: +36-38 cm (human vs robot)
+
+  Problem 2: Forward walking shows +2.36m in Z
+    - In SMPL frame: Z is vertical (UP)
+    - This is 2.36m UPWARD displacement, not forward
+    - Should be forward walking along X or Y axis
+
+  Root Cause: Axes are swapped between SMPL and G1 frame
+    - SMPL: Z-up (vertical), Y-forward, X-right
+    - G1: Y-up (vertical), X-forward, Z-right
+
+================================================================================
+WHAT SHOULD HAPPEN (After Stage 2 & 3 Complete)
+================================================================================
+
+After retargeting to G1 + MuJoCo physics:
+
+  "Stands Still":
+    ✓ Pelvis Y-coordinate: ~0.78m (not 1.16m)
+    ✓ Minimal motion (< 5cm displacement)
+    ✓ Coordinate frame: G1 robot frame (Y-up)
+
+  "Walks Forward":
+    ✓ Pelvis Y-coordinate: ~0.78m (stays relatively constant)
+    ✓ X or Z displacement: positive, showing forward walking
+    ✓ Coordinate frame: Proper robot frame
+
+================================================================================
+ROOT CAUSE ANALYSIS: WHY PIPELINE IS BROKEN
+================================================================================
+
+1. Design Issue:
+   - PyRoki retargeting uses trajectory-level optimization with JAX
+   - JAX is not installed in the environment
+   - The ProtoMotions ref_repo dependency wasn't set up with JAX
+
+2. Broken Dependency Chain:
+   pipeline_motion_to_robot.py
+     ├─ motion135_to_pyroki_keypoints.py .................... ✓ works
+     └─ batch_retarget_to_g1_from_keypoints.py ............. ✗ needs JAX
+        ├─ convert_pyroki_retargeted_robot_motions_to_proto.py ... (blocked)
+        └─ run_g1_rl_tracker_export.py ...................... (blocked)
+
+3. Evidence from _export_summary.json:
+   [
+     {
+       "name": "original_000_a_person_stands_still",
+       "error": "Retargeting failed: original_000_a_person_stands_still.npz"
+     }
+   ]
+
+================================================================================
+DIRECTORY STRUCTURE
+================================================================================
+
+Input:
+  ✓ output/physflow/eval_demo/data/npz/ (44-59 KB each, 12 files)
+    - original_000_a_person_stands_still.npz
+    - original_001_a_person_shifts_weight_from_le.npz
+    - original_002_a_person_walks_forward_slowly.npz
+    - ... (plus physflow_* variants)
+
+Intermediate (EMPTY - pipeline never completed):
+  ✗ output/physflow/eval_demo/data/robot_mesh_rl/motion_files/intermediates/
+    - keypoints/ (generated, but retargeting failed before use)
+    - contacts/ (empty)
+    - retargeted/ (empty)
+
+Output (EMPTY - never generated):
+  ✗ output/physflow/eval_demo/data/robot_mesh_rl/
+    - NO *.json files
+    - NO *.motion files
+    - Only _export_summary.json showing failures
+
+Note: The directory path mentioned in query (/...robot_json/) does NOT exist.
+      The actual directory is robot_mesh_rl/ but it's empty due to pipeline failure.
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+IMMEDIATE FIX (Required):
+  1. Install JAX dependency:
+     pip install jax jaxlib
+
+  2. Re-run robot export:
+     python3 scripts/embodied/run_g1_rl_tracker_export.py \
+       --input-dir output/physflow/eval_demo/data/npz/ \
+       --output-dir output/physflow/eval_demo/data/robot_mesh_rl/
+
+VALIDATION (After Fix):
+  3. Check output JSON files exist in:
+     output/physflow/eval_demo/data/robot_mesh_rl/
+
+  4. Verify pelvis height in body_pos[0][1]:
+     Should be ~0.78m, NOT 1.16m
+     
+  5. Check motion displacements:
+     - "stands_still": X, Z < 5cm
+     - "walks_forward": increasing X or Z over time
+     - "weight_shift": small lateral motion
+
+  6. Verify coordinate frame is correct:
+     - Y should be vertical (up)
+     - Forward walking should show X displacement, Y ~constant
+
+================================================================================
+KEY TAKEAWAY
+================================================================================
+
+The root translation values in motion_135 ARE HUMAN SCALE in SMPL FRAME.
+This is INTENTIONAL by design - the pipeline converts human kinematics
+to robot dynamics across 3 stages:
+
+  SMPL Human (1.14m height)
+    ↓ [Retargeting]
+  G1 Robot Skeleton (joint angles)
+    ↓ [Physics Simulation]
+  G1 Robot Dynamics (0.78m height, physically valid)
+
+The pipeline is currently BROKEN at the retargeting stage (missing JAX).
+Once fixed, the output JSON will have physically plausible robot motion!
+
+================================================================================

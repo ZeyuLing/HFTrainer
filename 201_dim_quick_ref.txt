@@ -1,0 +1,149 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                   201-DIM MOTION FORMAT - QUICK REFERENCE                  ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌─ LAYOUT ─────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│  DIMS     SIZE  CONTENT                                                     │
+│  ─────────────────────────────────────────────────────────────────────      │
+│  [0:3]      3   Translation (SMPL world position)                           │
+│  [3:135]  132   Rotation (22 joints × 6D row-major rot6d)                   │
+│  [135:201] 66   Joint Positions (22 joints × 3D, Scheme D)                  │
+│  ─────────────────────────────────────────────────────────────────────      │
+│  TOTAL    201   Complete motion representation                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ THE 66 POSITION DIMENSIONS ─────────────────────────────────────────────────┐
+│                                                                              │
+│  ANSWER: 22 joints × 3D coordinates per joint = 66 dims                    │
+│  ✓ INCLUDES pelvis (differs from 198-dim which excludes it)                 │
+│                                                                              │
+│  ENCODING PER JOINT (Scheme D):                                             │
+│  ┌────────────────────────────────────────────────────────────────┐        │
+│  │ [X] = world_x - pelvis_x  (relative to pelvis)                │        │
+│  │ [Y] = world_y             (absolute world height, for ground) │        │
+│  │ [Z] = world_z - pelvis_z  (relative to pelvis)                │        │
+│  └────────────────────────────────────────────────────────────────┘        │
+│                                                                              │
+│  JOINT LAYOUT (dims 135-201):                                               │
+│  ┌─ dims ──┬─────────────────────┐                                         │
+│  │ 135-137 │ Pelvis (0)          │                                         │
+│  │ 138-140 │ L_Hip (1)           │                                         │
+│  │ 141-143 │ R_Hip (2)           │                                         │
+│  │ ...     │ ... (20 more)       │                                         │
+│  │ 198-200 │ R_Wrist (21)        │                                         │
+│  └─────────┴─────────────────────┘                                         │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ 22 SMPL JOINTS IN ORDER ────────────────────────────────────────────────────┐
+│                                                                              │
+│  0: Pelvis (root)       1: L_Hip         2: R_Hip          3: Spine1        │
+│  4: L_Knee              5: R_Knee        6: Spine2          7: L_Ankle       │
+│  8: R_Ankle             9: Spine3        10: L_Foot        11: R_Foot       │
+│  12: Neck               13: L_Collar    14: R_Collar      15: Head         │
+│  16: L_Shoulder         17: R_Shoulder   18: L_Elbow       19: R_Elbow      │
+│  20: L_Wrist            21: R_Wrist                                         │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ HOW POSITIONS ARE COMPUTED ─────────────────────────────────────────────────┐
+│                                                                              │
+│  1. Parse 135-dim motion:                                                   │
+│     trans = motion[0:3]         (translation)                              │
+│     rot6d = motion[3:135]       (22 joints × 6)                            │
+│                                                                              │
+│  2. Run Forward Kinematics (FK) on LOCAL rotations:                        │
+│     → Converts rotation matrices to world-space positions                   │
+│     → Follows SMPL-22 kinematic tree                                        │
+│     → Result: world_pos (22, 3) for each frame                             │
+│                                                                              │
+│  3. Apply Scheme D encoding:                                                │
+│     X, Z: subtract pelvis position (relative)                              │
+│     Y: keep absolute (ground contact info)                                 │
+│                                                                              │
+│  4. Flatten to 66 dims and append to rotation data                         │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ ROTATION ENCODING (Dims 3-135) ─────────────────────────────────────────────┐
+│                                                                              │
+│  TYPE: Row-major 6D rotation (NOT column-major)                            │
+│  SIZE: 22 joints × 6 dimensions = 132 dims                                 │
+│                                                                              │
+│  FORMAT: [R₀₀, R₀₁, R₁₀, R₁₁, R₂₀, R₂₁]                                      │
+│           └─ first two rows of 3×3 rotation matrix                         │
+│                                                                              │
+│  SPACE: Can be LOCAL (parent-relative) or GLOBAL (world-relative)          │
+│  DEFAULT: LOCAL (used for FK computation)                                  │
+│                                                                              │
+│  Conversion: column-major → row-major via index reordering [0,3,1,4,2,5]   │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ COMPARISON: 135-DIM VS 198-DIM VS 201-DIM ──────────────────────────────────┐
+│                                                                              │
+│  135-DIM: [trans(3) + rot6d_22j(132)]                                       │
+│           No positions, rotation + translation only                        │
+│                                                                              │
+│  198-DIM: [trans(3) + rot6d_22j(132) + pos_21j(63)]                        │
+│           Pelvis EXCLUDED from position channels (21×3=63)                 │
+│                                                                              │
+│  201-DIM: [trans(3) + rot6d_22j(132) + pos_22j(66)]                        │
+│           Pelvis INCLUDED in position channels (22×3=66)  ← THIS ONE!       │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ KEY FILES ──────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│  hftrainer/datasets/motion/motionhub/transforms/                           │
+│  ├─ load_smplx.py          Create motion_135 from SMPL params              │
+│  ├─ compute_198dim.py      135 → 198 (positions, exclude pelvis)           │
+│  ├─ load_o6dp.py           Load pre-computed 201-dim npy files             │
+│  ├─ fk_utils.py            Kinematics utilities                            │
+│  └─ local_to_global.py     Rotation space conversion                       │
+│                                                                              │
+│  hftrainer/pipelines/motion/                                               │
+│  └─ differentiable_fk.py   FK computation, motion parsing                  │
+│                                                                              │
+│  scripts/data/                                                              │
+│  ├─ compute_201dim_stats.py Compute Mean/Std for 201-dim format            │
+│  └─ compute_198dim_stats.py Compute Mean/Std for 198-dim format            │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ SCHEME D ENCODING (WHY?) ───────────────────────────────────────────────────┐
+│                                                                              │
+│  ✓ Horizontal (XZ) relative to pelvis:                                     │
+│    - More stable across sequences                                          │
+│    - Invariant to global locomotion                                        │
+│    - Leads to better compression                                           │
+│                                                                              │
+│  ✓ Vertical (Y) absolute world height:                                     │
+│    - Preserves ground contact information                                  │
+│    - Ankles near Y≈0 (ground level)                                        │
+│    - Important for footfall detection                                      │
+│                                                                              │
+│  ✓ Differentiable:                                                          │
+│    - Used in FK consistency loss during training                           │
+│    - Enforces physical plausibility                                        │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ INITIALIZATION SEQUENCE ────────────────────────────────────────────────────┐
+│                                                                              │
+│  Raw SMPL NPZ File                                                         │
+│    ↓                                                                        │
+│  LoadSmplx55: Extract 22 joints, convert axis-angle → rot6d                │
+│    ↓                                                                        │
+│  motion_135 = [trans(3) + rot6d(132)]                                      │
+│    ↓                                                                        │
+│  Compute201DimPosition (or transform): Run FK                             │
+│    ↓                                                                        │
+│  motion_201 = [motion_135 + pos_66]                                        │
+│    ↓                                                                        │
+│  Ready for training/inference                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+

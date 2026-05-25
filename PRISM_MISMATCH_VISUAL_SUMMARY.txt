@@ -1,0 +1,251 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                  PRISM TEXT EMBEDDING MISMATCH - VISUAL SUMMARY                ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ CRITICAL: MAX SEQUENCE LENGTH MISMATCH                                        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  TRAINING PATH:                                                              │
+│  ══════════════                                                              │
+│  PrismTrainer.__init__(max_text_length=128)  [DEFAULT]                       │
+│           ↓                                                                  │
+│  bundle.encode_prompt(max_sequence_length=128)                               │
+│           ↓                                                                  │
+│  UMT5Encoder sees: [batch_size, 128, 768/4096]                              │
+│           ↓                                                                  │
+│  Transformer processes: [B, 128, text_dim]                                   │
+│           ↓                                                                  │
+│  Outputs: motion with text context from 128 tokens                           │
+│                                                                               │
+│  ─────────────────────────────────────────────                              │
+│                                                                               │
+│  INFERENCE PATH:                                                             │
+│  ═════════════════                                                           │
+│  PrismARPipeline.generate_single_segment(                                    │
+│      max_sequence_length=512  [DEFAULT]  ← 4X LONGER!                        │
+│  )                                                                            │
+│           ↓                                                                  │
+│  _get_t5_prompt_embeds(max_sequence_length=512)                              │
+│           ↓                                                                  │
+│  UMT5Encoder sees: [batch_size, 512, 768/4096]  ← MORE DATA!                │
+│           ↓                                                                  │
+│  Transformer processes: [B, 512, text_dim]                                   │
+│           ↓                                                                  │
+│  Outputs: motion with text context from 512 tokens                           │
+│                                                                               │
+│  ⚠️  PROBLEM: Transformer NEVER trained with 512-token sequences!            │
+│      Distribution shift → degraded performance                              │
+│                                                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ATTENTION MASK HANDLING                                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  TRAINING:                                                                   │
+│  ──────────                                                                  │
+│  transformer(                                                                │
+│      hidden_states=noisy_latents,                                            │
+│      encoder_hidden_states=text_states,    ✓ Provided                        │
+│      hidden_states_mask=padding_mask,      ✓ For motion tokens               │
+│      encoder_hidden_states_mask=None,      ✗ ALWAYS NONE!                    │
+│  )                                                                            │
+│                                                                               │
+│  → Text attention includes padding tokens (zero vectors)                     │
+│                                                                               │
+│  ─────────────────────────────────────────────                              │
+│                                                                               │
+│  INFERENCE:                                                                  │
+│  ──────────                                                                  │
+│  transformer(                                                                │
+│      hidden_states=latent_model_input,                                       │
+│      timestep=timestep,                                                      │
+│      encoder_hidden_states=prompt_embeds,  ✓ Provided                        │
+│      hidden_states_mask=motion_mask,       ✓ For motion tokens               │
+│      attention_kwargs=attention_kwargs,                                      │
+│      is_causal=is_causal,                                                    │
+│      encoder_hidden_states_mask=<missing>  ✗ ALSO NOT PASSED!               │
+│  )                                                                            │
+│                                                                               │
+│  → Same behavior: text attention includes padding                            │
+│                                                                               │
+│  ✓ CONSISTENT: Both paths ignore encoder mask                                │
+│  ✗ ISSUE: Padding zeros dilute text signal for long sequences                │
+│                                                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ TEXT EMBEDDING FLOW COMPARISON                                                │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│                      TRAINING (128 tokens)                                   │
+│                      ════════════════════                                    │
+│                                                                               │
+│  "a person walks forward"                                                    │
+│         ↓                                                                    │
+│  Tokenizer(max_length=128, padding='max_length', truncation=True)            │
+│         ↓                                                                    │
+│  input_ids: [CLS, a, person, walks, forward, SEP, PAD, PAD, ...]           │
+│  (total: 128)                                                                │
+│         ↓                                                                    │
+│  UMT5Encoder (frozen)                                                        │
+│         ↓                                                                    │
+│  seq_lens = [7]  (actual tokens excluding padding)                           │
+│  prompt_embeds shape BEFORE trim: [1, 128, 768]                              │
+│         ↓                                                                    │
+│  TRIM: prompt_embeds[0, :7, :] = [emb_CLS, emb_a, ..., emb_SEP]             │
+│  PAD:  [emb_CLS, ..., emb_SEP, ZEROS, ZEROS, ...] → [1, 128, 768]           │
+│         ↓                                                                    │
+│  Transformer sees: [1, 128, 768]                                             │
+│  - 7 real tokens                                                             │
+│  - 121 zero-padding vectors                                                  │
+│                                                                               │
+│  ──────────────────────────────────────────────────────────────────          │
+│                                                                               │
+│                     INFERENCE (512 tokens)                                   │
+│                     ════════════════════════                                 │
+│                                                                               │
+│  "a person walks forward"                                                    │
+│         ↓                                                                    │
+│  Tokenizer(max_length=512, padding='max_length', truncation=True)            │
+│         ↓                                                                    │
+│  input_ids: [CLS, a, person, walks, forward, SEP, PAD, PAD, ...]           │
+│  (total: 512)                                                                │
+│         ↓                                                                    │
+│  UMT5Encoder (frozen)                                                        │
+│         ↓                                                                    │
+│  seq_lens = [7]  (actual tokens excluding padding)                           │
+│  prompt_embeds shape BEFORE trim: [1, 512, 768]                              │
+│         ↓                                                                    │
+│  TRIM: prompt_embeds[0, :7, :] = [emb_CLS, emb_a, ..., emb_SEP]             │
+│  PAD:  [emb_CLS, ..., emb_SEP, ZEROS, ZEROS, ...] → [1, 512, 768]           │
+│         ↓                                                                    │
+│  Transformer sees: [1, 512, 768]                                             │
+│  - 7 real tokens                                                             │
+│  - 505 zero-padding vectors  ← 4.2x MORE PADDING!                           │
+│                                                                               │
+│  ✗ MISMATCH:                                                                 │
+│    - Model trained on [B, 128, 768] sequences                                │
+│    - Inference provides [B, 512, 768] sequences                              │
+│    - 4x longer sequences = extrapolation beyond training distribution        │
+│    - More padding → more noise in cross-attention                            │
+│                                                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ PROMPT DROPOUT (CLASSIFIER-FREE GUIDANCE)                                     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  TRAINING (10% dropout):                                                     │
+│  ──────────────────────                                                      │
+│                                                                               │
+│  Batch of 4 captions:                                                        │
+│  [                                                                            │
+│      "a person walks",        # 90% chance: keep                             │
+│      "a person runs",         # 10% chance: convert to ""                    │
+│      "a person jumps",        # 90% chance: keep                             │
+│      "a person dances"        # 10% chance: convert to ""                    │
+│  ]                                                                            │
+│         ↓ prompt_drop_rate loop                                              │
+│  [                                                                            │
+│      "a person walks",                                                       │
+│      "",                      ← Empty string → [CLS, PAD, PAD, ...] → ZEROS │
+│      "a person jumps",                                                       │
+│      ""                       ← Empty string → [CLS, PAD, PAD, ...] → ZEROS │
+│  ]                                                                            │
+│         ↓                                                                    │
+│  Transformer learns: "How to generate motion even with empty text"           │
+│                                                                               │
+│  ───────────────────────────────────────────────────────────────             │
+│                                                                               │
+│  INFERENCE (0% dropout):                                                     │
+│  ──────────────────────                                                      │
+│                                                                               │
+│  Batch of 1 caption:                                                         │
+│  [                                                                            │
+│      "a person walks"                                                        │
+│  ]                                                                            │
+│         ↓ No dropout                                                         │
+│  [                                                                            │
+│      "a person walks"        ← Always present                                │
+│  ]                                                                            │
+│         ↓                                                                    │
+│  Transformer always gets: real text + classifier-free guidance signal        │
+│                                                                               │
+│  ✗ DISTRIBUTION SHIFT:                                                       │
+│    - Training: 90% real text, 10% empty                                      │
+│    - Inference: 100% real text                                               │
+│    - Model extrapolates beyond training distribution                         │
+│                                                                               │
+│  ℹ️  NOTE: This is intentional for CFG but could explain generation drift   │
+│                                                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ SUMMARY TABLE                                                                 │
+├────────────────────────┬──────────────────┬──────────────────┬──────────────┤
+│ Aspect                 │ Training         │ Inference        │ Match?       │
+├────────────────────────┼──────────────────┼──────────────────┼──────────────┤
+│ Max Sequence Length    │ 128              │ 512              │ ✗ NO         │
+│ Text Encoder           │ UMT5             │ UMT5             │ ✓ YES        │
+│ Tokenizer              │ Same             │ Same             │ ✓ YES        │
+│ Encoding Method        │ On-the-fly       │ On-the-fly       │ ✓ YES        │
+│ Text Attention Mask    │ None             │ None             │ ✓ YES        │
+│ Prompt Dropout         │ 10%              │ 0%               │ ✗ NO         │
+│ Num Motion Per Prompt  │ N/A              │ Default: 1       │ ≈ OK         │
+│ Padding Strategy       │ Zero-padding     │ Zero-padding     │ ✓ YES        │
+│ Output Dimensions      │ [B, 128, 768]    │ [B, 512, 768]    │ ✗ NO         │
+└────────────────────────┴──────────────────┴──────────────────┴──────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ IMPACT SEVERITY                                                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  🔴 CRITICAL (Max Sequence Length 128→512)                                   │
+│     - Transformer extrapolates 4x                                             │
+│     - Likely source of generation degradation                                │
+│     - Impacts all text conditioning                                          │
+│                                                                               │
+│  🟠 SECONDARY (No Text Attention Masking)                                    │
+│     - Pads dilute signal by 4x at inference                                  │
+│     - But same behavior at training (not a mismatch per se)                  │
+│     - Could be improved but not primary cause                                │
+│                                                                               │
+│  🟡 TERTIARY (Prompt Dropout 10%→0%)                                         │
+│     - Distribution shift in text signal                                      │
+│     - But this is intentional (CFG training)                                 │
+│     - Probably acceptable for generation                                     │
+│                                                                               │
+│  🟢 MINOR (Num Motion Per Prompt Repeat)                                     │
+│     - Default is 1, so minimal impact                                        │
+│     - Only affects batch dimension                                           │
+│                                                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+RECOMMENDED ACTION PLAN:
+═══════════════════════
+
+1. [HIGH PRIORITY] Change inference default max_sequence_length to 128
+   - Recompile/update prism_backend.py line 334
+   - Test inference quality immediately
+
+2. [MEDIUM PRIORITY] Match training max_text_length to actual usage
+   - Check training config for actual max_text_length value
+   - If only short prompts used, consider reducing further
+   - If long prompts needed, retrain with max_text_length=256-512
+
+3. [LOW PRIORITY] Add optional text attention masking
+   - Would improve signal quality marginally
+   - Requires changes to both trainer and inference
+   - Measurable but not critical
+
+4. [DOCUMENTATION] Document CFG dropout behavior
+   - Clarify that 10% empty prompts during training is intentional
+   - Document expected inference behavior with/without CFG

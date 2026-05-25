@@ -112,6 +112,7 @@ class PrismTrainer(BaseTrainer):
             latents,
             frame_condition_rate=self.frame_condition_rate,
             condition_num_frames=self.condition_num_frames,
+            num_frames=num_frames,
         )
 
         step_indices = torch.randint(

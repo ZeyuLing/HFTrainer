@@ -1,0 +1,44 @@
+--- a/hftrainer/pipelines/motion/prism_backend.py
++++ b/hftrainer/pipelines/motion/prism_backend.py
+@@ -371,6 +371,18 @@ class PrismARPipeline(DiffusionPipeline):
+             latents, condition, first_frame_mask = self.prepare_latents(
+                 batch_size=batch_size,
+                 num_channels_latents=num_channels_latents,
+                 num_joints=num_joints,
+                 num_frames=num_frames,
+                 dtype=transformer_dtype,
+                 device=device,
+                 first_frame_latents=first_frame_latents,
+             )
+ 
++        # Create motion_mask in latent space [B, T_latent, J]
++        # All frames are valid (no padding in inference), so mask is all-ones
++        # This ensures consistent attention behavior with training
++        motion_mask = torch.ones(
++            batch_size,
++            latents.shape[2],  # num_latent_frames
++            num_joints,
++            dtype=transformer_dtype,
++            device=device
++        )
++
+         # Denoising loop
+         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+ 
+@@ -391,6 +403,7 @@ class PrismARPipeline(DiffusionPipeline):
+             noise_pred = current_model(
+                 hidden_states=latent_model_input,
+                 timestep=timestep,
+                 encoder_hidden_states=prompt_embeds,
++                hidden_states_mask=motion_mask,
+                 attention_kwargs=attention_kwargs,
+                 is_causal=self.config.is_causal,
+             )
+@@ -401,6 +414,7 @@ class PrismARPipeline(DiffusionPipeline):
+                     hidden_states=latent_model_input,
+                     timestep=timestep,
+                     encoder_hidden_states=negative_prompt_embeds,
++                    hidden_states_mask=motion_mask,
+                     attention_kwargs=attention_kwargs,
+                     is_causal=self.config.is_causal,
+                 )

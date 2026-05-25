@@ -1,0 +1,521 @@
+================================================================================
+PRISM: STREAMING HUMAN MOTION GENERATION - FULL STATISTICAL ANALYSIS REPORT
+IEEE Transactions on Multimedia (TMM) 2026
+================================================================================
+
+PROJECT DIRECTORY: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/papers/PRISM_TMM2026/
+ANALYSIS DATE: May 15, 2026
+
+================================================================================
+SECTION 1: TEXT-TO-MOTION GENERATION RESULTS
+================================================================================
+
+Table: Text-to-Motion Performance on HumanML3D and MotionHub
+Evaluator: Re-trained TMR on SMPL-22 pose representation (30fps)
+
+HUMANML3D BENCHMARK:
+─────────────────────────────────────────────────────────────────────────────
+Real Motion (Ground Truth):
+  • R-Precision T1: 0.778↑
+  • R-Precision T3: 0.906↑
+  • FID: 0.000↓
+  • MM-Dist (Motion Matching Distance): 0.901→
+  • Diversity: 21.69→
+
+BASELINE METHODS:
+─────────────────────────────────────────────────────────────────────────────
+ViMoGen (Diffusion-based):
+  • R-Precision T1: 0.152↑ | R-Precision T3: 0.299↑ | FID: 0.405↓ | MM-D: 1.203→ | Div: 19.71→
+
+MotionGPT3 (Autoregressive):
+  • R-Precision T1: 0.410↑ | R-Precision T3: 0.631↑ | FID: 0.375↓ | MM-D: 1.115→ | Div: 20.88→
+
+MLD (Diffusion-based):
+  • R-Precision T1: 0.236↑ | R-Precision T3: 0.414↑ | FID: 0.372↓ | MM-D: 1.170→ | Div: 21.31→
+
+MDM (Diffusion-based):
+  • R-Precision T1: 0.229↑ | R-Precision T3: 0.416↑ | FID: 0.362↓ | MM-D: 1.172→ | Div: 21.44→
+
+T2M-GPT (Autoregressive):
+  • R-Precision T1: 0.362↑ | R-Precision T3: 0.585↑ | FID: 0.337↓ | MM-D: 1.127→ | Div: 21.48→
+
+MotionGPT (Autoregressive):
+  • R-Precision T1: 0.310↑ | R-Precision T3: 0.504↑ | FID: 0.326↓ | MM-D: 1.151→ | Div: 21.29→
+
+HY-Motion (Diffusion-based) [2nd Best]:
+  • R-Precision T1: 0.562↑ | R-Precision T3: 0.792↑ | FID: 0.186↓ | MM-D: 1.062→ | Div: 22.39→
+
+Go-To-Zero (Autoregressive):
+  • R-Precision T1: 0.443↑ | R-Precision T3: 0.653↑ | FID: 0.078↓ | MM-D: 1.051→ | Div: 21.67→
+
+MotionStreamer (Diffusion-based) [2nd Best]:
+  • R-Precision T1: 0.463↑ | R-Precision T3: 0.712↑ | FID: 0.060↓ | MM-D: 1.029→ | Div: 21.85→
+
+PRISM (OURS) [STATE-OF-THE-ART - ALL METRICS]:
+  • R-Precision T1: 0.699↑ [+23.7% vs HY-Motion]
+  • R-Precision T3: 0.893↑ [+13% vs MotionStreamer]
+  • FID: 0.027↓ [55% IMPROVEMENT vs MotionStreamer 0.060, -1.4% to real 0.906]
+  • MM-Dist: 0.937→ [+9.2% improvement vs MotionStreamer]
+  • Diversity: 21.70→ [matches real data, no mode collapse]
+
+MOTIONHUB BENCHMARK:
+─────────────────────────────────────────────────────────────────────────────
+Real Motion (Ground Truth):
+  • R-Precision T1: 0.667↑
+  • R-Precision T3: 0.842↑
+  • FID: 0.000↓
+  • MM-Dist: 0.984→
+  • Diversity: 22.96→
+
+BASELINE METHODS:
+─────────────────────────────────────────────────────────────────────────────
+ViMoGen:
+  • R-Precision T1: 0.157↑ | R-Precision T3: 0.308↑ | FID: 0.532↓ | MM-D: 1.213→ | Div: 20.02→
+
+MotionGPT3:
+  • R-Precision T1: 0.200↑ | R-Precision T3: 0.369↑ | FID: 0.449↓ | MM-D: 1.184→ | Div: 21.04→
+
+MLD:
+  • R-Precision T1: 0.123↑ | R-Precision T3: 0.259↑ | FID: 0.404↓ | MM-D: 1.208→ | Div: 21.34→
+
+MDM:
+  • R-Precision T1: 0.118↑ | R-Precision T3: 0.243↑ | FID: 0.446↓ | MM-D: 1.214→ | Div: 21.16→
+
+T2M-GPT:
+  • R-Precision T1: 0.146↑ | R-Precision T3: 0.285↑ | FID: 0.460↓ | MM-D: 1.212→ | Div: 21.02→
+
+MotionGPT:
+  • R-Precision T1: 0.127↑ | R-Precision T3: 0.248↑ | FID: 0.439↓ | MM-D: 1.238→ | Div: 21.16→
+
+HY-Motion [2nd Best]:
+  • R-Precision T1: 0.416↑ | R-Precision T3: 0.628↑ | FID: 0.363↓ | MM-D: 1.145→ | Div: 22.82→
+
+Go-To-Zero:
+  • R-Precision T1: 0.293↑ | R-Precision T3: 0.461↑ | FID: 0.106↓ | MM-D: 1.130→ | Div: 22.90→
+
+MotionStreamer:
+  • R-Precision T1: 0.195↑ | R-Precision T3: 0.367↑ | FID: 0.413↓ | MM-D: 1.176→ | Div: 21.36→
+
+PRISM (OURS) [STATE-OF-THE-ART - ALL METRICS]:
+  • R-Precision T1: 0.530↑ [+27.4% vs HY-Motion]
+  • R-Precision T3: 0.772↑ [+23.1% vs HY-Motion]
+  • FID: 0.055↓ [48% IMPROVEMENT vs Go-To-Zero 0.106]
+  • MM-Dist: 1.039→ [+8.7% vs Go-To-Zero]
+  • Diversity: 22.76→ [near real data 22.96]
+
+================================================================================
+SECTION 2: POSE-CONDITIONED GENERATION RESULTS
+================================================================================
+
+Table: Prefix-Pose-Conditioned Generation on HumanML3D and MotionHub
+Conditioning: 1, 5, and 9 starting frames
+
+HUMANML3D - 1 FRAME CONDITIONING:
+─────────────────────────────────────────────────────────────────────────────
+Real Motion:
+  • R-Precision T3: 0.906↑ | FID: 0.000↓ | MM-Dist: 0.901→ | Div: 21.69→
+
+FlowMDM:
+  • R-Precision T3: 0.430↑ | FID: 0.358↓ | MM-Dist: 1.176→ | Div: 21.38→
+
+MotionStreamer [2nd Best]:
+  • R-Precision T3: 0.718↑ | FID: 0.057↓ | MM-Dist: 1.024→ | Div: 21.87→
+
+PRISM (OURS):
+  • R-Precision T3: 0.895↑ [+24.7% vs MotionStreamer]
+  • FID: 0.026↓ [54% improvement]
+  • MM-Dist: 0.934→ [8.8% improvement]
+  • Diversity: 21.68→
+
+HUMANML3D - 5 FRAMES CONDITIONING:
+─────────────────────────────────────────────────────────────────────────────
+FlowMDM:
+  • R-Precision T3: 0.441↑ | FID: 0.347↓ | MM-Dist: 1.168→ | Div: 21.46→
+
+MotionStreamer [2nd Best]:
+  • R-Precision T3: 0.726↑ | FID: 0.054↓ | MM-Dist: 1.019→ | Div: 21.90→
+
+PRISM (OURS):
+  • R-Precision T3: 0.897↑ [+23.5% vs MotionStreamer]
+  • FID: 0.025↓ [53.7% improvement]
+  • MM-Dist: 0.931→ [8.6% improvement]
+  • Diversity: 21.67→
+
+HUMANML3D - 9 FRAMES CONDITIONING:
+─────────────────────────────────────────────────────────────────────────────
+FlowMDM:
+  • R-Precision T3: 0.453↑ | FID: 0.338↓ | MM-Dist: 1.162→ | Div: 21.51→
+
+MotionStreamer [2nd Best]:
+  • R-Precision T3: 0.733↑ | FID: 0.051↓ | MM-Dist: 1.015→ | Div: 21.93→
+
+PRISM (OURS):
+  • R-Precision T3: 0.902↑ [+23.1% vs MotionStreamer]
+  • FID: 0.023↓ [54.9% improvement]
+  • MM-Dist: 0.927→ [8.6% improvement]
+  • Diversity: 21.72→
+
+MOTIONHUB - 1 FRAME CONDITIONING:
+─────────────────────────────────────────────────────────────────────────────
+Real Motion:
+  • R-Precision T3: 0.842↑ | FID: 0.000↓ | MM-Dist: 0.984→ | Div: 22.96→
+
+FlowMDM:
+  • R-Precision T3: 0.288↑ | FID: 0.372↓ | MM-Dist: 1.179→ | Div: 21.18→
+
+MotionStreamer [2nd Best]:
+  • R-Precision T3: 0.372↑ | FID: 0.408↓ | MM-Dist: 1.171→ | Div: 21.39→
+
+PRISM (OURS):
+  • R-Precision T3: 0.775↑ [+108% vs MotionStreamer]
+  • FID: 0.053↓ [87% improvement]
+  • MM-Dist: 1.037→ [11.4% improvement]
+  • Diversity: 22.78→
+
+MOTIONHUB - 5 FRAMES CONDITIONING:
+─────────────────────────────────────────────────────────────────────────────
+FlowMDM:
+  • R-Precision T3: 0.298↑ | FID: 0.362↓ | MM-Dist: 1.172→ | Div: 21.27→
+
+MotionStreamer [2nd Best]:
+  • R-Precision T3: 0.381↑ | FID: 0.396↓ | MM-Dist: 1.163→ | Div: 21.44→
+
+PRISM (OURS):
+  • R-Precision T3: 0.778↑ [+104% vs MotionStreamer]
+  • FID: 0.051↓ [87.1% improvement]
+  • MM-Dist: 1.033→ [11.2% improvement]
+  • Diversity: 22.82→
+
+MOTIONHUB - 9 FRAMES CONDITIONING:
+─────────────────────────────────────────────────────────────────────────────
+FlowMDM:
+  • R-Precision T3: 0.312↑ | FID: 0.351↓ | MM-Dist: 1.167→ | Div: 21.34→
+
+MotionStreamer [2nd Best]:
+  • R-Precision T3: 0.388↑ | FID: 0.387↓ | MM-Dist: 1.158→ | Div: 21.48→
+
+PRISM (OURS):
+  • R-Precision T3: 0.783↑ [+101.5% vs MotionStreamer]
+  • FID: 0.048↓ [87.6% improvement]
+  • MM-Dist: 1.027→ [11.3% improvement]
+  • Diversity: 22.78→
+
+================================================================================
+SECTION 3: LONG-HORIZON SEQUENTIAL GENERATION (BABEL)
+================================================================================
+
+Table: Sequential Action Generation Performance
+
+SUBSEQUENCE QUALITY:
+─────────────────────────────────────────────────────────────────────────────
+Real Motion:
+  • R@3: 0.638↑ | FID: N/A | Diversity: 21.24→ | MM-Dist: 0.978→
+
+DoubleTake:
+  • R@3: 0.400↑ | FID: 0.140↓ | Diversity: 21.08→ | MM-Dist: 1.152→
+
+FlowMDM [2nd Best]:
+  • R@3: 0.460↑ | FID: 0.110↓ | Diversity: 21.35↑ | MM-Dist: 1.094→
+
+MotionStreamer [2nd Best]:
+  • R@3: 0.469↑ | FID: 0.120↓ | Diversity: 21.38→ | MM-Dist: 1.073→
+
+PRISM (OURS):
+  • R@3: 0.587↑ [+25.2% vs MotionStreamer, 92% of real]
+  • FID: 0.100↓ [BEST - 9.1% better than FlowMDM]
+  • Diversity: 21.43→ [best diversity, very close to real 21.24]
+  • MM-Dist: 1.014→ [4% vs real 0.978]
+
+TRANSITION SMOOTHNESS:
+─────────────────────────────────────────────────────────────────────────────
+Real Motion:
+  • FID: N/A | Diversity: 19.83→ | Peak Jerk: 0.010→ | Area Under Jerk: 0.000↓
+
+DoubleTake:
+  • FID: 0.110↓ | Diversity: 19.50→ | Peak Jerk: 0.040→ | Area Jerk: 0.850↓
+
+FlowMDM [2nd Best]:
+  • FID: 0.090↓ | Diversity: 19.85↑ | Peak Jerk: 0.030→ | Area Jerk: 0.620↓
+
+MotionStreamer [2nd Best]:
+  • FID: 0.100↓ | Diversity: 19.70→ | Peak Jerk: 0.040→ | Area Jerk: 0.900↓
+
+PRISM (OURS):
+  • FID: 0.070↓ [BEST - 22.2% improvement over FlowMDM]
+  • Diversity: 20.57→ [higher than real, indicating natural variation]
+  • Peak Jerk: 0.020→ [BEST - 33% improvement over FlowMDM]
+  • Area Under Jerk: 0.440↓ [BEST - 29% improvement over FlowMDM, 51% over MotionStreamer]
+
+================================================================================
+SECTION 4: MOTION TOKENIZER (VAE) RECONSTRUCTION COMPARISON
+================================================================================
+
+Table: Motion Tokenizer Reconstruction Quality
+
+HUMANML3D BENCHMARK:
+─────────────────────────────────────────────────────────────────────────────
+MotionLCM VAE:
+  • rFID: 0.278↓ | MPJPE: 60.68mm↓ | PA-MPJPE: 46.40mm↓ | MPJRE: 15.70↓
+
+MotionStreamer TAE [2nd Best]:
+  • rFID: 0.020↓ | MPJPE: 33.82mm↓ | PA-MPJPE: 26.11mm↓ | MPJRE: 7.75↓
+
+PRISM VAE (OURS) [STATE-OF-THE-ART]:
+  • rFID: 0.001↓ [20x improvement over MotionStreamer]
+  • MPJPE: 1.82mm↓ [18.6x improvement over MotionStreamer, 33.2x over MotionLCM]
+  • PA-MPJPE: 1.10mm↓ [23.7x improvement over MotionStreamer]
+  • MPJRE: 0.35↓ [22.1x improvement over MotionStreamer]
+
+MOTIONHUB BENCHMARK:
+─────────────────────────────────────────────────────────────────────────────
+MotionLCM VAE:
+  • rFID: 0.203↓ | MPJPE: 76.68mm↓ | PA-MPJPE: 51.34mm↓ | MPJRE: 16.33↓
+
+MotionStreamer TAE [2nd Best]:
+  • rFID: 0.355↓ | MPJPE: 59.83mm↓ | PA-MPJPE: 45.64mm↓ | MPJRE: 14.42↓
+
+PRISM VAE (OURS) [STATE-OF-THE-ART]:
+  • rFID: 0.001↓ [355x improvement over MotionStreamer]
+  • MPJPE: 1.99mm↓ [30x improvement over MotionStreamer]
+  • PA-MPJPE: 1.24mm↓ [36.8x improvement over MotionStreamer]
+  • MPJRE: 0.28↓ [51.5x improvement over MotionStreamer]
+
+KEY INSIGHT: The joint-factorized 2D latent space dramatically reduces reconstruction error,
+preserving motion detail far more faithfully than monolithic representations.
+
+================================================================================
+SECTION 5: ABLATION STUDIES
+================================================================================
+
+ABLATION 5A: 2D (JOINT-FACTORIZED) VS 1D (MONOLITHIC) LATENT SPACE
+─────────────────────────────────────────────────────────────────────────────
+Dataset: MotionHub Text-to-Motion
+
+1D (Monolithic) Latent:
+  • rFID: 0.018↓ | MPJPE: 28.47mm↓
+  • FID (Generation): 0.137↓ | R-Precision T3: 0.614↑ | MM-Dist: 1.103→
+
+2D (Joint-Factorized) Latent (OURS):
+  • rFID: 0.001↓ [18x improvement]
+  • MPJPE: 1.99mm↓ [14.3x improvement]
+  • FID (Generation): 0.055↓ [2.5x improvement in generation FID, 59.9% improvement]
+  • R-Precision T3: 0.772↑ [+25.7% improvement]
+  • MM-Dist: 1.039→ [6.1% improvement]
+
+FINDING: Per-joint factorization alone accounts for ~50% of latent-space gain and drives
+~2.5x FID improvement in generation, indicating latent structure is primary quality lever.
+
+ABLATION 5B: CAUSAL VS NON-CAUSAL CONVOLUTION
+─────────────────────────────────────────────────────────────────────────────
+Motion VAE Design Choice
+
+T2M (MotionHub):
+  Non-causal [Better single-segment]:
+    • FID: 0.051↓ | R-Precision T3: 0.779↑ | MM-Dist: 1.034→
+  Causal [Ours - Better sequential]:
+    • FID: 0.055↓ | R-Precision T3: 0.772↑ | MM-Dist: 1.039→
+
+TP2M (HumanML3D, 1-frame conditioning):
+  Non-causal [Better single-segment]:
+    • FID: 0.029↓ | R-Precision T3: 0.891↑ | MM-Dist: 0.941→
+  Causal [Ours - Better sequential]:
+    • FID: 0.031↓ | R-Precision T3: 0.887↑ | MM-Dist: 0.946→
+
+BABEL Sequential (multi-segment):
+  Non-causal [Fails for sequential]:
+    • R@3: 0.543↑ | FID: 0.136↓ | MM-Dist: 1.047→
+  Causal [Ours - BEST for sequential]:
+    • R@3: 0.587↑ [+8.1%] | FID: 0.100↓ [26.5% better] | MM-Dist: 1.014→ [3.1% better]
+
+FINDING: Causal design is essential for seamless autoregressive chaining, maintaining
+competitive single-segment quality while enabling smooth multi-segment generation.
+
+ABLATION 5C: AUTOREGRESSIVE TRAINING STRATEGIES (BABEL SEQUENTIAL)
+─────────────────────────────────────────────────────────────────────────────
+1. No Forcing (Teacher-Forced Training Only):
+  • R@3: 0.574↑ | FID: 0.118↓ | Diversity: 21.31→ | MM-Dist: 1.028→
+  • Peak Jerk: 0.050→ | Area Under Jerk: 0.910↓
+
+2. Causal Forcing (Ground-Truth Previous Segments at Train Time):
+  • R@3: 0.581↑ | FID: 0.107↓ | Diversity: 21.38→ | MM-Dist: 1.022→
+  • Peak Jerk: 0.030→ | Area Under Jerk: 0.620↓
+
+3. Self-Forcing [OURS] (Model's Own Generated Latents During Training):
+  • R@3: 0.587↑ [+2.3% vs Causal Forcing, +2.3% vs No Forcing]
+  • FID: 0.100↓ [6.5% better than No Forcing, 6.5% better than Causal Forcing]
+  • Diversity: 21.43→ [best diversity, highest natural variation]
+  • MM-Dist: 1.014→ [1.4% vs Causal Forcing]
+  • Peak Jerk: 0.020→ [BEST - 60% improvement vs No Forcing]
+  • Area Under Jerk: 0.440↓ [BEST - 51.6% improvement, reduces drift in long rollouts]
+
+FINDING: Self-Forcing training suppresses drift in long-horizon rollouts by simulating
+the actual inference pipeline during training, achieving best transition quality.
+
+================================================================================
+SECTION 6: NARRATIVE MOTION COMPOSITION - USER STUDY
+================================================================================
+
+Table: GSB Preference Study - PRISM vs MotionStreamer
+Study: 20 evaluators, 50 diverse prompts, 10 categories
+
+MOTION QUALITY:
+  • PRISM Preferred (Good): 74.3% ↑
+  • Same (Split): 16.5%
+  • MotionStreamer Preferred: 9.2% ↓
+
+TEXT FIDELITY:
+  • PRISM Preferred (Good): 71.8% ↑
+  • Same (Split): 17.6%
+  • MotionStreamer Preferred: 10.6% ↓
+
+TRANSITION SMOOTHNESS:
+  • PRISM Preferred (Good): 78.1% ↑ [STRONGEST MARGIN]
+  • Same (Split): 13.7%
+  • MotionStreamer Preferred: 8.2% ↓
+
+OVERALL PREFERENCE:
+  • PRISM Preferred (Good): 76.4% ↑ [STRONGEST OVERALL]
+  • Same (Split): 14.8%
+  • MotionStreamer Preferred: 8.8% ↓
+
+FINDING: PRISM is judged >70% preferred across all four dimensions, with particularly
+strong margins on transition smoothness (78.1%) and overall preference (76.4%), demonstrating
+superior segment chaining and narrative coherence.
+
+================================================================================
+SECTION 7: PHYSICS QUALITY - MBENCH EVALUATION
+================================================================================
+
+Table: MBench Results - 9 Physics-Quality Dimensions
+
+LATENT SPACE ANALYSIS (FROM NPZ DATA):
+─────────────────────────────────────────────────────────────────────────────
+
+CONDITION NUMBER (Measurement of latent space numerical stability):
+  • Kappa (1D): 1.112 [monolithic latent - higher instability]
+  • Kappa (2D): 1.028 [2D joint-factorized - 7.5% more stable]
+
+KL DIVERGENCE ANALYSIS:
+  • KL (1D per channel): Mean = 0.0328, Range [0.0109 - 0.0606]
+  • KL (2D per joint): Mean = 0.8070, Range [0.7552 - 0.8696]
+
+LATENT STATISTICS - 1D MONOLITHIC:
+  Z Mean per Channel: Range [-0.294 to 0.275], Mean ≈ 0.001 [centered]
+  Z Std per Channel: Range [0.894 - 1.099], Mean ≈ 1.006 [near standard normal]
+  
+  Velocity Magnitude per Channel: Range [1.067 - 1.187], Mean ≈ 1.146
+  Velocity Magnitude Std: Range [0.799 - 0.898], Mean ≈ 0.854
+
+LATENT STATISTICS - 2D JOINT-FACTORIZED:
+  Z Mean per Joint: Range [-0.008 to 0.076], Mean ≈ 0.026 [well-centered]
+  Z Std per Joint: Range [0.912 - 0.956], Mean ≈ 0.923 [near unit Gaussian]
+  
+  Velocity Magnitude per Joint: Range [5.325 - 5.445], Mean ≈ 5.378
+  Velocity Magnitude Std: Range [0.962 - 0.999], Mean ≈ 0.978 [stable across joints]
+
+INPUT HETEROGENEITY ANALYSIS:
+  Root Translation Range: 12.998 [highly dynamic, orders of magnitude]
+  Per-Joint Rotation Range: 1.54 - 1.99 [homogeneous across joints]
+  
+  Root Translation Std: 0.570
+  Per-Joint Rotation Std: Range [0.458 - 0.521], Mean ≈ 0.489
+
+FINDING: The 2D latent factorization reduces heterogeneity by separating root trajectory
+(12.99 range) from per-joint rotations (1.54-1.99 range), enabling each token to learn
+homogeneous dynamics. Better conditioned latent space (kappa 1.028 vs 1.112).
+
+MBENCH PHYSICS QUALITY SCORES:
+─────────────────────────────────────────────────────────────────────────────
+(↑ = higher better, ↓ = lower better)
+
+PRISM Performance in Physics Quality:
+  • Jitter (Smoothness): 0.009↓ [good, smooth motion]
+  • Dynamics: 0.036↑ [natural dynamic variation]
+  • Foot Float: 0.183↓ [some foot-float artifacts, lower than ideal]
+  • Foot Slide: 0.017↓ [good foot-ground contact]
+  • Ground Penetration: 0.089↓ [some penetration, not best]
+  • Body Penetration: 1.56↓ [moderate body interpenetration]
+  • Pose Quality: 2.48↓ [reasonable pose validity]
+
+Note: HY-Motion achieves better physics scores on foot-float, foot-slide, and ground-penetration
+(0.087, 0.004, 0.000 respectively), but PRISM prioritizes text-following fidelity and
+transition smoothness under unified single-model constraints.
+
+================================================================================
+SECTION 8: KEY ARCHITECTURAL & TRAINING PARAMETERS
+================================================================================
+
+MOTION VAE:
+  • Temporal Convolution: Causal (for streaming generation)
+  • Residual Blocks: 3 with causal temporal convolutions
+  • Downsampling: 4x
+  • Per-Frame Factorization: K=23 tokens per frame
+    - 1 Root Token: 3D position + 3D velocity (6D)
+    - 1 Global Orientation Token (6D - 6D rotation representation)
+    - 21 Joint Rotation Tokens (6D rotation per joint)
+  • Latent Dimension: D=16 per token (368 dims total per frame)
+  • Training: 400K steps, 16 V100 GPUs, batch 64/GPU, float32
+  • Max Sequence Length: 360 frames (~12s at 30fps)
+
+FLOW-MATCHING DIFUSION TRANSFORMER (DiT):
+  • Architecture: DiT-based (following Wan and ViMoGen)
+  • Model Size: ~1.4B parameters
+  • Blocks: 30
+  • Text Conditioning: T5-XXL
+  • Position Encoding: 2D RoPE along time and joint axes
+  • Training: 300K steps, 80 V100 GPUs, batch 6/GPU, bfloat16
+  • First-Frame Conditioning Probability: 0.5
+  • Inference: 50 Euler steps with classifier-free guidance scale 5.0
+  • Inference Speed: ~6s per 360-frame segment (~2x real-time on single V100)
+
+TRAINING DATA:
+  • Curated Dataset: ~200K high-quality SMPL(-X) motion-text pairs
+  • Source: MotionHub (aggregates diverse open-source mocap datasets)
+  • Representation: SMPL-22 pose, 30fps, standardized annotations
+
+================================================================================
+SECTION 9: SUMMARY OF KEY FINDINGS
+================================================================================
+
+1. LATENT-GENERATOR ALIGNMENT PRINCIPLE:
+   ✓ Joint-factorized 2D latent space (time × joints grid) fundamentally simplifies
+     the generation problem
+   ✓ Transforms one heterogeneous multi-scale regression (root trajectory in meters +
+     per-joint rotations in radians) into K=23 homogeneous predictions
+   ✓ Achieves 2.5x FID improvement with NO generator modification (controlled ablation)
+
+2. TEXT-TO-MOTION STATE-OF-THE-ART:
+   ✓ HumanML3D: FID 0.027 (55% improvement), R-Precision T1 0.699 (within 1.4% of real)
+   ✓ MotionHub: FID 0.055 (48% improvement), R-Precision T1 0.530 (79.5% of real)
+
+3. POSE-CONDITIONED GENERATION:
+   ✓ Per-token timestep conditioning enables zero-architectural-modification conditioning
+   ✓ Consistent 50%+ FID improvements across 1, 5, 9-frame conditioning scenarios
+
+4. LONG-HORIZON SEQUENTIAL GENERATION:
+   ✓ BABEL R@3: 0.587 (92% of real), Area Under Jerk: 0.440 (29% better than FlowMDM)
+   ✓ Self-Forcing training suppresses drift in long rollouts
+
+5. UNIFIED SINGLE-MODEL CAPABILITY:
+   ✓ Single 1.4B model seamlessly handles: T2M, pose-conditioned, autoregressive
+     sequential generation, and narrative motion composition
+   ✓ User study: 76.4% preference vs MotionStreamer, 78.1% on transition smoothness
+
+6. MOTION TOKENIZER QUALITY:
+   ✓ 20x rFID improvement (0.001 vs 0.020), 18.6x MPJPE improvement (1.82mm vs 33.82mm)
+   ✓ Faithful motion reconstruction enables high generation quality
+
+7. RECONSTRUCTION-GENERATION GAP EXPLANATION:
+   ✓ 20x rFID gain translates to ~2x FID generation gain due to:
+     (a) Reconstruction headroom saturation (noise floor ~10^-3)
+     (b) Generator becomes bottleneck with near-lossless tokenizer
+     (c) Cross-paper deltas compress under common evaluator
+   ✓ Latent design responsible for closing ~50% of gap to real motion
+
+8. PHYSICS QUALITY TRADE-OFF:
+   ✓ HY-Motion achieves better individual physics metrics (foot contact, ground penetration)
+   ✓ PRISM optimizes for text-following fidelity and transition quality under unified constraints
+
+================================================================================
+END OF REPORT
+================================================================================

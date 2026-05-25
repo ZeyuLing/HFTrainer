@@ -1,0 +1,324 @@
+═══════════════════════════════════════════════════════════════════════════════
+COMPLETE SCRIPT INVENTORY - scripts/embodied/ Directory
+═══════════════════════════════════════════════════════════════════════════════
+
+TOTAL SCRIPTS: 71 Python files + 4 shell scripts
+
+───────────────────────────────────────────────────────────────────────────────
+🟢 CRITICAL SCRIPTS (PhysFlow demo data generation)
+───────────────────────────────────────────────────────────────────────────────
+
+⭐ physflow_eval_and_export.py (517 lines)
+   → MAIN SCRIPT: Generates eval demo data with SMPL mesh exports
+   → Input: Original + trained T2M checkpoints
+   → Output: output/physflow/eval_demo/ (motion_135 NPZ + SMPL mesh JSON)
+   → Uses: physflow_trainer, physflow_physics_oracle, batch_npz_to_smpl_mesh_json
+
+⭐ physflow_trainer.py (993 lines)
+   → Core training loop: generate → physics correct → fine-tune
+   → Loads HyMotion T2M model, applies physics-grounded loss
+   → Produces model_final.pt checkpoint
+
+⭐ physflow_physics_oracle.py (328 lines)
+   → MuJoCo PD-tracking wrapper: motion_135 → physics_correct(motion_135)
+   → Used by trainer and evaluator for physics correction
+   → Handles Y-up ↔ Z-up transforms
+
+───────────────────────────────────────────────────────────────────────────────
+🟡 SUPPORTING SCRIPTS (PhysFlow pipeline)
+───────────────────────────────────────────────────────────────────────────────
+
+physflow_curriculum.py (147 lines)
+   → Defines PHYSFLOW_LEVELS: 8 difficulty levels with prompts
+   → Manages curriculum progression (standing → walking → complex)
+   → Exported by: trainer, evaluator, eval_and_export
+
+physflow_precompute_text.py (87 lines)
+   → Pre-compute text embeddings (Qwen3-8B + CLIP-L)
+   → Avoids loading large encoder during training
+   → Output: text_embeddings.pt
+
+physflow_evaluate.py (598 lines)
+   → Comprehensive before/after evaluation
+   → Generates metrics.json with completion_rate, tracking_error, jerk
+   → Saves per-prompt NPZ and SMPL mesh JSON
+
+───────────────────────────────────────────────────────────────────────────────
+🔵 PHYSICS SIMULATION SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+run_smpl_physics_sim.py (1171 lines)
+   → Core MuJoCo simulation engine
+   → Provides: yup_to_zup, zup_to_yup, smpl_to_qpos, qpos_to_smpl
+   → Physics loop with collision detection, friction, PD control
+   → Used by: physflow_physics_oracle, physflow_trainer
+
+run_smpl_rl_tracker.py (1162 lines)
+   → RL-based motion tracking/correction (alternative to PD)
+   → Output: output/physflow/eval_demo/smpl_mesh_rl/
+
+run_g1_rl_tracker_export.py (729 lines)
+   → RL-based G1 robot motion tracking
+   → Output: output/physflow/eval_demo/robot_mesh_rl/
+
+───────────────────────────────────────────────────────────────────────────────
+📦 FORMAT CONVERSION SCRIPTS (motion_135 → other formats)
+───────────────────────────────────────────────────────────────────────────────
+
+→ Web Visualization Formats:
+  batch_npz_to_smpl_mesh_json.py (202 lines)
+     Convert motion_135 NPZ → SMPL mesh JSON (Three.js compatible)
+  
+  batch_npz_to_smpl_joints.py (209 lines)
+     Convert motion_135 NPZ → joint positions JSON (skeleton-only)
+
+→ Robot Retargeting Formats:
+  motion135_to_pyroki_keypoints.py (540 lines)
+     Convert motion_135 → PyRoki 18-point keypoints + contacts
+     Used by pipeline_motion_to_robot.py
+  
+  motion135_to_smplx.py (162 lines)
+     Convert motion_135 → SMPL-X NPZ (GMR retargeting, V5)
+
+───────────────────────────────────────────────────────────────────────────────
+🤖 ROBOT MOTION GENERATION SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+pipeline_motion_to_robot.py (268 lines)
+   → End-to-end: motion_135 NPZ → robot motion (PyRoki V6)
+   → Three stages: keypoints → retarget → .motion files
+   → Optional ONNX tracker validation
+
+batch_retarget_parallel.py (257 lines)
+   → Parallel batch retargeting (CPU PyRoki, ~60min/motion)
+   → Multiprocessing with configurable workers
+
+───────────────────────────────────────────────────────────────────────────────
+🌐 WEB VISUALIZATION SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+batch_pipeline_to_web.py (295 lines)
+   → Batch convert NPZ → ProtoMotions cache → JSON for web
+   → Full pipeline: NPZ → Retarget → JSON
+
+batch_t2m_to_embodied.py (1029 lines)
+   → End-to-end: Text prompts → T2M → robot motion → web JSON
+   → Generates manifest, metadata, comparison website data
+
+───────────────────────────────────────────────────────────────────────────────
+🔬 DEBUG & DIAGNOSTIC SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+debug_root_transform.py (488 lines)
+   → Debug Y-up ↔ Z-up coordinate transforms
+
+debug_pose_diagnostic.py (375 lines)
+   → Diagnose pose/joint issues in physics simulation
+
+debug_sim_stability.py (269 lines)
+   → Test physics simulation stability, contact detection
+
+diag_actuator.py (298 lines)
+   → Diagnose actuator configurations
+
+check_motion_coords.py (171 lines)
+   → Verify motion coordinate systems
+
+test_e2e_v6.py (292 lines)
+   → End-to-end test of PyRoki V6 pipeline
+
+test_body_joint_combos.py (311 lines)
+   → Test joint combination permutations
+
+test_pd_standing.py (339 lines)
+   → Test PD controller on standing motion
+
+test_pd_standing_v2.py (174 lines)
+   → PD controller test v2
+
+test_mujoco_euler.py (175 lines)
+   → Test Euler angle conversions
+
+test_joint_reorder.py (237 lines)
+   → Test joint axis reordering
+
+test_definitive_fk.py (365 lines)
+   → Test forward kinematics
+
+test_single_joint_debug.py (313 lines)
+   → Single joint debugging
+
+test_height_analysis.py (319 lines)
+   → Height scaling analysis
+
+test_root_rotation_fix.py (308 lines)
+   → Test root rotation transformations
+
+verify_transform_euler.py (314 lines)
+   → Verify Euler transform correctness
+
+───────────────────────────────────────────────────────────────────────────────
+🏗️ HELPER & UTILITY SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+convert_cache_to_json.py (154 lines)
+   → Convert cached motion format → JSON
+
+generate_smpl_mesh_vertices.py (280 lines)
+   → Pre-compute SMPL mesh vertices for visualization
+
+gmr_retarget_headless.py (260 lines)
+   → GMR-based retargeting (V5 pipeline)
+
+gmr_to_protomotions.py (612 lines)
+   → Convert GMR-retargeted motion → ProtoMotions .motion
+
+rebuild_v4_from_motion.py (340 lines)
+   → Reconstruct V4 format from .motion files
+
+render_tracker_headless.py (876 lines)
+   → Headless rendering of tracked motions
+
+run_tracker_export.py (703 lines)
+   → Export tracker outputs (renders + qpos references)
+
+hymotion_to_smplx.py (150 lines)
+   → Convert HyMotion format → SMPL-X
+
+incremental_v4_pipeline.py (608 lines)
+   → Incremental V4 processing pipeline
+
+───────────────────────────────────────────────────────────────────────────────
+📊 BATCH UTILITY SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+_batch_compare.py (196 lines)
+   → Batch comparison utility
+
+_compare_caches.py (81 lines)
+   → Compare cache files
+
+_compare_v4_v5.py (276 lines)
+   → Compare V4 vs V5 pipeline outputs
+
+───────────────────────────────────────────────────────────────────────────────
+📝 SHELL SCRIPTS
+───────────────────────────────────────────────────────────────────────────────
+
+_debug_fall.sh
+   → Debug falling motion
+
+_run_sim_test.sh
+   → Run simulation test
+
+run_v6_full_regen.sh
+   → Full regeneration of V6 pipeline
+
+───────────────────────────────────────────────────────────────────────────────
+📋 DOCUMENTATION FILES
+───────────────────────────────────────────────────────────────────────────────
+
+FORMAT_SPECIFICATION.md (12,701 bytes)
+   → Specification of motion data formats
+
+ORACLE_INDEX.md (12,652 bytes)
+   → Physics oracle implementation index
+
+VERIFICATION_SUMMARY.txt (10,881 bytes)
+   → Verification test summary
+
+detailed_code_analysis.md (16,085 bytes)
+   → Detailed code analysis
+
+hymotion_verification_report.md (16,256 bytes)
+   → HyMotion verification report
+
+physics_oracle_report.md (29,476 bytes)
+   → Physics oracle comprehensive report
+
+oracle_quick_ref.txt (11,442 bytes)
+   → Physics oracle quick reference
+
+───────────────────────────────────────────────────────────────────────────────
+SCRIPT CATEGORIES BY PURPOSE
+───────────────────────────────────────────────────────────────────────────────
+
+Core Training/Eval (6 scripts):
+  ✓ physflow_curriculum.py
+  ✓ physflow_precompute_text.py
+  ✓ physflow_trainer.py
+  ✓ physflow_physics_oracle.py
+  ✓ physflow_evaluate.py
+  ✓ physflow_eval_and_export.py ⭐ MAIN
+
+Physics Simulation (3 scripts):
+  ✓ run_smpl_physics_sim.py
+  ✓ run_smpl_rl_tracker.py
+  ✓ run_g1_rl_tracker_export.py
+
+Format Conversion (4 scripts):
+  ✓ batch_npz_to_smpl_mesh_json.py
+  ✓ batch_npz_to_smpl_joints.py
+  ✓ motion135_to_pyroki_keypoints.py
+  ✓ motion135_to_smplx.py
+
+Robot/Web Export (4 scripts):
+  ✓ pipeline_motion_to_robot.py
+  ✓ batch_retarget_parallel.py
+  ✓ batch_pipeline_to_web.py
+  ✓ batch_t2m_to_embodied.py
+
+Testing/Debug (20+ scripts):
+  ✓ test_*.py, debug_*.py, verify_*.py, diag_*.py, check_*.py
+
+Utilities (15+ scripts):
+  ✓ convert_*.py, generate_*.py, gmr_*.py, rebuild_*.py, render_*.py
+
+───────────────────────────────────────────────────────────────────────────────
+OUTPUT DIRECTORY MAPPING
+───────────────────────────────────────────────────────────────────────────────
+
+generated by physflow_eval_and_export.py:
+
+output/physflow/eval_demo/
+├── data/
+│   ├── npz/                      ← motion_135 NPZ files (original_* and physflow_*)
+│   ├── smpl_mesh/                ← SMPL mesh JSON (kinematic, Three.js compatible)
+│   ├── smpl_mesh_physics/        ← SMPL mesh JSON (physics-corrected)
+│   ├── robot_motion/             ← (Optional) PyRoki retargeted robot motions
+│   ├── robot_mesh_rl/            ← (Optional) RL-tracked robot renders
+│   ├── smpl_mesh_rl/             ← (Optional) RL-corrected SMPL meshes
+│   ├── meta/                     ← Per-motion metadata JSON
+│   ├── sim_stats/                ← Physics correction statistics
+│   └── rl_stats/                 ← RL tracking statistics
+├── metrics.json                  ← Summary comparison metrics
+├── batch_retarget.sh             ← Robot retargeting batch script
+├── batch_retarget_fast.sh        ← Fast retargeting variant
+├── efficient_retarget.sh         ← Efficient retargeting script
+├── run_onnx_sim.sh               ← ONNX simulation script
+└── retarget_log*.txt             ← Retargeting logs
+
+───────────────────────────────────────────────────────────────────────────────
+EXECUTION FLOW FOR DEMO DATA GENERATION
+───────────────────────────────────────────────────────────────────────────────
+
+1. physflow_precompute_text.py
+   → Encode curriculum prompts with Qwen3-8B + CLIP-L
+   → Save: output/physflow/text_embeddings.pt
+
+2. physflow_trainer.py (optional if model_final.pt already exists)
+   → Iteratively train on curriculum
+   → Save: output/physflow/model_final.pt
+
+3. physflow_eval_and_export.py ⭐ MAIN STEP
+   Load models → Curriculum prompts → Generate motion_135
+   → Apply physics correction (oracle)
+   → Export motion_135 NPZ + SMPL mesh JSON
+   → Compute metrics
+   → Save: output/physflow/eval_demo/
+
+4. (Optional) pipeline_motion_to_robot.py
+   → Retarget to G1 robot motion
+   → Save: robot .motion files in eval_demo/data/robot_motion/
+
+═══════════════════════════════════════════════════════════════════════════════

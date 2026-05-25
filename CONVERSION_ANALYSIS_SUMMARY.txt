@@ -1,0 +1,316 @@
+================================================================================
+NPZ TO SMPL MESH JSON CONVERSION PIPELINE - ANALYSIS SUMMARY
+================================================================================
+Generated: 2026-05-25
+Project: HYMotion PhysFlow 3D Web Viewer
+
+================================================================================
+1. EXACT FUNCTION SIGNATURES
+================================================================================
+
+PRIMARY FUNCTION:
+  convert_single_npz(npz_path: str, smpl_type: str = "smplx", 
+                     gender: str = "neutral") -> dict
+
+  Parameters:
+    - npz_path: path to input .npz file
+    - smpl_type: "smpl" | "smplh" (recommended) | "smplx"
+    - gender: "neutral" | "male" | "female"
+  
+  Returns: {"type": "frames", "fps": int, "frames": list}
+
+ROTATION CONVERTER:
+  rot6d_to_axis_angle_np(rot6d: np.ndarray) -> np.ndarray
+  
+  - Input shape: (..., 6) - row-major rot6d
+  - Output shape: (..., 3) - axis-angle
+  - Process: reorder → Gram-Schmidt → matrix → axis-angle
+
+================================================================================
+2. INPUT NPZ FORMAT (motion_135)
+================================================================================
+
+FILE STRUCTURE:
+  Keys: ['motion_135', 'fps', 'prompt']
+  
+  motion_135: shape (T, 135) where T = frame count
+    [0:3]      = Translation [tx, ty, tz] (3 values)
+    [3:135]    = 22 joints × 6 rot6d (132 values)
+                 = rot6d for root + 21 body joints
+  
+  fps: integer, typically 30
+  prompt: string description of motion
+
+JOINT STRUCTURE (22 total):
+  Joint 0:     Root (Pelvis)
+  Joints 1-21: Body joints (21 body joints)
+    - Spine (3), Neck, Head
+    - Left/Right arms (shoulder, elbow, wrist)
+    - Left/Right legs (hip, knee, ankle)
+    - Left/Right toes
+
+ROT6D ENCODING (per joint):
+  6 floats = first two columns of 3×3 rotation matrix
+  Row-major order: [R00, R01, R10, R11, R20, R21]
+  Requires orthogonalization via Gram-Schmidt
+
+EXAMPLE FILE:
+  output/physflow_v2_compare_iter1000/npz/pretrained_00_a_person_stands_still_raw.npz
+  - motion_135: (120, 135) = 120 frames × 135 values
+  - fps: 30
+  - prompt: "a person stands still"
+
+================================================================================
+3. OUTPUT JSON FORMAT (SMPL Mesh JSON)
+================================================================================
+
+TOP-LEVEL STRUCTURE:
+  {
+    "type": "frames",                      // Always "frames"
+    "fps": 30,                             // Framerate
+    "frames": [                            // Array of frames
+      [frame_0_person_0],
+      [frame_1_person_0],
+      ...
+    ]
+  }
+
+FRAME STRUCTURE (per frame, per person):
+  [{
+    "id": 0,                               // Person ID
+    "gender": "neutral",                   // Gender
+    "smpl_type": "smplh",                  // SMPL type
+    "Rh": [[rx, ry, rz]],                  // Root orientation (axis-angle)
+    "Th": [[tx, ty, tz]],                  // Root translation
+    "poses": [[p0, p1, ..., pN]],          // Full pose vector (axis-angle)
+    "shapes": [[0, 0, ..., 0]],            // Shape coefficients (16 values)
+    "mocap_framerate": 30
+  }]
+
+POSE VECTOR SIZES:
+  SMPL:   72 params  (3 root + 69 body)
+  SMPL-H: 156 params (3 root + 69 body + 84 hands)
+  SMPL-X: 165 params (3 root + 69 body + 3 jaw + 6 eyes + 90 hands)
+
+JOINT MAPPING (motion_135 → SMPL):
+  motion_135 joints 0-21 (22 total)
+    ↓
+  SMPL-H poses[0:66] (root + 21 body, 22×3 params)
+  SMPL-H poses[66:156] (hands, 28×3 params = all zeros)
+
+SHAPE COEFFICIENTS:
+  Always 16 zeros (motion_135 doesn't contain body shape variation)
+
+================================================================================
+4. BATCH CONVERSION CLI
+================================================================================
+
+SCRIPT:
+  scripts/embodied/batch_npz_to_smpl_mesh_json.py
+
+USAGE - BATCH CONVERT:
+  python3 scripts/embodied/batch_npz_to_smpl_mesh_json.py \
+      --npz-dir output/physflow_v2_compare_iter1000/npz \
+      --output-dir motion_annot_web/embodied_viz/data/smpl_mesh \
+      --smpl-type smplh \
+      --gender neutral \
+      --skip-existing
+
+USAGE - SINGLE FILE:
+  python3 scripts/embodied/batch_npz_to_smpl_mesh_json.py \
+      --npz-file output/physflow_v2_compare_iter1000/npz/pretrained_00_a_person_stands_still_raw.npz \
+      --output-dir motion_annot_web/embodied_viz/data/smpl_mesh
+
+ARGUMENTS:
+  --npz-dir TEXT          Directory of NPZ files (mutually exclusive with --npz-file)
+  --npz-file TEXT         Single NPZ file (mutually exclusive with --npz-dir)
+  --output-dir TEXT       Output directory (REQUIRED)
+  --smpl-type TEXT        SMPL type: "smpl" | "smplh" (default) | "smplx"
+  --gender TEXT           Gender: "neutral" (default) | "male" | "female"
+  --skip-existing         Skip already converted files
+
+================================================================================
+5. NPZ FILES AVAILABLE IN COMPARISON OUTPUT
+================================================================================
+
+LOCATION:
+  output/physflow_v2_compare_iter1000/npz/
+
+STATISTICS:
+  Total files: 76 NPZ files
+
+BREAKDOWN:
+  pretrained + raw:  19 files
+  pretrained + rl:   19 files
+  finetuned + raw:   19 files
+  finetuned + rl:    19 files
+  
+  RL = Reinforcement Learning refinement applied
+
+NAMING PATTERN:
+  {variant}_{id}_{description}_{motion_type}.npz
+  
+  Example files:
+    pretrained_00_a_person_stands_still_raw.npz
+    pretrained_00_a_person_stands_still_rl.npz
+    pretrained_01_a_person_stands_in_a_relaxed_pose_raw.npz
+    finetuned_17_a_person_does_a_jumping_jack_rl.npz
+
+MOTION IDS (0-18, 19 unique motions):
+  Each variant has 19 motion sequences covering various movements
+
+================================================================================
+6. EMBODIED_VIZ DATA DIRECTORY STATE
+================================================================================
+
+BASE PATH:
+  motion_annot_web/embodied_viz/
+
+CURRENT STRUCTURE:
+  ✅ app.py                   - Flask web viewer (28.8 KB)
+  ✅ templates/               - HTML templates (19.6 KB)
+  ✅ static/ → symlink        - Assets from score_m2m_refine
+  ❌ data/                    - MISSING - needs to be created
+      ❌ smpl_mesh/           - MISSING - output directory for JSON
+
+ACTION REQUIRED:
+  mkdir -p motion_annot_web/embodied_viz/data/smpl_mesh
+
+WEB APP:
+  - Flask application for 3D motion visualization
+  - Routes for loading motion JSON files
+  - Asset serving from static/
+  - HTML templates for rendering
+
+================================================================================
+7. TRANSFORMATION PROCESS
+================================================================================
+
+TRANSLATION:
+  Source: motion_135[:, 0:3]
+  Target: JSON "Th" (root translation)
+  Process: Direct copy to output
+
+ROTATION:
+  Source: motion_135[:, 3:9] (root joint rot6d, joint 0)
+  Process:
+    1. Reorder from row-major [R00,R01,R10,R11,R20,R21] 
+       to column-major [R00,R10,R20,R01,R11,R21]
+    2. Gram-Schmidt orthogonalization to complete 3×3 matrix
+    3. Compute cross product for third column
+    4. Use scipy.spatial.transform.Rotation.from_matrix().as_rotvec()
+    5. Convert 3×3 rotation → 3-element axis-angle vector
+  Target: JSON "Rh" (root orientation, axis-angle)
+
+BODY POSES:
+  Source: motion_135[:, 9:135] (joints 1-21, 21×6 rot6d = 126 values)
+  Process: Apply rot6d→axis-angle to each of 21 body joints
+  Target: JSON "poses" 
+    - For SMPL-H: 156 total params
+    - [0:3] root axis-angle (duplicated from Rh)
+    - [3:66] 21 body joints × 3 (63 params)
+    - [66:156] hand joint placeholders (90 zeros)
+
+================================================================================
+8. TEST CONVERSION RESULTS
+================================================================================
+
+TEST FILE:
+  input/physflow_v2_compare_iter1000/npz/pretrained_00_a_person_stands_still_raw.npz
+
+CONVERSION OUTPUT:
+  ✅ type: "frames"
+  ✅ fps: 30
+  ✅ frames: 120 frames
+  ✅ frame[0]["Rh"]: [[-0.0348, 0.0361, 0.0044]]
+  ✅ frame[0]["Th"]: [[0.0181, 0.9906, -0.0228]]
+  ✅ frame[0]["poses"]: [1 × 156 vector]
+  ✅ frame[0]["shapes"]: [1 × 16 zeros]
+  ✅ JSON size (compact): 237.2 KB
+
+STATUS: ✅ Conversion pipeline verified and working
+
+================================================================================
+9. EXPECTED OUTPUT STATISTICS
+================================================================================
+
+Input:           76 NPZ files (motion_135 format)
+Output:          76 JSON files (SMPL mesh JSON format)
+Per-file size:   ~200-300 KB (compact JSON)
+Total size:      ~15-23 MB
+Frames per file: ~100-150 frames
+Framerate:       30 fps
+Processing time: ~5-10 minutes (for all 76 files)
+
+================================================================================
+10. KEY TRANSFORMATION DETAILS
+================================================================================
+
+MOTION_135 ENCODING:
+  ✅ Total values per frame: 135
+  ✅ Translation: 3 values [tx, ty, tz]
+  ✅ Rotations: 132 values = 22 joints × 6 (rot6d encoding)
+  ✅ Format: Float32 numpy array
+  ✅ Framerate: 30 fps (typical)
+
+ROT6D TO AXIS-ANGLE PROCESS:
+  ✅ Input: Row-major rot6d [R00, R01, R10, R11, R20, R21]
+  ✅ Reorder: [0, 2, 4, 1, 3, 5] to column-major
+  ✅ Orthogonalize: Gram-Schmidt to complete 3×3 matrix
+  ✅ Convert: Rotation matrix → axis-angle via scipy
+  ✅ Output: 3-element axis-angle vector
+
+SMPL MESH JSON OUTPUT:
+  ✅ Top-level keys: type, fps, frames
+  ✅ Frame array: Array of person objects
+  ✅ Person object: id, gender, smpl_type, Rh, Th, poses, shapes, mocap_framerate
+  ✅ JSON format: Compact (no whitespace) for minimal file size
+  ✅ SMPL-H default: 52 joints, 156-param pose vectors
+
+================================================================================
+11. NEXT STEPS
+================================================================================
+
+STEP 1 - Create Output Directory:
+  mkdir -p motion_annot_web/embodied_viz/data/smpl_mesh
+
+STEP 2 - Run Batch Conversion:
+  python3 scripts/embodied/batch_npz_to_smpl_mesh_json.py \
+      --npz-dir output/physflow_v2_compare_iter1000/npz \
+      --output-dir motion_annot_web/embodied_viz/data/smpl_mesh \
+      --smpl-type smplh \
+      --gender neutral \
+      --skip-existing
+
+STEP 3 - Verify Output:
+  ls -lh motion_annot_web/embodied_viz/data/smpl_mesh/ | head -10
+  du -sh motion_annot_web/embodied_viz/data/smpl_mesh/
+
+STEP 4 - Test JSON Validity:
+  python3 -c "import json; json.load(open('motion_annot_web/embodied_viz/data/smpl_mesh/pretrained_00_a_person_stands_still_raw.json'))"
+
+================================================================================
+SUMMARY
+================================================================================
+
+✅ Conversion Pipeline: Ready to execute
+✅ Input Format: motion_135 NPZ (22 joints, 135 params/frame)
+✅ Output Format: SMPL mesh JSON (52-156 joints, 156-165 params/frame)
+✅ Available Files: 76 NPZ files ready for conversion
+✅ Default SMPL Type: smplh (52 joints, best web support)
+✅ Processing Time: 5-10 minutes for all 76 files
+✅ Total Output Size: ~15-23 MB
+
+KEY TRANSFORMATIONS:
+  ✅ Translation: Direct copy
+  ✅ Rotation: rot6d → Gram-Schmidt orthogonalization → axis-angle
+  ✅ Body Joints: 22 joints → 52+ joints (with zero-padding)
+  ✅ Shape: All zeros (no body shape variation)
+
+READY TO DEPLOY:
+  - Create: motion_annot_web/embodied_viz/data/smpl_mesh/
+  - Run: batch_npz_to_smpl_mesh_json.py with provided arguments
+  - Mount: JSON directory in Flask web viewer (app.py)
+  - Serve: 3D SMPL mesh visualization in web browser
+
+================================================================================

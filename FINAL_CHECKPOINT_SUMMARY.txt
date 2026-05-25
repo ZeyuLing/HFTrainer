@@ -1,0 +1,262 @@
+╔═════════════════════════════════════════════════════════════════════════════╗
+║                 CHECKPOINT PATHS DISCOVERY COMPLETE                         ║
+║                    E2 (SMPL Caption) & E4 (KIMODO Caption)                   ║
+╚═════════════════════════════════════════════════════════════════════════════╝
+
+📋 DELIVERABLES
+──────────────────────────────────────────────────────────────────────────────
+
+✓ Two comprehensive documentation files have been generated:
+
+  1. CHECKPOINT_PATHS_E2_E4_REPORT.md (14 KB, 374 lines)
+     → Complete technical documentation with all details
+     → Includes absolute paths, file sizes, timestamps
+     → Configuration details and related experiments
+     → Loading code examples
+     → Verification commands
+
+  2. CHECKPOINT_QUICK_REFERENCE.txt (6.6 KB)
+     → Quick lookup format for fast access
+     → Python loading snippets
+     → Key differences table
+     → Verification commands
+
+
+📍 EXACT CHECKPOINT PATHS
+──────────────────────────────────────────────────────────────────────────────
+
+E2: SMPL Root + Caption Conditioning (Latest: Epoch 330)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Model File:
+  └─ work_dirs/hymotion_m2m_v2_smpl_caption_E2/checkpoint-epoch_330/model.pt
+  
+  Size: 1.8 GB
+  Last Modified: May 15, 2026, 16:37 UTC
+  
+  Also Available:
+  ├─ model.safetensors (1.8 GB)
+  ├─ optimizer.bin (3.7 GB)
+  └─ meta.pt (852 B)
+
+E4: KIMODO Root + Caption Conditioning (Latest: Epoch 270)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Model File:
+  └─ work_dirs/hymotion_m2m_v2_kimodo_caption_E4/checkpoint-epoch_270/model.pt
+  
+  Size: 1.8 GB
+  Last Modified: May 15, 2026, 17:00 UTC
+  
+  Also Available:
+  ├─ model.safetensors (1.8 GB)
+  ├─ optimizer.bin (3.7 GB)
+  └─ meta.pt (852 B)
+
+
+📁 TEXT EMBEDDING FILES (.pt CACHE)
+──────────────────────────────────────────────────────────────────────────────
+
+Primary Cache:
+└─ data/eval/m2m_v2/caption_embeddings/cache.pt (328 MB)
+   └─ Contains: QWEN3 + CLIP-L text embeddings for all training captions
+   └─ Last Modified: May 14, 2026, 18:08 UTC
+
+Sharded Distribution (8 parts):
+├─ cache_shard_0.pt (42 MB)
+├─ cache_shard_1.pt (42 MB)
+├─ cache_shard_2.pt (42 MB)
+├─ cache_shard_3.pt (41 MB)
+├─ cache_shard_4.pt (41 MB)
+├─ cache_shard_5.pt (41 MB)
+├─ cache_shard_6.pt (42 MB)
+└─ cache_shard_7.pt (42 MB)
+   └─ Total: 328 MB across 8 shards
+   └─ Location: data/eval/m2m_v2/caption_embeddings/shards/
+
+Backup (Historical):
+└─ data/eval/m2m_v2/caption_embeddings/backup/cache.qwen3_embedding.before_fix.pt
+   └─ Purpose: Pre-QWEN3 fix version (reference only)
+
+
+⚙️  KEY EXPERIMENT PARAMETERS
+──────────────────────────────────────────────────────────────────────────────
+
+SHARED CONFIGURATION (E2 & E4):
+  • Motion Representation: 198-dimensional
+    - 3-dim translation
+    - 22 × 6-dim rotation (6D continuous representation)
+    - 63-dim FK-derived joint positions
+  • Text Encoder: QWEN3 + CLIP-L
+  • Rotation Space: local (SMPL frame coordinates)
+  • Prediction Type: velocity
+  • CFG (Classifier-Free Guidance): 10% unconditional ratio
+  • Keypoint Supervision Weight: 10.0
+  • Training Data: train_hymotion_400h_hq_permo_motionfix_editing_20260514.json
+  • Initialized From: caption_local_phase2 checkpoint (epoch 3370)
+
+E2 SPECIFICS (SMPL Root Baseline):
+  • Root Representation: SMPL Root (raw, no smoothing)
+  • Translation Processing: Direct absolute translation
+  • Mean/Std Directory: data/hymotion_m2m_data/_stats_198dim
+  • Timestep Squared Weighting: disabled
+  • Use Case: Standard text-to-motion generation
+  • Latest Checkpoint: Epoch 330
+
+E4 SPECIFICS (KIMODO Root with ADMM Smoothing):
+  • Root Representation: KIMODO Root (online ADMM smoothed)
+    - Pelvis translation: 6cm margin on XZ plane (horizontal)
+    - Y-axis (vertical): unchanged
+  • Translation Processing: ADMM-smoothed with 0.06m margin
+  • Mean/Std Directory: data/hymotion_m2m_data/_stats_198dim_kimodo_root
+  • Timestep Squared Weighting: enabled (suppress noisy-FK spikes)
+  • Use Case: Embodied motion (robot deployment, consistent trajectories)
+  • Latest Checkpoint: Epoch 270
+
+
+📊 CHECKPOINT STATISTICS
+──────────────────────────────────────────────────────────────────────────────
+
+E2 Experiment:
+  • Total Checkpoints: 33 epochs (10, 20, 30, ..., 330)
+  • Training Progress: Stable through epoch 330
+  • Latest Status: Most recent (May 15 16:37 UTC)
+  • Model Size: 1.8 GB per checkpoint
+
+E4 Experiment:
+  • Total Checkpoints: 27 epochs (10, 20, 30, ..., 270)
+  • Training Progress: Stable through epoch 270
+  • Latest Status: Most recent (May 15 17:00 UTC)
+  • Model Size: 1.8 GB per checkpoint
+
+Text Embeddings:
+  • Total .pt files in data/: 26 files
+  • Embedding Cache: 328 MB (unified for both experiments)
+  • Last Updated: May 14 18:08 UTC
+
+
+🔧 QUICK START - LOADING MODELS
+──────────────────────────────────────────────────────────────────────────────
+
+Python (PyTorch):
+──────────────
+import torch
+
+# Load E2 checkpoint
+e2_checkpoint = torch.load(
+    'work_dirs/hymotion_m2m_v2_smpl_caption_E2/checkpoint-epoch_330/model.pt',
+    map_location='cuda:0',
+    weights_only=False
+)
+
+# Load E4 checkpoint
+e4_checkpoint = torch.load(
+    'work_dirs/hymotion_m2m_v2_kimodo_caption_E4/checkpoint-epoch_270/model.pt',
+    map_location='cuda:0',
+    weights_only=False
+)
+
+# Load text embeddings
+text_embeddings = torch.load(
+    'data/eval/m2m_v2/caption_embeddings/cache.pt',
+    map_location='cpu'
+)
+
+Command Line (Verification):
+────────────────────────────
+# Check E2
+ls -lh work_dirs/hymotion_m2m_v2_smpl_caption_E2/checkpoint-epoch_330/model.pt
+
+# Check E4
+ls -lh work_dirs/hymotion_m2m_v2_kimodo_caption_E4/checkpoint-epoch_270/model.pt
+
+# Check embeddings
+ls -lh data/eval/m2m_v2/caption_embeddings/cache.pt
+
+
+🎯 KEY FINDINGS
+──────────────────────────────────────────────────────────────────────────────
+
+1. CHECKPOINT DISCOVERY:
+   ✓ E2 latest: checkpoint-epoch_330 (1.8 GB model)
+   ✓ E4 latest: checkpoint-epoch_270 (1.8 GB model)
+   ✓ Both use distributed training (64 processes)
+   ✓ Both initialized from caption_local_phase2 epoch 3370
+
+2. TEXT EMBEDDINGS:
+   ✓ Primary cache: 328 MB cache.pt
+   ✓ Sharded format: 8 × 41-42 MB for distributed loading
+   ✓ Encoder: QWEN3 + CLIP-L
+   ✓ Used by both E2 and E4 via LoadPreExtractedTextEmbedding
+
+3. MOTION REPRESENTATIONS:
+   ✓ E2: SMPL Root (raw, standard baseline)
+   ✓ E4: KIMODO Root (ADMM smoothed, 6cm XZ margin)
+   ✓ Both: 198-dimensional with FK-derived joint positions
+   ✓ Distinction: E4 includes timestep² weighting for FK spike suppression
+
+4. TRAINING CONFIGURATION:
+   ✓ Shared text encoder: QWEN3 + CLIP-L
+   ✓ Shared annotation: train_hymotion_400h_hq_permo_motionfix_editing_20260514.json
+   ✓ CFG enabled: 10% unconditional guidance
+   ✓ Keypoint supervision: 10.0 weight
+
+
+📝 CONFIGURATION FILES
+──────────────────────────────────────────────────────────────────────────────
+
+Main Configs:
+├─ configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py (E2)
+└─ configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_046b.py (E4)
+
+Base Config (shared):
+└─ configs/hymotion_m2m_v2/_base_hymotion_m2m_v2_046b.py
+
+Related Phase Experiments:
+├─ configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase1.py
+├─ configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py (init source)
+├─ configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_phase1.py
+└─ configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_046b.py
+
+
+✅ VERIFICATION CHECKLIST
+──────────────────────────────────────────────────────────────────────────────
+
+✓ E2 checkpoint directory exists
+✓ E2 model.pt file verified (1.8 GB)
+✓ E2 safetensors alternative confirmed
+✓ E4 checkpoint directory exists
+✓ E4 model.pt file verified (1.8 GB)
+✓ E4 safetensors alternative confirmed
+✓ Text embedding cache.pt verified (328 MB)
+✓ All 8 shards accounted for
+✓ Backup embedding file located
+✓ Configuration files located
+✓ Training annotation file identified
+✓ All absolute paths resolved
+
+
+📌 ABSOLUTE PATH REFERENCE
+──────────────────────────────────────────────────────────────────────────────
+
+Base Directory:
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
+E2 Model:
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/work_dirs/hymotion_m2m_v2_smpl_caption_E2/checkpoint-epoch_330/model.pt
+
+E4 Model:
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/work_dirs/hymotion_m2m_v2_kimodo_caption_E4/checkpoint-epoch_270/model.pt
+
+Text Embeddings:
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/data/eval/m2m_v2/caption_embeddings/cache.pt
+
+
+═════════════════════════════════════════════════════════════════════════════
+
+Report Generated: 2026-05-15 17:26 UTC
+
+Supporting Documents:
+  • CHECKPOINT_PATHS_E2_E4_REPORT.md (comprehensive, 374 lines)
+  • CHECKPOINT_QUICK_REFERENCE.txt (quick lookup format)
+  • FINAL_CHECKPOINT_SUMMARY.txt (this file)
+
+═════════════════════════════════════════════════════════════════════════════

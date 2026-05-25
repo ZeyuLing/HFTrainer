@@ -1,0 +1,218 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                   SMPL-MUJOCO SIMULATION ARCHITECTURE                          ║
+║                              May 2026                                          ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  INPUT DATA LAYER                                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  motion_135.npz (Your Motion Data)                                          │
+│  ├─ motion_135: (T, 135) = [transl(3) + 22×rot6d(132)]                     │
+│  ├─ fps: int (typically 30)                                                │
+│  └─ [optional] positions: (T, 22, 3)                                       │
+│                                                                             │
+│  SMPL Model Files (checkpoints/smpl_models/)                               │
+│  ├─ SMPL/ (595 MB)                                                        │
+│  ├─ SMPL-H/ (symlink)                                                     │
+│  └─ SMPL-X/ (3.2 GB)                                                      │
+│      ├─ v_template, J_regressor, weights, faces, shapedirs               │
+│      └─ [Used for FK → mesh rendering]                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    ▼                               ▼
+┌─────────────────────────────────────────┐ ┌─────────────────────────────────┐
+│ CONVERSION LAYER 1                      │ │ VISUALIZATION PIPELINE           │
+├─────────────────────────────────────────┤ ├─────────────────────────────────┤
+│                                         │ │                                 │
+│ motion135_to_smplx.py                   │ │ batch_npz_to_smpl_mesh_json.py  │
+│ ├─ Rot6D → Rotation Matrix              │ │ ├─ motion_135 → SMPL JSON       │
+│ │  (Gram-Schmidt orthogonalization)     │ │ ├─ Format: {"frames": [...]}    │
+│ ├─ RotMat → Axis-Angle (scipy)          │ │ └─ For web viewer               │
+│ │                                       │ │                                 │
+│ └─ Output: SMPL-X NPZ                   │ └─────────────────────────────────┘
+│    ├─ pose_body: (T, 63)               │              │
+│    ├─ root_orient: (T, 3)              │              ▼
+│    ├─ trans: (T, 3)                    │ generate_smpl_mesh_vertices.py
+│    ├─ betas: (10,)  [zeros]            │ ├─ SMPL Forward Kinematics
+│    ├─ gender: "neutral"                │ ├─ Outputs: vertices.bin
+│    └─ mocap_frame_rate: 30             │ └─ For rendering (not physics)
+│                                         │
+└─────────────────────────────────────────┘
+                    │
+                    └─────────────────┬────────────────────┐
+                                      │                    │
+        ┌─────────────────────────────▼────────────────────▼──────────┐
+        │       PHYSICS SIMULATION LAYER (Choice of Path)             │
+        ├──────────────────────────────────────────────────────────────┤
+        │                                                              │
+        │ PATH A: ProtoMotions (Recommended)                           │
+        │ ════════════════════════════════════                          │
+        │                                                              │
+        │ 1. SmplRobotConfig / SMPLXRobotConfig                         │
+        │    ├─ asset: mjcf/smpl_humanoid.xml [238 lines]            │
+        │    ├─ control: PD parameters (stiffness, damping)           │
+        │    └─ simulation_params: fps, decimation, substeps          │
+        │                                                              │
+        │ 2. MotionLib                                                │
+        │    ├─ Loads motion sequences                               │
+        │    ├─ Samples random clips                                 │
+        │    └─ Provides target poses                                │
+        │                                                              │
+        │ 3. MimicMotionManager                                       │
+        │    ├─ Tracks reference motion                              │
+        │    ├─ Computes PD targets                                  │
+        │    └─ Updates every simulation step                        │
+        │                                                              │
+        │ 4. Simulators (Choose One)                                  │
+        │    ├─ Newton (MuJoCo backend) ◄── DIRECT MUJOCO            │
+        │    ├─ IsaacGym (NVIDIA GPU)                                │
+        │    ├─ IsaacLab (newer NVIDIA)                              │
+        │    └─ Genesis (CPU/GPU)                                    │
+        │                                                              │
+        │ 5. BaseEnv                                                  │
+        │    ├─ Handles step/reset                                   │
+        │    ├─ Computes observations                                │
+        │    ├─ Reward function (pose error, contacts, etc.)        │
+        │    └─ Termination conditions                               │
+        │                                                              │
+        │ ─────────────────────────────────────────────────────────   │
+        │                                                              │
+        │ PATH B: Direct MuJoCo (Standalone)                          │
+        │ ═══════════════════════════════════                         │
+        │                                                              │
+        │ 1. mujoco.MjModel.from_xml_file(smpl_humanoid.xml)        │
+        │ 2. Manual joint angle conversion (motion_135 → qpos)       │
+        │ 3. mujoco.mj_step() for physics                            │
+        │ 4. Manual PD controller implementation                     │
+        │ 5. Custom observation/reward logic                         │
+        │                                                              │
+        └──────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+        ┌──────────────────────────────────────────────────────────────┐
+        │           SIMULATION STEP EXECUTION                          │
+        ├──────────────────────────────────────────────────────────────┤
+        │                                                              │
+        │  foreach env in parallel:                                   │
+        │  ┌────────────────────────────────────────────────────────┐ │
+        │  │ 1. Get target pose from MotionManager                 │ │
+        │  │    └─ pose_body(t), root_orient(t), trans(t)         │ │
+        │  │                                                       │ │
+        │  │ 2. Compute PD control (for each joint)               │ │
+        │  │    force = kp * (target - current) - kd * velocity   │ │
+        │  │                                                       │ │
+        │  │ 3. Apply forces to MuJoCo                            │ │
+        │  │    └─ data.ctrl = forces                             │ │
+        │  │                                                       │ │
+        │  │ 4. Physics integration                               │ │
+        │  │    ├─ Gravity, contacts, friction                    │ │
+        │  │    ├─ Collision detection                            │ │
+        │  │    └─ mj_step() ← Core physics loop                 │ │
+        │  │                                                       │ │
+        │  │ 5. Read state                                        │ │
+        │  │    ├─ qpos: joint angles                             │ │
+        │  │    ├─ qvel: joint velocities                         │ │
+        │  │    └─ contacts: force/torque                         │ │
+        │  │                                                       │ │
+        │  │ 6. Compute observations                              │ │
+        │  │    ├─ Pose tracking error vs reference               │ │
+        │  │    ├─ Contact info (feet on ground?)                 │ │
+        │  │    └─ Height, velocity, acceleration                 │ │
+        │  │                                                       │ │
+        │  │ 7. Compute reward                                    │ │
+        │  │    ├─ r_pose = -||current - target||²               │ │
+        │  │    ├─ r_contact = penalty for unwanted contacts      │ │
+        │  │    ├─ r_control = penalty for large forces           │ │
+        │  │    └─ r_total = weighted combination                 │ │
+        │  │                                                       │ │
+        │  │ 8. Check termination                                 │ │
+        │  │    ├─ Episode length exceeded?                       │ │
+        │  │    ├─ Pose error too large?                          │ │
+        │  │    └─ Contact failure?                               │ │
+        │  │                                                       │ │
+        │  └────────────────────────────────────────────────────────┘ │
+        │                                                              │
+        └──────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+        ┌──────────────────────────────────────────────────────────────┐
+        │              OUTPUT / ANALYSIS LAYER                         │
+        ├──────────────────────────────────────────────────────────────┤
+        │                                                              │
+        │  Simulation Results                                          │
+        │  ├─ Trajectories: (num_envs, T, state_dim)                 │
+        │  ├─ Rewards: (num_envs, T)                                 │
+        │  ├─ Tracking error: (num_envs, T)                          │
+        │  └─ Contact forces: (num_envs, T, num_contacts)            │
+        │                                                              │
+        │  Metrics                                                    │
+        │  ├─ Average pose error                                     │
+        │  ├─ Success rate (motion completion)                       │
+        │  ├─ Energy expenditure                                     │
+        │  └─ Contact pattern analysis                               │
+        │                                                              │
+        │  Visualization                                              │
+        │  ├─ MuJoCo viewer (interactive)                            │
+        │  ├─ Video rendering                                        │
+        │  ├─ Trajectory plots                                       │
+        │  └─ Web-based mesh viewer                                  │
+        │                                                              │
+        └──────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║  KEY RESOURCES IN YOUR CODEBASE                                                ║
+╠════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                ║
+║  ✅ XML Models (Ready to Use)                                                 ║
+║     • ref_repo/ProtoMotions/data/assets/mjcf/smpl_humanoid.xml               ║
+║     • ref_repo/ProtoMotions/data/assets/mjcf/smplx_humanoid.xml              ║
+║                                                                                ║
+║  ✅ Robot Configurations                                                       ║
+║     • ref_repo/ProtoMotions/robot_configs/smpl.py                            ║
+║     • ref_repo/ProtoMotions/robot_configs/smplx.py                           ║
+║                                                                                ║
+║  ✅ Data Conversion Scripts                                                    ║
+║     • scripts/embodied/motion135_to_smplx.py                                 ║
+║     • scripts/embodied/batch_npz_to_smpl_mesh_json.py                        ║
+║     • scripts/embodied/generate_smpl_mesh_vertices.py                        ║
+║                                                                                ║
+║  ✅ SMPL Model Files                                                           ║
+║     • checkpoints/smpl_models/ (595MB SMPL + 3.2GB SMPL-X)                   ║
+║                                                                                ║
+║  ✅ ProtoMotions Components                                                    ║
+║     • Motion tracking: ProtoMotions/envs/motion_manager/                      ║
+║     • Environment: ProtoMotions/envs/base_env/                                ║
+║     • Observation: ProtoMotions/envs/obs/                                     ║
+║     • Examples: ProtoMotions/examples/env_kinematic_playback.py               ║
+║                                                                                ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+SPEC SHEET
+──────────
+Humanoid Type:          SMPL (22-joint + root) / SMPL-X (with hands)
+Bodies:                 23 (1 pelvis + 22 joints)
+DOF:                    ~69 (7 free root + 66 hinge angles)
+Collision:              Capsules (limbs) + Boxes (feet/hands/head)
+Control:                Proportional-Derivative (PD)
+Simulation Rate:        120 FPS (decimation 4 = 30 Hz control)
+Motion Format:          motion_135 (rot6d) → SMPL-X axis-angle
+Data Conversion:        Implemented (motion135_to_smplx.py)
+Physics Backend:        MuJoCo (via Newton simulator)
+GPU Support:            ✅ IsaacGym, IsaacLab, Genesis
+CPU Support:            ✅ Newton, Genesis
+
+GOTCHAS & TIPS
+──────────────
+1. Rot6D Layout: HyMotion uses row-major [R00,R01,R10,R11,R20,R21]
+                 Reorder [0,2,4,1,3,5] before Gram-Schmidt
+2. Joint Order: Free root (7) + L_Hip(3) + L_Knee(3) + ... (60+)
+3. Stability: Use stiffness=1000 for torso, damping=80-100
+4. Contact: Condim=3 enables friction; margin=0.001 for stability
+5. Hand Control: motion_135 is 22-joint SMPL (no hands)
+                 Use SMPL-X config for detailed hand simulation
+
+STATUS: 🟢 READY TO IMPLEMENT

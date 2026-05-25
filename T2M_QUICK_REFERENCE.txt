@@ -1,0 +1,136 @@
+═══════════════════════════════════════════════════════════════════════════════
+🎯 OFFICIAL HYUNANMOTION T2M TRAINING CODE - QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 KEY FILES (All Located in hftrainer/)
+
+1. BUNDLE (Model Architecture)
+   File: hftrainer/models/motion/hymotion_t2m/bundle.py
+   Class: HyMotionT2MBundle(ModelBundle)
+   Key methods: encode_text(), mask_text_cond(), predict_flow(), decode_motion_from_latent()
+
+2. TRAINER (Training Loop)
+   File: hftrainer/trainers/motion/hymotion_t2m_trainer.py
+   Class: HyMotionT2MTrainer(BaseTrainer)
+   Key methods: _prepare_text_encoding() [3-path logic], train_step()
+
+3. TEXT ENCODER (Dual Encoder)
+   File: hftrainer/models/motion/hymotion_m2m/network/text_encoder.py
+   Class: HYTextModel(nn.Module)
+   Key methods: _encode_llm() [Qwen3], _encode_sentence_emb() [CLIP-L], encode()
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 TEXT EMBEDDINGS SUMMARY
+
+Dimension Reference:
+  - vtxt (sentence vector):    (B, 1, 768)    [CLIP-L, L2-normalized]
+  - ctxt (token embeddings):   (B, 128, 4096) [Qwen3, NOT normalized]
+  - ctxt_length:               (B,)           [actual pre-padding length]
+
+Null Embeddings (for CFG):
+  - null_vtxt_feat:   nn.Parameter (1, 1, 768)   [zero-initialized]
+  - null_ctxt_input:  nn.Parameter (1, 1, 4096)  [zero-initialized]
+
+═══════════════════════════════════════════════════════════════════════════════
+🔄 TEXT CONDITIONING - 3 PATHS
+
+Path 1: Pre-Encoded Text (FASTEST)
+  → Batch contains: text_vec_raw, text_ctxt_raw, text_ctxt_raw_length
+  → Direct use, no encoding needed
+
+Path 2: Online Caption Encoding
+  → Batch contains: caption field
+  → Call bundle.encode_text(captions)
+  → Returns: {text_vec_raw, text_ctxt_raw, text_ctxt_raw_length}
+
+Path 3: Null Embeddings (UNCONDITIONAL)
+  → When caption is empty or zero-length
+  → Use bundle.null_vtxt_feat and bundle.null_ctxt_input
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ CFG DROPOUT - Bernoulli Masking
+
+Implementation:
+  1. Generate per-batch mask: Bernoulli(p=cond_mask_prob)  [default: 0.1]
+  2. Where mask=1, replace text embeddings with null embeddings
+  3. This makes ~10% of batch unconditional
+
+Code:
+  mask = torch.bernoulli(torch.ones(bs, device=device) * cond_mask_prob)
+  vtxt_masked = where(mask, null_vtxt_feat.expand_as(vtxt), vtxt)
+  ctxt_masked = where(mask, null_ctxt_input.expand_as(ctxt), ctxt)
+
+═══════════════════════════════════════════════════════════════════════════════
+🔍 TEXT NORMALIZATION
+
+CLIP-L (vtxt):
+  ✅ L2-normalized to unit vector
+  Location: text_encoder.py line 254
+  Output magnitude: ≈ 1.0
+
+Qwen3 (ctxt):
+  ❌ NOT normalized (raw hidden state)
+  Output magnitude: arbitrary, depends on LLM output scale
+
+═══════════════════════════════════════════════════════════════════════════════
+⚙️ TEXT PADDING CONVENTION
+
+Default: max_text_len = 128
+
+Process:
+  1. Encode text → ctxt (B, Lc, 4096) where Lc is actual token count
+  2. Store ctxt_length = Lc (pre-padding)
+  3. Pad or truncate ctxt to 128: F.pad(ctxt, (0,0,0,pad_len-Lc))
+  4. Build padding_mask: [True]*Lc + [False]*(128-Lc)
+  5. Pass mask to transformer for attention masking
+
+═══════════════════════════════════════════════════════════════════════════════
+🆚 T2M vs M2M DIFFERENCES
+
+Text Processing: IDENTICAL
+  ✅ Both use Qwen3-8B + CLIP-L
+  ✅ Both apply CFG dropout with Bernoulli masking
+  ✅ Both have null embeddings as nn.Parameters
+  ✅ Both pad to max_text_len=128
+
+Motion Processing: KEY DIFFERENCE
+  ❌ M2M: 135-dim (absolute transl + rot6d)
+  ❌ T2M: 201-dim (relative transl + rot6d for 33-joint SMPL)
+
+Model Input: KEY DIFFERENCE
+  ❌ M2M: x_input = [x_t + VACE_context] = (B,L,540)
+  ❌ T2M: x_input = x_t only = (B,L,201)
+
+═══════════════════════════════════════════════════════════════════════════════
+💡 IMPLEMENTATION CHECKLIST
+
+For Text-Conditioned T2M:
+  ☑ Use HYTextModel for dual-encoder text encoding
+  ☑ Pad text tokens to 128 (matches training distribution)
+  ☑ Apply L2-norm ONLY to sentence embeddings (vtxt), NOT LLM tokens (ctxt)
+  ☑ Implement 3-path conditioning for flexibility
+  ☑ Use Bernoulli masking for classifier-free guidance
+
+For Inference:
+  ☑ Pre-encode text offline for speed (Path 1)
+  ☑ Preserve ctxt_length for proper padding mask generation
+  ☑ Load null embeddings from pretrained T2M checkpoint
+  ☑ Apply CFG masking during inference
+
+For Training:
+  ☑ Always normalize motion using pretrained mean/std
+  ☑ Preserve padding masks throughout pipeline
+  ☑ Save null embeddings in checkpoint (bundle-level parameters)
+  ☑ Verify text paths match training distribution
+
+═══════════════════════════════════════════════════════════════════════════════
+📚 COMPREHENSIVE ANALYSIS
+
+Full analysis with detailed code examples, flow diagrams, and comparisons:
+  → T2M_ANALYSIS_FINAL_SUMMARY.md
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ Analysis Status: COMPLETE
+Last Updated: May 15, 2026
+Repository: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+═══════════════════════════════════════════════════════════════════════════════

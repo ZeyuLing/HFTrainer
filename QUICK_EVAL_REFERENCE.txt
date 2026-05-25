@@ -1,0 +1,202 @@
+================================================================================
+PRISM EVALUATION & BATCH INFERENCE - QUICK REFERENCE CARD
+================================================================================
+
+BASE PATH: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+
+================================================================================
+1. BATCH INFERENCE SCRIPTS
+================================================================================
+
+PRISM KAFS ABLATION (Primary - HumanML3D + MotionHub):
+  Location: scripts/eval/eval_prism_kafs_ablation.py
+  Purpose:  Batch evaluation under different KAFS modes (none, depth_driven, uniform, random)
+  Command:  python scripts/eval/eval_prism_kafs_ablation.py \
+              --config configs/prism/prism_1b_tp2m_multiframe.py \
+              --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-latest \
+              --kafs-mode depth_driven \
+              --anno-file data/annotation/test_hml3d.json \
+              --output-dir work_dirs/prism_kafs_eval_test \
+              --num-inference-steps 20 \
+              --max-samples 100
+
+M2M v2 MULTI-TASK EVALUATION:
+  Location: scripts/eval/eval_m2m_v2_all_tasks.py (203 KB)
+  Purpose:  Comprehensive eval of 4 M2M v2 model variants across E1-E15 tasks
+  Command:  python scripts/eval/eval_m2m_v2_all_tasks.py \
+              --tasks E2 E3 E4 E5 \
+              --models caption_local caption_global \
+              --max-samples 50 \
+              --output-dir work_dirs/m2m_v2_eval_batch
+
+UNIFIED INFERENCE ENTRY POINT:
+  Location: tools/infer.py (14 KB - recently updated)
+  Purpose:  Single endpoint for PRISM, HyMotion T2M/M2M, VerMo
+  Command:  python tools/infer.py \
+              --config configs/prism/prism_1b_tp2m_multiframe.py \
+              --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-latest \
+              --prompt "a person walks forward" \
+              --output output/test_motion.npz \
+              --num-steps 20
+
+OTHER EVALUATION SCRIPTS IN scripts/eval/:
+  - eval_m2m_v2_t2m.py (34 KB) - T2M-specific M2M v2 eval
+  - eval_with_motionclip_evaluator.py (24 KB) - MotionCLIP metrics
+  - eval_momask_native_h3d263.py (15 KB) - MoMask on H3D-263
+  - momask_infer_h3d_test.py (13 KB) - MoMask H3D test inference
+  - compute_kafs_metrics.py (9 KB) - KAFS-specific metric computation
+
+================================================================================
+2. TEST ANNOTATION FILES
+================================================================================
+
+LOCATION: data/annotation/
+
+HUMANML3D TEST SET:
+  ✓ test_hml3d.json (primary)
+  ✓ test_hml3d_rewritten.json (alternative captions)
+
+MOTIONHUB TEST SETS:
+  ✓ test_motionhub_t2m.json (text-to-motion - primary)
+  ✓ test_motionhub_t2m_rewritten.json (alternative captions)
+  ✓ test_motionhub_1p.json (1-person)
+  ✓ test_motionhub_2p.json (2-person)
+  ✓ test_motionhub_m2d.json (motion-to-dance)
+  ✓ test_motionhub_recon.json (reconstruction)
+  ✓ test_motionhub_s2g.json (speech-to-gesture)
+
+NOTE: Most are symlinks to /apdcephfs_cq11/share_1467498/home/zeyuling/versatilemotion/data/annotation/
+
+================================================================================
+3. PRISM CONFIGS & CHECKPOINTS
+================================================================================
+
+CONFIG LOCATION: configs/prism/
+
+PRIMARY CONFIGS:
+  ✓ prism_1b_tp2m_1frame.py (single frame - baseline)
+  ✓ prism_1b_tp2m_multiframe.py (multi-frame - recommended)
+  ✓ prism_1b_tp2m_multiframe_kt_spectral.py (KT Spectral variant - latest May 17)
+
+ABLATION VARIANTS:
+  • prism_1b_tp2m_1frame_kt_dfs.py
+  • prism_1b_tp2m_1frame_kt_spectral.py
+  • prism_1b_tp2m_multiframe_kt_dfs.py
+  • prism_mcm_motionhub.py (motion-to-music)
+
+CHECKPOINTS: work_dirs/prism_*_kt_spectral/checkpoint-latest
+  → Latest: prism_1b_tp2m_multiframe_kt_spectral/ (11.3 GB, updated May 18 07:11)
+
+================================================================================
+4. M2M v2 MODEL REGISTRY
+================================================================================
+
+V2_MODELS LOCATION: scripts/eval/eval_m2m_v2_all_tasks.py (lines 113-200+)
+
+PHASE 0 - ROOT REPRESENTATION ABLATIONS:
+  ✓ smpl_uncond_E1 (SMPL + unconditioned) → work_dirs/hymotion_m2m_v2_smpl_uncond_E1/
+  ✓ kimodo_uncond_E3 (KIMODO + unconditioned) → work_dirs/hymotion_m2m_v2_kimodo_uncond_E3/
+  ✓ smpl_caption_E2 (SMPL + caption) → work_dirs/hymotion_m2m_v2_smpl_caption_E2/
+  ✓ kimodo_caption_E4 (KIMODO + caption) → work_dirs/hymotion_m2m_v2_kimodo_caption_E4/
+
+PHASE 1 & 2 - MIXED TRAINING VARIANTS:
+  • uncond_local/global
+  • caption_local/global
+  • caption_local_phase1/2, caption_global_phase1/2
+
+LATEST MODELS (as of May 18):
+  → hymotion_m2m_v2_smpl_caption_E2/ (531.5 GB - LATEST)
+  → hymotion_m2m_v2_kimodo_caption_E4/ (487.2 GB)
+
+================================================================================
+5. EVALUATION RESULTS STORAGE
+================================================================================
+
+PRIMARY OUTPUT: output/ (29 TB total)
+  Recent: embodied_t2m_v4/ (568.7 GB), embodied_t2m_v3/ (142.1 GB)
+  Pattern: eval_v2_e9_20260423_manifold/ (use date stamps)
+
+WORK_DIRS: work_dirs/ (553 TB total, 296 directories)
+  M2M Evals: m2m_v2_eval_four_new_missing_all_20260514_*/ (1.4 TB each)
+  PRISM: prism_kafs_ablation/ (102.2 GB)
+
+EVALUATION RESULTS: eval_results/
+  m2m/ (2.65 TB) - M2M results
+  m2m_smoke/ (2.7 GB) - smoke tests
+
+================================================================================
+6. CAPTION EMBEDDING CACHE
+================================================================================
+
+LOCATION: data/eval/m2m_v2/caption_embeddings/cache.pt
+
+PURPOSE: Pre-extracted text embeddings (avoids re-encoding during eval)
+
+IF MISSING, REBUILD:
+  CUDA_VISIBLE_DEVICES=0 python3 scripts/caption/extract_eval_caption_embeddings.py --force
+
+================================================================================
+7. KEY DATA PATHS
+================================================================================
+
+Motion Data:         data/motionhub/
+Test Annotations:    data/annotation/
+Pre-computed Cache:  data/eval/m2m_v2/caption_embeddings/cache.pt
+Checkpoint Storage:  checkpoints/ (121.7 GB)
+Model Checkpoints:   work_dirs/{model_name}/checkpoint-{iteration|latest}
+
+================================================================================
+8. QUICK START - BATCH EVALUATION ON TEST SETS
+================================================================================
+
+PRISM on HumanML3D (KAFS Ablation):
+  cd /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
+  python scripts/eval/eval_prism_kafs_ablation.py \
+    --config configs/prism/prism_1b_tp2m_multiframe.py \
+    --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-latest \
+    --kafs-mode depth_driven \
+    --anno-file data/annotation/test_hml3d.json \
+    --output-dir work_dirs/prism_eval_hml3d \
+    --num-inference-steps 20
+
+PRISM on MotionHub (T2M):
+  python scripts/eval/eval_prism_kafs_ablation.py \
+    --anno-file data/annotation/test_motionhub_t2m.json \
+    --kafs-mode none \
+    --max-samples 50
+
+M2M v2 Comprehensive Eval (all tasks):
+  python scripts/eval/eval_m2m_v2_all_tasks.py \
+    --all-tasks \
+    --max-samples 100 \
+    --output-dir work_dirs/m2m_v2_eval_all
+
+================================================================================
+9. KAFS MODES EXPLAINED
+================================================================================
+
+none:           Standard baseline (no per-joint timestep scaling)
+depth_driven:   Per-joint scaling based on kinematic tree depth [RECOMMENDED]
+uniform:        All joints get alpha=1.0 (sanity check)
+random:         Random alphas in [0.85, 1.15] (ablation control)
+
+================================================================================
+10. TROUBLESHOOTING
+================================================================================
+
+✗ Caption embedding cache not found:
+  → Run: CUDA_VISIBLE_DEVICES=0 python3 scripts/caption/extract_eval_caption_embeddings.py --force
+
+✗ Caption models missing text encoder:
+  → Models trained with LoadPreExtractedTextEmbedding need pre-extracted cache
+  → Use the script above to rebuild cache
+
+✗ Test annotation files not found:
+  → Check symlinks: data/annotation/ points to versatilemotion repo
+  → Alternative: use direct paths if symlinks are broken
+
+✗ Checkpoint not loading:
+  → Verify path exists: work_dirs/{model_name}/checkpoint-{iteration|latest}
+  → Check format: PyTorch .pt or SafeTensors .safetensors
+
+================================================================================

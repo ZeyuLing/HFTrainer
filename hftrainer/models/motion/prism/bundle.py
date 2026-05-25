@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,6 +15,8 @@ from hftrainer.models.motion.prism.gaussian_distribution import (
     DiagonalGaussianDistributionNd,
 )
 from hftrainer.registry import MODEL_BUNDLES
+
+logger = logging.getLogger(__name__)
 
 
 def _get_sigmas(scheduler, timesteps, n_dim: int = 4, dtype=torch.float32):
@@ -35,22 +38,27 @@ class PrismBundle(ModelBundle):
         self,
         transformer: dict,
         vae: dict,
-        tokenizer: dict,
-        text_encoder: dict,
-        scheduler: dict,
-        smpl_pose_processor: dict,
+        tokenizer: Optional[dict] = None,
+        text_encoder: Optional[dict] = None,
+        scheduler: Optional[dict] = None,
+        smpl_pose_processor: Optional[dict] = None,
     ):
         super().__init__()
-        self._build_modules(
-            {
-                'transformer': transformer,
-                'vae': vae,
-                'tokenizer': tokenizer,
-                'text_encoder': text_encoder,
-                'scheduler': scheduler,
-                'smpl_pose_processor': smpl_pose_processor,
-            }
-        )
+        modules = {
+            'transformer': transformer,
+            'vae': vae,
+            'scheduler': scheduler,
+            'smpl_pose_processor': smpl_pose_processor,
+        }
+        if tokenizer is not None:
+            modules['tokenizer'] = tokenizer
+        else:
+            logger.info('PrismBundle: tokenizer=None, text encoding unavailable.')
+        if text_encoder is not None:
+            modules['text_encoder'] = text_encoder
+        else:
+            logger.info('PrismBundle: text_encoder=None, text encoding unavailable.')
+        self._build_modules(modules)
         if hasattr(self.scheduler, 'set_timesteps'):
             self.scheduler.set_timesteps(self.scheduler.config.num_train_timesteps)
         self.use_static = bool(getattr(self.vae.config, 'use_static', False))
@@ -114,8 +122,10 @@ class PrismBundle(ModelBundle):
         os.makedirs(save_directory, exist_ok=True)
         self.transformer.save_pretrained(os.path.join(save_directory, 'transformer'), **kwargs)
         self.vae.save_pretrained(os.path.join(save_directory, 'vae'), **kwargs)
-        self.text_encoder.save_pretrained(os.path.join(save_directory, 'text_encoder'), **kwargs)
-        self.tokenizer.save_pretrained(os.path.join(save_directory, 'tokenizer'))
+        if hasattr(self, 'text_encoder') and self.text_encoder is not None:
+            self.text_encoder.save_pretrained(os.path.join(save_directory, 'text_encoder'), **kwargs)
+        if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+            self.tokenizer.save_pretrained(os.path.join(save_directory, 'tokenizer'))
         self.scheduler.save_pretrained(os.path.join(save_directory, 'scheduler'))
         with open(os.path.join(save_directory, 'smpl_pose_processor.json'), 'w', encoding='utf-8') as f:
             json.dump(self.get_module_build_cfg('smpl_pose_processor'), f, ensure_ascii=False, indent=2)
@@ -161,6 +171,11 @@ class PrismBundle(ModelBundle):
         prompt_drop_rate: float = 0.0,
         dtype: Optional[torch.dtype] = None,
     ) -> torch.Tensor:
+        if not hasattr(self, 'text_encoder') or self.text_encoder is None:
+            raise RuntimeError(
+                'PrismBundle.encode_prompt() requires text_encoder, but it was not loaded. '
+                'Use pre-extracted T5 features instead (t5_text_embeds in batch).'
+            )
         device = next(self.text_encoder.parameters()).device
         dtype = dtype or next(self.text_encoder.parameters()).dtype
         prompt = [prompt] if isinstance(prompt, str) else prompt
@@ -201,19 +216,24 @@ class PrismBundle(ModelBundle):
         dtype: Optional[torch.dtype] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode prompts and return embeddings with attention mask.
-        
+
         Args:
             prompt: Text prompt(s) to encode.
             max_sequence_length: Maximum length for tokenization.
             prompt_drop_rate: Rate for random prompt dropout.
             dtype: Target dtype for embeddings.
-            
+
         Returns:
             Tuple of:
                 - prompt_embeds: Text embeddings [B, max_seq_len, hidden_dim]
                 - encoder_hidden_states_mask: Attention mask [B, max_seq_len]
                   where 1 = valid token, 0 = padding token
         """
+        if not hasattr(self, 'text_encoder') or self.text_encoder is None:
+            raise RuntimeError(
+                'PrismBundle.encode_prompt_with_mask() requires text_encoder, but it was not loaded. '
+                'Use pre-extracted T5 features instead (t5_text_embeds in batch).'
+            )
         device = next(self.text_encoder.parameters()).device
         dtype = dtype or next(self.text_encoder.parameters()).dtype
         prompt = [prompt] if isinstance(prompt, str) else prompt
@@ -277,7 +297,20 @@ class PrismBundle(ModelBundle):
         latents: torch.Tensor,
         frame_condition_rate: float = 0.1,
         condition_num_frames: Union[int, List[int]] = 1,
+        num_frames: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """Create condition mask for frames to keep (mask=False = keep, mask=True = generate).
+        
+        Args:
+            latents: Motion latents [B, C, T, J]
+            frame_condition_rate: Rate at which to apply conditioning
+            condition_num_frames: Number(s) of condition frames to use
+            num_frames: Optional pre-pad frame counts [B]. If provided, will not sample
+                       condition frames from the padded region (frames >= num_frames_vae).
+                       
+        Returns:
+            mask: Boolean mask [B, 1, T, J] where False=keep (condition), True=generate
+        """
         batch_size, _, latent_frames, latent_joints = latents.shape
         device = latents.device
         if frame_condition_rate <= 0:
@@ -296,8 +329,29 @@ class PrismBundle(ModelBundle):
         frame_idx = torch.arange(latent_frames, device=device).unsqueeze(0)
         cond_frame_mask = frame_idx < num_cond_sel.unsqueeze(1)
         mask = (~cond_frame_mask).unsqueeze(1).unsqueeze(-1)
+        
+        # CRITICAL FIX (2026-05-25): Respect padding boundaries
+        # If num_frames is provided, never sample condition frames from padded region.
+        # This prevents gradient instability from encoding corrupted VAE latents (from replicated motion padding).
+        if num_frames is not None:
+            num_frames = num_frames.to(device)
+            scale_factor = self.vae.config.scale_factor_temporal
+            num_frames_vae = (num_frames + scale_factor - 1) // scale_factor
+            num_frames_vae = torch.clamp(num_frames_vae, min=1, max=latent_frames)  # min=1: always allow >= 1 cond frame
+            
+            # Create a padding boundary mask: True where frame >= valid_frames (i.e., in padded region)
+            valid_frame_mask = frame_idx >= num_frames_vae.unsqueeze(1)  # [B, T]
+            
+            # Force all frames in padded region to be generated (mask=True)
+            # by expanding valid_frame_mask to [B, 1, T, J]
+            padding_mask = valid_frame_mask.unsqueeze(1).unsqueeze(-1).expand_as(mask)
+            mask = mask | padding_mask  # OR: if in padded region, force generate
+            
+            logger.debug(
+                f'create_condition_mask with padding: batch_frames={num_frames_vae.tolist()}, '
+                f'latent_frames={latent_frames}, padded_frames_masked={padding_mask.sum().item()}'
+            )
         return mask.expand(batch_size, 1, latent_frames, latent_joints).to(torch.bool)
-
     def create_sequence_ts(
         self,
         ori_ts: torch.Tensor,

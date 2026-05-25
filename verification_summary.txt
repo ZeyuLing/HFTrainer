@@ -1,0 +1,400 @@
+================================================================================
+PROTOMOTIONS SMPL ONNX TRACKER - VERIFICATION SUMMARY
+================================================================================
+
+Investigation Date: May 2026
+Status: COMPLETE - All 4 critical questions answered with exact code evidence
+
+================================================================================
+CRITICAL QUESTION 1: Does ONNX export include observation normalization?
+================================================================================
+
+ANSWER: NO - Normalization is NOT in the ONNX graph
+
+File: deployment/export_bm_tracker_onnx.py
+Lines: 305-328
+
+Evidence:
+---------
+The ObservationExportModule is instantiated with raw observation functions:
+
+    observation_module = ObservationExportModule(
+        obs_functions=obs_functions,           # No normalization wrapper
+        output_keys=comp_manager.obs_var_names,
+        input_keys=input_keys,
+        input_mapping=obs_name_to_input_mapping,
+        constants=constants,
+    )
+
+There is NO call to any normalization module, heading offset computation,
+or frame transformation before or after ObservationExportModule creation.
+
+File: protomotions/utils/export_utils.py
+Lines: 1163-1195
+
+Evidence (ObservationExportModule.forward):
+---------
+    def forward(self, *args) -> tuple:
+        context = {key: tensor for key, tensor in zip(self._input_keys, args)}
+        outputs = []
+        for obs_name in self._output_keys:
+            func = self._obs_functions[obs_name]
+            input_mapping = self._obs_input_mappings[obs_name]
+            constants = self._obs_constants[obs_name]
+            func_kwargs = {}
+            for arg_name, var_expr in input_mapping.items():
+                func_kwargs[arg_name] = context[var_expr]  # DIRECT PASSTHROUGH
+            func_kwargs.update(constants)
+            obs_value = func(**func_kwargs)
+            outputs.append(obs_value)
+        return tuple(outputs)
+
+ANALYSIS: The forward method is pure function invocation with NO transformation.
+          It maps input tensors directly to observation functions.
+          There is no heading normalization, no yaw extraction, no root-relative
+          position computation happening here.
+
+================================================================================
+CRITICAL QUESTION 2: Does ObservationExportModule include heading normalization?
+================================================================================
+
+ANSWER: NO - ObservationExportModule is a lightweight function wrapper with
+            zero transformation logic
+
+File: protomotions/utils/export_utils.py
+Lines: 1056-1196
+
+Class Definition Summary:
+---------
+class ObservationExportModule(torch.nn.Module):
+    """Wraps observation component functions for ONNX export.
+    
+    Stores observation functions and their input/output mappings.
+    During forward pass, routes context tensors through observation functions.
+    """
+    
+    def __init__(self, obs_functions, output_keys, input_keys, 
+                 input_mapping, constants):
+        super().__init__()
+        self._obs_functions = obs_functions      # Dict of observation functions
+        self._output_keys = output_keys          # List of output keys
+        self._input_keys = input_keys            # List of input keys
+        self._obs_input_mappings = input_mapping # Input routing dict
+        self._obs_constants = constants          # Static constants
+
+    def forward(self, *args) -> tuple:
+        # See above - direct passthrough, no transformation
+
+MISSING FUNCTIONALITY:
+---------
+The following ONNX-exportable operations do NOT exist in this module:
+  ❌ compute_yaw_offset
+  ❌ extract_yaw_from_quaternion
+  ❌ apply_heading_offset
+  ❌ root_relative_position_computation
+  ❌ heading_normalization
+
+Conclusion: Heading normalization and root-relative transformation MUST be
+            handled externally, not inside the ONNX model.
+
+================================================================================
+CRITICAL QUESTION 3: Where is heading normalization done at deployment time?
+================================================================================
+
+ANSWER: YES - External preprocessing in test_tracker_mujoco.py and state_utils.py
+
+File: deployment/test_tracker_mujoco.py
+Lines: 676-704
+
+Main Simulation Loop - Heading Offset Computation and Application:
+---------
+    # Step 0: Compute heading offset
+    if step == 0:
+        robot_quat_xyzw = robot_state.root_body_rotation
+        motion_quat_xyzw = motion_frame.root_body_rotation
+        heading_offset = compute_yaw_offset_np(robot_quat_xyzw, motion_quat_xyzw)
+        # heading_offset stored globally, reused for all future frames
+
+    # Get future motion frame (BEFORE alignment)
+    future_refs = motion_lib.get_frames([1])  # Next frame
+
+    # APPLY heading alignment EXTERNALLY (CRITICAL STEP)
+    future_refs["body_rot"] = apply_heading_offset_np(
+        heading_offset, 
+        future_refs["body_rot"]
+    )
+
+    # Build ONNX inputs from already-aligned tensors
+    onnx_inputs = build_onnx_inputs(
+        robot_state=robot_state,           # Raw world-frame
+        future_refs=future_refs,           # NOW heading-aligned
+        control_state=control_state,
+    )
+
+    # Call ONNX with preprocessed inputs
+    onnx_output = onnx_session.run(None, onnx_inputs)
+
+KEY INSIGHT: Heading normalization is NOT inside the ONNX model.
+             It's done EXTERNALLY before calling the ONNX model.
+             This is the DEPLOYMENT PATTERN.
+
+File: deployment/state_utils.py
+Lines: 244-273
+
+Heading Offset Computation Function:
+---------
+    def compute_yaw_offset_np(robot_quat_xyzw, motion_quat_xyzw):
+        """Compute yaw-only offset between robot and motion headings.
+        
+        Returns quaternion representing rotation to align motion to robot heading.
+        """
+        robot_yaw = _extract_yaw_quat_np(robot_quat_xyzw)
+        motion_yaw = _extract_yaw_quat_np(motion_quat_xyzw)
+        return _quat_mul_np(robot_yaw, _quat_conjugate_np(motion_yaw))
+
+File: deployment/state_utils.py
+Lines: 276-298
+
+Apply Heading Offset Function:
+---------
+    def apply_heading_offset_np(offset_quat_xyzw, body_rots_xyzw):
+        """Apply heading offset quaternion to all body rotations.
+        
+        Args:
+            offset_quat_xyzw: Yaw-only offset quaternion (shape: 4)
+            body_rots_xyzw: Body rotations (shape: [N_bodies, 4])
+        
+        Returns:
+            Aligned body rotations (shape: [N_bodies, 4])
+        """
+        original_shape = body_rots_xyzw.shape
+        flat = body_rots_xyzw.reshape(-1, 4)
+        offset_broadcast = np.broadcast_to(offset_quat_xyzw, flat.shape)
+        aligned = _quat_mul_np(offset_broadcast, flat)
+        return aligned.reshape(original_shape)
+
+File: deployment/test_tracker_mujoco.py
+Lines: 400-449
+
+Build ONNX Inputs (after alignment):
+---------
+    def build_onnx_inputs(robot_state, future_refs, control_state):
+        """Assemble inputs for ONNX model after heading alignment.
+        
+        All future_refs inputs have been pre-aligned by apply_heading_offset_np.
+        """
+        return {
+            "current_rigid_body_pos": robot_state.body_pos,         # Raw
+            "current_rigid_body_rot": robot_state.body_rot,         # Raw
+            "current_rigid_body_vel": robot_state.body_vel,         # Raw
+            "current_rigid_body_ang_vel": robot_state.body_ang_vel, # Raw
+            "ground_heights": control_state.ground_height,
+            "historical_actions": control_state.last_action,
+            # These ARE heading-aligned:
+            "mimic_future_pos": future_refs["body_pos"],            # Aligned
+            "mimic_future_rot": future_refs["body_rot"],            # Aligned
+            "mimic_future_vel": future_refs["body_vel"],
+            "mimic_future_ang_vel": future_refs["body_ang_vel"],
+        }
+
+DEPLOYMENT CONTRACT SUMMARY:
+---------
+1. Heading offset computed ONCE at step 0
+2. Applied to motion frames BEFORE assembling ONNX inputs
+3. Robot state passed RAW (no normalization)
+4. ONNX model called with aligned inputs
+5. Model returns action commands
+
+This pattern allows the ONNX model to be DEPLOYMENT-AGNOSTIC:
+  - Works in MuJoCo, IsaacGym, Newton, Genesis, etc.
+  - Works on real robots (if external heading alignment is done)
+  - No simulator-specific code inside ONNX model
+
+================================================================================
+CRITICAL QUESTION 4: What do unified_pipeline.yaml keys refer to?
+================================================================================
+
+ANSWER: Raw world-frame states (NOT processed observations)
+
+File: data/pretrained_models/motion_tracker/smpl/compiled_models/unified_pipeline.yaml
+Lines: 28-60, 81-90
+
+Policy Input Mapping:
+---------
+    policy_inputs:
+    - name: current_rigid_body_pos
+      key: current.rigid_body_pos      # Maps to context view
+      shape: [1, 24, 3]
+    
+    - name: current_rigid_body_rot
+      key: current.rigid_body_rot      # Maps to context view
+      shape: [1, 24, 4]
+    
+    - name: current_rigid_body_vel
+      key: current.rigid_body_vel      # Maps to context view
+      shape: [1, 24, 3]
+    
+    - name: current_rigid_body_ang_vel
+      key: current.rigid_body_ang_vel  # Maps to context view
+      shape: [1, 24, 3]
+    
+    - name: mimic_future_rot
+      key: mimic.future_rot            # Maps to motion tracking context
+      shape: [1, 1, 24, 4]
+
+Runtime mapping (lines 81-90):
+    _runtime:
+      onnx_name_to_in_key:
+        current_rigid_body_pos: current.rigid_body_pos
+        current_rigid_body_rot: current.rigid_body_rot
+        current_rigid_body_vel: current.rigid_body_vel
+        current_rigid_body_ang_vel: current.rigid_body_ang_vel
+        mimic_future_pos: mimic.future_pos
+        mimic_future_rot: mimic.future_rot
+        ...
+
+Trace the actual values (File: protomotions/envs/context_views.py, lines 87-165):
+---------
+    class CurrentStateView:
+        """Container for current robot state in training/inference.
+        
+        Values are assigned directly from RobotState with NO transformation.
+        """
+        
+        def __init__(self, state: RobotState):
+            # DIRECT ASSIGNMENT (no heading normalization, no root-relative)
+            self.rigid_body_pos = state.rigid_body_pos           # World XYZ
+            self.rigid_body_rot = state.rigid_body_rot           # World quaternion
+            self.rigid_body_vel = state.rigid_body_vel           # World XYZ
+            self.rigid_body_ang_vel = state.rigid_body_ang_vel   # World angular velocity
+
+VERIFICATION - No Transformation in Context Views:
+---------
+Lines 136-144 of protomotions/envs/context_views.py show:
+    self.rigid_body_pos = state.rigid_body_pos
+    self.rigid_body_rot = state.rigid_body_rot
+    self.rigid_body_vel = state.rigid_body_vel
+    self.rigid_body_ang_vel = state.rigid_body_ang_vel
+
+There is NO code like:
+    self.rigid_body_pos = state.rigid_body_pos - root_position  # Not root-relative
+    self.rigid_body_rot = apply_heading_offset(state.rigid_body_rot)  # Not normalized
+
+Conclusion: unified_pipeline.yaml keys refer to RAW WORLD-FRAME states.
+            They are NOT processed observations.
+            They are direct fields from RobotState populated by the simulator.
+
+================================================================================
+DATA FLOW: WHERE DO RAW vs. ALIGNED INPUTS COME FROM?
+================================================================================
+
+File: deployment/test_tracker_mujoco.py (lines 676-709)
+
+    # Get raw robot state from MuJoCo
+    robot_state = get_state_from_mujoco()
+    # Contains: pos, rot, vel, ang_vel (all in world frame, wxyz format)
+    # Convert wxyz → xyzw
+    robot_state.body_rot = convert_wxyz_to_xyzw(robot_state.body_rot)
+
+    # Get motion frame
+    future_refs = motion_lib.get_frames([1])  # Raw motion, world frame
+    # Contains: pos, rot, vel, ang_vel (xyzw format already)
+
+    # CRITICAL: Apply heading offset to motion frame ONLY
+    future_refs["body_rot"] = apply_heading_offset_np(
+        heading_offset,
+        future_refs["body_rot"]
+    )
+    # Now future_refs.body_rot is heading-aligned
+
+    # Build ONNX inputs
+    onnx_inputs = {
+        "current_rigid_body_pos": robot_state.pos,       # ← RAW world-frame
+        "current_rigid_body_rot": robot_state.rot,       # ← RAW world-frame
+        "current_rigid_body_vel": robot_state.vel,       # ← RAW world-frame
+        "current_rigid_body_ang_vel": robot_state.ang_vel, # ← RAW world-frame
+        "mimic_future_pos": future_refs["pos"],          # ← ALIGNED
+        "mimic_future_rot": future_refs["rot"],          # ← ALIGNED
+        "mimic_future_vel": future_refs["vel"],
+        "mimic_future_ang_vel": future_refs["ang_vel"],
+    }
+
+    # Call ONNX
+    onnx_output = onnx_session.run(None, onnx_inputs)
+
+ASYMMETRY EXPLANATION:
+---------
+Why does the ONNX model receive RAW robot state but ALIGNED motion references?
+
+Answer: The model learns to predict actions by tracking motion targets.
+        For the tracking to work, motion targets must be in the same frame
+        as robot observations. Since robot state is in world frame, motion
+        references must be aligned to robot's heading (otherwise tracking
+        would fail due to heading mismatch).
+
+During training (protomotions/envs/control/mimic.py):
+        The same alignment happens internally in the environment.
+
+At inference (test_tracker_mujoco.py):
+        The same alignment happens externally before calling ONNX.
+
+Result: Model sees consistently-framed inputs in both cases.
+
+================================================================================
+SUMMARY OF FINDINGS
+================================================================================
+
+Question 1: ONNX Normalization?
+   Answer: NO - zero transformation logic in ONNX export
+
+Question 2: ObservationExportModule Transformation?
+   Answer: NO - lightweight wrapper with direct function invocation
+
+Question 3: External Preprocessing at Deployment?
+   Answer: YES - heading alignment done in test_tracker_mujoco.py
+           before calling ONNX model
+
+Question 4: unified_pipeline.yaml Input Format?
+   Answer: Raw world-frame states mapped from CurrentStateView
+           Future motion inputs are externally pre-aligned
+           (alignment done in test_tracker_mujoco.py)
+
+CRITICAL DESIGN PATTERN:
+  ✓ ONNX model is deployment-agnostic (no simulator-specific code)
+  ✓ All preprocessing delegated to external deployment layer
+  ✓ Heading alignment is external, not internal
+  ✓ Model expects: raw robot state + aligned motion references
+  ✓ Coordination: motion frames aligned to robot heading before ONNX call
+
+================================================================================
+KEY FILES AND LINE REFERENCES
+================================================================================
+
+1. deployment/export_bm_tracker_onnx.py
+   - Lines 305-328: ObservationExportModule instantiation
+   - Lines 383-389: UnifiedPipelineModule composition
+
+2. protomotions/utils/export_utils.py
+   - Lines 1056-1196: ObservationExportModule class definition
+   - Lines 1163-1195: forward() method implementation
+   - Lines 390-470: UnifiedPipelineModule class definition
+
+3. deployment/test_tracker_mujoco.py
+   - Lines 676-704: Main simulation loop with heading offset computation
+   - Lines 400-449: build_onnx_inputs function
+   - Lines 682-686: Heading offset computation and storage
+   - Lines 692-694: apply_heading_offset call (CRITICAL)
+
+4. deployment/state_utils.py
+   - Lines 244-273: compute_yaw_offset_np function
+   - Lines 276-298: apply_heading_offset_np function
+
+5. protomotions/envs/context_views.py
+   - Lines 87-165: CurrentStateView class definition
+   - Lines 136-144: Direct RobotState field assignments
+
+6. data/pretrained_models/motion_tracker/smpl/compiled_models/unified_pipeline.yaml
+   - Lines 28-60: policy_inputs definition
+   - Lines 81-90: _runtime onnx_name_to_in_key mapping
+
+================================================================================

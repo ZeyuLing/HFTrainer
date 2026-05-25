@@ -1,0 +1,292 @@
+================================================================================
+PRISM TRAINER - LOSS COMPUTATION CODE SECTIONS WITH LINE NUMBERS
+================================================================================
+
+FILE: hftrainer/trainers/motion/prism_trainer.py
+================================================================================
+
+SECTION 1: TRAINER INITIALIZATION (Lines 14-40)
+────────────────────────────────────────────────
+
+14  @TRAINERS.register_module()
+15  class PrismTrainer(BaseTrainer):
+16      """Trainer for PRISM flow-matching motion generation."""
+17
+18      def __init__(
+19          self,
+20          bundle,
+21          condition_num_frames: Union[int, List[int]] = 1,
+22          frame_condition_rate: float = 0.1,
+23          prompt_drop_rate: float = 0.1,
+24          max_text_length: int = 128,
+25          val_prompts: Optional[List[str]] = None,
+26          num_val_inference_steps: int = 10,
+27          guidance_scale: float = 5.0,
+28          translation_loss_weight: float = 0.5,  # ← KEY PARAMETER
+29          **kwargs,
+29      ):
+30          super().__init__(bundle)
+31          self.condition_num_frames = condition_num_frames
+32          self.frame_condition_rate = frame_condition_rate
+33          self.prompt_drop_rate = prompt_drop_rate
+34          self.max_text_length = max_text_length
+35          self.val_prompts = val_prompts or ['a person walking forward']
+36          self.num_val_inference_steps = num_val_inference_steps
+37          self.guidance_scale = guidance_scale
+38          self.translation_loss_weight = translation_loss_weight  # ← STORED
+39
+40
+
+
+SECTION 2: TRAIN_STEP METHOD - DATA PREPARATION (Lines 41-93)
+──────────────────────────────────────────────────────────────
+
+41      def train_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+42          motion = batch['motion']
+43          captions = batch['caption']
+44          num_frames = batch.get('num_frames')
+45
+46          latents = self.bundle.encode_motion(motion)  # Motion → VAE latents
+47          batch_size, _, latent_frames, latent_joints = latents.shape
+48
+49          # PADDING MASK CREATION - Marks frames beyond num_frames as invalid
+50          padding_mask = self.bundle.create_padding_mask(
+51              num_frames=num_frames,
+52              batch_size=batch_size,
+53              latent_frames=latent_frames,
+54              latent_joints=latent_joints,
+55              device=latents.device,
+56          )
+57          
+58          # TEXT ENCODING
+59          text_states = self.bundle.encode_prompt(
+60              captions,
+61              max_sequence_length=self.max_text_length,
+62              prompt_drop_rate=self.prompt_drop_rate,
+63              dtype=next(self.bundle.transformer.parameters()).dtype,
+64          )
+65          
+66          # CONDITION FRAME MASKING - Which frames are frozen for conditioning
+67          condition_frame_mask_vae = self.bundle.create_condition_mask(
+68              latents,
+69              frame_condition_rate=self.frame_condition_rate,
+70              condition_num_frames=self.condition_num_frames,
+71          )
+72
+73          # TIMESTEP SAMPLING - Random flow matching timesteps
+74          step_indices = torch.randint(
+75              0,
+76              len(self.bundle.scheduler.timesteps),
+77              (batch_size,),
+78              device=latents.device,
+79          )
+80          scheduler_timesteps = self.bundle.scheduler.timesteps.to(device=latents.device)
+81          timesteps = scheduler_timesteps[step_indices]
+82
+83          # FLOW NOISE ADDITION - Add noise at sampled timesteps
+84          noisy_latents, targets = self.bundle.add_flow_noise(latents, timesteps)
+85          noisy_latents = torch.where(condition_frame_mask_vae, noisy_latents, latents)
+86          
+87          timesteps = self.bundle.create_sequence_ts(
+88              timesteps,
+89              condition_frame_mask_vae,
+90              self.bundle.transformer.config.patch_size,
+91          )
+92          
+93          transformer_dtype = next(self.bundle.transformer.parameters()).dtype
+94          noisy_latents = noisy_latents.to(dtype=transformer_dtype)
+95
+
+
+SECTION 3: TRANSFORMER FORWARD PASS (Lines 95-102)
+────────────────────────────────────────────────────
+
+95          model_pred = self.bundle.transformer(
+96              hidden_states=noisy_latents,
+97              encoder_hidden_states=text_states,
+98              timestep=timesteps,
+99              hidden_states_mask=padding_mask if num_frames is not None else None,  # ← MASK PASSED HERE
+100             encoder_hidden_states_mask=None,
+101         ).float()
+102
+
+
+SECTION 4: LOSS COMPUTATION - MSE & MASKING (Lines 103-111)
+────────────────────────────────────────────────────────────
+
+103         mse = F.mse_loss(model_pred, targets.float(), reduction='none')
+104         # mse shape: [B, C, T', J] where J=23 (token 0=translation, 1-22=rotation)
+105         
+106         condition_mask = condition_frame_mask_vae.expand_as(mse).float()
+107         padding_mask = padding_mask.unsqueeze(1).expand_as(mse).float()  # ← EXPAND FOR ALL DIMS
+108         full_mask = condition_mask * padding_mask  # ← COMBINED MASK
+109
+
+
+SECTION 5: TRANSLATION/ROTATION SEPARATION (Lines 110-121)
+────────────────────────────────────────────────────────────
+
+110         # Separate translation (J=0) and rotation (J=1:) to prevent
+111         # translation loss dilution (1/23 ≈ 4.3% vs 22/23 ≈ 95.7%).
+112         
+113         mse_transl = mse[:, :, :, :1]           # [B, C, T', 1] - Token 0 only
+114         mask_transl = full_mask[:, :, :, :1]
+115         loss_transl = (mse_transl * mask_transl).sum() / (mask_transl.sum() + 1e-6)
+116
+117         mse_rot = mse[:, :, :, 1:]              # [B, C, T', 22] - Tokens 1-22
+118         mask_rot = full_mask[:, :, :, 1:]
+119         loss_rot = (mse_rot * mask_rot).sum() / (mask_rot.sum() + 1e-6)
+
+
+SECTION 6: WEIGHTED COMBINATION & OUTPUT (Lines 120-126)
+───────────────────────────────────────────────────────────
+
+120         w_t = self.translation_loss_weight
+121         loss = w_t * loss_transl + (1.0 - w_t) * loss_rot
+122         return {
+123             'loss': loss,
+124             'loss_flow': loss.detach(),
+125             'loss_transl': loss_transl.detach(),
+126             'loss_rot': loss_rot.detach(),
+127         }
+
+
+================================================================================
+CONFIG FILES
+================================================================================
+
+FILE: configs/prism/prism_1b_tp2m_1frame.py
+────────────────────────────────────────────
+
+Key sections:
+
+Lines 74-92: SMPL Pose Processor Configuration
+───────────────────────────────────────────────
+74    smpl_pose_processor=dict(
+75        type="SMPLPoseProcessor",
+76        trainable=False,
+77        save_ckpt=False,
+78        do_normalize=True,
+79        stats_file="data/statistic/smplx55_stats_hymotion_aug.json",
+80        rot_type="rotation_6d",                # ← 6D rotation encoding
+81        transl_type="abs_rel",                 # ← Absolute + relative translation
+82        smpl_type="smpl_22",                   # ← 22 SMPL joints (+ root translation)
+83        smpl_model=dict(
+84            type="SmplxLiteV437Coco17",
+85            model_path="checkpoints/smpl_models/smplx",
+86            ...
+87        ),
+88    ),
+
+Lines 95-101: Trainer Configuration
+──────────────────────────────────────
+95    trainer = dict(
+96        type="PrismTrainer",
+97        condition_num_frames=[1],              # ← 1-frame conditioning
+98        frame_condition_rate=0.1,              # ← 10% of frames conditioned
+99        prompt_drop_rate=0.1,                  # ← 10% prompts randomly dropped
+100       max_text_length=256,                   # ← Max text tokens
+101       # translation_loss_weight NOT SET → Uses default 0.5
+102   )
+
+
+FILE: configs/prism/prism_1b_tp2m_multiframe.py
+────────────────────────────────────────────────
+
+1    # PRISM 1B text+pose-to-motion, multi-frame conditioning (1/5/9 frames)
+2    #
+3    # Resume from versatilemotion checkpoint (iter=15000):
+4    #   bash tools/taiji_dist_train.sh configs/prism/prism_1b_tp2m_multiframe.py --auto-resume
+5    #
+6    # This stage fine-tunes from the 1-frame pretrained model with multi-frame
+7    # pose conditioning (condition_num_frames=[1, 5, 9], frame_condition_rate=0.1).
+8
+9    _base_ = './prism_1b_tp2m_1frame.py'
+10
+11   trainer = dict(
+12       condition_num_frames=[1, 5, 9],        # ← Multi-frame: sample 1, 5, or 9
+13       frame_condition_rate=0.1,
+14   )
+
+
+FILE: configs/prism/prism_debug_loss_split.py
+───────────────────────────────────────────────
+
+Lines 95-102: Debug Trainer Configuration
+────────────────────────────────────────────
+95    trainer = dict(
+96        type="PrismTrainer",
+97        condition_num_frames=[1],
+98        frame_condition_rate=0.1,
+99        prompt_drop_rate=0.1,
+100       max_text_length=256,
+101       translation_loss_weight=0.5,          # ← EXPLICIT for debugging
+102   )
+
+
+================================================================================
+MOTION REPRESENTATION
+================================================================================
+
+LATENT SPACE STRUCTURE (After VAE Encoding)
+────────────────────────────────────────────
+
+Shape after VAE encode: [B, 16, T', 23]
+  - B: Batch size
+  - 16: Latent channels (VAE output dimension)
+  - T': Temporal dimension (frames in latent space)
+  - 23: Motion tokens
+    - Token 0: ROOT TRANSLATION (3D global position)
+    - Tokens 1-22: JOINT ROTATIONS (22 SMPL joints, 6D rotation encoding)
+
+For loss computation:
+  - mse[:, :, :, :1]  → Translation MSE (shape [B, 16, T', 1])
+  - mse[:, :, :, 1:]  → Rotation MSE (shape [B, 16, T', 22])
+
+
+================================================================================
+MASKING FLOW
+================================================================================
+
+1. PADDING MASK CREATION (Lines 50-56)
+   Input:   num_frames = [32, 45, 40, ...]  (actual frames per batch element)
+   Output:  padding_mask shape [B, 1, T', 1]
+   Values:  1 = valid frame, 0 = padded frame
+
+2. CONDITION MASK (Lines 67-71)
+   Output:  condition_frame_mask_vae shape [B, 1, T', 1]
+   Values:  1 = frame NOT conditioned (will have loss), 
+            0 = frame IS conditioned (frozen, no loss)
+
+3. EXPAND FOR MSE (Line 107-108)
+   padding_mask.unsqueeze(1).expand_as(mse)
+   → Shape [B, 16, T', 23]
+   → Same mask replicated across all 16 channels and 23 tokens
+
+4. FULL MASK COMBINATION (Line 108)
+   full_mask = condition_mask * padding_mask
+   → Loss = 0 for frames where:
+     - Frame is padded (padding_mask=0) OR
+     - Frame is conditioned (condition_mask=0)
+
+5. APPLY TO LOSS (Lines 115, 119)
+   loss = (mse * mask).sum() / mask.sum()
+   → Normalized sum: only valid, unconditioned frames contribute
+
+
+================================================================================
+WEIGHT PARAMETER MEANINGS
+================================================================================
+
+translation_loss_weight = w_t ∈ [0, 1]
+   w_r = 1 - w_t
+
+   loss = w_t * loss_transl + w_r * loss_rot
+
+Examples:
+   w_t = 0.5  →  loss = 0.5 * loss_transl + 0.5 * loss_rot       (EQUAL)
+   w_t = 0.3  →  loss = 0.3 * loss_transl + 0.7 * loss_rot       (Favor rotation)
+   w_t = 0.04 →  loss = 0.04 * loss_transl + 0.96 * loss_rot     (Proportional to 1:22)
+   w_t = 1.0  →  loss = loss_transl                              (Translation only)
+   w_t = 0.0  →  loss = loss_rot                                 (Rotation only)
+

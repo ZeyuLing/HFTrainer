@@ -1,0 +1,606 @@
+/usr/local/lib/python3.9/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  from torch.distributed.optim import \
+[2026-05-19 21:22:08,353] [INFO] [real_accelerator.py:191:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, input, weight, bias=None):
+/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, grad_output):
+[2026/05/19 21:22:09] hftrainer INFO: Config: configs/hymotion_m2m/hymotion_m2m_completion_151dim_single_agent_fm_046b.py
+[2026/05/19 21:22:09] hftrainer INFO: Work dir: work_dirs/hymotion_m2m_completion_151dim_single_agent_046b
+Detected kernel version 5.4.119, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+[2026/05/19 21:22:11] hftrainer INFO: Config saved to: work_dirs/hymotion_m2m_completion_151dim_single_agent_046b/20260519_212209/config.py
+[2026/05/19 21:22:11] hftrainer INFO: Work dir: work_dirs/hymotion_m2m_completion_151dim_single_agent_046b
+[2026/05/19 21:22:11] hftrainer INFO: Run dir (logs/tb): work_dirs/hymotion_m2m_completion_151dim_single_agent_046b/20260519_212209
+[2026/05/19 21:22:11] hftrainer INFO: Environment info:
+Platform: Linux-5.4.119-19.0009.56-x86_64-with-glibc2.28
+Python: 3.9.16 (main, Sep 22 2023, 12:15:56) 
+[GCC 8.5.0 20210514 (TencentOS 8.5.0-18)]
+PyTorch: 2.5.0+cu118
+CUDA available: True
+CUDA version: 11.8
+GPU count: 1
+  GPU 0: Tesla T4
+accelerate: 1.10.1
+transformers: 4.57.3
+diffusers: 0.36.0
+peft: 0.17.1
+mmengine: 0.10.7
+safetensors: 0.7.0
+[2026/05/19 21:22:15] hftrainer INFO: 
+Model Summary:
+  Module              Total Params  Trainable Params  Trainable  Save Ckpt
+  ------------------  ------------  ----------------  ---------  ---------
+  motion_transformer   461,203,095       461,203,095  True       True     
+  m2m_loss                       0                 0  False      False    
+  kimodo_aux_loss                0                 0  False      False    
+  <bundle-orphan>            4,864             4,864  True       True     
+  ------------------  ------------  ----------------  ---------  ---------
+  TOTAL                461,207,959       461,207,959
+  Trainable ratio: 100.00%
+  Bundle orphan tensors:
+  <bundle-orphan> null_vtxt_feat           param shape=(1, 1, 768) norm=0.2686 requires_grad=True
+  <bundle-orphan> null_ctxt_input          param shape=(1, 1, 4096) norm=0.6496 requires_grad=True
+  <bundle-orphan> mean                     buffer shape=(151,) norm=6.4277
+  <bundle-orphan> std                      buffer shape=(151,) norm=2.8737
+
+[2026/05/19 21:22:15] hftrainer INFO: Building trainer...
+[2026/05/19 21:22:15] hftrainer INFO: Building dataloaders...
+Loading data_list:   0%|          | 0/407552 [00:00<?, ?it/s]Loading data_list:  19%|█▉        | 76912/407552 [00:00<00:00, 769049.22it/s]Loading data_list:  39%|███▉      | 159148/407552 [00:00<00:00, 800376.34it/s]Loading data_list:  59%|█████▉    | 242401/407552 [00:00<00:00, 815035.94it/s]Loading data_list:  88%|████████▊ | 357953/407552 [00:00<00:00, 949422.32it/s]Loading data_list: 100%|██████████| 407552/407552 [00:00<00:00, 924010.36it/s]
+Loaded 407552 samples from data/annotation/train_hymotion_400h_hq_20260403.json
+[2026/05/19 21:22:19] hftrainer INFO: Building optimizers...
+[2026/05/19 21:22:19] hftrainer INFO: Starting accelerator.prepare()...
+[2026/05/19 21:22:32] hftrainer WARNING: Skipped 3 shape-mismatched params in module 'motion_transformer': ['input_encoder.weight: ckpt (1024, 201) vs model (1024, 604)', 'final_layer.linear.weight: ckpt (201, 1024) vs model (151, 1024)', 'final_layer.linear.bias: ckpt (201,) vs model (151,)']
+[2026/05/19 21:22:33] hftrainer WARNING: Missing keys in module 'motion_transformer': ['input_encoder.weight', 'final_layer.linear.weight', 'final_layer.linear.bias']...
+[2026/05/19 21:22:33] hftrainer INFO: ============================================================
+[2026/05/19 21:22:33] hftrainer INFO: Loaded model weights from: checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt
+[2026/05/19 21:22:33] hftrainer INFO: Optimizer and training state reset to initial.
+[2026/05/19 21:22:33] hftrainer INFO: ============================================================
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] train(): entering before_run hooks
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] before_run -> LoggerHook
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] before_run done -> LoggerHook
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] before_run -> EMAHook
+[2026/05/19 21:22:33] hftrainer INFO: EMA hook initialized.
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] before_run done -> EMAHook
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] all before_run hooks done; entering main training loop (by_epoch=True)
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] _train_by_epoch: starting from current_epoch=0, max_epochs=1000
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] epoch=0: bundle.train()
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] before_train_epoch -> LoggerHook
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] before_train_epoch done -> LoggerHook
+[2026/05/19 21:22:33] hftrainer INFO: [Rank 0] starting dataloader iter for epoch=0
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/datasets/motion/motionhub/transforms/universal_mask.py:610: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  bone_offsets = torch.load(
+[2026/05/19 21:22:37] hftrainer INFO: [Rank 0] first batch received for epoch=0
+[2026/05/19 21:22:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:38] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:38] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:38] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:38] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:38] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:38] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:39] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:39] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:39] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:39] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 198]
+[2026/05/19 21:22:39] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:39] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:42] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:42] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:42] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:42] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 198, 198, 151, 151, 151, 198, 151, 198]
+[2026/05/19 21:22:42] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:42] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:42] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:42] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:42] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:42] hftrainer INFO: epoch [1/1000]  step [10/12736]  loss=0.0000  data_time=0.05s  train_time=0.00s  eta=127d 12:40:27
+[2026/05/19 21:22:42] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:42] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:42] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:44] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:44] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:44] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:44] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198]
+[2026/05/19 21:22:44] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:44] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:44] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:22:44] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:44] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:44] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151]
+[2026/05/19 21:22:44] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:44] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:22:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:22:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:22:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 198]
+[2026/05/19 21:22:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:50] hftrainer INFO: epoch [1/1000]  step [20/12736]  loss=0.0000  data_time=3.07s  train_time=0.01s  eta=123d 14:31:31
+[2026/05/19 21:22:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 198, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 198, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:22:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 198, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:22:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:52] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:52] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:52] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:53] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151]
+[2026/05/19 21:22:53] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:53] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:53] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 198, 198, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:53] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:53] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:53] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 198, 151, 151]
+[2026/05/19 21:22:53] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:53] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:54] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:54] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:54] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:54] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151]
+[2026/05/19 21:22:54] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:54] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:54] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:22:54] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:54] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:54] hftrainer INFO: epoch [1/1000]  step [30/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=104d 04:31:44
+[2026/05/19 21:22:55] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:55] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:55] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:56] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 198, 198, 151, 151, 151, 151, 198, 198]
+[2026/05/19 21:22:56] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:56] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:56] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:22:56] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:56] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:56] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 198, 198, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:56] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:56] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:59] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:59] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:59] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:59] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198]
+[2026/05/19 21:22:59] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:59] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:59] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:59] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:59] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:22:59] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:22:59] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:22:59] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:01] hftrainer INFO: epoch [1/1000]  step [40/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=104d 09:41:07
+[2026/05/19 21:23:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:03] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:03] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:03] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:04] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151]
+[2026/05/19 21:23:04] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:04] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:04] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:04] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:04] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:04] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198]
+[2026/05/19 21:23:04] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:04] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:05] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:05] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:05] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:05] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:05] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:05] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:05] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:23:05] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:05] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:05] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:05] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:05] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:05] hftrainer INFO: epoch [1/1000]  step [50/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=95d 05:02:48
+[2026/05/19 21:23:07] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151]
+[2026/05/19 21:23:07] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:07] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:07] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:07] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:07] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:07] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 198, 151]
+[2026/05/19 21:23:07] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:07] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:07] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 198, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 198, 151, 198, 198, 151, 151]
+[2026/05/19 21:23:07] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:07] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:09] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:09] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:09] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:09] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:09] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:09] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:09] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151]
+[2026/05/19 21:23:09] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:09] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:09] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 198, 151, 151, 198, 151]
+[2026/05/19 21:23:09] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:09] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:10] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:10] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:10] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:11] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:11] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:11] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:11] hftrainer INFO: epoch [1/1000]  step [60/12736]  loss=0.0000  data_time=0.92s  train_time=0.01s  eta=93d 05:35:22
+[2026/05/19 21:23:11] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:11] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:11] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:12] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:23:12] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:12] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:12] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:23:12] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:12] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:14] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 198]
+[2026/05/19 21:23:14] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:14] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:14] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 198, 198, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:14] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:14] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:14] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:14] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:14] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:15] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:23:15] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:15] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:16] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 198]
+[2026/05/19 21:23:16] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:16] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:16] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:16] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:16] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:16] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151]
+[2026/05/19 21:23:16] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:16] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:16] hftrainer INFO: epoch [1/1000]  step [70/12736]  loss=0.0000  data_time=0.14s  train_time=0.01s  eta=89d 23:43:30
+[2026/05/19 21:23:18] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:18] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:18] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:20] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 198, 151, 198, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:23:20] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:20] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:20] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 198, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:20] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:20] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:20] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 198, 151]
+[2026/05/19 21:23:20] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:20] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:21] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:21] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:21] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:23] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:23] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:23] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:23] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 198, 151]
+[2026/05/19 21:23:23] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:23] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:23] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:23] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:23] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:23] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:23] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:23] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:27] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:27] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:27] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:27] hftrainer INFO: epoch [1/1000]  step [80/12736]  loss=0.0000  data_time=4.02s  train_time=0.00s  eta=100d 01:00:24
+[2026/05/19 21:23:27] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 198, 198, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:27] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:27] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:27] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:27] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:27] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:27] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:27] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:27] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:30] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:30] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:30] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:30] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 198, 151, 151, 198, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:30] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:30] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:30] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:23:30] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:30] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:30] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:30] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:30] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:31] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198]
+[2026/05/19 21:23:31] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:31] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:31] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:31] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:31] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:31] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:31] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:31] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:31] hftrainer INFO: epoch [1/1000]  step [90/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=95d 17:28:01
+[2026/05/19 21:23:32] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:23:32] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:32] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:36] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198]
+[2026/05/19 21:23:36] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:36] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:36] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 198, 151, 198, 151, 151, 151, 198, 151, 151, 198, 198, 198, 198, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:23:36] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:36] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:36] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151]
+[2026/05/19 21:23:36] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:36] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:36] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:36] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:36] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:23:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 198, 198, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:37] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:23:37] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:37] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:39] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198]
+[2026/05/19 21:23:39] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:39] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:39] hftrainer INFO: epoch [1/1000]  step [100/12736]  loss=0.0000  data_time=1.92s  train_time=0.01s  eta=97d 20:05:03
+[2026/05/19 21:23:39] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:39] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:39] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:40] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 198, 151, 198, 151, 198, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:40] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:40] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:40] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 198, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:40] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:40] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:43] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:43] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:43] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:43] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198]
+[2026/05/19 21:23:43] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:43] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:43] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:43] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:43] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:43] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:43] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:43] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:45] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 198, 151, 151, 198, 151, 151, 198, 151]
+[2026/05/19 21:23:45] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:45] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:45] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 198, 198, 198, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198]
+[2026/05/19 21:23:45] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:45] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:45] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:45] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:45] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:45] hftrainer INFO: epoch [1/1000]  step [110/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=93d 16:03:28
+[2026/05/19 21:23:45] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151]
+[2026/05/19 21:23:45] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:45] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 198, 151]
+[2026/05/19 21:23:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:47] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:47] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:47] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:48] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 198, 198, 151, 151, 151]
+[2026/05/19 21:23:48] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:48] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:48] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:48] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:48] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:48] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:48] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:48] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:48] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:48] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:48] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 198, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:50] hftrainer INFO: epoch [1/1000]  step [120/12736]  loss=0.0000  data_time=2.30s  train_time=0.01s  eta=89d 06:10:11
+[2026/05/19 21:23:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 198, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:50] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:50] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:50] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:51] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:23:51] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:51] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:52] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:52] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:52] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:52] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:52] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:52] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:52] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 198, 151, 151, 198]
+[2026/05/19 21:23:52] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:52] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:52] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:52] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:52] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:54] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:54] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:54] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:54] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:23:54] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:54] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:54] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151]
+[2026/05/19 21:23:54] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:54] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:54] hftrainer INFO: epoch [1/1000]  step [130/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=88d 07:01:47
+[2026/05/19 21:23:55] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:55] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:55] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:56] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:23:56] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:56] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:23:56] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:23:56] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:23:56] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:24:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 198, 151, 151, 151, 151, 198, 198, 151, 151, 151, 198, 151, 198, 151, 151, 198, 198, 151, 151, 198, 198, 198]
+[2026/05/19 21:24:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 151, 198, 198, 151, 151]
+[2026/05/19 21:24:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:01] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:24:01] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:01] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:03] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 198, 151, 151, 198, 198, 151, 151, 151, 151, 151, 198, 151, 151, 198, 198, 151, 151, 198, 151, 151, 151, 151]
+[2026/05/19 21:24:03] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:03] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:04] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 198, 151, 198, 151, 151, 151, 151, 151, 198, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151]
+[2026/05/19 21:24:04] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:04] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:04] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 198, 151, 151, 151, 198, 151, 151, 151, 151, 198]
+[2026/05/19 21:24:04] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:04] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:04] hftrainer INFO: epoch [1/1000]  step [140/12736]  loss=0.0000  data_time=0.05s  train_time=0.01s  eta=91d 16:39:58
+[2026/05/19 21:24:04] hftrainer WARNING: Skipping batch: found motion dims {198, 151} != 151. Batch has mixed dimensions: [198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 198]
+[2026/05/19 21:24:04] hftrainer INFO: Creating skip context for batch with B=32, L=360, D=151
+[2026/05/19 21:24:04] hftrainer INFO: train_step: Skipping batch due to: dimension_mismatch
+[2026/05/19 21:24:06] hftrainer ERROR: [Rank 0] Exception in train_step at epoch=0 batch=141 global_step=141:
+Traceback (most recent call last):
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1610, in _train_by_epoch
+    output = self.trainer.train_step(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 512, in train_step
+    ctx = self._prepare_and_forward(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 368, in _prepare_and_forward
+    pred = self.bundle.predict_flow(
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/bundle.py", line 529, in predict_flow
+    return self.motion_transformer(
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py", line 940, in forward
+    x = mod(
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py", line 531, in forward
+    q, k = self.rotary_emb.apply_rotary_emb(q, k)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/positional_encoding.py", line 99, in apply_rotary_emb
+    xq_out = (xq.float() * cos + self.rotate_half(xq.float()) * sin).type_as(xq)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/positional_encoding.py", line 90, in rotate_half
+    return torch.stack([-x_imag, x_real], dim=-1).flatten(3)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 46.00 MiB. GPU 0 has a total capacity of 14.58 GiB of which 9.62 MiB is free. Process 2632439 has 14.57 GiB memory in use. Of the allocated memory 14.34 GiB is allocated by PyTorch, and 107.47 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+[2026/05/19 21:24:08] hftrainer ERROR: Training failed with exception:
+Traceback (most recent call last):
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/tools/train.py", line 87, in main
+    runner.train()
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1494, in train
+    self._train_by_epoch(train_cfg, val_interval)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1610, in _train_by_epoch
+    output = self.trainer.train_step(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 512, in train_step
+    ctx = self._prepare_and_forward(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 368, in _prepare_and_forward
+    pred = self.bundle.predict_flow(
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/bundle.py", line 529, in predict_flow
+    return self.motion_transformer(
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py", line 940, in forward
+    x = mod(
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py", line 531, in forward
+    q, k = self.rotary_emb.apply_rotary_emb(q, k)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/positional_encoding.py", line 99, in apply_rotary_emb
+    xq_out = (xq.float() * cos + self.rotate_half(xq.float()) * sin).type_as(xq)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/positional_encoding.py", line 90, in rotate_half
+    return torch.stack([-x_imag, x_real], dim=-1).flatten(3)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 46.00 MiB. GPU 0 has a total capacity of 14.58 GiB of which 9.62 MiB is free. Process 2632439 has 14.57 GiB memory in use. Of the allocated memory 14.34 GiB is allocated by PyTorch, and 107.47 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Traceback (most recent call last):
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/tools/train.py", line 112, in <module>
+    main()
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/tools/train.py", line 87, in main
+    runner.train()
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1494, in train
+    self._train_by_epoch(train_cfg, val_interval)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/runner/accelerate_runner.py", line 1610, in _train_by_epoch
+    output = self.trainer.train_step(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 512, in train_step
+    ctx = self._prepare_and_forward(batch)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/trainers/motion/hymotion_m2m_trainer.py", line 368, in _prepare_and_forward
+    pred = self.bundle.predict_flow(
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/bundle.py", line 529, in predict_flow
+    return self.motion_transformer(
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py", line 940, in forward
+    x = mod(
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/hymotion_mmdit.py", line 531, in forward
+    q, k = self.rotary_emb.apply_rotary_emb(q, k)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/positional_encoding.py", line 99, in apply_rotary_emb
+    xq_out = (xq.float() * cos + self.rotate_half(xq.float()) * sin).type_as(xq)
+  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/hftrainer/models/motion/hymotion_m2m/network/positional_encoding.py", line 90, in rotate_half
+    return torch.stack([-x_imag, x_real], dim=-1).flatten(3)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 46.00 MiB. GPU 0 has a total capacity of 14.58 GiB of which 9.62 MiB is free. Process 2632439 has 14.57 GiB memory in use. Of the allocated memory 14.34 GiB is allocated by PyTorch, and 107.47 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
