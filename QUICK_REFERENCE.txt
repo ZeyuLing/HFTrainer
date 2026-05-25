@@ -1,217 +1,207 @@
-╔════════════════════════════════════════════════════════════════════════════╗
-║         MotionWanRotaryPosEmbed KT-RoPE Integration - QUICK REFERENCE      ║
-╚════════════════════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                  PHYSFLOW ROBOT JSON INVESTIGATION SUMMARY                 ║
+║                              May 20, 2026                                   ║
+╚═══════════════════════════════════════════════════════════════════════════╝
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔍 WHERE IS RoPE INSTANTIATED?
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION
+════════════════════════════════════════════════════════════════════════════
+How are robot animation JSON files generated for the PhysFlow demo?
+Are root translations (pelvis body positions) physically plausible?
 
-FILE: hftrainer/models/motion/prism/network/transformer_prism.py
-LINES: 164-166 (in PrismTransformerMotionModel.__init__)
+ANSWER
+════════════════════════════════════════════════════════════════════════════
+❌ No robot_frames JSON files were generated (pipeline is BROKEN)
 
-    self.rope = MotionWanRotaryPosEmbed(
-        attention_head_dim, patch_size, rope_max_seq_len
-    )
+Pipeline Architecture (3 stages):
+  ✓ Stage 1: SMPL human kinematics → PyRoki keypoints [WORKS]
+  ✗ Stage 2: PyRoki keypoints → G1 robot angles [BROKEN - missing JAX]
+  ✗ Stage 3: Robot simulation + JSON export [BLOCKED - Stage 2 failed]
 
-PROBLEM: Only passes 3 parameters, missing KT-RoPE params!
+Root Cause: Missing "jax" module for PyRoki retargeting optimization
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 WHAT PARAMETERS NEED TO BE ADDED?
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEY FINDINGS
+════════════════════════════════════════════════════════════════════════════
 
-NEW PARAMETERS (4 total):
-  • rope_theta (float, default: 10000.0)
-  • joint_pos_mode (str, default: "sequential")
-  • num_spectral_modes (int, default: 4)
-  • spectral_scale (Optional[int], default: None)
+1. INPUT DATA (motion_135 NPZ files)
+   ├─ 12 files in output/physflow/eval_demo/data/npz/
+   ├─ Format: (T, 135) - 3 DOF translation + 22×6 DOF rotation
+   ├─ Coordinate: SMPL (Z-up, human scale)
+   └─ Status: ✓ Present and validated
 
-ALREADY CONFIGURABLE (3 total):
-  • attention_head_dim (default: 128)
-  • patch_size (default: (1, 1))
-  • rope_max_seq_len (default: 1024)
+2. PELVIS HEIGHT ANALYSIS
+   ├─ "Stands Still":   Y = 1.162 m (HUMAN height, not robot!)
+   ├─ "Weight Shift":   Y = 1.124 m (HUMAN height)
+   ├─ "Walks Forward":  Y = 1.138 m (AVG, with 2.36m upward movement!)
+   └─ ISSUE: Expected ~0.78m (G1 robot), got ~1.14-1.16m (human)
+             Difference: +36-38cm (human vs robot size)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔧 4-STEP IMPLEMENTATION CHECKLIST
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. FORWARD WALKING MOTION
+   ├─ Expected: Forward displacement in X-axis (robot frame)
+   ├─ Actual:   +2.36m displacement in Z-axis (VERTICAL UP in SMPL)
+   └─ Reveals: Coordinate frame mismatch (SMPL Z-up vs G1 Y-up)
 
-STEP 1: CONFIG FILE
-  FILE: configs/prism/prism_1b_tp2m_1frame.py
-  LINES: After line 35
-  ADD:
-    rope_theta=10000.0,
-    joint_pos_mode="sequential",
-    num_spectral_modes=4,
-    spectral_scale=None,
-  ✓ DONE
+4. EXPLANATION
+   This is INTENTIONAL design, not a bug:
+   ├─ motion_135 uses SMPL human frame (easier for generative models)
+   ├─ PyRoki should convert to G1 robot frame + scale
+   ├─ MuJoCo should simulate physics
+   ├─ But Stage 2 fails → no output generated
+   └─ Result: pipeline broken before physics conversion
 
-STEP 2A: TRANSFORMER __init__ SIGNATURE
-  FILE: hftrainer/models/motion/prism/network/transformer_prism.py
-  LINES: 132-149
-  ADD to signature:
-    rope_theta: float = 10000.0,
-    joint_pos_mode: str = "sequential",
-    num_spectral_modes: int = 4,
-    spectral_scale: Optional[int] = None,
-  ✓ DONE
+PIPELINE STATUS
+════════════════════════════════════════════════════════════════════════════
 
-STEP 2B: ROPE INSTANTIATION
-  FILE: hftrainer/models/motion/prism/network/transformer_prism.py
-  LINES: 164-166
-  REPLACE: self.rope = MotionWanRotaryPosEmbed(...)
-  WITH:
-    self.rope = MotionWanRotaryPosEmbed(
-        attention_head_dim=attention_head_dim,
-        patch_size=patch_size,
-        rope_max_seq_len=rope_max_seq_len,
-        theta=rope_theta,
-        joint_pos_mode=joint_pos_mode,
-        num_spectral_modes=num_spectral_modes,
-        spectral_scale=spectral_scale,
-    )
-  ✓ DONE
+Stage 1: motion135_to_pyroki_keypoints.py
+  Status: ✓ WORKS
+  Output: keypoints/*.npy files generated successfully
+  Evidence: (90, 18, 3) keypoint arrays in intermediates/keypoints/
 
-STEP 3: RoPE MODULE __init__
-  FILE: hftrainer/models/motion/prism/network/motion_rope.py
-  LINES: 69-75 (signature) + after line 111 (storage)
+Stage 2: batch_retarget_to_g1_from_keypoints.py
+  Status: ✗ BROKEN
+  Error: ModuleNotFoundError: No module named 'jax'
+  Location: line 23 in PyRoki retargeting script
+  Impact: FATAL - entire downstream pipeline blocked
+
+Stage 3: run_g1_rl_tracker_export.py
+  Status: ✗ BLOCKED (never executed)
+  Would: MuJoCo simulation + body pose extraction
+  Output: robot_frames JSON (never generated)
+
+DIRECTORY FINDINGS
+════════════════════════════════════════════════════════════════════════════
+
+✓ FOUND:
+  - output/physflow/eval_demo/data/npz/
+    └─ 12 motion_135 NPZ files (44-59 KB each)
   
-  UPDATE SIGNATURE:
-    def __init__(
-        self,
-        attention_head_dim: int,
-        patch_size: Tuple[int, int],
-        max_seq_len: int,
-        theta: float = 10000.0,
-        joint_pos_mode: str = "sequential",
-        num_spectral_modes: int = 4,
-        spectral_scale: Optional[int] = None,
-    ):
-  
-  STORE PARAMETERS (after line 111):
-    self.joint_pos_mode = joint_pos_mode
-    self.num_spectral_modes = num_spectral_modes
-    self.spectral_scale = spectral_scale
-  ✓ DONE
+  - output/physflow/eval_demo/data/robot_mesh_rl/motion_files/intermediates/keypoints/
+    └─ Keypoint .npy files from Stage 1
 
-STEP 4: IMPLEMENT KT-RoPE LOGIC (OPTIONAL)
-  FILE: hftrainer/models/motion/prism/network/motion_rope.py
-  LINES: In forward(), after line 178
-  
-  ADD:
-    if self.joint_pos_mode == "spectral":
-        # TODO: Apply Laplacian eigenvector decomposition
-        pass
-    elif self.joint_pos_mode == "dfs":
-        # TODO: Apply kinematic tree DFS traversal
-        pass
-  ✓ OPTIONAL
+✗ NOT FOUND:
+  - /apdcephfs/.../robot_json/ (directory doesn't exist)
+  - output/physflow/eval_demo/data/robot_mesh_rl/*.json (EMPTY)
+  - output/physflow/eval_demo/data/robot_mesh_rl/motion_files/intermediates/retargeted/ (EMPTY)
+  - output/physflow/eval_demo/data/robot_mesh_rl/*.motion (EMPTY)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🧪 TESTING COMMANDS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Evidence of Failure: _export_summary.json
+  [{
+    "name": "original_000_a_person_stands_still",
+    "error": "Retargeting failed: original_000_a_person_stands_still.npz"
+  }]
 
-Unit Tests (RoPE):
-  cd hftrainer/models/motion/prism/network
-  python motion_rope.py
+HOW TO FIX
+════════════════════════════════════════════════════════════════════════════
 
-Integration Tests (Transformer):
-  cd hftrainer/models/motion/prism/network
-  python transformer_prism.py
+1. Install JAX dependency:
+   $ pip install jax jaxlib
 
-Verification Script:
-  python test_ktropoe_params.py
+2. Re-run robot export:
+   $ python3 scripts/embodied/run_g1_rl_tracker_export.py \
+       --input-dir output/physflow/eval_demo/data/npz/ \
+       --output-dir output/physflow/eval_demo/data/robot_mesh_rl/
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 RESUME TRAINING
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. Verify output:
+   $ ls -lh output/physflow/eval_demo/data/robot_mesh_rl/*.json
+   (Should show JSON files like original_000_*.json, etc.)
 
-Before: bash tools/taiji_dist_train.sh configs/prism/prism_1b_tp2m_1frame.py --auto-resume
-After:  bash tools/taiji_dist_train.sh configs/prism/prism_1b_tp2m_1frame.py --auto-resume
+4. Validate pelvis height:
+   $ python3 << 'PYEOF'
+   import json
+   with open('output/physflow/eval_demo/data/robot_mesh_rl/original_000_a_person_stands_still.json') as f:
+     data = json.load(f)
+   pelvis_y = data['frames'][0]['body_pos'][0][1]
+   print(f"Pelvis Y: {pelvis_y:.3f}m")
+   # Expected: 0.78m (not 1.162m from input)
+   PYEOF
 
-(Same command - the updated config will be used automatically)
+EXPECTED OUTPUT (AFTER FIX)
+════════════════════════════════════════════════════════════════════════════
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 ARCHITECTURE DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+For "stands_still" motion:
+{
+  "type": "robot_frames",
+  "robot": "g1",
+  "fps": 25,
+  "num_frames": 45,
+  "num_bodies": 17,
+  "bodies": [{"name": "pelvis", "meshes": [...]}, ...],
+  "frames": [
+    {
+      "body_pos": [
+        [0.0, 0.78, 0.0],     ← pelvis at ~0.78m (NOT 1.162m!)
+        [...],                 ← other bodies
+      ],
+      "body_quat": [[1.0, 0.0, 0.0, 0.0], ...]
+    },
+    // ... minimal motion for standing
+  ]
+}
 
-DIMENSION SPLIT (attention_head_dim=128):
-  temporal dimension (t_dim) = 64
-  spatial dimension (j_dim) = 64
+KEY CHANGES FROM INPUT:
+  Pelvis height: 1.162m (SMPL) → 0.78m (robot)  ✓
+  Coordinate frame: Z-up (SMPL) → Y-up (robot)  ✓
+  Motion scale: human → robot                    ✓
+  Physics: kinematics → dynamics (MuJoCo)        ✓
 
-SEQUENCE LENGTH EXAMPLE (64 frames, 22 joints, patch_size=(1,1)):
-  N = (64 // 1) * (22 // 1) = 1408
+DATA FORMAT REFERENCE
+════════════════════════════════════════════════════════════════════════════
 
-OUTPUT SHAPE:
-  (batch, seq_len, 1, attention_head_dim) = (1, 1408, 1, 128)
+motion_135 INPUT:
+  Shape: (T, 135)
+  [0:3]:    Root translation [X, Y, Z]
+  [3:135]:  22 joints × 6 DOF rotation (rot6d)
+  Frame rate: 30 fps
+  Coordinate: SMPL (Z-up)
 
-USAGE:
-  • Passed to all 30 transformer blocks
-  • Used in attention layer rotations
-  • Compatible with hidden_states_mask
-  • Compatible with causal_mask
+PyRoki Keypoints INTERMEDIATE:
+  Shape: (T, 18, 3)
+  18 anatomical keypoints from SMPL skeleton
+  Coordinate: Z-up (ready for retargeting)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📚 DOCUMENTATION FILES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+robot_frames JSON OUTPUT:
+  Format: {"type": "robot_frames", "robot": "g1", ...}
+  Per-frame: body_pos (Nx3), body_quat (Nx4 wxyz)
+  Coordinate: MuJoCo World (Y-up)
+  Body count: 17 (G1 robot bodies)
 
-1. KTROPOE_SUMMARY.md (10 KB)
-   → Executive summary and overview
+ANALYSIS DOCUMENTS CREATED
+════════════════════════════════════════════════════════════════════════════
 
-2. ktropoe_instantiation_report.md (13 KB)
-   → Comprehensive technical analysis
+1. robot_animation_analysis.md (368 lines)
+   └─ Complete technical analysis with data flow diagrams
 
-3. ktropoe_config_flow.txt (22 KB)
-   → Visual flow diagrams and architecture
+2. ROBOT_JSON_FINDINGS.txt (226 lines)
+   └─ Executive summary with quick reference tables
 
-4. ktropoe_implementation_snippets.md (12 KB)
-   → Ready-to-use code snippets
+3. robot_json_data_reference.txt (315 lines)
+   └─ Data format specifications and validation procedures
 
-5. QUICK_REFERENCE.txt (This file)
-   → Quick checklist for implementation
+4. INVESTIGATION_COMPLETE.md (333 lines)
+   └─ Full investigation report with recommendations
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⏱️  ESTIMATED TIMELINE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. QUICK_REFERENCE.txt (this file)
+   └─ One-page visual summary
 
-Documentation Review:     5-10 minutes
-Implementation (4 steps): 15-30 minutes
-Testing & Verification:   10-15 minutes
-─────────────────────────────────────────
-TOTAL:                   30-55 minutes
+CONCLUSION
+════════════════════════════════════════════════════════════════════════════
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-❓ COMMON QUESTIONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Root Translations Status:
+  ❌ NOT physically plausible for G1 robot (yet)
+  ✓ Physically plausible for SMPL human (input is correct)
+  ⏳ Would be physically plausible AFTER pipeline completes
+     (but pipeline is broken at Stage 2 - missing JAX)
 
-Q: Will my existing training break?
-A: No! Default values match current behavior.
+Pipeline Status:
+  ❌ Currently BROKEN (missing JAX dependency)
+  ✓ Architecture is SOUND
+  ✓ Easy to fix (one dependency installation)
+  ⏱ Estimated time to fix: < 5 minutes
 
-Q: What's the most important parameter?
-A: rope_theta - it was hardcoded and now needs to be configurable.
+Recommendation:
+  ✓ Install JAX
+  ✓ Re-run export
+  ✓ Validate output shows Y ≈ 0.78m (not 1.16m)
 
-Q: Can I change only some parameters?
-A: Yes! Each has a sensible default, only override what you need.
-
-Q: How do I verify parameters are being passed?
-A: Check model.config.rope_theta and model.rope.joint_pos_mode
-
-Q: Do I need to implement spectral/dfs modes immediately?
-A: No, they're optional. "sequential" works as-is.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ SUCCESS CRITERIA
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-After implementation, verify:
-  ☐ Config file loads without errors
-  ☐ Model accepts new parameters from config
-  ☐ Parameters accessible in model.config
-  ☐ Parameters accessible in model.rope
-  ☐ Unit tests pass (motion_rope.py)
-  ☐ Integration tests pass (transformer_prism.py)
-  ☐ Forward pass produces correct shapes
-  ☐ Training resumption works (--auto-resume)
-
-══════════════════════════════════════════════════════════════════════════════
-For detailed information, see the comprehensive documentation files.
-Start with KTROPOE_SUMMARY.md, then refer to specific files as needed.
-══════════════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════
+Investigation Complete | Status: BLOCKED on JAX | Priority: HIGH
+════════════════════════════════════════════════════════════════════════════

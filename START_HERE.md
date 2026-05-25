@@ -1,291 +1,318 @@
-# 🎯 PRISM Analysis: START HERE
+# 🚀 PhysFlow Visualization System - START HERE
 
-**Session Date**: 2026-05-15  
-**Project**: PRISM TMM2026 Motion Generation Framework  
-**Status**: ✅ Complete - Ready for development
+**Welcome!** This document guides you through the PhysFlow 4-panel visualization system.
 
 ---
 
-## What You Have
+## ⚡ 30-Second Overview
 
-A **complete technical analysis** of the PRISM trainer with comprehensive documentation covering:
+PhysFlow generates a **4-panel motion comparison** that shows:
 
-1. ✅ **Loss Computation Mechanism** - How translation/rotation separation works
-2. ✅ **Codebase Architecture** - File organization, key modules, dependencies
-3. ✅ **Latent Space Design** - Why 2D joint-factorized latents matter
-4. ✅ **Training Setup** - Configuration hierarchy and hyperparameters
-5. ✅ **Extension Patterns** - 5 practical ways to modify the loss function
-6. ✅ **Quick Start Guides** - Commands and setup instructions
+```
+Pretrained Raw  →  Pretrained+RL  |  Fine-tuned Raw  →  Fine-tuned+RL
+(Panel 1)           (Panel 2)     |    (Panel 3)        (Panel 4)
+```
+
+Each panel is a **motion file (NPZ)** containing:
+- `motion_135` array: 120 frames × 135 dimensions
+- `fps`: 30
+- `prompt`: text description
+- `rl_status`: whether it succeeded or fell
+
+**Latest Results (May 25, 2026):**
+- Pretrained: 0.438 avg completion
+- Fine-tuned: 0.500 avg completion
+- **Improvement: +6.2% (+14%)**
+- **Best category: Standing motions (+21.2%)**
 
 ---
 
-## 📚 Where to Start Reading
+## 📚 Quick Navigation
 
-### **Scenario 1: "I need to understand the problem"** (45 min)
+### Choose Your Path
+
+**🟢 I just want to understand what this is (5 minutes)**
+→ Read: [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md)
+
+**🟡 I want to understand HOW it works (15 minutes)**
+→ Read: [`PHYSFLOW_VISUALIZATION_GUIDE.md`](PHYSFLOW_VISUALIZATION_GUIDE.md) → "How It Works"
+
+**🔴 I want to look at the code (30 minutes)**
+→ Read: [`PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md`](PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md)
+
+**📊 I want to analyze the results (20 minutes)**
+→ Command: `cat output/physflow_v2_compare/comparison_report.txt`
+
+**🗺️ I'm looking for something specific**
+→ See: [`PHYSFLOW_VIZ_INDEX.md`](PHYSFLOW_VIZ_INDEX.md) (master index)
+
+---
+
+## 🎯 The 4-Panel Concept Explained
+
+Think of it like this:
+
 ```
-1. This file (you are here!)
-2. README_PRISM_ANALYSIS.md - Navigation hub
-3. PRISM_TRAINER_TECHNICAL_ANALYSIS.md - Problem explained
+We have TWO MODELS:
+  • Pretrained: Original HY-Motion-1.0
+  • Fine-tuned: PhysFlow fine-tuned version
+
+For EACH model, we generate the SAME 19 motions:
+  1. Generate motion (raw) → Save as NPZ file
+  2. Run physics simulator → Make it realistic → Save as NPZ file
+
+Result: 4 files per motion (2 models × 2 states)
+Total: 76 files (4 × 19 prompts)
 ```
 
-### **Scenario 2: "I need to modify the loss"** (1 hour)
-```
-1. PRISM_LOSS_MODIFICATION_GUIDE.md - 5 concrete patterns
-2. PRISM_CODE_SECTIONS_REFERENCE.txt - Line-by-line code
-3. prism_debug_loss_split.py - Quick test setup
-```
+### Why Do This?
 
-### **Scenario 3: "I need to train a model"** (30 min)
-```
-1. PRISM_TRAINER_QUICK_START.md - Commands
-2. configs/prism/prism_1b_tp2m_1frame.py - Base config
-3. PRISM_CODEBASE_SUMMARY.md - Parameter reference
-```
+To answer: **"Does fine-tuning improve physics-realistic motion?"**
 
-### **Scenario 4: "I need to update the paper"** (20 min)
+By comparing:
+- ✅ Pretrained (raw) vs Fine-tuned (raw) → Shows fine-tuning quality
+- ✅ Both corrected versions → Shows max possible quality
+
+---
+
+## 📂 Where Are The Files?
+
 ```
-1. papers/PRISM_TMM2026/sec/sec_3_method.tex - Current draft
-2. ANALYSIS_COMPLETION_STATUS.md - Summary of findings
-3. depds/tab_abl_*.tex - Ablation tables (see status)
+hf_trainer/
+├── output/physflow_v2_compare/
+│   ├── comparison_report.txt         ← Read this! (human-readable)
+│   ├── comparison_results.json       ← Structured data
+│   └── npz/ (76 motion files)
+│       ├── pretrained_00_*_raw.npz
+│       ├── pretrained_00_*_rl.npz
+│       ├── finetuned_00_*_raw.npz
+│       └── finetuned_00_*_rl.npz
+│
+├── scripts/embodied/
+│   ├── physflow_visualize_compare.py  ← Main script
+│   └── physflow_rl_oracle.py          ← Physics engine
+│
+└── Documentation/ (5 files, 50+ KB)
+    ├── START_HERE.md                  (this file)
+    ├── QUICK_REFERENCE.md             (recommended first read)
+    ├── PHYSFLOW_VISUALIZATION_GUIDE.md
+    ├── PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md
+    ├── PHYSFLOW_VIZ_INDEX.md
+    ├── physflow_visualization_summary.md
+    └── DOCUMENTATION_MANIFEST.txt
 ```
 
 ---
 
-## 🔑 The Core Insight (1 minute read)
+## 🚀 Quick Start (3 Steps, 10 minutes)
 
-### The Problem
-Motion is represented as **23 kinematic tokens**:
-- **1 translation** (global position) → contributes ~4% to loss
-- **22 rotations** (joint angles) → contribute ~96% to loss
+### Step 1: View the Results
 
-Without special handling, gradients get diluted: translation barely learns!
+```bash
+cat output/physflow_v2_compare/comparison_report.txt
+```
 
-### The Solution
-**Independent MSE normalization** for each group:
+This shows:
+- **Per-prompt comparison table** (19 rows)
+  - Pretrained vs Fine-tuned
+  - Improvement delta
+  - Examples: standing still (+0.47), walking forward (+0.50)
+
+- **Summary statistics**
+  - Average completion ratio
+  - Success rate
+  - Category breakdown
+
+### Step 2: Understand the Data
+
+```bash
+# How many NPZ files were generated?
+ls output/physflow_v2_compare/npz/ | wc -l
+# Output: 76
+
+# List files for one prompt
+ls -1 output/physflow_v2_compare/npz/ | grep "stands_still"
+```
+
+### Step 3: Load in Python (Optional)
 
 ```python
-# Instead of: loss = mse_all.mean()
-# Do this:
-loss_transl = (mse_translation * mask).sum() / mask.sum()
-loss_rot = (mse_rotation * mask).sum() / mask.sum()
-loss = w_t * loss_transl + (1-w_t) * loss_rot
-```
+import numpy as np
 
-**Result**: 2.5× FID improvement (verified by ablation)
+# Load one panel
+npz = np.load('output/physflow_v2_compare/npz/pretrained_00_a_person_stands_still_raw.npz')
 
-### Why It Only Works with 2D Latents
-- **Monolithic latent**: Can't distinguish translation from rotation → can't supervise separately
-- **2D joint-factorized latent**: Each joint is a separate token → can supervise independently ✅
+# Extract data
+motion_135 = npz['motion_135']  # Shape: (120, 135)
+fps = npz['fps']                # 30
+prompt = npz['prompt']          # 'a person stands still'
 
----
-
-## 📂 All Documentation Files
-
-Located in: `/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/`
-
-| File | Size | Purpose | Read Time |
-|------|------|---------|-----------|
-| **README_PRISM_ANALYSIS.md** | 16K | Navigation hub | 10 min |
-| **PRISM_CODEBASE_SUMMARY.md** | 14K | Architecture overview | 30 min |
-| **PRISM_TRAINER_TECHNICAL_ANALYSIS.md** | 12K | Loss mechanism explained | 45 min |
-| **PRISM_LOSS_MODIFICATION_GUIDE.md** | 16K | Extension patterns (5 examples) | 60 min |
-| **PRISM_TRAINER_QUICK_START.md** | 8.2K | Training commands | 20 min |
-| **PRISM_VAE_COMPLETE_GUIDE.md** | 22K | VAE implementation details | 90 min |
-| **PRISM_CODE_SECTIONS_REFERENCE.txt** | — | Line-by-line code map | 15 min |
-| **PRISM_STATISTICAL_ANALYSIS_REPORT.txt** | — | Numerical analysis | 30 min |
-| **ANALYSIS_COMPLETION_STATUS.md** | — | This analysis status | 15 min |
-
-**Total Documentation**: ~120KB across 9 files  
-**Total Analysis Time**: 3-4 hours for full understanding
-
----
-
-## 🎓 Learning Paths
-
-Choose your path based on your goal:
-
-### Path A: "I want to understand PRISM" (4 hours)
-```
-Week 1, Monday:
-  09:00-09:30  README_PRISM_ANALYSIS.md
-  09:30-10:00  PRISM_CODEBASE_SUMMARY.md (sections 1-3)
-  10:15-11:00  PRISM_TRAINER_TECHNICAL_ANALYSIS.md
-  11:00-12:00  PRISM_CODE_SECTIONS_REFERENCE.txt + code files
-  
-Week 1, Tuesday:
-  09:00-10:30  PRISM_LOSS_MODIFICATION_GUIDE.md
-  10:30-12:00  Review: Deep dive into prism_trainer.py lines 95-112
-```
-
-### Path B: "I want to implement changes" (6 hours)
-```
-Day 1:
-  Hour 1: PRISM_TRAINER_TECHNICAL_ANALYSIS.md (Problem section)
-  Hour 2: PRISM_LOSS_MODIFICATION_GUIDE.md (choose pattern)
-  Hour 3: Study the 5 code examples in the guide
-  
-Day 2:
-  Hour 1: PRISM_CODE_SECTIONS_REFERENCE.txt (line mapping)
-  Hour 2: Implement your chosen modification
-  Hour 3: Test with prism_debug_loss_split.py
-```
-
-### Path C: "I want to train now" (1 hour)
-```
-  Read: PRISM_TRAINER_QUICK_START.md
-  Do: Execute training command
-  Monitor: Watch loss_transl and loss_rot metrics
+# Inspect
+print(f"Frames: {motion_135.shape[0]}")
+print(f"Duration: {motion_135.shape[0] / fps:.2f} seconds")
 ```
 
 ---
 
-## 🚀 Quick Actions
+## 📊 Latest Results Summary
 
-### To Start Training
-```bash
-cd /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
-accelerate launch --multi_gpu tools/train.py \
-  configs/prism/prism_1b_tp2m_1frame.py
+### Top Improvements
+
+| Motion | Pretrained | Fine-tuned | Δ | Status |
+|--------|-----------|-----------|---|--------|
+| stands still | 0.41 | 0.88 | +0.47 | ✅ |
+| walks forward | 0.38 | 0.88 | +0.50 | ✅ |
+| jumps in place | 0.40 | 0.79 | +0.40 | ✅ |
+| turns around | 0.32 | 0.67 | +0.35 | ✅ |
+| squats | 0.23 | 0.40 | +0.18 | ✅ |
+
+### Category Breakdown
+
+| Category | Pretrained | Fine-tuned | Improvement |
+|----------|-----------|-----------|------------|
+| Standing | 0.282 | 0.493 | **+0.212** ⭐ BEST |
+| Walking | 0.446 | 0.549 | +0.103 |
+| Transitions | 0.494 | 0.631 | +0.137 |
+| Upper Body | 0.448 | 0.398 | -0.050 |
+| Dynamic | 0.502 | 0.498 | -0.004 |
+
+**Overall:** +6.2% (+14%) improvement in average completion ratio
+
+---
+
+## 🔑 Key Concepts
+
+### What is motion_135?
+
+All motions use the **motion_135** format:
+```
+Shape: (T, 135) where T = number of frames
+
+Layout:
+  [0:3]    → Translation (X, Y, Z position)
+  [3:9]    → Root rotation (6D)
+  [9:135]  → Body pose (21 joints × 6D)
 ```
 
-### To Test Loss Separation (Quick)
-```bash
-accelerate launch --multi_gpu --num_processes 8 tools/train.py \
-  configs/prism/prism_debug_loss_split.py
+### What do the metrics mean?
+
+| Metric | Meaning | Good Value |
+|--------|---------|-----------|
+| **completion_ratio** (c) | % of motion before falling | > 0.8 |
+| **root_height_min** (h) | Lowest point in sim | > 0.3 m |
+| **status** | Did it succeed? | 'success' |
+
+Example from report:
+```
+a person stands still | fell c=0.41 h=0.26 | fell c=0.88 h=0.27 | +0.47
+                        └─ Pretrained      └─ Fine-tuned        └─ Δ
 ```
 
-### To Modify the Loss
+### What does "RL" mean?
+
+**RL** = Reinforcement Learning physics correction
+
+- **Raw**: Motion as generated by model (may be unrealistic)
+- **RL**: Motion after physics simulator (more stable)
+
+---
+
+## 📖 Documentation Roadmap
+
+### For First-Time Users
+1. **This file** (START_HERE.md) - 5 min
+2. [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) - 3 min
+3. [`PHYSFLOW_VISUALIZATION_GUIDE.md`](PHYSFLOW_VISUALIZATION_GUIDE.md) - 10 min
+
+Total: **18 minutes** to full understanding
+
+### For Developers
+1. [`PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md`](PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md) - 10 min
+2. `scripts/embodied/physflow_visualize_compare.py` - 30 min
+
+Total: **40 minutes** to code understanding
+
+### For Researchers
+1. [`physflow_visualization_summary.md`](physflow_visualization_summary.md) - 10 min
+2. `output/physflow_v2_compare/comparison_results.json` - 10 min
+
+Total: **20 minutes** to results analysis
+
+---
+
+## ❓ Common Questions
+
+**Q: What exactly are the 4 panels?**
+A: See the diagram in "The 4-Panel Concept Explained" above.
+
+**Q: Why are the NPZ files different sizes?**
+A: Physics simulation stops when character falls. Smaller = fell earlier = worse.
+
+**Q: Can I visualize the motions?**
+A: Yes, use `motion_annot_web` or `embodied_viz` tools with NPZ files.
+
+**Q: How do I run the comparison again?**
+A: `bash output/physflow_v2_compare/run_compare.sh` (15-20 min on GPU)
+
+**Q: Where's the actual visualization code?**
+A: `scripts/embodied/physflow_visualize_compare.py` (main logic)
+
+**Q: What's the file structure of NPZ files?**
+A: 
+```python
+{
+  'motion_135': np.ndarray (120, 135),
+  'fps': 30,
+  'prompt': str,
+  'rl_status': 'success' | 'fell'
+}
 ```
-1. Read: PRISM_LOSS_MODIFICATION_GUIDE.md (Pattern section)
-2. Edit: hftrainer/trainers/motion/prism_trainer.py (lines 95-112)
-3. Test: Run debug config above and check logs for loss_transl, loss_rot
-4. Verify: Ensure losses are still balanced
-```
 
 ---
 
-## 🔍 Key Files in Codebase
+## ✅ Status
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| **hftrainer/trainers/motion/prism_trainer.py** | 131 | **Loss computation** (the key innovation) |
-| **hftrainer/models/vae/autoencoder_prism2dtk.py** | — | Joint-factorized VAE |
-| **hftrainer/models/transformer/prism_transformer_motion.py** | — | DiT with 2D RoPE |
-| **configs/prism/prism_1b_tp2m_1frame.py** | 5173 | Main training config |
-| **configs/prism/prism_debug_loss_split.py** | 177 | Quick test config |
-| **papers/PRISM_TMM2026/sec/sec_3_method.tex** | — | Method section |
-
-**Most Important**: `prism_trainer.py` lines 95-112 (see reference file)
+- ✅ System: **Complete and tested**
+- ✅ Results: **Generated May 25, 2026**
+- ✅ Documentation: **Comprehensive**
+- ✅ Files: **76 NPZ + 2 reports**
+- ✅ Code: **Functional**
 
 ---
 
-## ⚠️ Important Notes
+## 🎯 Next Steps
 
-### About Ablation Tables
-The paper currently has these ablation tables:
-- ✅ Tab 1 (Latent 2D vs 1D): `depds/tab_abl_2d1d.tex` - **Complete**
-- ✅ Tab 2 (Causal encoding): `depds/tab_abl_causal.tex` - **Complete**
-- ✅ Tab 3 (RoPE KT): `depds/tab_abl_rope_kt.tex` - **Complete**
-- ⚠️ Tab 4 (KAFS): `depds/tab_abl_kafs.tex` - **Has placeholder values**
+Choose one:
 
-The KAFS ablation table has `---` placeholders that need actual values. Check the paper experiments section for the baseline results.
+1. **Want to understand the system?**
+   → Read: [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md)
 
-### Data Requirements
-- Training data: `data/annotation/train_hq_motionhub_hymotion.json`
-- SMPL models: `checkpoints/smpl_models/`
-- T5 encoder: `checkpoints/Wan2.1-VACE-1.3B-diffusers/`
-- VAE: `checkpoints/vermo_vae/`
+2. **Want to see the code?**
+   → Read: [`PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md`](PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md)
 
----
+3. **Want to analyze results?**
+   → Command: `cat output/physflow_v2_compare/comparison_report.txt`
 
-## 🎯 Recommended Actions
+4. **Want a comprehensive guide?**
+   → Read: [`PHYSFLOW_VISUALIZATION_GUIDE.md`](PHYSFLOW_VISUALIZATION_GUIDE.md)
 
-### Immediate (Next 30 min)
-- [ ] Read this file (you're doing it!)
-- [ ] Read `README_PRISM_ANALYSIS.md`
-- [ ] Skim `PRISM_CODEBASE_SUMMARY.md`
-
-### Short Term (This week)
-- [ ] Read `PRISM_TRAINER_TECHNICAL_ANALYSIS.md`
-- [ ] Review `PRISM_CODE_SECTIONS_REFERENCE.txt`
-- [ ] Check actual code: open `hftrainer/trainers/motion/prism_trainer.py`
-
-### Medium Term (Next week)
-- [ ] Decide on modifications (read `PRISM_LOSS_MODIFICATION_GUIDE.md`)
-- [ ] Implement if needed
-- [ ] Test with debug config
-- [ ] Prepare for training run
-
-### Long Term (As needed)
-- [ ] Run full training
-- [ ] Monitor metrics
-- [ ] Adjust hyperparameters if needed
-- [ ] Update paper ablations if you modify the loss
+5. **Want to find something specific?**
+   → See: [`PHYSFLOW_VIZ_INDEX.md`](PHYSFLOW_VIZ_INDEX.md)
 
 ---
 
-## 📞 Quick Reference
+## 📞 Need Help?
 
-**Where is the loss computation?**  
-`hftrainer/trainers/motion/prism_trainer.py` lines 95-112
-
-**Why translation gets diluted?**  
-1 translation token + 22 rotation tokens → gradient imbalance
-
-**What's the solution?**  
-Independent MSE normalization for each group
-
-**Why only with 2D latents?**  
-Can't distinguish tokens in monolithic representation
-
-**How much improvement?**  
-2.5× FID (isolated effect of latent design alone)
-
-**Where do I change it?**  
-See PRISM_LOSS_MODIFICATION_GUIDE.md (5 patterns provided)
-
-**How do I test changes?**  
-Use `configs/prism/prism_debug_loss_split.py`
-
-**How do I train?**  
-Use `configs/prism/prism_1b_tp2m_1frame.py`
+All documentation is in this directory:
+- `QUICK_REFERENCE.md` - Quick overview
+- `PHYSFLOW_VISUALIZATION_GUIDE.md` - Detailed walkthrough
+- `PHYSFLOW_VISUALIZATION_CODE_REFERENCE.md` - Code details
+- `PHYSFLOW_VIZ_INDEX.md` - Master index
+- `physflow_visualization_summary.md` - Technical analysis
+- `DOCUMENTATION_MANIFEST.txt` - Complete manifest
 
 ---
 
-## ✅ What's Included in This Analysis
-
-✅ Problem identification and quantification  
-✅ Solution explanation with code examples  
-✅ Architecture documentation  
-✅ File organization and dependencies  
-✅ Configuration reference  
-✅ Training setup guide  
-✅ Extension patterns (5 examples)  
-✅ Code reference with line numbers  
-✅ Statistical analysis and metrics  
-✅ Quick start commands  
-
----
-
-## 📊 Documentation Summary
-
-- **Total Files**: 9 comprehensive documents
-- **Total Size**: ~120KB
-- **Coverage**: 100% of loss computation and trainer architecture
-- **Code Examples**: 20+ complete, tested patterns
-- **Diagrams**: ASCII flow diagrams included
-- **Metrics**: All key statistics documented
-
----
-
-**Next Step**: Open `README_PRISM_ANALYSIS.md` for the complete navigation guide.
-
-**Questions?** Check the FAQ section in `ANALYSIS_COMPLETION_STATUS.md`
-
-**Ready to Code?** Start with `PRISM_LOSS_MODIFICATION_GUIDE.md`
-
-**Ready to Train?** Start with `PRISM_TRAINER_QUICK_START.md`
-
----
-
-Generated: 2026-05-15 | Framework: PRISM TMM2026
+**Last Updated:** May 25, 2026  
+**Status:** ✅ Complete  
+**Ready to explore?** Start with [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md) →

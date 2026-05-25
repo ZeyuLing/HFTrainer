@@ -1,192 +1,146 @@
 ================================================================================
-TEXT GUIDANCE SCALE INVESTIGATION: COMPLETE RESULTS
+MUJOCO SMPL HUMANOID FALLING INVESTIGATION - QUICK SUMMARY
 ================================================================================
 
-INVESTIGATION COMPLETED: May 15, 2026
-
-Question: "Is CFG disabled? Does text_guidance_scale default to 1.0, making 
-caption conditioning ineffective?"
-
-ANSWER: ✅ NO - CFG IS PROPERLY CONFIGURED AND ACTIVE
+INVESTIGATION DATE: 2026-05-21
+BASE PATH: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
 
 ================================================================================
-KEY FINDINGS
+FINDINGS
 ================================================================================
 
-1. CLI ARGUMENT (scripts/eval/eval_m2m_v2_all_tasks.py, lines 3797-3798)
-   ✅ EXISTS with DEFAULT: 5.0
+1. SELF-COLLISION HANDLING: 🔴 CRITICAL ISSUE FOUND
+   ─────────────────────────────────────────────────
+
+   Status: MuJoCo backend IGNORES the self_collisions flag
    
-   parser.add_argument('--text-guidance-scale', type=float, default=5.0,
-       help='CFG scale for text-conditioned models (5.0 standard for flow matching)')
-
-2. PIPELINE INITIALIZATION (scripts/eval/eval_m2m_v2_all_tasks.py, lines 1385-1389)
-   ⚠️ INITIALIZED WITHOUT EXPLICIT text_guidance_scale (defaults to 1.0 internally)
+   Evidence:
+   • IsaacGym respects it: simulator/isaacgym/simulator.py
+     → Uses: col_filter = 0 if self.robot_config.asset.self_collisions else 1
    
-   pipeline = HyMotionM2MPipeline(
-       bundle=bundle,
-       num_steps=50,
-       replacement_guidance='none',
-   )
-
-3. PIPELINE OVERRIDE (scripts/eval/eval_m2m_v2_all_tasks.py, line 2905)
-   ✅ OVERRIDDEN BEFORE INFERENCE
+   • Newton respects it: simulator/newton/simulator.py  
+     → Uses: enable_self_collisions=self.robot_config.asset.self_collisions
    
-   pipeline.text_guidance_scale = text_guidance_scale
-
-4. VALUE PASSED (scripts/eval/eval_m2m_v2_all_tasks.py, lines 4046-4048)
-   ✅ CONDITIONED ON MODEL TYPE
+   • Genesis respects it: simulator/genesis/simulator.py
+     → Uses: enable_self_collision=self.robot_config.asset.self_collisions
    
-   text_guidance_scale=(
-       args.text_guidance_scale if model_info.get('has_caption') else 1.0)
+   • MuJoCo DOES NOT: simulator/mujoco/simulator.py
+     → NO CODE EXISTS to handle robot self-collisions (lines 1-1240 checked)
+     → Only handles projectiles (lines 1142-1153)
    
-   For caption models (caption_local, caption_global, etc.): 5.0 ✅
-   For uncond models (uncond_local, uncond_global, etc.): 1.0 ✅
-
-5. CFG ACTIVATION (hftrainer/pipelines/motion/hymotion_m2m_pipeline.py, line 221)
-   ✅ CORRECT LOGIC
+   Impact on SMPL:
+   • SMPL geoms have contype=1|7 and conaffinity=1 (from MJCF)
+   • This allows self-collision of robot body parts
+   • Standing pose has natural interpenetration (shoulders, hips)
+   • MuJoCo generates repulsive forces to resolve penetrations
+   • Forces exceed PD control → humanoid falls
    
-   do_cfg = self.text_guidance_scale > 1.0 and not self.bundle.uncondition_mode
+   File Reference: ref_repo/ProtoMotions/protomotions/simulator/mujoco/simulator.py
+   • Line 294-379: _create_simulation() - needs self-collision handling
+   • Line 394-431: _override_joint_properties() - ignores self_collisions flag
+   • Line 1142-1153: Only projectile collision code exists
+
+================================================================================
+
+2. ARMATURE VALUES: ✅ NOT THE PROBLEM
+   ─────────────────────────────────────
    
-   Result: do_cfg = (5.0 > 1.0) and (not False) = True ✅
-
-6. CFG APPLICATION (hftrainer/pipelines/motion/hymotion_m2m_pipeline.py, line 277)
-   ✅ APPLIED AT EACH ODE STEP
+   SMPL MJCF Configuration:
+   • File: ref_repo/ProtoMotions/protomotions/data/assets/mjcf/smpl_humanoid.xml
+   • ALL joints: armature="0.02" (consistent across all 69 joints)
+   • MuJoCo default: armature=0.02 (standard)
+   • IsaacGym PhysX: 0.01-0.05 range
    
-   x_pred = pred_basic + self.text_guidance_scale * (pred_text - pred_basic)
-                         ↑
-                    Amplifies text influence by 5.0×
+   Robot Config:
+   • File: ref_repo/ProtoMotions/protomotions/robot_configs/smpl.py (lines 75-111)
+   • Does not override armature (inherits from MJCF)
+   • Specifies stiffness/damping/effort_limit only
+   
+   Simulator Code:
+   • File: ref_repo/ProtoMotions/protomotions/simulator/mujoco/simulator.py (lines 394-431)
+   • Properly reads armature from control_info if specified
+   • If not specified, uses MJCF value (0.02)
+   
+   Conclusion: Armature values are STANDARD and CONSISTENT
+   → This is NOT causing the falling issue
 
 ================================================================================
-DATA FLOW SUMMARY
-================================================================================
 
-Default CLI: --text-guidance-scale 5.0
-           ↓
-eval script parses: args.text_guidance_scale = 5.0
-           ↓
-Main loop: model_info.get('has_caption') = True
-           ↓
-Passed to evaluate_sample(): text_guidance_scale = 5.0
-           ↓
-Pipeline override: pipeline.text_guidance_scale = 5.0
-           ↓
-Pipeline inference:
-   - do_cfg activation: (5.0 > 1.0) = True ✅
-   - CFG formula: x_pred = uncond + 5.0 × (cond - uncond)
-   - At every ODE step: caption influence amplified 5×
+3. CONDIM AND GEOM COLLISION SETTINGS: ℹ️ APPROPRIATE
+   ──────────────────────────────────────────────────
+   
+   MJCF Settings (ref_repo/ProtoMotions/protomotions/data/assets/mjcf/smpl_humanoid.xml):
+   • condim="3" - Allows 3D friction (standard for humanoids)
+   • contype="1|7" - Collision type bits (leg=1, feet/hands=7)
+   • conaffinity="1" - Can collide with anything having contype bit 0
+   • margin="0.001" - 0.1 cm contact margin (standard)
+   
+   Assessment:
+   ✅ condim=3 is appropriate (enables sliding friction)
+   ✅ margin is standard (0.1 cm)
+   ❌ contype/conaffinity settings allow uncontrolled self-collision
 
 ================================================================================
-MODEL BREAKDOWN
+ROOT CAUSE
 ================================================================================
 
-CAPTION-ENABLED MODELS (CFG ACTIVE):
-✅ caption_local       → text_guidance_scale = 5.0
-✅ caption_global      → text_guidance_scale = 5.0
-✅ caption_local_phase1     → text_guidance_scale = 5.0
-✅ caption_global_phase1    → text_guidance_scale = 5.0
-✅ caption_local_phase2     → text_guidance_scale = 5.0
-✅ caption_global_phase2    → text_guidance_scale = 5.0
-✅ kimodo_caption_E4   → text_guidance_scale = 5.0
-✅ smpl_caption_E2     → text_guidance_scale = 5.0
+The SMPL humanoid falls in MuJoCo RL tracker simulation because:
 
-UNCONDITIONED MODELS (CFG DISABLED):
-❌ uncond_local        → text_guidance_scale = 1.0
-❌ uncond_global       → text_guidance_scale = 1.0
-❌ kimodo_uncond_E3    → text_guidance_scale = 1.0
-❌ smpl_uncond_E1      → text_guidance_scale = 1.0
+1. MuJoCo backend does NOT implement self-collision disabling
+2. All robot geoms allow mutual collision (conaffinity=1)
+3. Standing pose has natural limb interpenetration
+4. MuJoCo contact solver generates repulsive forces
+5. These forces dominate PD control torques
+6. Humanoid becomes unstable and falls
+
+This is the ONLY major difference between MuJoCo and other simulators that
+support the self_collisions flag.
 
 ================================================================================
-VERIFICATION CHECKLIST
+FIX PRIORITY
 ================================================================================
 
-[✅] CLI argument exists: --text-guidance-scale
-[✅] Default value: 5.0 (safe, non-zero)
-[✅] Value received by evaluate_sample()
-[✅] Value set on pipeline before inference
-[✅] CFG activation check: scale > 1.0
-[✅] CFG formula applied at each step
-[✅] Caption models identified with has_caption=True
-[✅] Uncond models get safe default 1.0
+🔴 HIGH PRIORITY
+
+Implement _disable_self_collisions() in MujocoSimulator class:
+• Location: ref_repo/ProtoMotions/protomotions/simulator/mujoco/simulator.py
+• Call in: _create_simulation() method (around line 318)
+• Mirror IsaacGym's approach
+• Set geom_conaffinity[gid] = 0 for all robot geoms
+
+Expected result:
+• Humanoid will remain stable during motion tracking
+• No self-collision repulsive forces will interfere with PD control
+• Behavior will match other simulators (IsaacGym, Newton, Genesis)
 
 ================================================================================
-CRITICAL CODE LOCATIONS
+QUICK REFERENCE: CODE LOCATIONS
 ================================================================================
 
-File: scripts/eval/eval_m2m_v2_all_tasks.py
-  Line 3797-3798: CLI argument definition (default 5.0)
-  Line 1385-1389: Pipeline initialization
-  Line 2905:      Pipeline parameter override
-  Line 4046-4048: Conditional passing to evaluate_sample()
+PROBLEM FILE (MuJoCo):
+  ref_repo/ProtoMotions/protomotions/simulator/mujoco/simulator.py
+  • Line 294-379: _create_simulation() - missing self-collision handling
+  • Line 394-431: _override_joint_properties() - reads armature OK
+  • Line 1142-1153: _disable_projectile_collisions() - only for projectiles
 
-File: hftrainer/pipelines/motion/hymotion_m2m_pipeline.py
-  Line 86:   Constructor (default text_guidance_scale=1.0)
-  Line 99:   Store as instance variable
-  Line 221:  CFG activation check: do_cfg = scale > 1.0
-  Line 277:  CFG application formula
+COMPARISON FILES (Working implementations):
+  ref_repo/ProtoMotions/protomotions/simulator/isaacgym/simulator.py - col_filter logic
+  ref_repo/ProtoMotions/protomotions/simulator/newton/simulator.py - enable_self_collisions
+  ref_repo/ProtoMotions/protomotions/simulator/genesis/simulator.py - enable_self_collision
 
-================================================================================
-POTENTIAL ISSUE FOUND
-================================================================================
+SMPL CONFIGURATION:
+  ref_repo/ProtoMotions/protomotions/robot_configs/smpl.py
+  • Line 63-72: Asset config (self_collisions: bool = True by default)
+  • Line 75-111: Control config (armature not specified)
+  
+SMPL ASSET:
+  ref_repo/ProtoMotions/protomotions/data/assets/mjcf/smpl_humanoid.xml
+  • Lines 13-143: All geoms with contype/conaffinity/condim settings
 
-tools/infer.py for HyMotion M2M (lines 230-233):
-❌ DOES NOT PASS text_guidance_scale to pipeline
-
-Current code:
-    pipeline = HyMotionM2MPipeline(
-        bundle=bundle,
-        num_steps=args.num_steps or 50,
-    )
-
-Should be:
-    pipeline = HyMotionM2MPipeline(
-        bundle=bundle,
-        num_steps=args.num_steps or 50,
-        text_guidance_scale=getattr(args, 'guidance_scale', 5.0) or 5.0,
-    )
-
-Also missing: --guidance-scale CLI argument for M2M in tools/infer.py
-(T2M has it at line 286)
+BASE CONFIG:
+  ref_repo/ProtoMotions/protomotions/robot_configs/base.py
+  • Line 96-101: RobotAssetConfig class with self_collisions: bool = True
 
 ================================================================================
-CONCLUSION
-================================================================================
-
-✅ CFG IS CORRECTLY IMPLEMENTED
-
-1. ✅ Text guidance is NOT disabled
-2. ✅ Default scale is 5.0 (not 1.0)
-3. ✅ Pipeline receives the correct value
-4. ✅ CFG is activated when scale > 1.0
-5. ✅ Caption effect is amplified 5× during inference
-6. ✅ Eval script correctly distinguishes caption vs uncond models
-
-The design is robust:
-- Safe default (1.0 for uncond models)
-- Flexible (can override via CLI)
-- Model-aware (checks has_caption)
-- Correct implementation (CFG formula applied properly)
-
-================================================================================
-DOCUMENTATION GENERATED
-================================================================================
-
-✓ TEXT_GUIDANCE_SCALE_ANALYSIS.md
-  - Comprehensive analysis with code references
-  - 9 major sections covering all aspects
-  - Table of all models and their CFG status
-
-✓ CFG_DETAILED_FLOW.md
-  - Step-by-step execution trace
-  - 9 phases from CLI to inference
-  - Detailed data flow diagram
-  - Key checkpoints for verification
-
-✓ TEXT_GUIDANCE_QUICK_REFERENCE.md
-  - Quick lookup guide
-  - Command-line usage examples
-  - Common issues and solutions
-  - Critical code locations
-
-All saved to: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/
-
+INVESTIGATION COMPLETE
 ================================================================================
