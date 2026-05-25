@@ -1,0 +1,229 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║          PRISM TRANSFORMER ATTENTION BLOCK ARCHITECTURE SUMMARY              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+QUESTION 1: How does PrismTransformerMotionModel construct transformer blocks?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Location: hftrainer/models/motion/prism/network/transformer_prism.py, lines 195-209
+
+Implementation:
+  self.blocks = nn.ModuleList(
+      [
+          WanTransformerBlockWithMask(
+              inner_dim,
+              ffn_dim,
+              num_attention_heads,
+              qk_norm,
+              cross_attn_norm,
+              eps,
+              added_kv_proj_dim,
+              use_fp32_upcast_attention,  # ← CRITICAL PARAMETER (Line 205)
+          )
+          for _ in range(num_layers)  # num_layers = 30
+      ]
+  )
+
+Key Facts:
+  ✓ Creates 30 transformer blocks (num_layers=30 from config)
+  ✓ Uses nn.ModuleList with list comprehension
+  ✓ Each block is WanTransformerBlockWithMask instance
+  ✓ All blocks receive IDENTICAL parameters
+  ✓ Parameter passing is DIRECT (no **kwargs unpacking)
+
+
+QUESTION 2: Does it use WanTransformerBlockWithMask? Does it pass use_fp32_upcast_attention?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Answer: YES to both
+
+✓ YES: Uses WanTransformerBlockWithMask (line 197)
+  - This is the ONLY block type used
+  - Imported from .block_with_mask (line 75)
+
+✓ YES: Passes use_fp32_upcast_attention (line 205)
+  - Passed as 8th positional argument
+  - Passed to each of the 30 blocks
+  - Not wrapped in **kwargs
+
+Example at line 197-205:
+  WanTransformerBlockWithMask(
+      inner_dim,              # 1
+      ffn_dim,                # 2
+      num_attention_heads,    # 3
+      qk_norm,                # 4
+      cross_attn_norm,        # 5
+      eps,                    # 6
+      added_kv_proj_dim,      # 7
+      use_fp32_upcast_attention,  # 8 ← THIS PARAMETER
+
+
+QUESTION 3: Full config inheritance chain
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Starting from: configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached_v3.py
+
+Chain:
+  1. prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached_v3.py (line 27)
+     _base_ = './prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached.py'
+     Overrides: module_dtype, use_fp16_autocast
+     Does NOT override: use_fp32_upcast_attention
+
+  2. prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached.py (line 15)
+     _base_ = './prism_1b_tp2m_multiframe_kt_spectral_unified.py'
+     Overrides: tokenizer, text_encoder
+     Does NOT override: use_fp32_upcast_attention
+
+  3. prism_1b_tp2m_multiframe_kt_spectral_unified.py (line 12)
+     _base_ = './prism_1b_tp2m_multiframe.py'
+     Overrides: joint_pos_mode, num_spectral_modes, spectral_scale
+     Does NOT override: use_fp32_upcast_attention
+
+  4. prism_1b_tp2m_multiframe.py (line 9)
+     _base_ = './prism_1b_tp2m_1frame.py'
+     Overrides: condition_num_frames, frame_condition_rate
+     Does NOT override: use_fp32_upcast_attention
+
+  5. prism_1b_tp2m_1frame.py (line 34) ← MAIN DEFINITION
+     ✓ SETS: use_fp32_upcast_attention=True
+     This is where the parameter is FIRST defined
+     All configs above inherit this value
+
+Result: All v3/v2/unified configs inherit use_fp32_upcast_attention=True
+
+
+QUESTION 4: Does config rely on default True or is it explicit?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Answer: EXPLICIT, not relying on defaults
+
+✓ Explicitly set in: configs/prism/prism_1b_tp2m_1frame.py, line 34
+  
+  model = dict(
+      type="PrismBundle",
+      transformer=dict(
+          type="PrismTransformerMotionModel",
+          # ... other params ...
+          use_fp32_upcast_attention=True,  # ← LINE 34: EXPLICIT SETTING
+          # ... more params ...
+      ),
+  )
+
+While code defaults also have `use_fp32_upcast_attention: bool = True`:
+  - PrismTransformerMotionModel.__init__, line 154
+  - WanTransformerBlockWithMask.__init__, line 85
+
+The config setting OVERRIDES these defaults. The explicit config value is used.
+
+
+QUESTION 5: How are WanTransformerBlockWithMask instances created?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Direct instantiation with positional/named arguments:
+
+  WanTransformerBlockWithMask(
+      inner_dim,                    # Line 198: positional
+      ffn_dim,                      # Line 199: positional
+      num_attention_heads,          # Line 200: positional
+      qk_norm,                      # Line 201: positional
+      cross_attn_norm,              # Line 202: positional
+      eps,                          # Line 203: positional
+      added_kv_proj_dim,            # Line 204: positional
+      use_fp32_upcast_attention,    # Line 205: positional ← PARAMETER IN QUESTION
+  )
+
+Key Facts:
+  ✗ NOT using **kwargs unpacking
+  ✓ Direct positional arguments
+  ✓ Same parameters for all 30 blocks
+  ✗ NOT using config dict forwarding
+  ✓ Parameter comes from model's __init__ parameter
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+PARAMETER FLOW DIAGRAM:
+
+  Config (prism_1b_tp2m_1frame.py, line 34)
+    use_fp32_upcast_attention=True
+         ↓ (passed to PrismTransformerMotionModel constructor)
+  
+  PrismTransformerMotionModel.__init__() (line 154)
+    use_fp32_upcast_attention: bool = True
+         ↓ (passed to each block at line 205)
+  
+  WanTransformerBlockWithMask.__init__() (line 85)
+    use_fp32_upcast_attention: bool = True
+         ↓ (used in conditional logic at lines 97-99 and 113-115)
+  
+  Attention Processor Selection:
+    if use_fp32_upcast_attention:
+        attn1_processor = WanAttnProcessorFP32Upcast()  # Softmax in fp32
+        attn2_processor = WanAttnProcessorFP32Upcast()  # Softmax in fp32
+    else:
+        attn1_processor = WanAttnProcessor()  # Standard
+        attn2_processor = WanAttnProcessor()  # Standard
+         ↓ (used during block.forward() calls)
+  
+  During Forward Pass:
+    WanAttnProcessorFP32Upcast.__call__() (attention_fp32_upcast.py, lines 104-228)
+      Lines 104-118: Check if upcast is needed
+      Lines 209-214: Upcast Q, K, V, mask to fp32
+      Line 216: Disable autocast to preserve fp32
+      Lines 217-226: Run attention in fp32
+      Line 228: Cast output back to original dtype
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+KEY FILES AND LINE NUMBERS:
+
+  Config Definition:
+    configs/prism/prism_1b_tp2m_1frame.py:34
+      use_fp32_upcast_attention=True
+
+  Model Initialization:
+    hftrainer/models/motion/prism/network/transformer_prism.py:154
+      Parameter definition with default=True
+    
+    hftrainer/models/motion/prism/network/transformer_prism.py:205
+      Passing to each block
+
+  Block Initialization:
+    hftrainer/models/motion/prism/network/block_with_mask.py:85
+      Parameter definition with default=True
+    
+    hftrainer/models/motion/prism/network/block_with_mask.py:97-99
+      Self-attention processor selection
+    
+    hftrainer/models/motion/prism/network/block_with_mask.py:113-115
+      Cross-attention processor selection
+
+  FP32 Upcast Implementation:
+    hftrainer/models/motion/prism/network/attention_fp32_upcast.py:37-72
+      Class definition with defaults
+    
+    hftrainer/models/motion/prism/network/attention_fp32_upcast.py:104-118
+      Upcast decision logic
+    
+    hftrainer/models/motion/prism/network/attention_fp32_upcast.py:204-229
+      Actual upcast execution
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+VERIFICATION: Is use_fp32_upcast_attention enabled for v3 config?
+
+YES, definitely enabled:
+  ✓ Set to True in base config (prism_1b_tp2m_1frame.py, line 34)
+  ✓ Not overridden in v3/v2/unified variants
+  ✓ All 30 blocks use WanAttnProcessorFP32Upcast
+  ✓ Both self-attention and cross-attention use fp32 softmax
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+See also:
+  - PRISM_ATTENTION_TRACE.md (comprehensive trace)
+  - PRISM_ATTENTION_CODE_REFS.md (detailed code references)
+

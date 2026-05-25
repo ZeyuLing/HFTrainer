@@ -1,0 +1,217 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║         PRISM DATASET PIPELINE: `results['caption_path']` Flow                 ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 1: ANNOTATION FILE (train_hq_motionhub_hymotion.json)                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    data_list[idx] = {
+        "subset": "academic",
+        "smplx_path": "../hymotion_data/Academic/.../S3_Box_1_poses_origintime_13.55_22.7.npz",
+        "hierarchical_caption_path": "../hymotion_data/Academic/.../S3_Box_1_poses_origintime_13.55_22.7.json",
+        ...
+    }
+
+    Raw annotation value (RELATIVE PATH):
+    ┌────────────────────────────────────────────────────────────┐
+    │  ../hymotion_data/Academic/.../...S3_Box_1_poses_.../json  │
+    │  (Note: ../ escapes data/motionhub directory)              │
+    └────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 2: prepare_data() in MotionHubSingleAgentTextDataset                     │
+│  Location: hftrainer/datasets/motion/motionhub/single_agent_text_dataset.py    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    def prepare_data(self, idx: int) -> dict:
+        raw_data_info = self.data_list[idx]
+        data_info = {
+            "motion_path": os.path.join(
+                self.data_dir,  # "data/motionhub"
+                raw_data_info["motion_key"]  # "../hymotion_data/..."
+            ),
+            "caption_path": os.path.join(
+                self.data_dir,  # "data/motionhub"
+                raw_data_info["hierarchical_caption_path"]  # "../hymotion_data/..."
+            ),
+        }
+        return data_info
+
+    ┌─────────────────────────┐         ┌──────────────────────────┐
+    │ Annotation file value   │         │ os.path.join() result    │
+    │                         │         │                          │
+    │ ../hymotion_data/...    ├────────→│ data/motionhub/..        │
+    │                         │         │ /hymotion_data/...       │
+    └─────────────────────────┘         └──────────────────────────┘
+
+    Output: caption_path (WITH .. segments, NOT normalized)
+    ┌────────────────────────────────────────────────────────────┐
+    │  data/motionhub/../hymotion_data/Academic/.../...          │
+    │  ↑ Key property: Contains LITERAL ".." in path string      │
+    └────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 3: PASSED TO PIPELINE TRANSFORMS                                        │
+│  Config: pipeline = [LoadPreExtractedT5Feature, LoadSmplx55, ...]             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    results = {
+        "motion_path": "data/motionhub/../hymotion_data/Academic/...",
+        "caption_path": "data/motionhub/../hymotion_data/Academic/...",
+    }
+
+    ▼ ENTERS PIPELINE ▼
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 4: LoadPreExtractedT5Feature.transform()                                │
+│  Location: hftrainer/datasets/motion/motionhub/transforms/load_text.py        │
+│            lines 271-333                                                       │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    INPUT: caption_path = "data/motionhub/../hymotion_data/Academic/.../...json"
+
+    PROCESSING:
+    ┌────────────────────────────────────────────────────────────┐
+    │ Step 1: os.path.normpath(caption_path)                     │
+    │   INPUT:  data/motionhub/../hymotion_data/Academic/...     │
+    │   OUTPUT: data/hymotion_data/Academic/...                  │
+    │           (.. segments resolved)                            │
+    │                                                             │
+    │ Step 2: Strip data_dir parent prefix ("data/")             │
+    │   INPUT:  data/hymotion_data/Academic/...                  │
+    │   OUTPUT: hymotion_data/Academic/...                       │
+    │           (data/ removed)                                   │
+    │                                                             │
+    │ Step 3: Remove data_dir basename ("motionhub/")            │
+    │   INPUT:  hymotion_data/Academic/...                       │
+    │   OUTPUT: hymotion_data/Academic/... (no change, already    │
+    │           removed in step 2)                               │
+    │                                                             │
+    │ Step 4: Change extension .json → .pt                       │
+    │   INPUT:  hymotion_data/Academic/.../S3_Box_1_poses_...json│
+    │   OUTPUT: hymotion_data/Academic/.../S3_Box_1_poses_...pt  │
+    │                                                             │
+    │ Step 5: os.path.join(feature_dir, rel_path)                │
+    │   INPUT:  feature_dir="data/t5_feature"                    │
+    │           rel_path="hymotion_data/Academic/.../...pt"      │
+    │   OUTPUT: data/t5_feature/hymotion_data/Academic/.../...pt │
+    └────────────────────────────────────────────────────────────┘
+
+    FINAL T5 FEATURE PATH:
+    ┌────────────────────────────────────────────────────────────┐
+    │  data/t5_feature/hymotion_data/Academic/.../...pt          │
+    │                                                             │
+    │  Looks up: os.path.exists(pt_path)                         │
+    │  If NOT found AND allow_none=True → return None (refetch)  │
+    │  If found → load embeddings, set results['t5_text_embeds'] │
+    └────────────────────────────────────────────────────────────┘
+
+    OUTPUT: results with additional keys:
+    {
+        "motion_path": "...",
+        "caption_path": "...",
+        "t5_text_embeds": Tensor[256, 4096] bf16,  # Padded embeddings
+        "t5_text_mask": Tensor[256] int64,         # Attention mask
+        "caption": str,                             # Caption text for logging
+    }
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STAGE 5: REMAINING TRANSFORMS                                                  │
+│  Transforms: [LoadSmplx55, RandomCropPadding, PackInputs]                      │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    LoadSmplx55:
+      - Reads motion from results['motion_path']
+      - Loads SMPL-X pose data, processes to 55-dim format
+      - Sets results['motion'] = Tensor[T, 55]
+
+    RandomCropPadding:
+      - Randomly crops/pads motion to 360 frames
+      - Updates results['num_frames']
+
+    PackInputs:
+      - Selects keys to keep: ['motion', 'num_frames', 'caption', 
+                               't5_text_embeds', 't5_text_mask']
+      - Meta keys: ['motion_path', 'fps']
+
+    FINAL BATCH ITEM:
+    ┌────────────────────────────────────────────────────────────┐
+    │  {                                                          │
+    │    "motion": Tensor[360, 55],                              │
+    │    "num_frames": int,                                      │
+    │    "caption": str,                                         │
+    │    "t5_text_embeds": Tensor[256, 4096] bf16,              │
+    │    "t5_text_mask": Tensor[256] int64,                     │
+    │    "motion_path": str (meta),                             │
+    │    "fps": float (meta),                                   │
+    │  }                                                          │
+    └────────────────────────────────────────────────────────────┘
+
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║  KEY PROPERTIES OF caption_path AT EACH STAGE                                  ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+  ┌──────────────────────┬────────────────────────┬──────────────────────────┐
+  │       STAGE          │      VALUE             │     PROPERTIES           │
+  ├──────────────────────┼────────────────────────┼──────────────────────────┤
+  │ Annotation JSON      │ ../hymotion_data/...   │ • Relative path          │
+  │                      │                        │ • Contains .. segments   │
+  │                      │                        │ • Escapes motionhub dir  │
+  ├──────────────────────┼────────────────────────┼──────────────────────────┤
+  │ prepare_data()       │ data/motionhub/..      │ • Still contains ..      │
+  │                      │ /hymotion_data/...     │ • Not normalized         │
+  │                      │                        │ • Joined but not reduced │
+  ├──────────────────────┼────────────────────────┼──────────────────────────┤
+  │ Entered Pipeline     │ data/motionhub/..      │ • SAME as prepare_data() │
+  │ (before transform)   │ /hymotion_data/...     │   (no path processing)   │
+  │                      │                        │ • Key used by LoadPre... │
+  ├──────────────────────┼────────────────────────┼──────────────────────────┤
+  │ Inside LoadPre...    │ data/hymotion_data/    │ • Normalized (.. removed)│
+  │ (after normpath)     │ Academic/...           │ • Internal to transform  │
+  │                      │                        │ • NOT stored in results  │
+  ├──────────────────────┼────────────────────────┼──────────────────────────┤
+  │ LoadPre T5 lookup    │ data/t5_feature/       │ • Maps to .pt file       │
+  │                      │ hymotion_data/.../pt   │ • Feature directory      │
+  │                      │                        │ • Used for os.path.exists│
+  ├──────────────────────┼────────────────────────┼──────────────────────────┤
+  │ Final (PackInputs)   │ NOT in final results   │ • Only used by transforms│
+  │                      │ (discarded)            │ • meta_keys doesn't      │
+  │                      │                        │   include caption_path   │
+  └──────────────────────┴────────────────────────┴──────────────────────────┘
+
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║  REFETCH LOGIC (when allow_none=True)                                         ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+  In LoadPreExtractedT5Feature.transform():
+
+    pt_path = data/t5_feature/hymotion_data/Academic/.../...pt
+
+    ┌─ Does pt_path exist? ──────────────┐
+    │                                    │
+    YES                                  NO
+    │                                    │
+    v                                    v
+  Load embeddings              Is allow_none=True?
+  Set t5_text_embeds,          │
+  t5_text_mask,                YES ← (default in t5cached config)
+  caption                       │
+  Return results                v
+                             Return None
+                               │
+                               v
+                    Dataset.__getitem__():
+                      Catches None return
+                      Triggers refetch
+                      Picks random new idx
+                      Retries (up to max_refetch)
+
+
