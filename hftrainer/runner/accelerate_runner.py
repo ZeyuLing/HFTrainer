@@ -791,6 +791,7 @@ class AccelerateRunner:
         drop_last = dl_cfg.pop('drop_last', False)
         collate_fn = dl_cfg.pop('collate_fn', None)
         persistent_workers = dl_cfg.pop('persistent_workers', False)
+        prefetch_factor = dl_cfg.pop('prefetch_factor', None)
         sampler = dl_cfg.pop('sampler', None)
 
         dataset = DATASETS.build(dataset_cfg)
@@ -813,6 +814,8 @@ class AccelerateRunner:
 
         if num_workers > 0:
             loader_kwargs['persistent_workers'] = persistent_workers
+            if prefetch_factor is not None:
+                loader_kwargs['prefetch_factor'] = prefetch_factor
 
         return DataLoader(dataset, **loader_kwargs)
 

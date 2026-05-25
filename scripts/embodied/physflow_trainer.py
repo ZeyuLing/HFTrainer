@@ -138,6 +138,257 @@ def motion_135_to_201(
 
 
 # ---------------------------------------------------------------------------
+# GT Motion Loader for GT-SFT Mode
+# ---------------------------------------------------------------------------
+
+class GTMotionLoader:
+    """Loads ground truth mocap data for GT-SFT (supervised fine-tuning).
+
+    Instead of using on-policy model outputs (which leads to self-distillation
+    and mode collapse), GT-SFT uses real mocap data as the clean x1 target.
+
+    Data source: train_hymotion_400h.json → SMPL-H NPZ files (poses=156-dim)
+    Conversion: SMPL-H 156-dim → first 66 dims (22 body joints) → pad to 72
+                → encode_motion_135() → motion_135_to_201()
+
+    Category indexing: Categorizes motions by keywords in captions for
+    curriculum-aligned sampling (standing, walking, upper_body, dynamic).
+    """
+
+    # Keywords for category classification
+    CATEGORY_KEYWORDS = {
+        'standing': ['stand', 'still', 'idle', 'static', 'rest', 'pose', 't-pose',
+                     'weight shift', 'balance'],
+        'walking': ['walk', 'stroll', 'stride', 'step', 'pace', 'circle',
+                    'forward', 'backward', 'turn around', 'march'],
+        'upper_body': ['wave', 'raise', 'arm', 'hand', 'clap', 'point',
+                       'stretch', 'reach', 'gesture', 'grab', 'pick'],
+        'dynamic': ['kick', 'jump', 'squat', 'run', 'jog', 'lunge', 'hop',
+                    'spin', 'twist', 'bend', 'crouch', 'punch', 'box'],
+    }
+
+    def __init__(
+        self,
+        annotation_path: str = 'data/annotation/train_hymotion_400h.json',
+        max_frames: int = 150,
+        min_frames: int = 30,
+        seed: int = 42,
+    ):
+        """Load annotation index and categorize motions.
+
+        Args:
+            annotation_path: Path to training annotation JSON
+            max_frames: Maximum frames to use (clips beyond this are truncated)
+            min_frames: Minimum frames (skip shorter clips)
+            seed: Random seed for reproducible sampling
+        """
+        self.max_frames = max_frames
+        self.min_frames = min_frames
+        self.rng = np.random.RandomState(seed)
+        self.annotation_dir = os.path.dirname(os.path.abspath(annotation_path))
+
+        print(f"[GTMotionLoader] Loading annotation: {annotation_path}")
+        with open(annotation_path) as f:
+            data = json.load(f)
+        data_list = data['data_list']
+
+        # Index items by category (lazy-load actual motion data)
+        self.items_by_category: Dict[str, List[dict]] = {
+            'standing': [], 'walking': [], 'upper_body': [], 'dynamic': [],
+        }
+        self.all_items: List[dict] = []
+
+        skipped_short = 0
+        skipped_no_caption = 0
+        for clip_name, item in data_list.items():
+            # Skip very short clips
+            if item['num_frames'] < min_frames:
+                skipped_short += 1
+                continue
+
+            # Skip items without caption path
+            if not item.get('hierarchical_caption_path'):
+                skipped_no_caption += 1
+                continue
+
+            # Resolve paths relative to annotation directory
+            item['_smplx_abs'] = os.path.join(
+                self.annotation_dir, item['smplx_path'])
+            item['_caption_abs'] = os.path.join(
+                self.annotation_dir, item['hierarchical_caption_path'])
+            item['_clip_name'] = clip_name
+            self.all_items.append(item)
+
+        print(f"  Total valid items: {len(self.all_items)} "
+              f"(skipped {skipped_short} short, {skipped_no_caption} no caption)")
+
+        # Pre-categorize a subset for efficient sampling
+        # We don't read all captions (too slow for 549K items).
+        # Instead, categorize by clip name keywords first, then
+        # lazily categorize more when needed.
+        self._categorize_by_name()
+
+        for cat, items in self.items_by_category.items():
+            print(f"  Category '{cat}': {len(items)} items")
+
+    def _categorize_by_name(self):
+        """Quick categorization based on clip name and path keywords."""
+        for item in self.all_items:
+            name_lower = item['_clip_name'].lower()
+            categorized = False
+
+            # Check category keywords against clip name
+            for cat, keywords in self.CATEGORY_KEYWORDS.items():
+                for kw in keywords:
+                    if kw in name_lower:
+                        self.items_by_category[cat].append(item)
+                        categorized = True
+                        break
+                if categorized:
+                    break
+
+            # Default: assign to a category based on common patterns
+            if not categorized:
+                # Most uncategorized items are walking/general motion
+                # Put in 'walking' as it's the most common motion type
+                self.items_by_category['walking'].append(item)
+
+    def sample(
+        self,
+        category: Optional[str] = None,
+    ) -> Tuple[np.ndarray, str]:
+        """Sample a GT motion clip and its caption.
+
+        Args:
+            category: One of 'standing', 'walking', 'upper_body', 'dynamic'.
+                     If None, samples uniformly from all items.
+
+        Returns:
+            motion_135: (T, 135) ground truth motion in HyMotion format
+            caption: English text caption for the motion
+        """
+        # Select item pool
+        if category and category in self.items_by_category:
+            pool = self.items_by_category[category]
+            if not pool:
+                pool = self.all_items
+        else:
+            pool = self.all_items
+
+        # Random sample (with retries for load failures)
+        max_retries = 10
+        for attempt in range(max_retries):
+            idx = self.rng.randint(len(pool))
+            item = pool[idx]
+
+            try:
+                motion_135, caption = self._load_item(item)
+                return motion_135, caption
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise RuntimeError(
+                        f"Failed to load GT motion after {max_retries} retries: {e}")
+                continue
+
+        raise RuntimeError("Unreachable")
+
+    def _load_item(self, item: dict) -> Tuple[np.ndarray, str]:
+        """Load a single GT motion item: NPZ + caption.
+
+        Conversion pipeline:
+            SMPL-H poses (T, 156) → first 66 dims (22 body joints × 3 axis-angle)
+            → pad to 72 (add 2 zero hand joints) → encode_motion_135()
+        """
+        # Load motion NPZ
+        npz_path = item['_smplx_abs']
+        if not os.path.exists(npz_path):
+            raise FileNotFoundError(f"Motion NPZ not found: {npz_path}")
+
+        npz = np.load(npz_path)
+        poses = npz['poses']       # (T, 156) = 52 joints × 3 axis-angle
+        transl = npz['trans']      # (T, 3) Y-up translation
+
+        # Extract 22 body joints from SMPL-H 156-dim
+        # Layout: global_orient(3) + body_joints(63) = 22 joints × 3 = 66 dims
+        body_aa_66 = poses[:, :66]  # (T, 66) — first 22 joints
+
+        # Pad to 72 dims (SMPL-24: 22 body + 2 hand placeholder joints)
+        T = body_aa_66.shape[0]
+        smpl_pose_72 = np.zeros((T, 72), dtype=np.float32)
+        smpl_pose_72[:, :66] = body_aa_66
+        # Joints 22-23 (L_Hand, R_Hand) stay zero
+
+        # Truncate to max_frames
+        if T > self.max_frames:
+            # Random start for variety
+            start = self.rng.randint(0, T - self.max_frames)
+            smpl_pose_72 = smpl_pose_72[start:start + self.max_frames]
+            transl = transl[start:start + self.max_frames]
+            T = self.max_frames
+
+        # Convert to motion_135 format
+        motion_135 = encode_motion_135(smpl_pose_72, transl.astype(np.float32))
+
+        # Load caption
+        caption = self._load_caption(item['_caption_abs'])
+
+        return motion_135, caption
+
+    def _load_caption(self, caption_path: str) -> str:
+        """Load caption from hierarchical caption JSON.
+
+        Format: {'result': [{'short_caption': '...', 'short_caption_rewritten': [...]}]}
+        We randomly pick either the main caption or one of the rewritten variants.
+        """
+        if not os.path.exists(caption_path):
+            return "a person performs a motion"  # Fallback
+
+        with open(caption_path) as f:
+            caption_data = json.load(f)
+
+        results = caption_data.get('result', [])
+        if not results:
+            return "a person performs a motion"
+
+        # Pick a random result entry
+        entry = results[self.rng.randint(len(results))]
+
+        # 50% chance: use main caption, 50%: use a rewritten variant
+        short_caption = entry.get('short_caption', 'a person performs a motion')
+        rewritten = entry.get('short_caption_rewritten', [])
+
+        if rewritten and self.rng.random() < 0.5:
+            return rewritten[self.rng.randint(len(rewritten))]
+        return short_caption
+
+    def get_all_prompts_for_cache(self, num_per_category: int = 50) -> List[str]:
+        """Get a representative set of prompts for text embedding pre-computation.
+
+        Since GT-SFT uses real captions (not fixed curriculum prompts), we
+        pre-sample a set of captions to cache their embeddings.
+
+        Args:
+            num_per_category: Number of prompts to sample per category
+
+        Returns:
+            List of unique caption strings
+        """
+        prompts = set()
+        for category in self.items_by_category:
+            pool = self.items_by_category[category]
+            n_sample = min(num_per_category, len(pool))
+            indices = self.rng.choice(len(pool), n_sample, replace=False)
+            for idx in indices:
+                item = pool[idx]
+                try:
+                    caption = self._load_caption(item['_caption_abs'])
+                    prompts.add(caption)
+                except Exception:
+                    continue
+        return list(prompts)
+
+
+# ---------------------------------------------------------------------------
 # PhysFlow Trainer
 # ---------------------------------------------------------------------------
 
@@ -779,6 +1030,72 @@ class PhysFlowTrainer:
         }
 
     # ------------------------------------------------------------------
+    # GT-SFT iteration (ground truth supervised fine-tuning)
+    # ------------------------------------------------------------------
+
+    def train_iteration_gt(self, gt_loader: 'GTMotionLoader',
+                           category: Optional[str] = None) -> Dict:
+        """Single GT-SFT iteration: load GT → convert to 201 → train.
+
+        Instead of generating on-policy and correcting with RL (which causes
+        self-distillation when oracle returns the model's own output), this
+        method uses real mocap data as the x1 target.
+
+        Args:
+            gt_loader: GTMotionLoader instance for sampling GT data
+            category: Category to sample from (aligned with curriculum).
+                     None = sample from all categories.
+
+        Returns:
+            Dict with iteration results
+        """
+        iter_start = time.time()
+
+        # Phase 1: Sample GT motion and caption
+        motion_135_gt, caption = gt_loader.sample(category=category)
+        T = motion_135_gt.shape[0]
+
+        # Phase 2: Convert GT motion_135 → motion_201 via FK
+        body_model = self.bundle.body_model
+        if body_model is not None:
+            motion_201_gt = motion_135_to_201(
+                motion_135_gt, body_model, self.device
+            )
+        else:
+            # Fallback: pad with zeros for RIC dims
+            motion_201_gt = np.zeros((T, 201), dtype=np.float32)
+            motion_201_gt[:, :135] = motion_135_gt
+            print("[WARN] No body_model available, RIC dims set to zero")
+
+        # Phase 3: Flow matching fine-tune with GT as target
+        train_start = time.time()
+        train_result = self.train_step(motion_201_gt, caption)
+        train_time = time.time() - train_start
+
+        self.total_iterations += 1
+        self.loss_history.append(train_result['loss'])
+
+        total_time = time.time() - iter_start
+
+        return {
+            'iteration': self.total_iterations,
+            'skipped': False,
+            'prompt': caption,
+            'category': category or 'all',
+            'num_frames': T,
+            'loss': train_result['loss'],
+            'loss_velocity': train_result['loss_velocity'],
+            'loss_soar': train_result['loss_soar'],
+            'loss_kl': train_result.get('loss_kl', 0.0),
+            'timing': {
+                'training': train_time,
+                'total': total_time,
+            },
+            'did_optimizer_step': train_result.get('did_optimizer_step', False),
+            'accum_count': self._accum_count,
+        }
+
+    # ------------------------------------------------------------------
     # Direction B: Generation → RL
     # ------------------------------------------------------------------
 
@@ -1343,6 +1660,285 @@ def run_training(args):
     return trainer
 
 
+def run_gt_sft(args):
+    """Run GT-SFT: supervised fine-tuning with ground truth mocap targets.
+
+    This is the correct approach for PhysFlow training. Instead of generating
+    on-policy motions and "correcting" with an RL oracle (which with default
+    params returns the model's own output, causing self-distillation), GT-SFT
+    uses real mocap data as the clean x1 target in flow matching.
+
+    Benefits:
+    - No self-distillation / mode collapse risk
+    - Real physical motion as target (captured from real humans)
+    - Text-motion alignment from real caption pairs
+    - No quality gate needed (GT data is always valid)
+    - Much faster iterations (no generation or physics sim needed)
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # Load T2M bundle
+    print("\n" + "=" * 60)
+    print("Loading T2M model...")
+    print("=" * 60)
+    bundle = load_bundle(args.t2m_config, args.t2m_ckpt, device)
+
+    # Initialize GT motion loader
+    print("\n" + "=" * 60)
+    print("Initializing GT Motion Loader...")
+    print("=" * 60)
+    annotation_path = getattr(args, 'gt_annotation',
+                              'data/annotation/train_hymotion_400h.json')
+    gt_loader = GTMotionLoader(
+        annotation_path=annotation_path,
+        max_frames=150,
+        min_frames=30,
+        seed=args.seed,
+    )
+
+    # Initialize a minimal curriculum (just for compatibility with trainer init)
+    curriculum = PhysFlowCurriculum(seed=args.seed)
+
+    # Initialize a dummy oracle (not used in GT-SFT but required by trainer init)
+    # We pass it but never call it in train_iteration_gt
+    oracle = RLPhysicsOracle()
+
+    # Initialize trainer
+    trainer = PhysFlowTrainer(
+        bundle=bundle,
+        physics_oracle=oracle,
+        curriculum=curriculum,
+        device=device,
+        lr=args.lr,
+        num_ode_steps=args.num_ode_steps,
+        text_guidance_scale=args.text_guidance_scale,
+        grad_clip=args.grad_clip,
+        soar_lambda=0.0,  # No SOAR in GT-SFT
+        train_last_n_blocks=args.train_last_n_blocks,
+        use_amp=not args.no_amp,
+        output_dir=args.output_dir,
+        grad_accum=args.grad_accum,
+        kl_weight=getattr(args, 'kl_weight', 0.05),  # Default KL for GT-SFT
+        target_blend=1.0,  # Always use full GT target (no blending needed)
+    )
+
+    # ================================================================
+    # OPTIMIZATION: Use existing text cache + category-matched GT motions
+    # ================================================================
+    # Text encoding is the bottleneck (~50s per call with Qwen3-8B encoder).
+    # Solution: load pre-computed text embeddings from existing cache,
+    # pair with category-matched GT motions. Training becomes ~1s/iteration.
+
+    # Load existing text cache
+    text_cache_path = getattr(args, 'text_cache', None)
+    if not text_cache_path or not os.path.exists(text_cache_path):
+        # Try default locations
+        for fallback_path in [
+            'output/physflow_v2_test/text_embeddings.pt',
+            'output/physflow/text_embeddings.pt',
+        ]:
+            if os.path.exists(fallback_path):
+                text_cache_path = fallback_path
+                break
+
+    if text_cache_path and os.path.exists(text_cache_path):
+        print(f"\n  Loading text embeddings from: {text_cache_path}")
+        trainer.precompute_text_embeddings(cache_path=text_cache_path)
+    else:
+        print("\n[ERROR] No text cache found. Encoding 66 prompts takes ~1 hour.")
+        print("  Please run with --text-cache pointing to a pre-computed .pt file")
+        print("  Or run: python3 scripts/embodied/physflow_precompute_text.py first")
+        raise FileNotFoundError(
+            f"No text cache found. Tried: {text_cache_path}")
+
+    # Categorize cached prompts by motion type
+    cached_prompts = list(trainer._text_cache.keys())
+    print(f"  Cached prompts: {len(cached_prompts)}")
+
+    # Auto-categorize cached prompts using keyword matching
+    PROMPT_CATEGORIES = {
+        'standing': ['stand', 'still', 'idle', 'attention', 'relaxed',
+                     'breathe', 'shoulder', 'neck', 'nod', 'shrug',
+                     'crossed', 'hands on hips', 'puts hands'],
+        'walking': ['walk', 'step', 'stride', 'pace', 'stroll',
+                    'forward', 'backward', 'circle', 'sidestep',
+                    'march', 'turn'],
+        'upper_body': ['wave', 'raise', 'arm', 'hand', 'clap',
+                       'reach', 'point', 'stretch', 'beckon',
+                       'thumb', 'rub', 'scratch', 'gesture'],
+        'dynamic': ['kick', 'jump', 'squat', 'spin', 'hop',
+                    'lunge', 'balance', 'crouch', 'bend', 'pick',
+                    'twist', 'bow', 'pivot'],
+    }
+
+    prompts_by_category: Dict[str, List[str]] = {
+        'standing': [], 'walking': [], 'upper_body': [], 'dynamic': []
+    }
+    for prompt in cached_prompts:
+        p_lower = prompt.lower()
+        categorized = False
+        for cat, keywords in PROMPT_CATEGORIES.items():
+            for kw in keywords:
+                if kw in p_lower:
+                    prompts_by_category[cat].append(prompt)
+                    categorized = True
+                    break
+            if categorized:
+                break
+        if not categorized:
+            prompts_by_category['walking'].append(prompt)
+
+    for cat, prompts in prompts_by_category.items():
+        print(f"  Category '{cat}': {len(prompts)} cached prompts")
+
+    # Unload text encoder (no longer needed)
+    if hasattr(bundle, '_text_encoder') and bundle._text_encoder is not None:
+        bundle._text_encoder.cpu()
+        del bundle._text_encoder
+        bundle._text_encoder = None
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+
+    # Pre-sample GT motions for all iterations
+    categories = ['standing', 'walking', 'upper_body', 'dynamic']
+    cat_weights = [0.15, 0.35, 0.25, 0.25]
+    N = args.num_iterations
+
+    print(f"\n{'='*60}")
+    print(f"Pre-sampling {N} GT motions + matching cached prompts...")
+    print(f"{'='*60}")
+
+    pre_samples = []  # List of (motion_201, prompt, category)
+    body_model = bundle.body_model
+    skipped = 0
+
+    for i in range(N):
+        cat = np.random.choice(categories, p=cat_weights)
+        # Pick a random cached prompt from this category
+        cat_prompts = prompts_by_category.get(cat, [])
+        if not cat_prompts:
+            cat_prompts = cached_prompts  # Fallback to any
+        prompt = np.random.choice(cat_prompts)
+
+        try:
+            motion_135_gt, _ = gt_loader.sample(category=cat)
+            # Convert to motion_201 via FK
+            if body_model is not None:
+                motion_201_gt = motion_135_to_201(
+                    motion_135_gt, body_model, device
+                )
+            else:
+                T = motion_135_gt.shape[0]
+                motion_201_gt = np.zeros((T, 201), dtype=np.float32)
+                motion_201_gt[:, :135] = motion_135_gt
+            pre_samples.append((motion_201_gt, prompt, cat))
+        except Exception as e:
+            skipped += 1
+            continue
+
+        if (i + 1) % 100 == 0:
+            print(f"  Pre-sampled {i+1}/{N} motions...")
+
+    print(f"  Done: {len(pre_samples)} samples ready (skipped {skipped})")
+
+    # Training log
+    log_path = os.path.join(args.output_dir, 'training_log.jsonl')
+    print(f"\n  Log: {log_path}")
+    print(f"  Iterations: {len(pre_samples)}")
+    print(f"  LR: {args.lr}")
+    print(f"  Grad accumulation: {args.grad_accum}")
+    print(f"  KL weight: {getattr(args, 'kl_weight', 0.05)}")
+    print(f"  Category weights: {dict(zip(categories, cat_weights))}")
+
+    # Training loop (fast — text pre-cached, ~1s/iter expected)
+    print(f"\n{'='*60}")
+    print("Starting GT-SFT Training (text pre-cached, GT motion targets)")
+    print(f"{'='*60}")
+
+    loss_window = []
+    with open(log_path, 'w') as log_f:
+        for i, (motion_201, prompt, cat) in enumerate(pre_samples):
+            iter_start = time.time()
+
+            # Direct train_step — text feats come from cache
+            train_result = trainer.train_step(motion_201, prompt)
+            trainer.total_iterations += 1
+            trainer.loss_history.append(train_result['loss'])
+
+            iter_time = time.time() - iter_start
+
+            result = {
+                'iteration': i + 1,
+                'skipped': False,
+                'prompt': prompt,
+                'category': cat,
+                'num_frames': motion_201.shape[0],
+                'loss': train_result['loss'],
+                'loss_velocity': train_result['loss_velocity'],
+                'loss_soar': train_result['loss_soar'],
+                'loss_kl': train_result.get('loss_kl', 0.0),
+                'timing': {'total': iter_time},
+                'did_optimizer_step': train_result.get('did_optimizer_step', False),
+            }
+
+            # Log to file
+            log_f.write(json.dumps(result, default=str) + '\n')
+            if (i + 1) % 10 == 0:
+                log_f.flush()
+
+            # Running loss
+            loss_window.append(result['loss'])
+            if len(loss_window) > 50:
+                loss_window.pop(0)
+
+            # Print progress
+            if (i + 1) % args.log_interval == 0 or i == 0:
+                avg_loss = np.mean(loss_window)
+                kl_str = f", kl={result.get('loss_kl', 0.0):.6f}" if getattr(args, 'kl_weight', 0.05) > 0 else ''
+                print(f"  [{i+1}/{len(pre_samples)}] "
+                      f"loss={result['loss']:.5f} "
+                      f"(avg50={avg_loss:.5f}{kl_str}) | "
+                      f"cat={result['category']} "
+                      f"frames={result['num_frames']} | "
+                      f"time={iter_time:.2f}s | "
+                      f"prompt=\"{result['prompt'][:60]}...\"")
+
+            # Save checkpoint
+            if (i + 1) % args.save_interval == 0:
+                ckpt_path = os.path.join(
+                    args.output_dir, f'model_iter{i+1}.pt'
+                )
+                torch.save({
+                    'iteration': i + 1,
+                    'model_state_dict': bundle.motion_transformer.state_dict(),
+                    'optimizer_state_dict': trainer.optimizer.state_dict(),
+                    'loss_history': trainer.loss_history,
+                    'mode': 'gt-sft',
+                }, ckpt_path)
+                print(f"  [SAVE] Checkpoint saved: {ckpt_path}")
+
+    # Final save
+    final_path = os.path.join(args.output_dir, 'model_final.pt')
+    torch.save({
+        'iteration': len(pre_samples),
+        'model_state_dict': bundle.motion_transformer.state_dict(),
+        'optimizer_state_dict': trainer.optimizer.state_dict(),
+        'loss_history': trainer.loss_history,
+        'mode': 'gt-sft',
+    }, final_path)
+    print(f"\n[DONE] Final GT-SFT model saved: {final_path}")
+    print(f"  Total iterations: {trainer.total_iterations}")
+    avg_loss_final = np.mean(trainer.loss_history[-50:]) if trainer.loss_history else 0
+    print(f"  Final avg loss (last 50): {avg_loss_final:.5f}")
+
+    return trainer
+
+
 def run_bidirectional(args):
     """Run full bidirectional PhysFlow training (Direction A + B alternating)."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1531,10 +2127,11 @@ def parse_args():
 
     # Mode selection
     parser.add_argument('--mode', type=str, default='rl-to-gen',
-                        choices=['rl-to-gen', 'bidirectional', 'test-single'],
+                        choices=['rl-to-gen', 'bidirectional', 'test-single', 'gt-sft'],
                         help='Training mode: rl-to-gen (Direction A only), '
                              'bidirectional (A+B alternating), '
-                             'test-single (one iteration test)')
+                             'test-single (one iteration test), '
+                             'gt-sft (ground truth supervised fine-tuning)')
 
     # Model paths
     parser.add_argument('--t2m-config', type=str, required=True,
@@ -1639,6 +2236,11 @@ def parse_args():
     parser.add_argument('--test-single', action='store_true',
                         help='[DEPRECATED] Use --mode test-single instead')
 
+    # GT-SFT specific
+    parser.add_argument('--gt-annotation', type=str,
+                        default='data/annotation/train_hymotion_400h.json',
+                        help='Path to ground truth annotation JSON (for gt-sft mode)')
+
     return parser.parse_args()
 
 
@@ -1665,6 +2267,8 @@ if __name__ == '__main__':
         run_test_single(args)
     elif args.mode == 'bidirectional':
         run_bidirectional(args)
+    elif args.mode == 'gt-sft':
+        run_gt_sft(args)
     else:
         # Default: rl-to-gen (Direction A only)
         run_training(args)

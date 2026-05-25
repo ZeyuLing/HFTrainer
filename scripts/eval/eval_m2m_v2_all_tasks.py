@@ -3783,6 +3783,13 @@ def main():
     parser.add_argument('--include-disabled-settings', action='store_true',
                         help='Run settings marked _disabled in the task registry. '
                              'Use only for explicit backfill/rerun jobs.')
+    parser.add_argument('--caption-override-mode',
+                        choices=['none', 'blank', 'shuffle'],
+                        default='none',
+                        help='Diagnostic only: override loaded sample captions '
+                             'after caption-required filtering. "blank" forces '
+                             'null text; "shuffle" deterministically rotates '
+                             'captions across samples to test caption sensitivity.')
     parser.add_argument('--seed-base', type=lambda x: int(x, 0),
                         default=0xE4A10000,
                         help='Base seed for per-sample random state '
@@ -3973,6 +3980,22 @@ def main():
                 if not samples:
                     print('    WARNING: No valid samples!')
                     continue
+
+                if args.caption_override_mode != 'none':
+                    if args.caption_override_mode == 'blank':
+                        for _s in samples:
+                            _s['caption_original'] = _s.get('caption', '')
+                            _s['caption'] = ''
+                    elif args.caption_override_mode == 'shuffle':
+                        caps = [_s.get('caption', '') for _s in samples]
+                        if len(caps) > 1:
+                            shuffled = caps[1:] + caps[:1]
+                        else:
+                            shuffled = caps
+                        for _s, _cap in zip(samples, shuffled):
+                            _s['caption_original'] = _s.get('caption', '')
+                            _s['caption'] = _cap
+                    print(f'    [caption_override] mode={args.caption_override_mode}')
 
                 # Filter for E2-B: long sequences only
                 if task_id == 'E2' and setting_name == 'B':

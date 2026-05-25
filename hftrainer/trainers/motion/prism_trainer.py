@@ -27,6 +27,7 @@ class PrismTrainer(BaseTrainer):
         guidance_scale: float = 5.0,
         translation_loss_weight: float = 0.5,
         null_embedding_path: Optional[str] = None,
+        use_fp16_autocast: bool = False,
         **kwargs,
     ):
         super().__init__(bundle)
@@ -39,6 +40,7 @@ class PrismTrainer(BaseTrainer):
         self.guidance_scale = guidance_scale
         self.translation_loss_weight = translation_loss_weight
         self._null_embedding_path = null_embedding_path
+        self.use_fp16_autocast = use_fp16_autocast
 
     def _load_null_t5_embedding(self):
         """Load the pre-extracted null embedding (empty string '') for prompt dropout.
@@ -72,6 +74,24 @@ class PrismTrainer(BaseTrainer):
         captions = batch.get('caption')
         num_frames = batch.get('num_frames')
 
+        # Optional fp16 autocast for V100 Tensor Core acceleration.
+        # IMPORTANT: Only wrap the TRANSFORMER forward pass in autocast.
+        # The VAE encoder must stay in fp32 (its internal conv/activations
+        # were not designed for fp16 and produce NaN). The transformer is
+        # 99%+ of compute, so we get full tensor core benefit.
+        #
+        # CRITICAL: Must disable fused attention kernels (memory-efficient SDP)
+        # because they run softmax INTERNALLY in fp16, causing exp() overflow
+        # when attention scores > 11.09. The unfused "math" backend decomposes
+        # SDPA into separate ops where autocast correctly promotes softmax to
+        # fp32 while still using fp16 Tensor Cores for QK^T and Attn×V matmuls.
+        # Flash Attention is unavailable on V100 (requires SM≥80) anyway.
+        if self.use_fp16_autocast and not getattr(self, '_sdp_backends_configured', False):
+            torch.backends.cuda.enable_mem_efficient_sdp(False)
+            torch.backends.cuda.enable_flash_sdp(False)
+            self._sdp_backends_configured = True
+
+        # ---- VAE encoding + data prep (fp32, no autocast) ----
         latents = self.bundle.encode_motion(motion)
         batch_size, _, latent_frames, latent_joints = latents.shape
 
@@ -134,14 +154,23 @@ class PrismTrainer(BaseTrainer):
         transformer_dtype = next(self.bundle.transformer.parameters()).dtype
         noisy_latents = noisy_latents.to(dtype=transformer_dtype)
 
-        model_pred = self.bundle.transformer(
-            hidden_states=noisy_latents,
-            encoder_hidden_states=text_states,
-            timestep=timesteps,
-            hidden_states_mask=padding_mask if num_frames is not None else None,
-            encoder_hidden_states_mask=text_mask,
-        ).float()
+        # ---- Transformer forward (fp16 autocast for V100 tensor cores) ----
+        autocast_ctx = (
+            torch.cuda.amp.autocast(dtype=torch.float16)
+            if self.use_fp16_autocast
+            else torch.cuda.amp.autocast(enabled=False)
+        )
+        with autocast_ctx:
+            model_pred = self.bundle.transformer(
+                hidden_states=noisy_latents,
+                encoder_hidden_states=text_states,
+                timestep=timesteps,
+                hidden_states_mask=padding_mask if num_frames is not None else None,
+                encoder_hidden_states_mask=text_mask,
+            )
 
+        # Loss computation in fp32 (outside autocast for numerical stability)
+        model_pred = model_pred.float()
         mse = F.mse_loss(model_pred, targets.float(), reduction='none')
         # mse shape: [B, C, T', J] where J=23 (token 0=translation, 1-22=rotation)
         condition_mask = condition_frame_mask_vae.expand_as(mse).float()
