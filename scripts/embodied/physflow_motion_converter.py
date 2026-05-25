@@ -377,32 +377,55 @@ class MotionFormatConverter:
     # ═══════════════════════════════════════════════════════════════════════
 
     def _compute_ground_offset(self, qpos: np.ndarray) -> float:
-        """Compute ground offset for first frame.
+        """Compute ground offset using bilateral foot grounding.
 
-        Finds minimum z position across all body geoms in first frame,
-        so the humanoid's feet touch the ground.
+        Finds lowest z of foot geoms (L_Ankle, L_Toe, R_Ankle, R_Toe)
+        in first frame, with correct capsule/box geometry projection.
         """
         self.data.qpos[:] = qpos[0]
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
-        min_z = float("inf")
-        for gid in range(self.model.ngeom):
-            body_id = self.model.geom_bodyid[gid]
-            if body_id > 0:  # Skip world body
-                geom_pos = self.data.geom_xpos[gid]
-                geom_type = self.model.geom_type[gid]
-                if geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
-                    radius = self.model.geom_size[gid, 0]
-                    z = geom_pos[2] - radius
-                elif geom_type == mujoco.mjtGeom.mjGEOM_SPHERE:
-                    radius = self.model.geom_size[gid, 0]
-                    z = geom_pos[2] - radius
-                else:
-                    z = geom_pos[2]
-                min_z = min(min_z, z)
+        # Build foot body ID sets (cached on first call)
+        if not hasattr(self, '_left_foot_ids'):
+            self._left_foot_ids = set()
+            self._right_foot_ids = set()
+            for bid in range(1, self.model.nbody):
+                bname = mujoco.mj_id2name(
+                    self.model, mujoco.mjtObj.mjOBJ_BODY, bid)
+                if bname in ("L_Ankle", "L_Toe"):
+                    self._left_foot_ids.add(bid)
+                elif bname in ("R_Ankle", "R_Toe"):
+                    self._right_foot_ids.add(bid)
 
-        return min_z - 0.01  # 1cm margin to prevent penetration
+        def _lowest_geom_z(body_id_set):
+            min_z = float("inf")
+            for gid in range(self.model.ngeom):
+                if self.model.geom_bodyid[gid] not in body_id_set:
+                    continue
+                gtype = int(self.model.geom_type[gid])
+                gsize = self.model.geom_size[gid]
+                gxpos = self.data.geom_xpos[gid]
+                gxmat = self.data.geom_xmat[gid].reshape(3, 3)
+
+                if gtype == 5:  # capsule
+                    z_ext = abs(gxmat[2, 2]) * gsize[1] + gsize[0]
+                    bottom = gxpos[2] - z_ext
+                elif gtype == 3:  # sphere
+                    bottom = gxpos[2] - gsize[0]
+                elif gtype == 6:  # box
+                    z_ext = (abs(gxmat[2, 0]) * gsize[0] +
+                             abs(gxmat[2, 1]) * gsize[1] +
+                             abs(gxmat[2, 2]) * gsize[2])
+                    bottom = gxpos[2] - z_ext
+                else:
+                    bottom = gxpos[2]
+                min_z = min(min_z, bottom)
+            return min_z
+
+        left_min = _lowest_geom_z(self._left_foot_ids)
+        right_min = _lowest_geom_z(self._right_foot_ids)
+        return min(left_min, right_min)
 
     def _fk_trajectory(
         self, qpos: np.ndarray, dt: float

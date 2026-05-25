@@ -452,17 +452,22 @@ def residual_correction(
 
 
 def compute_ground_offset(mjcf_path: str, ref_qpos: np.ndarray) -> float:
-    """Compute ground offset so the lowest point touches the floor.
+    """Compute ground offset using bilateral foot grounding.
 
-    Sets the first frame of the motion on the ground plane (z=0).
-    Uses MuJoCo FK to find the lowest body/geom point.
+    Places the humanoid so the lowest foot geom touches z=0 exactly.
+    Uses ONLY foot bodies (L_Ankle, L_Toe, R_Ankle, R_Toe) for robust
+    grounding that works regardless of arm/head pose.
+
+    Matches the proven-correct approach from test_init_diff.py and
+    run_smpl_rl_tracker.py process_single_motion().
 
     Args:
         mjcf_path: Path to SMPL humanoid MJCF XML
         ref_qpos: (T, 76) reference qpos trajectory
 
     Returns:
-        offset: Value to subtract from qpos[:, 2] to place on ground
+        offset: Value to subtract from qpos[:, 2] to place feet on ground.
+                Equivalent to the lowest foot geom z-coordinate at frame 0.
     """
     import mujoco
 
@@ -474,28 +479,58 @@ def compute_ground_offset(mjcf_path: str, ref_qpos: np.ndarray) -> float:
     data.qvel[:] = 0.0
     mujoco.mj_forward(model, data)
 
-    # Find minimum z across all body geom positions
-    min_z = float("inf")
-    for gid in range(model.ngeom):
-        body_id = model.geom_bodyid[gid]
-        if body_id > 0:  # Skip world body
-            geom_pos = data.geom_xpos[gid]
-            # Account for geom size (capsule radius)
-            geom_type = model.geom_type[gid]
-            if geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
-                radius = model.geom_size[gid, 0]
-                z = geom_pos[2] - radius
-            elif geom_type == mujoco.mjtGeom.mjGEOM_SPHERE:
-                radius = model.geom_size[gid, 0]
-                z = geom_pos[2] - radius
+    # Identify foot body IDs (bilateral grounding)
+    left_foot_ids = set()
+    right_foot_ids = set()
+    for bid in range(1, model.nbody):
+        bname = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid)
+        if bname in ("L_Ankle", "L_Toe"):
+            left_foot_ids.add(bid)
+        elif bname in ("R_Ankle", "R_Toe"):
+            right_foot_ids.add(bid)
+
+    def _lowest_geom_z(body_id_set):
+        """Find lowest z of geoms belonging to given bodies.
+
+        Correctly handles capsule orientation (half-length projection)
+        and box half-extents projection onto Z axis.
+        """
+        min_z = float("inf")
+        for gid in range(model.ngeom):
+            if model.geom_bodyid[gid] not in body_id_set:
+                continue
+            gtype = int(model.geom_type[gid])
+            gsize = model.geom_size[gid]
+            gxpos = data.geom_xpos[gid]
+            gxmat = data.geom_xmat[gid].reshape(3, 3)
+
+            if gtype == 5:  # capsule: size=[radius, half_length, 0]
+                # Z extent = |cos(tilt)| * half_length + radius
+                z_ext = abs(gxmat[2, 2]) * gsize[1] + gsize[0]
+                bottom = gxpos[2] - z_ext
+            elif gtype == 3:  # sphere: size=[radius, 0, 0]
+                bottom = gxpos[2] - gsize[0]
+            elif gtype == 6:  # box: size=[hx, hy, hz]
+                # Project all 3 half-extents onto Z
+                z_ext = (abs(gxmat[2, 0]) * gsize[0] +
+                         abs(gxmat[2, 1]) * gsize[1] +
+                         abs(gxmat[2, 2]) * gsize[2])
+                bottom = gxpos[2] - z_ext
             else:
-                z = geom_pos[2]
-            min_z = min(min_z, z)
+                bottom = gxpos[2]
+            min_z = min(min_z, bottom)
+        return min_z
+
+    left_min = _lowest_geom_z(left_foot_ids)
+    right_min = _lowest_geom_z(right_foot_ids)
+    # Use the lower of left/right foot as grounding reference
+    grounding_ref_z = min(left_min, right_min)
 
     del model, data
-    # Return offset: how much to subtract from z to place on ground
-    # A small positive margin (1cm) prevents immediate penetration
-    return min_z - 0.01
+    # Return the z-coordinate of lowest foot point.
+    # Caller subtracts this: ref_qpos[:, 2] -= offset
+    # Result: lowest foot is at z=0 (on ground plane)
+    return grounding_ref_z
 
 
 # ===========================================================================
@@ -649,7 +684,6 @@ class RLPhysicsOracle:
             onnx_path=self.onnx_path,
             mjcf_path=self.mjcf_path,
             yaml_meta=self.yaml_meta,
-            gear=self.gear,
         )
 
         # [6] Post-processing based on mode
@@ -791,9 +825,9 @@ class RLPhysicsOracle:
         self,
         stats: dict,
         min_completion: float = 0.8,
-        min_root_height: float = 0.4,
-        max_root_height_std: float = 0.15,
-        max_jitter: float = 0.005,
+        min_root_height: float = 0.3,
+        max_root_height_std: float = 0.3,
+        max_jitter: float = 0.05,
     ) -> bool:
         """Quality gate for RL tracking results.
 

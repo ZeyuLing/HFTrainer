@@ -481,30 +481,24 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list,
         f"stiffness={len(stiffness)}, damping={len(damping)}"
     )
 
-    # FIX: Set gear=1 to match IsaacGym PD semantics.
+    # GEAR RATIO: Override to gear=1.0 for correct PD semantics.
     #
-    # MuJoCo actuator force chain with biastype=1 (affine):
-    #   actuator_force = gainprm[0]*ctrl + biasprm[0] + biasprm[1]*length + biasprm[2]*velocity
-    #   where: length = gear * q,  velocity = gear * qdot
-    #   joint_torque = gear * actuator_force
+    # The SMPL XML has gear=500, but with gear=500 the MuJoCo PD formula becomes:
+    #   actuator_force = kp*(ctrl - 500*q) - kd*(500*qdot)
+    # This always saturates forcerange → bang-bang control → crash at step 2.
     #
-    # With XML gear=500 (SMPL default), biasprm[1]=-kp, biasprm[2]=-kd:
-    #   actuator_force = kp*ctrl + 0 + (-kp)*(500*q) + (-kd)*(500*qdot)
-    #   joint_torque = 500 * actuator_force  →  catastrophic forces (10^7 N·m)
+    # With gear=1, the formula is the standard PD:
+    #   actuator_force = kp*(ctrl - q) - kd*qdot
+    # This matches IsaacGym's PD semantics (where the policy was trained).
     #
-    # GEAR RATIO: Set gear=1 to match IsaacGym PD semantics.
+    # ProtoMotions' MuJoCo code comment (simulator.py:540-546) also assumes gear=1:
+    #   "force = kp * (ctrl - q) - kd * qd"
+    # The fact that they don't override gear=500 is likely a latent bug in their
+    # MuJoCo backend (which is CPU-only, num_envs=1, for lightweight testing only).
     #
-    # In IsaacGym (where the RL policy was trained):
-    #   joint_torque = kp*(target-q) - kd*qdot, clamped to [-effort, effort]
-    #   Max joint torque = effort_limit = 500 N·m
-    #
-    # In MuJoCo with gear=1, forcerange=[-500, 500]:
-    #   actuator_force = kp*(ctrl-q) - kd*qdot, clamped to [-500, 500]
-    #   joint_torque = 1 * clamped_force → max = 500 N·m ✓ (matches IsaacGym)
-    #
-    # With gear=500 (XML default): max = 500*500 = 250,000 N·m → instant instability
+    # Empirically confirmed: gear=500 crashes at step 2, gear=1 survives to step 62+.
     model.actuator_gear[:, 0] = 1.0
-    log.info("  Set actuator gear=1 (matches IsaacGym effort_limit=500 semantics)")
+    log.info(f"  Gear override: 1.0 (standard PD, matches IsaacGym semantics)")
 
     for i in range(num_actuators):
         kp = stiffness[i]

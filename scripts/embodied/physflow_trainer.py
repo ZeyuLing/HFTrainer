@@ -86,10 +86,10 @@ def motion_135_to_201(
         [3:135]   22 x rot6d (132)
         [135:201] 22 x 3 joint positions in RIC (66)
 
-    RIC (Root-Invariant Coordinates, Scheme D):
-        - X, Z: relative to pelvis position
-        - Y: absolute world height
-        - Pelvis joint: always [0, pelvis_y, 0]
+    RIC (Root-Invariant Coordinates):
+        - All 3 coordinates (X, Y, Z) relative to pelvis position
+        - Pelvis joint: always [0, 0, 0]
+        - Evidence: T2M Mean/Std pelvis RIC dims = [0,0,0] / [0,0,0]
 
     Args:
         motion_135: (T, 135) motion in standard format
@@ -120,12 +120,15 @@ def motion_135_to_201(
     # Take first 22 joints (SMPL-22, skip last 2 hand joints)
     joints_22 = joints_world[:, :22, :]  # (T, 22, 3)
 
-    # Convert to RIC (Scheme D): XZ relative to pelvis, Y absolute
+    # Convert to RIC: ALL coordinates (X, Y, Z) relative to pelvis position.
+    # Evidence: T2M Mean/Std show joint Y means of -0.075 (hip below pelvis),
+    # NOT absolute heights of ~0.85m. Pelvis RIC dims (135-137) have zero
+    # mean and zero std (pelvis relative to itself = always [0,0,0]).
     pelvis_pos = joints_22[:, 0:1, :]  # (T, 1, 3)
     ric_joints = joints_22.copy()
     ric_joints[:, :, 0] -= pelvis_pos[:, :, 0]  # X relative to pelvis
+    ric_joints[:, :, 1] -= pelvis_pos[:, :, 1]  # Y relative to pelvis
     ric_joints[:, :, 2] -= pelvis_pos[:, :, 2]  # Z relative to pelvis
-    # Y stays absolute (world height)
 
     # Assemble 201-dim: motion_135 (135) + ric_positions (66)
     ric_flat = ric_joints.reshape(T, 66)  # (T, 66)
@@ -169,6 +172,7 @@ class PhysFlowTrainer:
         require_no_fall: bool = False,
         grad_accum: int = 1,
         kl_weight: float = 0.0,
+        target_blend: float = 1.0,
     ):
         """Initialize PhysFlow trainer.
 
@@ -187,6 +191,10 @@ class PhysFlowTrainer:
                 to reduce optimizer memory. Default 4 (~65M params vs full 460M).
                 Set to 0 to train all parameters.
             use_amp: Use automatic mixed precision (fp16 compute) to save memory
+            target_blend: Blending factor between model's own output and RL correction.
+                1.0 = use full RL correction as target (original behavior, high dist shift)
+                0.0 = use model's own output (no learning)
+                0.1-0.3 = gentle push toward physics (recommended for stability)
             motion_converter: MotionFormatConverter for Direction B (T2M → ProtoMotions)
             rl_experiment: Path to ProtoMotions experiment config for Direction B
             output_dir: Output directory for checkpoints and motion libraries
@@ -220,6 +228,7 @@ class PhysFlowTrainer:
         self.require_no_fall = require_no_fall
         self.grad_accum = grad_accum
         self.kl_weight = kl_weight
+        self.target_blend = target_blend
         self._accum_count = 0  # Tracks accumulated gradients
 
         # Set up trainable parameters
@@ -468,12 +477,17 @@ class PhysFlowTrainer:
     # Flow matching training step
     # ------------------------------------------------------------------
 
-    def train_step(self, motion_201_phys: np.ndarray, prompt: str) -> Dict:
+    def train_step(self, motion_201_phys: np.ndarray, prompt: str,
+                   motion_201_orig: Optional[np.ndarray] = None) -> Dict:
         """Single flow matching training step with physics-corrected target.
 
         Args:
             motion_201_phys: (T, 201) physics-corrected motion in raw space
             prompt: Text prompt used for generation
+            motion_201_orig: (T, 201) original model generation in raw space (optional)
+                If provided AND target_blend < 1.0, the training target x1 will be:
+                    x1 = (1 - target_blend) * orig_norm + target_blend * phys_norm
+                This provides a gentle push toward physics without distribution shift.
 
         Returns:
             Dict with loss values and metadata
@@ -482,9 +496,22 @@ class PhysFlowTrainer:
 
         T = motion_201_phys.shape[0]
 
-        # Normalize motion → x1 (the "clean" target)
-        x1 = torch.from_numpy(motion_201_phys).float().to(self.device).unsqueeze(0)  # (1, T, 201)
-        x1 = self.bundle.normalize_motion(x1)
+        # Normalize physics-corrected motion → x1_phys
+        x1_phys = torch.from_numpy(motion_201_phys).float().to(self.device).unsqueeze(0)  # (1, T, 201)
+        x1_phys = self.bundle.normalize_motion(x1_phys)
+
+        # If blending is enabled and we have the original motion, blend targets
+        if motion_201_orig is not None and self.target_blend < 1.0:
+            T_orig = motion_201_orig.shape[0]
+            T_min = min(T, T_orig)
+            x1_orig = torch.from_numpy(motion_201_orig[:T_min]).float().to(self.device).unsqueeze(0)
+            x1_orig = self.bundle.normalize_motion(x1_orig)
+            x1_phys_trunc = x1_phys[:, :T_min, :]
+            # Blend: gentle push toward physics
+            x1 = (1.0 - self.target_blend) * x1_orig + self.target_blend * x1_phys_trunc
+            T = T_min
+        else:
+            x1 = x1_phys
 
         # Sample noise x0
         x0 = torch.randn_like(x1)
@@ -702,9 +729,21 @@ class PhysFlowTrainer:
             motion_201_phys[:, :135] = motion_135_phys
             print("[WARN] No body_model available, RIC dims set to zero")
 
+        # Also convert original motion if target blending is enabled
+        motion_201_orig = None
+        if self.target_blend < 1.0:
+            if body_model is not None:
+                motion_201_orig = motion_135_to_201(
+                    motion_135, body_model, self.device
+                )
+            else:
+                T_orig = motion_135.shape[0]
+                motion_201_orig = np.zeros((T_orig, 201), dtype=np.float32)
+                motion_201_orig[:, :135] = motion_135
+
         # Phase 5: Flow matching fine-tune
         train_start = time.time()
-        train_result = self.train_step(motion_201_phys, prompt)
+        train_result = self.train_step(motion_201_phys, prompt, motion_201_orig)
         train_time = time.time() - train_start
 
         self.total_iterations += 1
@@ -1210,6 +1249,7 @@ def run_training(args):
         require_no_fall=args.require_no_fall,
         grad_accum=args.grad_accum,
         kl_weight=getattr(args, 'kl_weight', 0.0),
+        target_blend=getattr(args, 'target_blend', 1.0),
     )
 
     # Pre-encode all curriculum prompts (caches text embeddings, frees text encoder)
@@ -1223,6 +1263,7 @@ def run_training(args):
     print(f"  SOAR lambda: {args.soar_lambda}")
     print(f"  Grad accumulation: {args.grad_accum}")
     print(f"  KL weight: {getattr(args, 'kl_weight', 0.0)}")
+    print(f"  Target blend: {getattr(args, 'target_blend', 1.0)}")
     print(f"  Min locomotion ratio: {getattr(args, 'min_locomotion_ratio', 0.0)}")
     print(f"  Require no-fall: {args.require_no_fall}")
     print(f"  Min completion: {args.min_completion}")
@@ -1569,6 +1610,13 @@ def parse_args():
                              'Adds loss: kl_weight * mean_MSE(θ, θ_pretrained). '
                              'Prevents catastrophic forgetting. 0=disabled. '
                              'Recommended: 0.01-0.1 for online SFT.')
+    parser.add_argument('--target-blend', type=float, default=1.0,
+                        help='Blending factor for training target. '
+                             '1.0 = full RL correction (original, high dist shift). '
+                             '0.1-0.3 = gentle push toward physics (recommended). '
+                             'Target: x1 = (1-blend)*model_output + blend*RL_corrected. '
+                             'Prevents catastrophic distribution shift by keeping '
+                             'targets close to the model current generation.')
     parser.add_argument('--min-locomotion-ratio', type=float, default=0.0,
                         help='Minimum fraction of prompts from locomotion/walking '
                              'levels (level 1+). Forces balanced curriculum even at '
