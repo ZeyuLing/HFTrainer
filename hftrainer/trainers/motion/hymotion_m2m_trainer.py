@@ -65,48 +65,6 @@ class HyMotionM2MTrainer(BaseTrainer):
         """
         device = next(self.bundle.motion_transformer.parameters()).device
 
-        # Helper: Create zero-loss context for skipped batches with mixed dimensions
-        def _make_zero_loss_context(B=1, L=360, D=151, device=device):
-            """Return a complete context dict with all fields set to zeros/defaults.
-            This produces zero losses during _compute_base_loss, effectively skipping
-            the batch without causing KeyError."""
-            import logging
-            logger = logging.getLogger("hftrainer")
-            logger.info(f"Creating skip context for batch with B={B}, L={L}, D={D}")
-            # Return a marker dict that train_step can easily recognize
-            return {
-                '_skip_batch': True,  # Signal to train_step to skip this batch
-                'device': device,
-                'skip_reason': 'dimension_mismatch',
-            }
-
-
-        # Early dimension check: skip batches with mismatched motion dimensions
-        # (Some data files produce 198-dim instead of 151-dim due to data source inconsistency)
-        import logging
-        logger = logging.getLogger("hftrainer")
-        if isinstance(batch.get("src_motion"), (list, tuple)):
-            # Check ALL elements in the list for dimension consistency
-            if len(batch["src_motion"]) > 0:
-                dims = []
-                for item in batch["src_motion"]:
-                    if hasattr(item, "shape"):
-                        dims.append(item.shape[-1])
-                
-                # Check if all dims are 151
-                if any(d != 151 for d in dims):
-                    logger.warning(f"Skipping batch: found motion dims {set(dims)} != 151. Batch has mixed dimensions: {dims}")
-                    # Return zero-loss context to skip this batch
-                    B = len(batch["src_motion"])
-                    return _make_zero_loss_context(B=B, L=360, D=151, device=device)
-        elif isinstance(batch.get("src_motion"), torch.Tensor):
-            motion_dim = batch["src_motion"].shape[-1]
-            if motion_dim != 151:
-                logger.warning(f"Skipping batch: motion_dim={motion_dim} != 151. Shape: {batch['src_motion'].shape}")
-                # Return zero-loss context to skip this batch
-                B = batch['src_motion'].shape[0]
-                return _make_zero_loss_context(B=B, L=batch['src_motion'].shape[1], D=151, device=device)
-
 
         # Helper: convert list of tensors to stacked tensor (or keep as list if shapes differ)
         def _stack_if_list(data):
@@ -547,22 +505,6 @@ class HyMotionM2MTrainer(BaseTrainer):
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         ctx = self._prepare_and_forward(batch)
-
-        # CRITICAL: Skip batches with dimension mismatches (returns special marker dict)
-        # This MUST happen before calling _compute_base_loss which will KeyError if ctx is incomplete
-        import logging
-        logger = logging.getLogger("hftrainer")
-        if isinstance(ctx, dict) and ctx.get("_skip_batch"):
-            # Return zero losses for this batch without backprop
-            logger.info(f"train_step: Skipping batch due to: {ctx.get('skip_reason', 'unknown')}")
-            device = next(self.bundle.motion_transformer.parameters()).device
-            zero_loss = torch.zeros(1, device=device, requires_grad=True).sum()  # scalar with requires_grad=True
-            return {"loss": zero_loss}
-        
-        # If we reach here, ctx must be a complete dict ready for loss computation
-        if not isinstance(ctx, dict) or '_skip_batch' in ctx:
-            logger.error(f"FATAL: train_step received invalid ctx: type={type(ctx)}, keys={ctx.keys() if isinstance(ctx, dict) else 'N/A'}")
-            raise RuntimeError("train_step received invalid context from _prepare_and_forward")
 
         losses = self._compute_base_loss(ctx)
         loss = sum(losses.values())

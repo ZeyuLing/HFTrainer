@@ -34,7 +34,7 @@
         "is_enable_host_network": false,
         "is_enable_ssh_without_password": true,
         "is_enable_elastic_evicted_pulled_up": false,
-        "is_enable_fault_tolerance": false,
+        "is_enable_fault_tolerance": true,
         "keep_running_after_trainer_finish": false,
         "is_store_core_file": false,
         "is_enable_node_evicted_end_task": true,
