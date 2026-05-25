@@ -31,6 +31,7 @@ model = dict(
         in_channels=16,
         num_attention_heads=12,
         num_layers=30,
+        use_fp32_upcast_attention=True,
         out_channels=16,
         qk_norm="rms_norm_across_heads",
         rope_max_seq_len=1024,
