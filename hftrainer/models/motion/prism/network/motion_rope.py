@@ -6,10 +6,13 @@ motion data, which has two spatial dimensions: temporal frames and body joints.
 The RoPE is factorized into separate embeddings for each dimension, following
 the approach used in video/image transformers.
 
-Supports three joint position modes:
+Supports four joint position modes:
     - "sequential": Standard sequential indices (0, 1, 2, ...) for joints.
     - "spectral": Laplacian eigenvector coordinates from SMPL-22 kinematic tree.
-      Encodes kinematic distance as RoPE attention bias.
+      Encodes kinematic distance as RoPE attention bias. Per-mode frequency
+      decomposition — NOT compatible with sequential pretrained weights.
+    - "spectral_unified": Spectral L2-norm scalar positions with full j_dim
+      frequency basis. Compatible with sequential pretrained weights.
     - "dfs": Depth-first-search ordering of the kinematic tree.
 
 Reference:
@@ -158,11 +161,16 @@ class MotionWanRotaryPosEmbed(nn.Module):
         - First half (t_dim): Encodes temporal/frame position
         - Second half (j_dim): Encodes spatial/joint position
 
-    Supports three joint position modes:
+    Supports four joint position modes:
         - "sequential": Standard 0, 1, 2, ... indices (default, backward-compatible)
         - "spectral": Laplacian eigenvector coordinates from kinematic tree.
           Each joint gets a multi-dimensional spectral coordinate, and the j_dim
-          is further split across spectral modes.
+          is further split across spectral modes. NOT compatible with sequential
+          pretrained weights (different frequency basis).
+        - "spectral_unified": Like "spectral" but uses a single scalar position
+          per joint (L2 norm of spectral coords) with the FULL j_dim frequency
+          basis. Compatible with sequential pretrained weights — same frequency
+          components, only position values change from integers to spectral scalars.
         - "dfs": DFS ordering of the kinematic tree as joint indices.
 
     Args:
@@ -323,6 +331,87 @@ class MotionWanRotaryPosEmbed(nn.Module):
             self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
             self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
 
+        elif joint_pos_mode == "spectral_unified":
+            # Spectral Unified mode: same frequency basis as sequential (full j_dim),
+            # but with spectral-derived scalar positions instead of integer indices.
+            #
+            # Key difference from "spectral" mode:
+            #   - "spectral" splits j_dim into num_spectral_modes independent frequency
+            #     spaces with dim_per_mode dimensions each. This creates a DIFFERENT
+            #     frequency basis (steeper decay) incompatible with pretrained weights.
+            #   - "spectral_unified" keeps the SAME frequency basis (j_dim=64) as
+            #     sequential mode, only changing positions from integers to spectral
+            #     scalars. Fully compatible with sequential pretrained weights.
+            #
+            # Position computation: L2 norm of the spectral coordinate vector,
+            # scaled so the maximum matches num_joints (22). This preserves
+            # kinematic distance relationships while being a scalar.
+
+            # Temporal axis: standard sequential RoPE (identical to sequential mode)
+            freq_cos_t, freq_sin_t = get_1d_rotary_pos_embed(
+                t_dim,
+                max_seq_len,
+                theta,
+                use_real=True,
+                repeat_interleave_real=True,
+                freqs_dtype=freqs_dtype,
+            )
+            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=True)
+            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=True)
+
+            # Compute spectral coordinates
+            spectral_coords = _compute_spectral_coords(
+                num_joints=22, num_modes=num_spectral_modes
+            )
+            # spectral_coords: (22, num_modes) — multi-dimensional per joint
+
+            # Derive scalar position per joint: L2 norm of spectral coordinate
+            # This preserves kinematic distance: joints close in the tree have
+            # similar norms, distant joints have different norms.
+            spectral_positions = np.linalg.norm(spectral_coords, axis=1)  # (22,)
+
+            # Scale so that the maximum position matches spectral_scale
+            # (default 22.0 = num_joints, matching sequential range [0, 22])
+            scale = spectral_scale if spectral_scale is not None else 22.0
+            max_pos = spectral_positions.max()
+            if max_pos > 1e-8:
+                spectral_positions = spectral_positions * (scale / max_pos)
+
+            # Now use get_1d_rotary_pos_embed with these fractional positions
+            # (same j_dim=64 frequency basis as sequential mode)
+            spectral_pos_tensor = torch.from_numpy(
+                spectral_positions
+            ).to(dtype=freqs_dtype)
+
+            # Compute RoPE for these fractional positions manually
+            # (get_1d_rotary_pos_embed only supports integer/range positions)
+            half_dim = j_dim // 2
+            freq_seq = torch.arange(0, half_dim, dtype=freqs_dtype)
+            # Standard RoPE: theta^(-2i/d) where d = j_dim (full dimension!)
+            freqs = 1.0 / (theta ** (2.0 * freq_seq / j_dim))  # (j_dim/2,)
+
+            # outer product: (22,) × (j_dim/2,) -> (22, j_dim/2)
+            angles = torch.outer(spectral_pos_tensor, freqs)
+            cos_vals = torch.cos(angles).float()  # (22, j_dim/2)
+            sin_vals = torch.sin(angles).float()  # (22, j_dim/2)
+
+            # repeat_interleave pattern to match sequential: [cos(f0), cos(f0), cos(f1), ...]
+            joint_freqs_cos = cos_vals.repeat_interleave(2, dim=1)  # (22, j_dim)
+            joint_freqs_sin = sin_vals.repeat_interleave(2, dim=1)  # (22, j_dim)
+
+            self.register_buffer(
+                "joint_freqs_cos", joint_freqs_cos, persistent=True
+            )
+            self.register_buffer(
+                "joint_freqs_sin", joint_freqs_sin, persistent=True
+            )
+
+            # Translation token: identity RoPE (same as spectral mode)
+            trans_cos = torch.ones(j_dim, dtype=torch.float32)
+            trans_sin = torch.zeros(j_dim, dtype=torch.float32)
+            self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
+            self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
+
         elif joint_pos_mode == "dfs":
             # DFS mode: use DFS ordering as joint positions
             # Temporal axis still uses standard sequential RoPE
@@ -375,7 +464,7 @@ class MotionWanRotaryPosEmbed(nn.Module):
         else:
             raise ValueError(
                 f"Unknown joint_pos_mode: '{joint_pos_mode}'. "
-                f"Must be one of 'sequential', 'spectral', 'dfs'."
+                f"Must be one of 'sequential', 'spectral', 'spectral_unified', 'dfs'."
             )
 
     def forward(self, hidden_states: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -431,7 +520,7 @@ class MotionWanRotaryPosEmbed(nn.Module):
                 1, ppf * ppj, 1, -1
             )
 
-        elif self.joint_pos_mode in ("spectral", "dfs"):
+        elif self.joint_pos_mode in ("spectral", "spectral_unified", "dfs"):
             # Spectral/DFS mode: per-joint pre-computed frequencies
             # Temporal: use sequential RoPE (same as before)
             # Move temporal buffers to correct device and dtype
