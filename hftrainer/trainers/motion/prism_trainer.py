@@ -74,19 +74,14 @@ class PrismTrainer(BaseTrainer):
         captions = batch.get('caption')
         num_frames = batch.get('num_frames')
 
-        # Optional fp16 autocast for V100 Tensor Core acceleration.
-        # IMPORTANT: Only wrap the TRANSFORMER forward pass in autocast.
-        # The VAE encoder must stay in fp32 (its internal conv/activations
-        # were not designed for fp16 and produce NaN). The transformer is
-        # 99%+ of compute, so we get full tensor core benefit.
-        #
-        # CRITICAL: Must disable fused attention kernels (memory-efficient SDP)
-        # because they run softmax INTERNALLY in fp16, causing exp() overflow
-        # when attention scores > 11.09. The unfused "math" backend decomposes
-        # SDPA into separate ops where autocast correctly promotes softmax to
-        # fp32 while still using fp16 Tensor Cores for QK^T and Attn×V matmuls.
-        # Flash Attention is unavailable on V100 (requires SM≥80) anyway.
-        if self.use_fp16_autocast and not getattr(self, '_sdp_backends_configured', False):
+        # Disable fused attention kernels (memory-efficient and flash SDP).
+        # On V100: Flash SDP is unavailable (requires SM>=80).
+        # Memory-efficient SDP doesn't support bf16 on V100 (no native bf16 hw)
+        # and causes "CUDA driver error: invalid argument".
+        # Even with fp16 autocast, mem-efficient SDP runs softmax internally
+        # in fp16, causing exp() overflow when attention scores > 11.09.
+        # The unfused "math" backend is the only safe option on V100.
+        if not getattr(self, '_sdp_backends_configured', False):
             torch.backends.cuda.enable_mem_efficient_sdp(False)
             torch.backends.cuda.enable_flash_sdp(False)
             self._sdp_backends_configured = True
