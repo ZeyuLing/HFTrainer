@@ -3780,6 +3780,9 @@ def main():
                         help='Allow unconditioned models to run settings that '
                              'normally require captions. The caption is loaded '
                              'for bookkeeping but ignored by the model.')
+    parser.add_argument('--include-disabled-settings', action='store_true',
+                        help='Run settings marked _disabled in the task registry. '
+                             'Use only for explicit backfill/rerun jobs.')
     parser.add_argument('--seed-base', type=lambda x: int(x, 0),
                         default=0xE4A10000,
                         help='Base seed for per-sample random state '
@@ -3871,7 +3874,8 @@ def main():
                 # user reported Stage 1 pure-noise generation ignored LQ
                 # entirely). Kept as stubs so explicit `--settings` runs
                 # still resolve but are no-ops.
-                if task.settings[setting_name].mask_kwargs.get('_disabled', False):
+                if (task.settings[setting_name].mask_kwargs.get('_disabled', False)
+                        and not args.include_disabled_settings):
                     print(f'\n  Task: {task_key} — SKIPPED (setting marked '
                           f'_disabled in registry)')
                     continue

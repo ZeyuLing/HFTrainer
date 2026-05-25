@@ -30,6 +30,7 @@ def build_jobs(args: argparse.Namespace) -> List[Dict[str, str]]:
                 run_caption_nonaware=args.run_caption_nonaware,
                 allow_uncond_caption_required=args.allow_uncond_caption_required,
                 include_routine_skipped=args.include_routine_skipped,
+                include_disabled_settings=args.include_disabled_settings,
             )
             if args.settings:
                 settings = [s for s in settings if s in set(args.settings)]
@@ -78,6 +79,8 @@ def worker(gpu: str, q: Queue, args: argparse.Namespace, failures: List[str]) ->
             cmd.append("--run-caption-nonaware")
         if args.allow_uncond_caption_required:
             cmd.append("--allow-uncond-caption-required")
+        if args.include_disabled_settings:
+            cmd.append("--include-disabled-settings")
 
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu
@@ -113,6 +116,7 @@ def main() -> None:
     parser.add_argument("--run-caption-nonaware", action="store_true")
     parser.add_argument("--allow-uncond-caption-required", action="store_true")
     parser.add_argument("--include-routine-skipped", action="store_true")
+    parser.add_argument("--include-disabled-settings", action="store_true")
     args = parser.parse_args()
 
     jobs = build_jobs(args)

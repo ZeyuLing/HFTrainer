@@ -264,16 +264,26 @@ def main():
                 bundle.scheduler.set_timesteps(args.num_inference_steps, device=device)
                 timesteps = bundle.scheduler.timesteps
 
-                # Denoising loop (no first-frame conditioning for T2M)
+                # Motion mask: all valid positions (no padding)
+                motion_mask = torch.ones(
+                    1, num_latent_frames, num_joints, device=device
+                )
+
+                # Denoising loop with expand_timesteps=True (matches training)
                 for t in timesteps:
-                    latent_model_input = latents
-                    t_batch = t.unsqueeze(0).expand(1)
+                    latent_model_input = latents.to(dtype)
+
+                    # Per-token timestep: [B, T_latent * J]
+                    # For pure T2M (no conditioning), all positions get same t
+                    temp_ts = (torch.ones(num_latent_frames, num_joints, device=device) * t).flatten()
+                    timestep = temp_ts.unsqueeze(0)  # [1, T_latent * J]
 
                     # Conditional prediction
                     model_pred = bundle.transformer(
                         hidden_states=latent_model_input,
-                        timestep=t_batch,
+                        timestep=timestep,
                         encoder_hidden_states=text_states,
+                        hidden_states_mask=motion_mask,
                     )
                     if hasattr(model_pred, 'sample'):
                         model_pred = model_pred.sample
@@ -282,8 +292,9 @@ def main():
                     if args.guidance_scale > 1.0:
                         noise_uncond = bundle.transformer(
                             hidden_states=latent_model_input,
-                            timestep=t_batch,
+                            timestep=timestep,
                             encoder_hidden_states=neg_text,
+                            hidden_states_mask=motion_mask,
                         )
                         if hasattr(noise_uncond, 'sample'):
                             noise_uncond = noise_uncond.sample

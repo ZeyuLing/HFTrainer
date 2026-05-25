@@ -31,6 +31,7 @@ def runnable_settings(
     run_caption_nonaware: bool = False,
     allow_uncond_caption_required: bool = False,
     include_routine_skipped: bool = False,
+    include_disabled_settings: bool = False,
 ) -> List[str]:
     model_name = str(model_info.get("name", ""))
     if task_id == "E6" and not include_routine_skipped:
@@ -53,7 +54,7 @@ def runnable_settings(
 
     out: List[str] = []
     for setting_name, setting in task.settings.items():
-        if setting.mask_kwargs.get("_disabled", False):
+        if setting.mask_kwargs.get("_disabled", False) and not include_disabled_settings:
             continue
         setting_uc = getattr(setting, "use_caption", None)
         if setting_uc is True:
@@ -87,6 +88,7 @@ def build_jobs(args: argparse.Namespace) -> List[Dict[str, object]]:
                 run_caption_nonaware=args.run_caption_nonaware,
                 allow_uncond_caption_required=args.allow_uncond_caption_required,
                 include_routine_skipped=args.include_routine_skipped,
+                include_disabled_settings=args.include_disabled_settings,
             )
             if not settings:
                 print(f"[queue] skip {model} {task_id}: no runnable settings", flush=True)
@@ -135,6 +137,8 @@ def worker(gpu: str, q: Queue, args: argparse.Namespace, failures: List[str]) ->
             cmd.append("--run-caption-nonaware")
         if args.allow_uncond_caption_required:
             cmd.append("--allow-uncond-caption-required")
+        if args.include_disabled_settings:
+            cmd.append("--include-disabled-settings")
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu
         env.setdefault("PYTHONPATH", ".")
@@ -172,6 +176,7 @@ def main() -> None:
     parser.add_argument("--run-caption-nonaware", action="store_true")
     parser.add_argument("--allow-uncond-caption-required", action="store_true")
     parser.add_argument("--include-routine-skipped", action="store_true")
+    parser.add_argument("--include-disabled-settings", action="store_true")
     args = parser.parse_args()
 
     jobs = build_jobs(args)
