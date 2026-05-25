@@ -135,6 +135,12 @@ papers/
 # Evaluation output databases
 *.db
 
+# Accidental debug/runtime logs at repo root (training smoke, LaTeX, MuJoCo)
+/*.log
+/texput.log
+/MUJOCO_LOG.TXT
+/MUJOCO_LOG.txt
+
 # Root-level research markdown (should go to docs/temp/)
 /DEEP_DIVE_*.md
 /E3_*.md

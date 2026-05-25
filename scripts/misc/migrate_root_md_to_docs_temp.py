@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move repo-root session/investigation .md files into docs/temp/<topic>/."""
+"""Move repo-root session/investigation docs into docs/temp/<topic>/."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-KEEP_AT_ROOT = frozenset({"README.md", "CLAUDE.md"})
+KEEP_AT_ROOT = frozenset({"README.md", "CLAUDE.md", "requirements.txt"})
+DOC_EXTENSIONS = (".md", ".txt")
 
 # First match wins (more specific prefixes first).
 RULES: list[tuple[re.Pattern[str], str]] = [
@@ -102,23 +103,82 @@ def move_one(src: Path, dest: Path, dry_run: bool) -> str:
     return "moved"
 
 
+# Runtime/debug logs accidentally written to repo root (safe to delete).
+DELETE_LOG_GLOBS = ("*.log", "MUJOCO_LOG.TXT", "MUJOCO_LOG.txt")
+
+# Obsolete one-shot scripts (superseded by committed code under tools/ or scripts/).
+DELETE_SCRIPTS = ("APPLY_M2M_FIX.sh",)
+
+# Ad-hoc helpers → proper script dirs.
+RELOCATE_SCRIPTS = {
+    "run_eval_kt.sh": REPO / "scripts" / "eval" / "run_prism_kt_spectral_hml3d_smoke.sh",
+    "verify_deployment.sh": REPO / "scripts" / "debug" / "verify_prism_jitter_deployment.sh",
+}
+
+
+def delete_one(path: Path, dry_run: bool) -> str:
+    if not path.exists():
+        return "missing"
+    if dry_run:
+        return "would_delete"
+    if git_tracked(path):
+        subprocess.run(["git", "rm", "-f", str(path)], cwd=REPO, check=True)
+    else:
+        path.unlink()
+    return "deleted"
+
+
+def relocate_script(src_name: str, dest: Path, dry_run: bool) -> str:
+    src = REPO / src_name
+    if not src.exists():
+        return "missing"
+    if dry_run:
+        return f"would_relocate -> {dest.relative_to(REPO)}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if git_tracked(src):
+        subprocess.run(["git", "mv", str(src), str(dest)], cwd=REPO, check=True)
+    else:
+        src.rename(dest)
+    return "relocated"
+
+
 def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--docs-only", action="store_true", help="Skip log/script cleanup")
+    parser.add_argument("--cleanup-only", action="store_true", help="Only logs/scripts")
     args = parser.parse_args()
 
     stats: dict[str, int] = {}
-    for src in sorted(REPO.glob("*.md")):
-        if src.name in KEEP_AT_ROOT:
-            continue
-        subdir = classify(src.name)
-        dest = REPO / "docs" / "temp" / subdir / src.name
-        action = move_one(src, dest, args.dry_run)
-        stats[action] = stats.get(action, 0) + 1
-        if args.dry_run or action != "dup_skip":
-            print(f"{src.name}: {action}")
+
+    if not args.docs_only:
+        for pattern in DELETE_LOG_GLOBS:
+            for path in sorted(REPO.glob(pattern)):
+                action = delete_one(path, args.dry_run)
+                stats[action] = stats.get(action, 0) + 1
+                print(f"{path.name}: {action}")
+        for name in DELETE_SCRIPTS:
+            action = delete_one(REPO / name, args.dry_run)
+            stats[action] = stats.get(action, 0) + 1
+            print(f"{name}: {action}")
+        for name, dest in RELOCATE_SCRIPTS.items():
+            action = relocate_script(name, dest, args.dry_run)
+            stats[action] = stats.get(action, 0) + 1
+            print(f"{name}: {action}")
+
+    if not args.cleanup_only:
+        for ext in DOC_EXTENSIONS:
+            for src in sorted(REPO.glob(f"*{ext}")):
+                if src.name in KEEP_AT_ROOT:
+                    continue
+                subdir = classify(src.name)
+                dest = REPO / "docs" / "temp" / subdir / src.name
+                action = move_one(src, dest, args.dry_run)
+                stats[action] = stats.get(action, 0) + 1
+                if args.dry_run or action != "dup_skip":
+                    print(f"{src.name}: {action}")
 
     print("\n--- stats ---")
     for k, v in sorted(stats.items()):

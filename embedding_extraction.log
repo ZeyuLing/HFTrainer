@@ -1,43 +1,0 @@
-/usr/local/lib/python3.9/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
-  from torch.distributed.optim import \
-[INFO] shard 0/1: encoding 6607 captions on cuda:0
-[2026-05-14 01:54:29,880] [INFO] [real_accelerator.py:191:get_accelerator] Setting ds_accelerator to cuda (auto detect)
-/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
-  def forward(ctx, input, weight, bias=None):
-/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
-  def backward(ctx, grad_output):
-`torch_dtype` is deprecated! Use `dtype` instead!
-`torch_dtype` is deprecated! Use `dtype` instead!
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.84s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:02,  1.46s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.21s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.00s/it]
-Traceback (most recent call last):
-  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/scripts/data/prepare_permo_embeddings.py", line 310, in <module>
-    main()
-  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/scripts/data/prepare_permo_embeddings.py", line 294, in main
-    extract_embeddings(
-  File "/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/scripts/data/prepare_permo_embeddings.py", line 191, in extract_embeddings
-    text_encoder.to(device)
-  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1340, in to
-    return self._apply(convert)
-  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 900, in _apply
-    module._apply(fn)
-  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 900, in _apply
-    module._apply(fn)
-  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 900, in _apply
-    module._apply(fn)
-  [Previous line repeated 2 more times]
-  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 927, in _apply
-    param_applied = fn(param)
-  File "/usr/local/lib64/python3.9/site-packages/torch/nn/modules/module.py", line 1326, in convert
-    return t.to(
-torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.00 MiB. GPU 0 has a total capacity of 14.58 GiB of which 1.62 MiB is free. Process 3557835 has 6.81 GiB memory in use. Process 559127 has 7.76 GiB memory in use. Of the allocated memory 7.58 GiB is allocated by PyTorch, and 87.49 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
-/usr/local/lib/python3.9/site-packages/mmengine/optim/optimizer/zero_optimizer.py:11: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
-  from torch.distributed.optim import \
-[INFO] shard 0/1: encoding 6607 captions on cpu
-[2026-05-14 01:57:33,330] [INFO] [real_accelerator.py:191:get_accelerator] Setting ds_accelerator to cuda (auto detect)
-/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:49: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
-  def forward(ctx, input, weight, bias=None):
-/usr/local/lib/python3.9/site-packages/deepspeed/runtime/zero/linear.py:67: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
-  def backward(ctx, grad_output):
-`torch_dtype` is deprecated! Use `dtype` instead!
-`torch_dtype` is deprecated! Use `dtype` instead!
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:14<00:44, 15.00s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:30<00:30, 15.00s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:46<00:15, 15.88s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:47<00:00,  9.90s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:47<00:00, 11.92s/it]
