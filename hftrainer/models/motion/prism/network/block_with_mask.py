@@ -25,6 +25,8 @@ from diffusers.models.transformers.transformer_wan import (
 from diffusers.models.normalization import FP32LayerNorm
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 
+from .attention_fp32_upcast import WanAttnProcessorFP32Upcast
+
 
 @maybe_allow_in_graph
 class WanTransformerBlockWithMask(nn.Module):
@@ -55,6 +57,8 @@ class WanTransformerBlockWithMask(nn.Module):
         eps (float, optional): Epsilon for layer normalization. Defaults to 1e-6.
         added_kv_proj_dim (int, optional): Dimension for additional key-value projections
             (used in image-to-video models). Defaults to None.
+        use_fp32_upcast_attention (bool, optional): Whether to use FP32 upcast for attention
+            computation to prevent softmax overflow in fp16 training. Defaults to True.
 
     Example:
         >>> block = WanTransformerBlockWithMask(dim=1024, ffn_dim=4096, num_heads=16)
@@ -78,6 +82,7 @@ class WanTransformerBlockWithMask(nn.Module):
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
+        use_fp32_upcast_attention: bool = True,
     ):
         super().__init__()
 
@@ -88,18 +93,26 @@ class WanTransformerBlockWithMask(nn.Module):
 
         # Self-attention: Query, Key, Value all come from hidden_states
         # cross_attention_dim_head=None indicates this is self-attention
+        # Use FP32 upcast processor if enabled to prevent softmax overflow in fp16
+        attn1_processor = (
+            WanAttnProcessorFP32Upcast() if use_fp32_upcast_attention else WanAttnProcessor()
+        )
         self.attn1 = WanAttention(
             dim=dim,
             heads=num_heads,
             dim_head=dim // num_heads,
             eps=eps,
             cross_attention_dim_head=None,  # Self-attention: Q, K, V from same source
-            processor=WanAttnProcessor(),
+            processor=attn1_processor,
         )
 
         # ========== 2. Cross-attention ==========
         # Cross-attention: Query from hidden_states, Key/Value from encoder_hidden_states
         # cross_attention_dim_head is set to enable cross-attention mode
+        # Use FP32 upcast processor if enabled to prevent softmax overflow in fp16
+        attn2_processor = (
+            WanAttnProcessorFP32Upcast() if use_fp32_upcast_attention else WanAttnProcessor()
+        )
         self.attn2 = WanAttention(
             dim=dim,
             heads=num_heads,
@@ -107,7 +120,7 @@ class WanTransformerBlockWithMask(nn.Module):
             eps=eps,
             added_kv_proj_dim=added_kv_proj_dim,  # For I2V: additional image KV projection
             cross_attention_dim_head=dim // num_heads,  # Enables cross-attention mode
-            processor=WanAttnProcessor(),
+            processor=attn2_processor,
         )
 
         # Optional normalization before cross-attention

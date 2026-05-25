@@ -57,6 +57,7 @@ model = dict(
     pred_type='velocity',
     uncondition_mode=False,  # Enable text conditioning
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
+    motion_cond_mask_prob=0.3,  # 30% motion condition dropout to prevent condition shortcut
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim_kimodo_root',
     rotation_space='local',
     text_encoder=dict(),  # Use default QWEN3 + CLIP-L

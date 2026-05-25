@@ -141,10 +141,14 @@ class PrismTrainer(BaseTrainer):
 
         noisy_latents, targets = self.bundle.add_flow_noise(latents, timesteps)
         noisy_latents = torch.where(condition_frame_mask_vae, noisy_latents, latents)
+        # Access patch_size from transformer config (unwrap FSDP/DDP wrapper)
+        transformer_module = getattr(
+            self.bundle.transformer, 'module', self.bundle.transformer
+        )
         timesteps = self.bundle.create_sequence_ts(
             timesteps,
             condition_frame_mask_vae,
-            self.bundle.transformer.config.patch_size,
+            transformer_module.config.patch_size,
         )
         transformer_dtype = next(self.bundle.transformer.parameters()).dtype
         noisy_latents = noisy_latents.to(dtype=transformer_dtype)

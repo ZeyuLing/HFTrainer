@@ -211,6 +211,24 @@ class HyMotionM2MTrainer(BaseTrainer):
                 if src_mask is not None:
                     src_mask[i, src_len:] = 0.0
 
+        # Motion condition dropout: randomly drop the entire motion condition
+        # for a fraction of batch samples.  When motion is dropped the model
+        # receives the same state as pure text-conditioned generation (T2M):
+        #   src_mask = all-1s  → everything is "generate" (no known regions)
+        #   src_motion = zeros → reactive channel is all-zero
+        # This prevents the model from short-circuiting text understanding
+        # by relying solely on the high-information motion condition.
+        motion_cond_mask_prob = getattr(self.bundle, 'motion_cond_mask_prob', 0.0)
+        if self.training and motion_cond_mask_prob > 0 and src_mask is not None:
+            motion_drop_mask = torch.bernoulli(
+                torch.full((B,), motion_cond_mask_prob, device=device)
+            ).bool()  # (B,) True = drop motion condition
+            if motion_drop_mask.any():
+                # For dropped samples: all coordinates become "generate"
+                src_mask[motion_drop_mask] = 1.0
+                # For dropped samples: no source motion reference
+                src_motion[motion_drop_mask] = 0.0
+
         ref_pose = batch.get('ref_pose')
         if ref_pose is not None and not isinstance(ref_pose, Tensor):
             ref_pose = None

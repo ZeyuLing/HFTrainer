@@ -166,6 +166,7 @@ class HyMotionM2MBundle(ModelBundle):
         noise_scheduler_cfg: Optional[dict] = None,
         infer_noise_scheduler_cfg: Optional[dict] = None,
         cond_mask_prob: float = 0.0,
+        motion_cond_mask_prob: float = 0.0,
         enable_ctxt_null_feat: bool = False,
         vace_condition_mode: str = 'split_reactive',
         vtxt_input_dim: int = 768,
@@ -192,6 +193,7 @@ class HyMotionM2MBundle(ModelBundle):
         self.pred_type = pred_type
         self.uncondition_mode = uncondition_mode
         self.cond_mask_prob = cond_mask_prob
+        self.motion_cond_mask_prob = motion_cond_mask_prob
         # DEPRECATED: enable_ctxt_null_feat is no longer used by the pipeline.
         # Since 2026-05-15, inference CFG always nulls both vtxt and ctxt to
         # match training-time mask_text_cond behavior. Kept for checkpoint compat.

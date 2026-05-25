@@ -115,6 +115,8 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
         rope_max_seq_len (int, optional): Maximum sequence length for RoPE. Defaults to 1024.
         pos_embed_seq_len (int, optional): Sequence length for text positional embeddings.
             Defaults to None (no positional embedding).
+        use_fp32_upcast_attention (bool, optional): Whether to use FP32 upcast for attention
+            computation to prevent softmax overflow in fp16 training. Defaults to True.
 
     Attributes:
         rope: Rotary position embedding module for motion sequences.
@@ -149,6 +151,7 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
         joint_pos_mode: str = "sequential",
         num_spectral_modes: int = 4,
         spectral_scale: Optional[float] = None,
+        use_fp32_upcast_attention: bool = True,
     ) -> None:
         # Skip WanTransformer3DModel.__init__ and call ModelMixin.__init__ directly
         # to avoid initializing 3D-specific components
@@ -199,6 +202,7 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
                     cross_attn_norm,
                     eps,
                     added_kv_proj_dim,
+                    use_fp32_upcast_attention,
                 )
                 for _ in range(num_layers)
             ]
