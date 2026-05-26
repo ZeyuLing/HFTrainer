@@ -453,17 +453,26 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list,
     # DO NOT override solref/solimp — custom values cause instability
     log.info("  Contact params: MuJoCo defaults (do NOT override solref/solimp)")
 
-    # Contact margin: simulate IsaacGym's contact_offset=0.02m
-    # In IsaacGym (where the RL policy was trained), contact_offset makes contacts
-    # engage 2cm BEFORE geometric overlap. This means feet hovering 2cm above the
-    # floor still receive upward contact support forces.
-    # In MuJoCo, `margin` serves the same purpose: contacts are detected when
-    # dist < margin (positive dist = gap).
-    # This is the ONLY custom physics parameter that helps (proven by A/B test).
-    CONTACT_MARGIN = 0.02  # Match IsaacGym contact_offset
-    for geom_id in range(model.ngeom):
-        model.geom_margin[geom_id] = CONTACT_MARGIN
-    log.info(f"  Contact margin: {CONTACT_MARGIN}m (simulates IsaacGym contact_offset)")
+    # Contact margin: DO NOT set margin=0.02!
+    #
+    # DIAGNOSIS (2026-05-26): margin=0.02 causes a CATAPULT EFFECT.
+    # MuJoCo's `margin` is NOT equivalent to IsaacGym's `contact_offset`:
+    #   - IsaacGym contact_offset=0.02: soft spring detection zone, gentle forces
+    #   - MuJoCo margin=0.02: HARD constraint boundary, massive impulsive forces
+    #
+    # With margin=0.02 at correct root height:
+    #   Initial Fz = 5166 N (20× gravity!) → robot catapulted upward 1.6cm
+    # With margin=0 at same pose:
+    #   Initial Fz = 256 N (gravity support) → robot STABLE
+    #
+    # ProtoMotions' own MuJoCo simulator (simulator/mujoco/simulator.py) does NOT
+    # set any margin — it relies on MuJoCo defaults (margin=0 from XML defaults).
+    # The SMPL MJCF has no geom-level margin attribute either.
+    #
+    # Previous A/B test showing margin=0.02 "helped" was likely an artifact of
+    # wrong initial conditions (incorrect ground offset or penetrating pose).
+    # With correct ground offset, margin=0 is stable and physically correct.
+    log.info("  Contact margin: 0 (MuJoCo default, matches ProtoMotions MuJoCo backend)")
 
     # Zero passive forces (match training conditions)
     # ProtoMotions deployment script (test_tracker_mujoco.py) zeros all three.
@@ -656,7 +665,7 @@ def get_reference_at_time(ref_data, time_sec, dt_ref, total_frames):
     alpha = frame_f - int(np.floor(frame_f))
 
     if frame_lo == frame_hi or alpha < 1e-6:
-        return {k: v[frame_lo].copy() for k, v in ref_data.items()}
+        return {k: v[frame_lo].copy().astype(np.float32) for k, v in ref_data.items()}
 
     result = {}
     for key in ["body_pos", "body_vel", "body_ang_vel", "dof_pos"]:
@@ -968,22 +977,21 @@ def run_rl_tracker(
         # ---- Extract current simulation state (max-coords) ----
         cur_state = extract_sim_state(model, data, num_bodies)
 
-        # ---- Get reference state at current time (nearest-frame) ----
-        ref_frame_now = min(int(sim_time / dt_ref), T_ref - 1)
-        ref_now = {k: v[ref_frame_now].copy() for k, v in ref_data.items()}
+        # ---- Get reference state at current time (INTERPOLATED) ----
+        # ProtoMotions' MotionLib ALWAYS uses SLERP/LERP interpolation for reference
+        # motion lookup (confirmed from protomotions/components/motion_lib/motion_lib.py).
+        # The policy was trained with smooth interpolated references, NOT nearest-frame.
+        # Using nearest-frame creates discontinuous jumps in the reference signal that
+        # the policy never saw during training, causing incorrect action outputs.
+        ref_now = get_reference_at_time(ref_data, sim_time, dt_ref, T_ref)
 
-        # ---- Get future reference states ----
-        # Use NEAREST-FRAME lookup (matching test_physics_configs.py which works).
-        # Interpolation (nlerp) was causing policy instability — the RL policy was
-        # trained with nearest-frame reference lookup in ProtoMotions, so blending
-        # between frames gives it an observation it never saw during training.
-        # Also: NO heading offset — initial pose already matches reference, so
+        # ---- Get future reference states (INTERPOLATED) ----
+        # NO heading offset — initial pose already matches reference, so
         # heading offset is identity and applying it risks numerical noise.
         future_states = []
         for fi, fdt in zip(future_step_indices, future_dt_seconds):
             future_time = sim_time + fi * fdt
-            ref_frame_idx = min(int(future_time / dt_ref), T_ref - 1)
-            future_ref = {k: v[ref_frame_idx].copy() for k, v in ref_data.items()}
+            future_ref = get_reference_at_time(ref_data, future_time, dt_ref, T_ref)
             future_states.append(future_ref)
 
         # Stack future states: (num_future_steps, num_bodies, dim)
@@ -1130,14 +1138,25 @@ def run_rl_tracker(
                 model.actuator_biasprm[i, 1] = -kp
                 model.actuator_biasprm[i, 2] = -kd
 
-        # Store RAW ACTIONS (not joint_pos_targets) for historical input.
-        # ProtoMotions export_utils.py clearly distinguishes:
-        #   - "historical_actions" → output_key="actions" (raw policy output)
-        #   - "historical_processed_actions" → output_key="robot_action" (joint_pos_targets)
-        # Our ONNX input is "historical_actions" → expects raw actions.
-        # The YAML's "output_key: robot_action" is stale/incorrect for this input.
-        # joint_pos_targets ≈ actions × π (action_scale), feeding the scaled value
-        # corrupts the policy's internal state estimation.
+        # Store RAW POLICY OUTPUT (pre-tanh) for historical.actions input.
+        #
+        # The ONNX model's historical_actions input expects the RAW policy
+        # output (pre-tanh MLP output), NOT the processed joint_pos_targets.
+        #
+        # Evidence chain:
+        #   1. mlp.py line 73: previous_actions_factory(history_steps=1)
+        #      with default processed=False → reads raw actions
+        #   2. component_factories.py line 242-246: processed=False →
+        #      uses EnvContext.historical.actions (raw buffer)
+        #   3. state_history_buffer.py line 393: self.actions[:, 0] = actions
+        #      stores raw policy output; self.processed_actions stores post-tanh
+        #   4. export_utils.py line 649-653: current code assigns
+        #      output_key="actions" for historical_actions (not "robot_action")
+        #   5. action_functions.py: tanh(raw) * scale + offset = joint_pos_targets
+        #      — these are very different value ranges!
+        #
+        # The YAML's output_key="robot_action" is from an older export_utils
+        # version and is misleading. The actual training code feeds raw actions.
         prev_actions = out_dict["actions"].squeeze().copy()
 
         # ---- Apply control and step physics ----
