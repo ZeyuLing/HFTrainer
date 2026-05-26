@@ -214,9 +214,12 @@ class WanTransformerBlockWithMask(nn.Module):
 
         # ========== 1. Self-attention ==========
         # Apply adaptive layer norm: norm(x) * (1 + scale) + shift
+        # NOTE: hidden_states stays in fp32 throughout all sub-layers (fp32 residual stream).
+        # Under fp16 autocast, Linear layers inside attn/ffn use fp16 tensor cores,
+        # but residual additions remain fp32 to prevent overflow after 30 layers.
         norm_hidden_states = (
             self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
-        ).type_as(hidden_states)
+        )
 
         # Self-attention with rotary embeddings and optional masking
         # - encoder_hidden_states=None indicates self-attention (Q, K, V from hidden_states)
@@ -239,13 +242,11 @@ class WanTransformerBlockWithMask(nn.Module):
         )
 
         # Gated residual connection: x = x + gate * attn_output
-        hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(
-            hidden_states
-        )
+        hidden_states = hidden_states.float() + attn_output * gate_msa
 
         # ========== 2. Cross-attention ==========
         # Apply layer normalization (may be identity if cross_attn_norm=False)
-        norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
+        norm_hidden_states = self.norm2(hidden_states.float())
 
         # Cross-attention: Query from hidden_states, Key/Value from encoder_hidden_states
         # - attention_mask=encoder_hidden_states_mask masks padding in conditioning sequence
@@ -264,15 +265,18 @@ class WanTransformerBlockWithMask(nn.Module):
         # Apply adaptive layer norm with FFN-specific shift/scale
         norm_hidden_states = (
             self.norm3(hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa
-        ).type_as(hidden_states)
+        )
 
-        # Feed-forward network
+        # Feed-forward network — under fp16 autocast, Linear layers use fp16 tensor
+        # cores (fp16×fp16 with fp32 accumulation on V100). GELU-tanh computes x^3
+        # which could overflow fp16 if |x| > 40.3, but with LayerNorm-normalized
+        # inputs and pretrained weights, Linear outputs are typically magnitude 1-5,
+        # well below overflow threshold. The fp32 residual stream ensures no
+        # accumulation overflow across the 30 transformer blocks.
         ff_output = self.ffn(norm_hidden_states)
 
         # Gated residual connection for FFN
-        hidden_states = (
-            hidden_states.float() + ff_output.float() * c_gate_msa
-        ).type_as(hidden_states)
+        hidden_states = hidden_states.float() + ff_output.float() * c_gate_msa
 
         return hidden_states
 

@@ -480,9 +480,10 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
         scale = scale.to(hidden_states.device)
 
         # Apply adaptive layer norm: out = norm(x) * (1 + scale) + shift
+        # hidden_states is already fp32 (fp32 residual stream), so .float() is a no-op
         hidden_states = (
             self.norm_out(hidden_states.float()) * (1 + scale) + shift
-        ).type_as(hidden_states)
+        )
 
         # ==========================================================
         # 9. Output projection

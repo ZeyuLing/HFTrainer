@@ -482,7 +482,17 @@ class MotionWanRotaryPosEmbed(nn.Module):
         # Get target device and dtype from input
         device = hidden_states.device
         dtype = hidden_states.dtype
-        
+
+        # ============ FP32 PRECISION FIX FOR ROPE ============
+        # RoPE frequencies must maintain fp32 precision for accurate positional encoding.
+        # When in fp16 autocast context, dtype will be fp16, but we override it to fp32
+        # for RoPE buffers because:
+        # 1. RoPE frequencies are used in multiplicative operations (x * cos(θ))
+        # 2. fp16 precision loss accumulates across the attention head dimension
+        # 3. Lower precision = weaker positional encoding = worse sequence understanding
+        # Solution: Always use fp32 for RoPE buffers, regardless of training dtype
+        safe_rope_dtype = torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+
         # Extract input dimensions
         batch_size, num_channels, num_frames, num_joints = hidden_states.shape
 
@@ -498,10 +508,10 @@ class MotionWanRotaryPosEmbed(nn.Module):
                 self.attention_head_dim // 2,  # j_dim
             ]
 
-            # Move buffers to correct device and dtype
-            freqs_cos_all = self.freqs_cos.to(device=device, dtype=dtype)
-            freqs_sin_all = self.freqs_sin.to(device=device, dtype=dtype)
-            
+            # Move buffers to correct device and SAFE dtype for RoPE
+            freqs_cos_all = self.freqs_cos.to(device=device, dtype=safe_rope_dtype)
+            freqs_sin_all = self.freqs_sin.to(device=device, dtype=safe_rope_dtype)
+
             freqs_cos = freqs_cos_all.split(split_sizes, dim=1)
             freqs_sin = freqs_sin_all.split(split_sizes, dim=1)
 
@@ -523,16 +533,16 @@ class MotionWanRotaryPosEmbed(nn.Module):
         elif self.joint_pos_mode in ("spectral", "spectral_unified", "dfs"):
             # Spectral/DFS mode: per-joint pre-computed frequencies
             # Temporal: use sequential RoPE (same as before)
-            # Move temporal buffers to correct device and dtype
-            freqs_cos_t = self.freqs_cos_t.to(device=device, dtype=dtype)[:ppf]  # (ppf, t_dim)
-            freqs_sin_t = self.freqs_sin_t.to(device=device, dtype=dtype)[:ppf]  # (ppf, t_dim)
+            # Move temporal buffers to correct device and SAFE dtype for RoPE
+            freqs_cos_t = self.freqs_cos_t.to(device=device, dtype=safe_rope_dtype)[:ppf]  # (ppf, t_dim)
+            freqs_sin_t = self.freqs_sin_t.to(device=device, dtype=safe_rope_dtype)[:ppf]  # (ppf, t_dim)
 
             # Joint: per-joint pre-computed frequencies
-            # Move joint buffers to correct device and dtype (KEY FIX)
-            joint_freqs_cos = self.joint_freqs_cos.to(device=device, dtype=dtype)  # (22, j_dim)
-            joint_freqs_sin = self.joint_freqs_sin.to(device=device, dtype=dtype)  # (22, j_dim)
-            trans_freqs_cos = self.trans_freqs_cos.to(device=device, dtype=dtype)  # (j_dim,)
-            trans_freqs_sin = self.trans_freqs_sin.to(device=device, dtype=dtype)  # (j_dim,)
+            # Move joint buffers to correct device and SAFE dtype for RoPE
+            joint_freqs_cos = self.joint_freqs_cos.to(device=device, dtype=safe_rope_dtype)  # (22, j_dim)
+            joint_freqs_sin = self.joint_freqs_sin.to(device=device, dtype=safe_rope_dtype)  # (22, j_dim)
+            trans_freqs_cos = self.trans_freqs_cos.to(device=device, dtype=safe_rope_dtype)  # (j_dim,)
+            trans_freqs_sin = self.trans_freqs_sin.to(device=device, dtype=safe_rope_dtype)  # (j_dim,)
 
             # Build the full joint frequency array including translation token
             # Token ordering in PRISM: token 0 = translation, tokens 1-22 = joints
@@ -571,7 +581,6 @@ class MotionWanRotaryPosEmbed(nn.Module):
             )
 
         return freqs_cos, freqs_sin
-
 
 if __name__ == "__main__":
     """

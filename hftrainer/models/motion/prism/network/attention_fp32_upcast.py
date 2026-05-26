@@ -138,9 +138,27 @@ class WanAttnProcessorFP32Upcast(WanAttnProcessor):
         # Get QKV projections (remains in original dtype)
         query, key, value = _get_qkv_projections(attn, hidden_states, encoder_hidden_states)
 
-        # Apply RMSNorm (remains in original dtype)
-        query = attn.norm_q(query)
-        key = attn.norm_k(key)
+        # ============ CRITICAL FIX: RMSNorm fp16 Overflow Prevention ============
+        # RMSNorm computes x.pow(2).mean() which can overflow in fp16 if x > 256.
+        # During random initialization, Q/K values are typically in range [-1, 1] × sqrt(dim),
+        # which at dim=8192 yields values up to ~90. However, after attention softmax,
+        # values can exceed 256 in fp16, causing .pow(2) to overflow to inf.
+        # Solution: Upcast Q/K to fp32 BEFORE RMSNorm, then cast back to original dtype.
+        
+        # Only upcast if we're in fp16/bf16 (don't waste computation in fp32 training)
+        rms_upcast = original_dtype in (torch.float16, torch.bfloat16)
+        
+        if rms_upcast:
+            query_rms = query.to(torch.float32)
+            key_rms = key.to(torch.float32)
+            query_rms = attn.norm_q(query_rms).to(original_dtype)
+            key_rms = attn.norm_k(key_rms).to(original_dtype)
+            query = query_rms
+            key = key_rms
+        else:
+            # fp32 training: use original dtype
+            query = attn.norm_q(query)
+            key = attn.norm_k(key)
 
         # Reshape to multi-head format (remains in original dtype)
         query = query.unflatten(2, (attn.heads, -1))

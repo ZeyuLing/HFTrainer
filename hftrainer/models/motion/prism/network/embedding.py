@@ -128,7 +128,14 @@ class WanTimeTextEmbedding(nn.Module):
         timestep_proj = self.time_proj(self.act_fn(temb))
 
         # Step 6: Project text embeddings to model dimension
-        encoder_hidden_states = self.text_embedder(encoder_hidden_states)
+        # Run in fp32 to prevent GELU-tanh overflow under fp16 autocast.
+        # PixArtAlphaTextProjection uses nn.GELU(approximate="tanh") which computes x^3
+        # that overflows fp16 when |x| > 40.3.
+        with torch.amp.autocast('cuda', dtype=torch.float32):
+            encoder_hidden_states = self.text_embedder(encoder_hidden_states)
+        # Cast back to match temb dtype so downstream layers (cross-attention with
+        # bf16 weights under fp16 autocast) don't encounter dtype mismatch.
+        encoder_hidden_states = encoder_hidden_states.type_as(temb)
 
         return temb, timestep_proj, encoder_hidden_states
 
