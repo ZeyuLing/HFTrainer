@@ -421,6 +421,7 @@ class PhysFlowTrainer:
         min_completion: float = 0.8,
         min_root_height: float = 0.3,
         require_no_fall: bool = False,
+        require_success_only: bool = False,
         grad_accum: int = 1,
         kl_weight: float = 0.0,
         target_blend: float = 1.0,
@@ -454,6 +455,9 @@ class PhysFlowTrainer:
             require_no_fall: If True, reject ALL entries with status="fell" regardless
                 of completion ratio. Prevents degenerate feedback loop from truncated
                 targets teaching model to produce falling motions.
+            require_success_only: If True, only accept status="success" (root_height>0.4).
+                Rejects "unstable" (crouching, root~0.3-0.4) targets that may teach
+                model to generate unnatural low postures.
             grad_accum: Gradient accumulation steps. Optimizer steps after N successful
                 backward passes. Default=1 (no accumulation).
             kl_weight: Weight for KL regularization toward pretrained weights.
@@ -477,6 +481,7 @@ class PhysFlowTrainer:
         self.min_completion = min_completion
         self.min_root_height = min_root_height
         self.require_no_fall = require_no_fall
+        self.require_success_only = require_success_only
         self.grad_accum = grad_accum
         self.kl_weight = kl_weight
         self.target_blend = target_blend
@@ -940,7 +945,7 @@ class PhysFlowTrainer:
         motion_135_phys, stats = self.physics_oracle.correct(motion_135)
         phys_time = time.time() - phys_start
 
-        # Quality gate
+        # Quality gate for TRAINING (relaxed — allows partial success)
         is_good = self.physics_oracle.is_good_quality(
             stats,
             min_completion=self.min_completion,
@@ -951,7 +956,18 @@ class PhysFlowTrainer:
         if is_good and self.require_no_fall and stats.get('status') == 'fell':
             is_good = False
 
-        self.curriculum.update(success=is_good)
+        # Additional V5 strict gate: require status="success" (reject "unstable")
+        if is_good and self.require_success_only and stats.get('status') != 'success':
+            is_good = False
+
+        # Curriculum gate (STRICTER than training gate):
+        # Only counts as curriculum success if:
+        #  - Not fell, OR completion >= 0.8 (genuinely tracked well)
+        # This prevents curriculum advancing too fast with relaxed training gate
+        is_curriculum_success = is_good and (
+            stats.get('status') != 'fell' or stats.get('completion_ratio', 0) >= 0.8
+        )
+        self.curriculum.update(success=is_curriculum_success)
 
         if not is_good:
             self.total_skipped += 1
@@ -1564,6 +1580,7 @@ def run_training(args):
         min_completion=args.min_completion,
         min_root_height=args.min_root_height,
         require_no_fall=args.require_no_fall,
+        require_success_only=getattr(args, 'require_success_only', False),
         grad_accum=args.grad_accum,
         kl_weight=getattr(args, 'kl_weight', 0.0),
         target_blend=getattr(args, 'target_blend', 1.0),
@@ -1583,6 +1600,7 @@ def run_training(args):
     print(f"  Target blend: {getattr(args, 'target_blend', 1.0)}")
     print(f"  Min locomotion ratio: {getattr(args, 'min_locomotion_ratio', 0.0)}")
     print(f"  Require no-fall: {args.require_no_fall}")
+    print(f"  Require success-only: {getattr(args, 'require_success_only', False)}")
     print(f"  Min completion: {args.min_completion}")
     print(f"  Min root height: {args.min_root_height}")
 
@@ -2082,7 +2100,7 @@ def run_test_single(args):
     print(f"  Completion: {stats['completion_ratio']:.2f} "
           f"({stats['actual_sim_steps']}/{stats['total_sim_steps']} steps)")
     print(f"  Root height min: {stats['root_height_min']:.4f}")
-    print(f"  Tracking error: {stats['tracking_error_mean']:.4f}")
+    print(f"  Tracking error: {stats.get('tracking_error_mean', stats.get('jitter_filtered', 0.0)):.4f}")
     print(f"  Quality OK: {oracle.is_good_quality(stats)}")
 
     # Convert to 201-dim
@@ -2194,6 +2212,10 @@ def parse_args():
                         help='Reject ALL entries with status="fell" regardless of '
                              'completion ratio. Prevents training on truncated/fallen '
                              'targets which cause model degradation.')
+    parser.add_argument('--require-success-only', action='store_true',
+                        help='Only train on entries with status="success" (root_height_min>0.4). '
+                             'Rejects "unstable" entries (crouching, root~0.3-0.4) '
+                             'which may teach model unnatural postures.')
 
     # Gradient accumulation
     parser.add_argument('--grad-accum', type=int, default=1,

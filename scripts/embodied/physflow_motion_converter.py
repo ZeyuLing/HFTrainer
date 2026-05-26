@@ -104,6 +104,7 @@ from scripts.embodied.run_smpl_rl_tracker import (
     MUJOCO_2_SMPL,
     MUJOCO_BODY_NAMES,
     _patch_mjcf_xml,
+    _quat_mul_wxyz,
 )
 from scripts.embodied.physflow_rl_oracle import (
     decode_motion_135_array,
@@ -448,9 +449,12 @@ class MotionFormatConverter:
         """
         T = qpos.shape[0]
 
-        body_pos = np.zeros((T, NUM_BODIES, 3), dtype=np.float32)
-        body_rot = np.zeros((T, NUM_BODIES, 4), dtype=np.float32)  # xyzw
-        dof_pos = np.zeros((T, NUM_DOFS), dtype=np.float32)
+        # Use float64 intermediates for numerical stability during FK + velocity
+        # computation. Float32 causes ~6e-6 error per frame that compounds and
+        # corrupts the RL policy observation at ~step 67.
+        body_pos = np.zeros((T, NUM_BODIES, 3), dtype=np.float64)
+        body_rot = np.zeros((T, NUM_BODIES, 4), dtype=np.float64)  # xyzw
+        dof_pos = np.zeros((T, NUM_DOFS), dtype=np.float64)
         contacts = np.zeros((T, len(_FOOT_BODY_INDICES)), dtype=np.float32)
 
         for t in range(T):
@@ -459,45 +463,77 @@ class MotionFormatConverter:
             mujoco.mj_forward(self.model, self.data)
 
             # Extract body positions (skip world body at index 0)
-            body_pos[t] = self.data.xpos[1:NUM_BODIES + 1].copy().astype(np.float32)
+            body_pos[t] = self.data.xpos[1:NUM_BODIES + 1].copy()
 
             # Extract body rotations (wxyz -> xyzw)
             body_rot_wxyz = self.data.xquat[1:NUM_BODIES + 1].copy()
-            body_rot[t] = mujoco_wxyz_to_xyzw(body_rot_wxyz).astype(np.float32)
+            body_rot[t] = mujoco_wxyz_to_xyzw(body_rot_wxyz)
 
             # DOF positions (joint angles)
-            dof_pos[t] = self.data.qpos[7:7 + NUM_DOFS].copy().astype(np.float32)
+            dof_pos[t] = self.data.qpos[7:7 + NUM_DOFS].copy()
 
             # Foot contact detection via height threshold
             for ci, bi in enumerate(_FOOT_BODY_INDICES):
                 foot_z = body_pos[t, bi, 2]
                 contacts[t, ci] = 1.0 if foot_z < CONTACT_HEIGHT_THRESHOLD else 0.0
 
-        # Compute velocities via finite differences
-        body_vel = np.zeros_like(body_pos)
-        body_ang_vel = np.zeros_like(body_pos)
-        dof_vel = np.zeros_like(dof_pos)
+        # Compute velocities via BACKWARD finite differences.
+        # This matches what the RL policy expects (run_smpl_rl_tracker.py
+        # precompute_reference_maxcoords). Forward differences shift the velocity
+        # signal by one frame, causing observation mismatch during RL training.
+        body_vel = np.zeros_like(body_pos)      # float64
+        body_ang_vel = np.zeros_like(body_pos)  # float64
+        dof_vel = np.zeros_like(dof_pos)        # float64
 
         if T > 1:
-            # Linear velocity: (pos[t+1] - pos[t]) / dt
-            body_vel[:-1] = (body_pos[1:] - body_pos[:-1]) / dt
-            body_vel[-1] = body_vel[-2]
+            # Linear velocity: BACKWARD diff — vel[f] = (pos[f] - pos[f-1]) / dt
+            for f in range(1, T):
+                body_vel[f] = (body_pos[f] - body_pos[f - 1]) / dt
 
-            # Angular velocity from quaternion difference
-            for t in range(T - 1):
-                R_cur = sRot.from_quat(body_rot[t].reshape(-1, 4))
-                R_next = sRot.from_quat(body_rot[t + 1].reshape(-1, 4))
-                R_diff = R_next * R_cur.inv()
-                body_ang_vel[t] = (
-                    R_diff.as_rotvec().reshape(NUM_BODIES, 3) / dt
-                ).astype(np.float32)
-            body_ang_vel[-1] = body_ang_vel[-2]
+            # Angular velocity: 2 * vec(dq) / dt where dq = q1 * q0_inv (wxyz)
+            # This matches the RL tracker's convention exactly. Using scipy
+            # as_rotvec() gives subtly different results for near-identity
+            # rotations and doesn't handle the shortest-path convention.
+            for f in range(1, T):
+                for j in range(NUM_BODIES):
+                    # body_rot is xyzw, convert to wxyz for quaternion math
+                    q0_xyzw = body_rot[f - 1, j]
+                    q1_xyzw = body_rot[f, j]
+                    q0_w = np.array([q0_xyzw[3], q0_xyzw[0], q0_xyzw[1], q0_xyzw[2]])
+                    q1_w = np.array([q1_xyzw[3], q1_xyzw[0], q1_xyzw[1], q1_xyzw[2]])
 
-            # DOF velocity: finite difference
-            dof_vel[:-1] = (dof_pos[1:] - dof_pos[:-1]) / dt
-            dof_vel[-1] = dof_vel[-2]
+                    # q0_inv (conjugate for unit quaternion)
+                    q0_inv = np.array([q0_w[0], -q0_w[1], -q0_w[2], -q0_w[3]])
 
-        return body_pos, body_rot, body_vel, body_ang_vel, dof_pos, dof_vel, contacts
+                    # dq = q1 * q0_inv (Hamilton product, wxyz)
+                    dq = _quat_mul_wxyz(q1_w, q0_inv)
+
+                    # Shortest path: ensure w >= 0
+                    if dq[0] < 0:
+                        dq = -dq
+
+                    # Angular velocity = 2 * vec(dq) / dt
+                    body_ang_vel[f, j] = 2.0 * dq[1:4] / dt
+
+            # DOF velocity: BACKWARD diff
+            for f in range(1, T):
+                dof_vel[f] = (dof_pos[f] - dof_pos[f - 1]) / dt
+
+            # Frame 0 copies from frame 1 (no prior frame available)
+            body_vel[0] = body_vel[1]
+            body_ang_vel[0] = body_ang_vel[1]
+            dof_vel[0] = dof_vel[1]
+
+        # Cast to float32 for storage (ProtoMotions uses float32 tensors)
+        return (
+            body_pos.astype(np.float32),
+            body_rot.astype(np.float32),
+            body_vel.astype(np.float32),
+            body_ang_vel.astype(np.float32),
+            dof_pos.astype(np.float32),
+            dof_vel.astype(np.float32),
+            contacts,
+        )
 
     # ═══════════════════════════════════════════════════════════════════════
     # Utility methods

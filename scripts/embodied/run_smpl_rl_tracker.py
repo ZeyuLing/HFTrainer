@@ -509,6 +509,25 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list,
     model.actuator_gear[:, 0] = 1.0
     log.info(f"  Gear override: 1.0 (standard PD, matches IsaacGym semantics)")
 
+    # CRITICAL: Zero passive joint stiffness and damping.
+    #
+    # The SMPL MJCF has per-joint stiffness=800, damping=80 which produce passive
+    # spring-damper forces: F_passive = -stiffness*(q - springref) - damping*qdot
+    # These are ALWAYS applied by MuJoCo, independent of actuators.
+    #
+    # With actuator PD also applying F_actuator = kp*(ctrl - q) - kd*qdot (kp=800, kd=80),
+    # the effective gains are DOUBLED: total_kp=1600, total_kd=160.
+    #
+    # The RL policy was trained in IsaacGym where ONLY the PD actuator exists (no passive
+    # spring). ProtoMotions' MuJoCo simulator explicitly zeros these out:
+    #   simulator.py:386-392 (_zero_passive_forces):
+    #     "We manage PD control ourselves, so passive forces would double-count."
+    #     self.model.jnt_stiffness[:] = 0.0
+    #     self.model.dof_damping[:] = 0.0
+    model.jnt_stiffness[:] = 0.0
+    model.dof_damping[:] = 0.0
+    log.info(f"  Zeroed passive forces: {model.njnt} joints stiffness, {model.nv} DOFs damping")
+
     for i in range(num_actuators):
         kp = stiffness[i]
         kd = damping[i]
@@ -554,6 +573,165 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list,
     log.info(f"  {num_actuators} actuators, {model.nbody} bodies, "
              f"nq={model.nq}, nv={model.nv}")
     return model, data
+
+
+# ===========================================================================
+#  Virtual Floor Spring (emulate IsaacGym contact_offset=0.02)
+# ===========================================================================
+
+# IsaacGym contact_offset=0.02m: contacts are detected and the solver provides
+# support when geom surfaces are within 20mm of the floor, EVEN if not
+# geometrically penetrating. The RL policy was TRAINED with this behavior.
+#
+# MuJoCo only generates contact forces upon geometric penetration (dist < 0).
+# This means feet hovering 1-2mm above floor get NO support → the policy's
+# learned ankle torques (which assume floor pushback) lift feet further → fall.
+#
+# Solution: Apply a virtual spring force via xfrc_applied to each foot body
+# when its lowest geom surface is within contact_offset of the floor. This
+# provides the same continuous support zone the policy expects.
+#
+# Key design choices:
+#   - Only upward (Fz > 0) forces — floor can't pull
+#   - Stiffness calibrated so total force ≈ body_weight at equilibrium
+#   - Damping prevents oscillation
+#   - Also apply friction (lateral force opposing velocity) for stability
+#   - Forces applied to BODY COM via xfrc_applied (wrench in world frame)
+
+VIRTUAL_FLOOR_CONTACT_OFFSET = 0.02  # meters — match IsaacGym training
+VIRTUAL_FLOOR_STIFFNESS = 9000.0      # N/m — calibrated: 4 bodies × 0.02m × 9000 = 720N ≈ gravity
+VIRTUAL_FLOOR_DAMPING = 150.0         # Ns/m — underdamped to allow natural settling
+VIRTUAL_FLOOR_FRICTION_COEFF = 1.0    # Coulomb friction coefficient
+
+
+def _identify_foot_bodies(model):
+    """Identify foot body IDs and their associated geom info for virtual spring.
+
+    Returns list of dicts: [{body_id, body_name, geom_ids, ...}]
+    """
+    foot_body_names = ["L_Ankle", "L_Toe", "R_Ankle", "R_Toe"]
+    foot_bodies = []
+
+    for bname in foot_body_names:
+        bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, bname)
+        if bid < 0:
+            log.warning(f"  Virtual floor spring: body '{bname}' not found, skipping")
+            continue
+
+        # Find all geoms belonging to this body
+        geom_ids = []
+        for gid in range(model.ngeom):
+            if model.geom_bodyid[gid] == bid:
+                geom_ids.append(gid)
+
+        foot_bodies.append({
+            "body_id": bid,
+            "body_name": bname,
+            "geom_ids": geom_ids,
+        })
+
+    log.info(f"  Virtual floor spring: {len(foot_bodies)} foot bodies identified: "
+             f"{[fb['body_name'] for fb in foot_bodies]}")
+    return foot_bodies
+
+
+def _compute_foot_bottom_z(model, data, foot_body):
+    """Compute the lowest Z coordinate across all geoms of a foot body.
+
+    Uses exact geom geometry (capsule/sphere/box) + current orientation.
+    """
+    min_z = float("inf")
+    for gid in foot_body["geom_ids"]:
+        gtype = int(model.geom_type[gid])
+        gsize = model.geom_size[gid]
+        gxpos = data.geom_xpos[gid]
+        gxmat = data.geom_xmat[gid].reshape(3, 3)
+
+        if gtype == 5:  # capsule: center ± half_len along local Z + radius
+            radius = gsize[0]
+            half_len = gsize[1]
+            # Z-extent = |projection of capsule axis onto world Z| * half_len + radius
+            z_extent = abs(gxmat[2, 2]) * half_len + radius
+            bottom_z = gxpos[2] - z_extent
+        elif gtype == 3:  # sphere
+            bottom_z = gxpos[2] - gsize[0]
+        elif gtype == 6:  # box
+            half_extents = gsize[:3]
+            z_extent = (abs(gxmat[2, 0]) * half_extents[0] +
+                        abs(gxmat[2, 1]) * half_extents[1] +
+                        abs(gxmat[2, 2]) * half_extents[2])
+            bottom_z = gxpos[2] - z_extent
+        else:
+            bottom_z = gxpos[2]
+
+        min_z = min(min_z, bottom_z)
+
+    return min_z
+
+
+def _apply_virtual_floor_spring(model, data, foot_bodies):
+    """Apply virtual floor spring forces to foot bodies within contact_offset.
+
+    Emulates IsaacGym contact_offset=0.02m by providing upward support force
+    when foot geom surfaces are within 20mm of the floor (Z=0 plane).
+
+    Forces are applied via data.xfrc_applied (6D wrench at body COM in world frame).
+    Must be called BEFORE each mj_step (MuJoCo resets xfrc_applied between steps
+    only if you're using mj_step1/mj_step2 separately, but with mj_step it
+    persists — we clear and reapply each substep to be safe).
+
+    Args:
+        model: MjModel
+        data: MjData (modified in-place: xfrc_applied updated)
+        foot_bodies: list from _identify_foot_bodies()
+    """
+    for fb in foot_bodies:
+        bid = fb["body_id"]
+        bottom_z = _compute_foot_bottom_z(model, data, fb)
+
+        # Distance from floor (floor at Z=0)
+        dist = bottom_z  # positive = above floor, negative = penetrating
+
+        if 0 < dist < VIRTUAL_FLOOR_CONTACT_OFFSET:
+            # Only in the GAP zone: foot is above floor but within contact_offset.
+            # When dist <= 0, MuJoCo's hard contacts already provide full support.
+            # When dist >= contact_offset, foot is too high for virtual support.
+            depth = VIRTUAL_FLOOR_CONTACT_OFFSET - dist
+
+            # Spring force (upward, proportional to penetration into zone)
+            f_spring = VIRTUAL_FLOOR_STIFFNESS * depth
+
+            # Damping force (opposes vertical velocity of body)
+            # body velocity in world frame: data.cvel[bid] is (6,) = [ang(3), lin(3)]
+            # But cvel is in body-attached frame. Use subtree_linvel instead.
+            # Actually, for simple Z-velocity, use the body's COM velocity.
+            # data.cvel stores spatial velocity; linear part is [3:6].
+            # However, cvel is in the frame at body COM with world orientation
+            # for MuJoCo 3.x. Safest: use finite difference or qvel projection.
+            # Simple approach: use the body's vertical velocity from subtree_linvel
+            body_vz = data.cvel[bid, 5]  # linear Z velocity (world frame)
+
+            f_damping = -VIRTUAL_FLOOR_DAMPING * body_vz
+
+            # Total normal force (only upward — floor can't pull)
+            f_normal = max(0.0, f_spring + f_damping)
+
+            # Apply normal force (Z-axis, world frame)
+            data.xfrc_applied[bid, 2] += f_normal
+
+            # Virtual friction: oppose lateral velocity proportional to normal force
+            if f_normal > 0 and VIRTUAL_FLOOR_FRICTION_COEFF > 0:
+                body_vx = data.cvel[bid, 3]  # linear X velocity
+                body_vy = data.cvel[bid, 4]  # linear Y velocity
+                v_lateral = np.sqrt(body_vx**2 + body_vy**2)
+                if v_lateral > 1e-6:
+                    # Coulomb friction: F_friction = mu * F_normal, opposing velocity
+                    f_friction = VIRTUAL_FLOOR_FRICTION_COEFF * f_normal
+                    # Cap friction at what would stop the body (prevent oscillation)
+                    # Simple velocity-dependent scaling for smoothness
+                    scale = min(1.0, v_lateral / 0.01)  # ramp up over 1cm/s
+                    data.xfrc_applied[bid, 0] += -body_vx / v_lateral * f_friction * scale
+                    data.xfrc_applied[bid, 1] += -body_vy / v_lateral * f_friction * scale
 
 
 # ===========================================================================
@@ -947,6 +1125,11 @@ def run_rl_tracker(
     log.info(f"  Heading offset: {heading_offset} (should be ~[0,0,0,1])")
 
     # ------------------------------------------------------------------
+    # Identify foot bodies for virtual floor spring
+    # ------------------------------------------------------------------
+    foot_bodies = _identify_foot_bodies(model)
+
+    # ------------------------------------------------------------------
     # Simulation state variables
     # ------------------------------------------------------------------
     prev_actions = np.zeros(num_dofs, dtype=np.float32)
@@ -1162,6 +1345,10 @@ def run_rl_tracker(
         # ---- Apply control and step physics ----
         data.ctrl[:] = joint_pos_targets
         for sub_step in range(decimation):
+            # Virtual floor spring: emulate IsaacGym contact_offset=0.02m
+            # Clear previous external forces and apply virtual spring
+            data.xfrc_applied[:] = 0.0
+            _apply_virtual_floor_spring(model, data, foot_bodies)
             mujoco.mj_step(model, data)
             # NaN guard: break substep loop early if simulation diverged
             if np.any(np.isnan(data.qpos[:7])):

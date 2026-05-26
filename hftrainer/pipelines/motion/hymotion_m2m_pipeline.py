@@ -468,6 +468,14 @@ class HyMotionM2MPipeline:
                     else:
                         x = x_renorm
 
+            # Final hard replacement: ensure known regions are exactly preserved.
+            # This is critical for skip_last and flow_interp modes — the model's
+            # velocity prediction for known dims is unsupervised (loss is masked),
+            # so the last step introduces drift. We do a final replace to guarantee
+            # exact preservation.
+            if use_replacement and rep_mode in ('skip_last', 'flow_interp'):
+                x = torch.where(keep_mask, x_clean, x)
+
             sampled = x
         else:
             # Standard path: use torchdiffeq if available, else manual Euler.

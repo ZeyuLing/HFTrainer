@@ -79,6 +79,11 @@ def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False
     if host_gpu_num is not None:
         tmpl["designated_resource"]["host_gpu_num"] = float(host_gpu_num)
 
+    # Force RDMA for multi-node training (guard against CephFS caching stale template)
+    if host_num > 1:
+        tmpl["designated_resource"]["is_enable_rdma"] = True
+        tmpl["designated_resource"]["rdma_in_same_module"] = True
+
     if business_flag:
         tmpl["common"]["business_flag"] = business_flag
 
