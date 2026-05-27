@@ -263,9 +263,12 @@ class PrismARPipeline(DiffusionPipeline):
             .unsqueeze(0)
             .to(device=device, dtype=dtype)
         )
-        motion = self.smpl_processor.normalize(motion)
 
         # [B, T, D] -> [B, T, J, 6]
+        # NOTE: encode_motion will handle motion normalization to maintain
+        # training-inference consistency. Normalizing here would cause VAE to
+        # receive different (pre-normalized) motion than during training.
+
         motion = rearrange(motion, "b t (j d) -> b t j d", d=6)
 
         # Only use the first frame for condition
