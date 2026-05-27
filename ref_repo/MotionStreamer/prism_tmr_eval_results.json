@@ -1,0 +1,37 @@
+{
+  "n_samples_used": 7136,
+  "n_repeats": 20,
+  "fid": 585.5644137947781,
+  "fid_std": 0.00011796464558243222,
+  "diversity_real": 27.33726062774658,
+  "diversity_pred": 10.47925090789795,
+  "r_precision_real": [
+    0.6992572869955156,
+    0.8517516816143498,
+    0.9069927130044843
+  ],
+  "r_precision_real_std": [
+    0.0035223420904145933,
+    0.0025032357676719966,
+    0.0021578442457685196
+  ],
+  "r_precision_pred": [
+    0.033632286995515695,
+    0.06605941704035874,
+    0.09709921524663677
+  ],
+  "r_precision_pred_std": [
+    0.0013257348604557532,
+    0.0016998497451912466,
+    0.0019718178167679864
+  ],
+  "matching_score_real": 15.079250565558805,
+  "matching_score_pred": 26.50767037387386,
+  "config": {
+    "evaluator_ckpt": "ref_repo/MotionStreamer/MotionStreamer/MotionStreamer_HF/Evaluator_272/epoch=99.ckpt",
+    "data_root": "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272",
+    "pred_dir": "ref_repo/MotionStreamer/prism_272_predictions",
+    "gt_only": false,
+    "batch_size": 32
+  }
+}

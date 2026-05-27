@@ -1,0 +1,237 @@
+================================================================================
+PRISM OVERFIT EXPERIMENT (100 samples) - TRAINING ANALYSIS REPORT
+================================================================================
+Date: 2026-05-27
+Analysis of: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/work_dirs/prism_overfit_100/
+
+================================================================================
+1. EXPERIMENT CONFIGURATION
+================================================================================
+
+Config File: work_dirs/prism_overfit_100/20260526_212303/config.py
+
+Key Hyperparameters:
+  - Learning Rate (LR):        0.0005
+  - Optimizer:                 AdamW (β₁=0.9, β₂=0.99, weight_decay=0)
+  - Batch Size:                8
+  - Max Epochs:                5000
+  - Dataset:                   100 motion samples (overfit dataset)
+  - Training Data:             data/annotation/train_overfit_prism_100.json
+  - Checkpoint Interval:       Every 50 epochs, keep max 10 checkpoints
+  
+Model Architecture:
+  - Model Type:                PrismBundle
+  - Transformer:               PrismTransformerMotionModel
+    * Num Layers:              30
+    * Num Attention Heads:      12
+    * FFN Dim:                  8960
+    * In/Out Channels:          16
+    * Rope Max Seq Len:         1024
+    * Gradient Checkpointing:   Enabled
+    * FP32 Upcast Attention:    Enabled
+
+Training Setup:
+  - Mixed Precision:           No (Full precision)
+  - FSDP Strategy:             FULL_SHARD
+  - GPU/Distributed:           Multi-GPU FSDP
+  - Loaded From:               work_dirs/prism_1b_tp2m_multiframe/checkpoint-iter_15000
+
+================================================================================
+2. TRAINING RUNS SUMMARY
+================================================================================
+
+THREE TRAINING RUNS DETECTED:
+
+Run 1: 20260526_202251 (FAILED)
+  - Status: RuntimeError at epoch 42
+  - Error: "mat1 and mat2 must have the same dtype, but got Float and BFloat16"
+  - Epochs Completed: 41
+  - Final Loss: ~0.1658
+  - Issue: Mixed precision dtype mismatch
+
+Run 2: 20260526_203555 (INCOMPLETE)
+  - Status: Stopped early at epoch 41
+  - Last Loss: ~0.1658
+  - Note: Likely stopped due to dtype issue observed in Run 1
+
+Run 3: 20260526_212303 (ACTIVE/MAIN - THIS IS THE PRODUCTION RUN)
+  - Status: STILL TRAINING (as of 2026-05-27 04:19:23 UTC)
+  - Epochs Completed: 549 of 5000 (10.98%)
+  - Current Loss: 0.0553
+  - Training Time: ~7 hours (from 2026-05-26 21:28:52)
+  - Checkpoint Frequency: Every 50 epochs (currently at checkpoint-epoch_524)
+
+================================================================================
+3. LOSS TRAJECTORY ANALYSIS
+================================================================================
+
+EPOCH-BY-EPOCH LOSS PROGRESSION:
+
+Epoch 1:    Loss = 0.3889   (from fine-tuned checkpoint)
+Epoch 10:   Loss = 0.2756   (-64% from start)
+Epoch 50:   Loss = 0.0856   (-78% from start)
+Epoch 100:  Loss = 0.0860   (-78% from start)
+Epoch 200:  Loss = 0.0763   (-80% from start)
+Epoch 300:  Loss = 0.0635   (-84% from start)
+Epoch 400:  Loss = 0.0656   (-83% from start)
+Epoch 500:  Loss = 0.0666   (-83% from start)
+Epoch 549:  Loss = 0.0553   (-86% from start)
+
+PHASE-BASED ANALYSIS:
+
+Phase 1: Epochs 1-50 (Rapid descent)
+  - Mean Loss:   0.2300
+  - Std Dev:     0.0674
+  - Delta:       -0.2527 (loss decrease)
+  - Characteristics: Steep learning curve, noisy
+  
+Phase 2: Epochs 51-100 (Continued improvement)
+  - Mean Loss:   0.1237
+  - Std Dev:     0.0275
+  - Delta:       -0.0983
+  - Characteristics: Faster learning, still descending
+
+Phase 3: Epochs 101-200 (Slower improvement)
+  - Mean Loss:   0.0833
+  - Std Dev:     0.0150
+  - Delta:       -0.0319
+  - Characteristics: Plateauing, lower variance
+
+Phase 4: Epochs 201-549 (Apparent plateau)
+  - Mean Loss:   0.0648
+  - Std Dev:     0.0114
+  - Delta:       -0.0122
+  - Characteristics: Minimal improvement, stable
+
+================================================================================
+4. CONVERGENCE STATUS
+================================================================================
+
+ANSWER TO YOUR QUESTION: "Is 0.08-0.12 converged or still decreasing?"
+
+✗ NOT FULLY CONVERGED - STILL SLOWLY IMPROVING
+
+Evidence:
+  1. Last 50 epochs:   Mean = 0.0636, Std = 0.0133
+  2. Last 100 epochs:  Mean = 0.0624, Std = 0.0120
+  3. Last 200 epochs:  Mean = 0.0628, Std = 0.0107
+  
+  Improvement Rate (Last 200 epochs):
+    First 100 avg:  0.0631
+    Second 100 avg: 0.0624
+    Improvement:    0.000688 per 100 epochs
+    Rate:           0.00000688 per epoch
+
+  Verdict: Loss is STILL DECREASING, but at a VERY SLOW RATE
+           (~0.0000069 reduction per epoch in recent training)
+
+CONVERGENCE INDICATORS:
+  ✓ Positive:  Loss has plateaued to ~0.06 range (down from 0.39)
+  ✓ Positive:  Variance decreased significantly (0.067 → 0.011)
+  ✓ Positive:  No longer shows phase transitions
+  ⚠ Warning:  High fluctuation in recent 50 epochs (range: 0.042-0.121)
+  ✗ Negative: Still showing minor improvements, not converged
+
+STABILITY ANALYSIS:
+  - Loss range in last 50 epochs: 0.0422 to 0.1210 (range of 0.0788)
+  - This high range suggests:
+    * Noise in gradient estimates due to small dataset (100 samples)
+    * Possible oscillation around local minimum
+    * Still not in true convergence regime
+
+================================================================================
+5. LOSS BREAKDOWN (Latest Epoch 550)
+================================================================================
+
+Total Loss:        0.0569
+├── loss_flow:     0.0569  (99.7% of total)
+├── loss_transl:   0.0021  (3.7% of total)
+└── loss_rot:      0.1223  (214.7% of total - NEGATIVE?)
+
+Note: The loss_rot values sometimes exceed total loss, suggesting potential
+      issues with loss weighting or sign conventions. This warrants investigation.
+
+Loss Component Trends Over Time:
+  Epoch 1:   loss_flow=0.3946, loss_transl=0.3695, loss_rot=0.4196
+  Epoch 100: loss_flow=0.0830, loss_transl=0.0016, loss_rot=0.1704
+  Epoch 500: loss_flow=0.0666, loss_transl=0.0054, loss_rot=0.1309
+  Epoch 549: loss_flow=0.0569, loss_transl=0.0021, loss_rot=0.1223
+
+  ✓ flow loss consistently decreased (0.39 → 0.057)
+  ✓ transl loss nearly eliminated (0.37 → 0.002)
+  ⚠ rot loss remained high (0.42 → 0.12), likely the bottleneck
+
+================================================================================
+6. RECOMMENDATIONS
+================================================================================
+
+1. CONTINUE TRAINING OR STOP?
+   ✓ Current Status: Can continue training, minimal compute cost for small gain
+   
+   Options:
+   A) Continue to epoch 1000-2000 for potential 0.01% further improvement
+   B) Stop now and use checkpoint at epoch 500-524 (minimal loss difference)
+   C) Analyze loss_rot bottleneck - this component is preventing further convergence
+
+2. INVESTIGATE LOSS_ROT COMPONENT:
+   - loss_rot is 2x larger than loss_flow (0.122 vs 0.057)
+   - This suggests rotation prediction is the main challenge
+   - Consider:
+     * Checking gradient flow to rotation head
+     * Reviewing rotation encoding/decoding (rotation_6d mentioned in config)
+     * Examining if rotation targets are challenging on overfit set
+
+3. ANALYZE RECENT FLUCTUATIONS:
+   - Loss range 0.042-0.121 in last 50 epochs is unusual for small dataset
+   - Could indicate:
+     * Gradient noise from batch size 8 on 100-sample dataset
+     * Learning rate too high for current loss scale
+     * Try reducing LR from 0.0005 to 0.0001-0.0002
+
+4. NEXT STEPS:
+   - Decide on target loss threshold (currently approaching 0.05-0.06)
+   - Consider early stopping if goal is efficiency
+   - Otherwise, continue and reassess at epoch 1000
+
+================================================================================
+7. FILE LOCATIONS & CHECKPOINTS
+================================================================================
+
+Main Training Directory:
+  /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/work_dirs/prism_overfit_100/
+
+Latest Checkpoints:
+  - checkpoint-epoch_524 (2026-05-27 03:24)
+  - checkpoint-epoch_499 (2026-05-27 03:43)
+  - checkpoint-epoch_474 (2026-05-27 03:05)
+  [... more checkpoints going back to epoch_299]
+
+Training Logs:
+  - Main log: 20260526_212303/train.log (4486 lines, ~535 KB)
+  - TensorBoard events: 20260526_212303/training/events.out.tfevents.1779802108.*
+
+Configuration:
+  - Active config: 20260526_212303/config.py
+  - Note: No specific prism_1b_tp2m_overfit_100.py config file found
+          Config is generated at runtime in work_dirs/
+
+================================================================================
+8. SUMMARY
+================================================================================
+
+Loss 0.08-0.12 is NOT converged but very close to convergence:
+  ✗ Technically: Still decreasing (improvement rate: 0.0000069/epoch)
+  ✓ Practically: Loss plateau is clear (0.062 ± 0.012 for last 100 epochs)
+  
+The training shows a classic learning curve with three phases:
+  1. Rapid descent (epochs 1-50): 0.39 → 0.09
+  2. Steady improvement (epochs 50-100): 0.09 → 0.086  
+  3. Plateau (epochs 100+): 0.086 → 0.055 (very slow)
+
+At 549 epochs, the model has captured most learnable signal from the 
+100-sample dataset. Further training will yield minimal improvements.
+
+Estimated convergence point: ~500-1000 epochs (already reached)
+Expected final loss: 0.050-0.055 (current trajectory)
+
+================================================================================

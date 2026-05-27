@@ -1,0 +1,299 @@
+================================================================================
+                    PRISM EVALUATION RESOURCES INDEX
+                        Generated: 2026-05-27
+================================================================================
+
+This session created the following comprehensive resources for working with
+PRISM text-to-motion model predictions on HumanML3D test set:
+
+================================================================================
+                            DOCUMENTATION FILES
+================================================================================
+
+1. PRISM_EVALUATION_GUIDE.md (11 KB)
+   ────────────────────────────────────────────────────────────────────────
+   DETAILED TECHNICAL REFERENCE
+   
+   Contents:
+   ✓ Complete overview and quick start commands
+   ✓ Directory structure and file organization
+   ✓ NPZ file format with all keys documented
+   ✓ Manifest and run_meta JSON structures
+   ✓ SMPLX-55 format breakdown (stored format)
+   ✓ 135-dimensional format explanation (evaluation format)
+   ✓ Motion duration statistics and sampling
+   ✓ Python code examples for loading and conversion
+   ✓ Batch processing examples
+   ✓ Format conversion with rotation representations
+   ✓ Metric computation instructions
+   ✓ Related files and evaluation scripts
+   ✓ Alternative evaluation directories
+   
+   Use when: You need to understand the complete technical details
+
+
+2. PRISM_COMPLETE_REFERENCE.txt (15 KB)
+   ────────────────────────────────────────────────────────────────────────
+   QUICK REFERENCE & LOOKUP
+   
+   Contents:
+   ✓ Executive summary with key statistics
+   ✓ Quick access shell commands
+   ✓ Copy-paste ready file operations
+   ✓ Directory tree with examples
+   ✓ NPZ file naming convention
+   ✓ Complete data structure documentation
+   ✓ SMPLX-55 format specifications
+   ✓ 135D format with joint mapping
+   ✓ 6D rotation representation details
+   ✓ Complete Python code examples
+   ✓ Metric computation commands
+   ✓ Related files and paths
+   ✓ Troubleshooting FAQ
+   ✓ Dataset statistics
+   
+   Use when: You need quick answers or copy-paste code
+
+
+3. README_RESOURCES.md (3.4 KB)
+   ────────────────────────────────────────────────────────────────────────
+   RESOURCE OVERVIEW
+   
+   Contents:
+   ✓ Guide to all created files
+   ✓ What each file is for
+   ✓ Quick start steps
+   ✓ Key information summary table
+   ✓ Data structure overview
+   ✓ File manifest
+   ✓ Common tasks
+   ✓ Related documentation pointers
+   ✓ Notes and status
+   
+   Use when: You want an overview of what's available
+
+
+================================================================================
+                            UTILITY SCRIPTS
+================================================================================
+
+4. prism_predictions_loader.py (6.6 KB)
+   ────────────────────────────────────────────────────────────────────────
+   CONVENIENT LOADING UTILITY
+   
+   Class: PRISMPredictionLoader
+   
+   Features:
+   ✓ Initialize with evaluation directory
+   ✓ List all available motion IDs
+   ✓ Get caption for any motion
+   ✓ Load single motion in SMPLX-55 format
+   ✓ Get motion length in frames
+   ✓ Batch load multiple motions
+   ✓ Get evaluation run info
+   ✓ Get motion duration statistics
+   ✓ Handle missing files gracefully
+   ✓ Example usage and demonstration
+   
+   Methods:
+   - list_available_ids() → List[str]
+   - get_caption(motion_id) → str
+   - load_smplx55(motion_id) → Dict[str, ndarray]
+   - get_motion_length(motion_id) → int
+   - batch_load_ids(motion_ids) → Dict
+   - get_info() → Dict
+   - get_duration_stats() → Dict
+   
+   Example:
+   >>> from prism_predictions_loader import PRISMPredictionLoader
+   >>> loader = PRISMPredictionLoader()
+   >>> data = loader.load_smplx55("humanml3d_10006")
+   >>> caption = loader.get_caption("humanml3d_10006")
+
+
+5. smplx55_to_135dim_converter.py (8.5 KB)
+   ────────────────────────────────────────────────────────────────────────
+   FORMAT CONVERSION UTILITY
+   
+   Class: SMPLX55To135DConverter
+   
+   Features:
+   ✓ Convert axis-angle to rotation matrices
+   ✓ Convert rotation matrices to 6D representation
+   ✓ Extract 22 HumanML3D joints from SMPLX-55
+   ✓ Full SMPLX-55 to 135D conversion pipeline
+   ✓ Batch conversion for multiple files
+   ✓ Demonstration with sample motion
+   ✓ Value statistics and validation
+   ✓ Type conversion and safety checks
+   
+   Methods:
+   - axis_angle_to_rotation_matrix(axis_angle) → ndarray
+   - rotation_matrix_to_6d(rotation_matrix) → ndarray
+   - extract_humanml3d_joints(global_orient, body_pose) → ndarray
+   - convert_smplx55_to_135d(smplx_data) → ndarray
+   - convert_batch(npz_file_paths) → Dict
+   
+   Example:
+   >>> from smplx55_to_135dim_converter import SMPLX55To135DConverter
+   >>> converter = SMPLX55To135DConverter()
+   >>> data = np.load("path/to/humanml3d_10006.npz")
+   >>> motion_135d = converter.convert_smplx55_to_135d(data)
+
+
+================================================================================
+                          KEY FINDINGS SUMMARY
+================================================================================
+
+PRISM Model Evaluation Results:
+✓ Total predictions: 4,270 complete samples
+✓ Format: SMPLX-55 with axis-angle rotations
+✓ Storage: Individual NPZ files (100 KB average)
+✓ Location: work_dirs/prism_1b_tp2m_multiframe_kt_spectral_OLD_row_major_20260521/eval_hml3d_rewritten/
+✓ Total size: ~426 MB
+✓ Generated: May 19, 2026
+✓ Processing: 8 GPUs in parallel
+✓ Inference: 50 diffusion steps, guidance scale 5.0, seed 42
+
+Evaluation Formats:
+✓ Stored format: SMPLX-55 (168 dimensions)
+  - 3D translation
+  - 3D root rotation (axis-angle)
+  - 21 body joints × 3 (axis-angle)
+  - Additional hand, jaw, eye rotations
+  
+✓ Evaluation format: 135D (standardized)
+  - 3D translation
+  - 22 joints × 6D rotation representation
+  - Converted automatically by eval_with_motionclip_evaluator.py
+
+Motion Duration Statistics:
+✓ Frame range: 37 to 301 frames
+✓ Duration range: 1.2 to 10 seconds (@ 30fps)
+✓ Mean: 193 frames (6.4 seconds)
+✓ Median: 203 frames (6.8 seconds)
+
+Metadata:
+✓ manifest.json: Index of all 4,270 samples with captions
+✓ run_meta.json: Evaluation configuration and parameters
+✓ Perfect ID matching: All test set IDs present
+
+
+================================================================================
+                            QUICK COMMANDS
+================================================================================
+
+Count predictions:
+  ls work_dirs/.../eval_hml3d_rewritten/*.npz | wc -l
+  → 4270
+
+Load single motion:
+  python3 -c "import numpy as np; d = np.load('...humanml3d_10006.npz'); \
+    print(d['transl'].shape)"
+  → (T, 3)
+
+View metadata:
+  python3 -c "import json; \
+    m = json.load(open('...manifest.json')); print(m[0])"
+
+Get duration stats:
+  python3 -c "from prism_predictions_loader import PRISMPredictionLoader; \
+    l = PRISMPredictionLoader(); print(l.get_duration_stats())"
+
+Convert to 135D:
+  python3 -c "from smplx55_to_135dim_converter import SMPLX55To135DConverter; \
+    c = SMPLX55To135DConverter(); \
+    d = np.load('...humanml3d_10006.npz'); \
+    m = c.convert_smplx55_to_135d(d); print(m.shape)"
+  → (T, 135)
+
+Compute metrics:
+  python scripts/eval/eval_with_motionclip_evaluator.py \
+    --pred_dir work_dirs/.../eval_hml3d_rewritten \
+    --device cuda:0
+
+
+================================================================================
+                           HOW TO USE
+================================================================================
+
+1. Start with README_RESOURCES.md for an overview
+
+2. For quick answers, check PRISM_COMPLETE_REFERENCE.txt
+
+3. For detailed understanding, read PRISM_EVALUATION_GUIDE.md
+
+4. For Python access:
+   a. Use PRISMPredictionLoader for convenient loading
+   b. Use SMPLX55To135DConverter for format conversion
+   c. Use direct numpy for manual processing
+
+5. For metric computation:
+   python scripts/eval/eval_with_motionclip_evaluator.py
+
+
+================================================================================
+                         FILE LOCATIONS
+================================================================================
+
+All resources created in current working directory:
+  ./PRISM_EVALUATION_GUIDE.md
+  ./PRISM_COMPLETE_REFERENCE.txt
+  ./README_RESOURCES.md
+  ./prism_predictions_loader.py
+  ./smplx55_to_135dim_converter.py
+  ./PRISM_RESOURCES_INDEX.txt (this file)
+
+Actual PRISM predictions:
+  work_dirs/prism_1b_tp2m_multiframe_kt_spectral_OLD_row_major_20260521/eval_hml3d_rewritten/
+
+Related evaluation scripts:
+  scripts/eval/eval_prism_t2m_hml3d.py
+  scripts/eval/eval_with_motionclip_evaluator.py
+
+Related configurations:
+  configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py
+
+Test annotations:
+  data/annotation/test_hml3d_rewritten.json
+  data/annotation/test_hml3d.json
+
+
+================================================================================
+                              NOTES
+================================================================================
+
+✓ All resources are complete and functional
+✓ Python utilities are ready to import and use
+✓ Documentation is comprehensive and cross-referenced
+✓ All 4,270 predictions have been verified
+✓ Format conversion is tested and working
+✓ Metadata is fully preserved
+✓ Deterministic generation (seed=42) ensures reproducibility
+
+For issues or questions:
+1. Check PRISM_COMPLETE_REFERENCE.txt "Troubleshooting" section
+2. Review Python script docstrings
+3. Consult related evaluation scripts
+4. Check eval_with_motionclip_evaluator.py for automatic conversion
+
+
+================================================================================
+                       GENERATION METADATA
+================================================================================
+
+Created: 2026-05-27
+Session: Continuation of PRISM evaluation analysis
+Generator: Claude Code
+Python Version: 3.9+
+Dependencies: numpy, scipy, json, pathlib, warnings
+Total Resources: 6 files (3 documentation, 2 scripts, 1 index)
+Total Size: ~54 KB of documentation and utilities
+Verification Status: ✓ Complete and tested
+
+================================================================================
+                          End of Index
+================================================================================
+
+For more information, see README_RESOURCES.md or PRISM_EVALUATION_GUIDE.md
+

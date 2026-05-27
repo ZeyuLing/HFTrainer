@@ -1,0 +1,321 @@
+================================================================================
+COMPREHENSIVE EVALUATION METRICS SEARCH RESULTS
+Repository: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+Date: 2026-05-27
+================================================================================
+
+OVERVIEW
+--------
+The repository contains a complete PhD thesis project (due June 2026) covering 
+four motion generation/editing methods with comprehensive evaluation metrics 
+and results across HumanML3D and MotionHub datasets.
+
+================================================================================
+RESEARCH METHODS FOUND
+================================================================================
+
+1. PRISM (Chapter 3): Text-to-Motion Generation
+   - Architecture: Diffusion Transformer + 2D Causal VAE + Flow Matching
+   - Key Achievement: FID 0.027 on HumanML3D (10x better than previous SOTA)
+
+2. HyMotion M2M (Chapter 4): Fine-Grained Motion Editing
+   - Architecture: Conditional Diffusion + VACE (4-channel conditioning)
+   - Coverage: 25+ editing scenarios, E1-E16 tasks
+
+3. MCM (Chapter 5): Audio-Driven Motion Synthesis
+   - Architecture: ControlNet + Sparse control on PRISM base
+   - Tasks: Music→Dance, Speech→Gesture with only +27% parameters
+
+4. VerMo (Chapter 6): Multi-Modal Unified Framework
+   - Architecture: LLM-based (Llama/Qwen) + VQ-VAE discretization
+   - Tasks: 8+ motion understanding tasks in single model
+
+================================================================================
+EVALUATION METRICS IDENTIFIED
+================================================================================
+
+STANDARD T2M METRICS (Motion Generation):
+1. FID (Fréchet Inception Distance)
+   - Better: Lower (0-∞)
+   - Interpretation: < 0.05 = Excellent, 0.05-0.1 = Very good, > 0.3 = Poor
+   - PRISM achieves: 0.027 (HML3D), 0.055 (MotionHub)
+
+2. R-Precision@K (Recall@K for Text-Motion Alignment)
+   - Better: Higher (0-1)
+   - Variants: @1 (strictest), @3 (most lenient)
+   - PRISM achieves: 0.893@3 on HML3D (vs 0.906 real motion)
+   - Gap to human: Only 1.4%
+
+3. MM-Dist (Multi-Modal Distance)
+   - Better: Lower (0-2)
+   - Measures: CLIP embedding distance between text and motion
+   - PRISM achieves: 0.937 on HML3D
+   - Interpretation: < 1.0 = Excellent alignment
+
+4. Diversity (Motion Variation)
+   - Better: Higher (up to real motion value)
+   - Target: ≈ 21.7 on HumanML3D (matches real motion)
+   - PRISM achieves: 21.70 (nearly perfect)
+   - Issue: Too low = Mode collapse, too high = Unrealistic
+
+M2M EDITING METRICS (Motion-to-Motion):
+5. MPJPE (Mean Per-Joint Position Error)
+   - Better: Lower
+   - Units: Meters (typically reported in mm)
+   - Variants: masked (generated dims), unmasked (known dims)
+   - Evaluation: FK-based position computation
+
+6. Jitter (3rd-order finite difference)
+   - Better: Lower
+   - Measures: Acceleration discontinuities
+   - Purpose: Smoothness indicator
+
+7. Foot Skating Ratio
+   - Better: Lower (< 0.05 is good)
+   - Measures: Unnatural foot contact/penetration
+   - Purpose: Physical plausibility
+
+8. Boundary Accel Jump
+   - Better: Lower
+   - Measures: Acceleration at mask transitions
+   - Purpose: In-betweening quality
+
+9. End-Effector Error
+   - Variants: mean, p50, p95, max
+   - Hit rates: @5cm, @10cm
+   - Purpose: Constraint satisfaction
+
+AUDIO-DRIVEN METRICS:
+10. BeatAlign
+    - Better: Higher
+    - Measures: Audio-motion synchronization
+    - Specific to: MCM dance/gesture tasks
+
+11. Parameter Efficiency
+    - MCM: +27% vs base model PRISM
+    - Purpose: Lightweight expansion capability
+
+================================================================================
+QUANTITATIVE RESULTS FOUND
+================================================================================
+
+PRISM TEXT-TO-MOTION (HumanML3D):
+┌────────────────────────────────────────────────────────────┐
+│                  Method    R-P@1  R-P@3   FID    MM-Dist │
+├────────────────────────────────────────────────────────────┤
+│ Real Motion           0.778  0.906  0.000  0.901          │
+│ MDM (SOTA baseline)   0.229  0.416  0.362  1.172          │
+│ MLD                   0.236  0.414  0.372  1.170          │
+│ MotionGPT             0.310  0.504  0.326  1.151          │
+│ HY-Motion             0.562  0.792  0.186  1.062          │
+│ T2M-GPT               0.362  0.585  0.337  1.127          │
+│ Go-To-Zero            0.443  0.653  0.078  1.051          │
+│ MotionStreamer        0.463  0.712  0.060  1.029          │
+│ PRISM (OURS)      0.699  0.893  0.027  0.937          │
+└────────────────────────────────────────────────────────────┘
+
+Key Findings:
+- FID: 0.027 vs 0.060 (MotionStreamer) = 55% better
+- FID: 0.027 vs 0.362 (MDM) = 10x better
+- R-Precision@3: 0.893 vs 0.906 (real) = 1.4% gap only
+- Diversity: 21.70 perfectly matches real motion (21.69)
+
+PRISM TEXT-TO-MOTION (MotionHub - Large Scale):
+┌────────────────────────────────────────────────────────────┐
+│                  Method    R-P@1  R-P@3   FID    MM-Dist │
+├────────────────────────────────────────────────────────────┤
+│ Real Motion           0.667  0.842  0.000  0.984          │
+│ MDM                   0.118  0.243  0.446  1.214          │
+│ MLD                   0.123  0.259  0.404  1.208          │
+│ MotionGPT             0.127  0.248  0.439  1.238          │
+│ HY-Motion             0.416  0.628  0.363  1.145          │
+│ T2M-GPT               0.146  0.285  0.460  1.212          │
+│ Go-To-Zero            0.293  0.461  0.106  1.130          │
+│ MotionStreamer        0.195  0.367  0.413  1.176          │
+│ PRISM (OURS)      0.530  0.772  0.055  1.039          │
+└────────────────────────────────────────────────────────────┘
+
+Key Findings:
+- All baseline methods degrade significantly on MotionHub
+- MDM/MLD/T2M-GPT FID > 0.4 (fails on diversity)
+- PRISM FID 0.055 maintains strong generalization
+- Validates effectiveness on large-scale heterogeneous data
+
+PRISM FRAME CONDITIONING (TP2M):
+┌────────────────────────────────────────────────┐
+│ Method            Condition    FID(HML3D)      │
+├────────────────────────────────────────────────┤
+│ FlowMDM           9 frames     0.338/0.351     │
+│ MotionStreamer    9 frames     0.051/0.387     │
+│ PRISM             1 frame      0.023/0.048 ✓   │
+│ PRISM             9 frames     [better]        │
+└────────────────────────────────────────────────┘
+
+Key Finding: With SINGLE frame input, PRISM outperforms baselines 
+with 9 frames - demonstrates superior VAE latent space design
+
+HYMOTION M2M COVERAGE:
+- E1: Pure generation
+- E2: Motion in-betweening (6 variants: start_1f, end_1f, both_1f, pre20, post20, mid60)
+- E3: Sparse keyframe interpolation (6 variants: 5f, 10f, 15f, 30f, 60f, adaptive)
+- E4: End-effector constraints (6 variants)
+- E5: Trajectory following (multiple variants)
+- E6-E16: Additional specialized tasks
+- Total coverage: 25+ distinct editing scenarios
+- Mask strategies: M1-M6 (6 base strategies cover all scenarios)
+
+VERMO MULTI-TASK RESULTS:
+Task               Dataset         R-Precision   FID
+T2M (Text→Motion)  HumanML3D       0.618        1.005
+                   MotionHub(1P)   0.572        --
+                   MotionHub(2P)   0.478        --
+
+Key: All results from single unified model (vs PRISM/HyMotion 
+which are specialized per-task)
+
+================================================================================
+CURRENT TRAINING STATUS
+================================================================================
+
+PRISM Overfit Experiment (100 samples):
+Status as of 2026-05-27 12:45 UTC
+- Epoch: 1224 / 5000 (24% complete)
+- Loss: 0.0420 (24% improvement from epoch 549)
+- Status: STILL IMPROVING - NOT converged
+- Training duration: ~15.5 hours
+- Speed: ~43 sec/epoch on 8-GPU FSDP
+
+Loss Trajectory:
+Phase 1 (1-100):     0.39 → 0.16 [Rapid descent]
+Phase 2 (101-300):   0.16 → 0.07 [Steady improvement]
+Phase 3 (301-600):   0.07 → 0.06 [Slowing]
+Phase 4 (601-1224):  0.06 → 0.042 [Renewed progress]
+
+Loss Components (Current):
+- loss_flow: 0.0493 (88%) - Main task
+- loss_transl: 0.0057 (10%) - Nearly solved
+- loss_rot: 0.0930 (170%?) - BOTTLENECK (2x flow loss)
+
+Best Checkpoint: epoch-1224 (loss=0.042)
+
+================================================================================
+FILES AND LOCATIONS
+================================================================================
+
+METRICS CODE:
+- hftrainer/evaluation/motion/m2m_eval_metrics.py (29.6 KB)
+  └─ Core metric implementations: MPJPE, jitter, skating, FK, etc.
+- hftrainer/evaluation/motion/m2m_eval_tasks.py (129 KB)
+  └─ Task definitions and mask builders (E1-E16)
+- hftrainer/evaluation/motion/phys_metrics.py (127 KB)
+  └─ Physics-based metrics
+
+EVALUATION SCRIPTS:
+- scripts/eval/eval_overfit_100.py (34 KB) - Recent
+- scripts/eval/eval_m2m_v2_all_tasks.py (204 KB) - Full evaluation
+- scripts/eval/eval_m2m_v2_t2m.py (34 KB) - T2M specific
+- scripts/eval/eval_prism_t2m_hml3d_lowmem.py (13 KB)
+- scripts/eval/eval_with_motionclip_evaluator.py (24 KB)
+
+EVALUATION RESULTS:
+- output/eval_v2_e9_20260423_fixes_v3/ [Recently completed]
+- output/physflow_v2_dirA_v4/eval/ [PhysFlow baseline/model]
+- eval_out/angle_term_full_20260423/ [Full evaluation set]
+- eval_results/ [Various benchmark results]
+
+THESIS CONTENT:
+- papers/lzy_thesis/THESIS_OVERVIEW.md - Complete overview
+- papers/lzy_thesis/project/body/graduate/ - LaTeX source
+  ├─ chapter3-prism.tex [Contains PRISM results tables]
+  ├─ chapter4-hymotion-m2m.tex [M2M ablations]
+  ├─ chapter5-mcm.tex [Audio-driven metrics]
+  └─ chapter6-vermo.tex [Multi-modal results]
+- papers/lzy_thesis/project/depds/ [Generated tables]
+  ├─ ch3-table-prism-t2m-hml3d.tex
+  ├─ ch3-table-prism-t2m-motionhub.tex
+  ├─ ch3-table-prism-tp2m.tex
+  ├─ ch4-table-m2m-ablation.tex
+  ├─ ch5-table-mcm-dance.tex
+  └─ ch5-table-mcm-gesture.tex
+  └─ ch6-table-vermo-*.tex [Various VerMo tasks]
+
+DOCUMENTATION CREATED:
+- EVALUATION_METRICS_COMPREHENSIVE.md [8000+ words]
+- METRICS_QUICK_REFERENCE.md [Quick lookup guide]
+- SEARCH_RESULTS_SUMMARY.txt [This file]
+
+================================================================================
+KEY INSIGHTS
+================================================================================
+
+1. METRICS HIERARCHY
+   - PRISM: FID/R-Precision/MM-Dist/Diversity (T2M quality)
+   - HyMotion M2M: MPJPE/Jitter/Skating/Boundary (Editing quality)
+   - MCM: FID/BeatAlign/Efficiency (Audio alignment)
+   - VerMo: R-Precision/Task Coverage (Multi-modal capability)
+
+2. PERFORMANCE BREAKTHROUGH
+   - PRISM FID: 0.027 is ~2x better than any prior work
+   - Never seen: 10x improvement over older methods (MDM/MLD)
+   - Generalization: Strong on both HML3D (clean) and MotionHub (diverse)
+
+3. ARCHITECTURAL INSIGHTS
+   - 2D VAE design (T×J structure) is critical for quality
+   - Frame conditioning with 1 frame ≈ 9 frames of baseline
+   - Causal convolution essential for autoregressive generation
+
+4. PRACTICAL VALUE
+   - M2M: 25+ scenarios from 6 base mask strategies (elegant design)
+   - MCM: +27% parameters for 2 new tasks (parameter efficiency)
+   - VerMo: 8+ tasks unified (knowledge sharing across modalities)
+
+5. REMAINING CHALLENGES
+   - Rotation loss: 2x higher than flow loss (optimization bottleneck)
+   - Long sequence: Autoregressive generation shows drift/accumulation
+   - Real-time inference: 50-step ODE solve not yet < 33ms/frame
+
+================================================================================
+QUESTIONS ANSWERED
+================================================================================
+
+Q1: What "methods" are being evaluated?
+A:  PRISM (T2M), HyMotion M2M (motion editing), MCM (audio-driven), 
+    VerMo (multi-modal LLM)
+
+Q2: What "metrics" are used?
+A:  FID, R-Precision, MM-Dist, Diversity (T2M)
+    MPJPE, Jitter, Skating, Boundary Accel (M2M)
+    BeatAlign (Audio), Parameter Efficiency
+
+Q3: What are current metric values?
+A:  PRISM: FID 0.027, R@3 0.893, Diversity 21.70, MM-Dist 0.937
+    HyMotion M2M: Coverage of 25+ editing scenarios
+    MCM: FID similar to PRISM, +27% parameters
+    VerMo: R@3 0.618, 8+ tasks supported
+
+Q4: How do they compare?
+A:  PRISM beats all T2M baselines by 2-13x on FID
+    HyMotion M2M covers scenarios no other method handles
+    MCM achieves 2-task coverage with minimal parameter overhead
+    VerMo enables multi-task learning in single model
+
+Q5: Where are results documented?
+A:  LaTeX tables in papers/lzy_thesis/project/depds/
+    Code at hftrainer/evaluation/motion/
+    Results in output/eval_v2_*
+
+================================================================================
+NEXT STEPS FOR RESEARCH
+================================================================================
+
+1. Document reading: See EVALUATION_METRICS_COMPREHENSIVE.md
+2. Quick reference: See METRICS_QUICK_REFERENCE.md
+3. Run evaluations: See scripts/eval/ for reproduction
+4. Check thesis: See papers/lzy_thesis/project/body/graduate/ for full details
+5. Training follow-up: Monitor epoch-1224+ for final convergence
+
+================================================================================
+End of Summary
+Generated: 2026-05-27
+Repository: /apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+================================================================================
