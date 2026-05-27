@@ -35,13 +35,14 @@ _base_ = './_base_hymotion_m2m_v2_046b.py'
 
 work_dir = 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_E4plus'
 
-# Load T2M pretrained directly (clean text encoders).
-# exclude_bundle_keys: prevent SMPL Root mean/std from overwriting
-# KIMODO Root mean/std (different statistical distributions).
-# load_scope='model' resets optimizer/scheduler
+# Resume from E4 checkpoint (epoch 660) — model already trained on KIMODO Root M2M.
+# Data fix: MotionFix Z-up bug corrected in-place (2026-05-27), so continuing
+# training will learn correct Y-up MotionFix data without losing prior progress.
+# exclude_bundle_keys: ensure mean/std comes from config's mean_std_dir
+# load_scope='model' resets optimizer/scheduler for clean start with fixed data.
 load_from = dict(
     _delete_=True,
-    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    path='work_dirs/hymotion_m2m_v2_kimodo_caption_permo_resume_E4/checkpoint-epoch_890/',
     load_scope='model',
     exclude_bundle_keys=['mean', 'std'],
 )

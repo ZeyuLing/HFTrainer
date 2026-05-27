@@ -23,11 +23,13 @@ _base_ = './_base_hymotion_m2m_v2_046b.py'
 
 work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption'
 
-# Load from T2M pretrained (clean text encoders, not degraded phase2).
-# load_scope='model' resets optimizer/scheduler for clean start.
+# Resume from E2 checkpoint (epoch 870) — model already trained on M2M tasks.
+# Data fix: MotionFix Z-up bug corrected in-place (2026-05-27), so continuing
+# training will learn correct Y-up MotionFix data without losing prior progress.
+# load_scope='model' resets optimizer/scheduler for clean start with fixed data.
 load_from = dict(
     _delete_=True,
-    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    path='work_dirs/hymotion_m2m_v2_smpl_caption_resume_E2/checkpoint-epoch_870/',
     load_scope='model',
 )
 
