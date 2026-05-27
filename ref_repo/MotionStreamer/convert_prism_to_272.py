@@ -1,18 +1,22 @@
 """
-Convert PRISM SMPLX predictions to 272-dim MotionStreamer representation.
+Convert PRISM predictions to 272-dim MotionStreamer representation.
 
 Pipeline:
 1. Load PRISM NPZ (global_orient, body_pose, transl, betas)
 2. Apply face_z_transform (rotate first frame heading to face Z+)
-3. Run FK using smplx to get 22 joint positions
+3. Run FK using SMPL (NOT SMPLX!) to get 22 joint positions
 4. Apply representation_272 logic (heading removal, local positions, velocities, 6D rotations)
 5. Save as <original_hml3d_id>.npy with shape (T, 272)
+
+IMPORTANT: The GT 272-dim data was computed with SMPL body model.
+Using SMPLX produces physically impossible skeletons due to different body templates.
+PRISM outputs 63-dim body_pose (21 SMPLX joints), so we pad to 69-dim (23 SMPL joints)
+with zeros for the last 2 hand joints.
 
 Usage:
     python3 convert_prism_to_272.py \
         --pred_dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral_OLD_row_major_20260521/eval_hml3d_rewritten \
         --annotation data/annotation/test_hml3d.json \
-        --smplx_model checkpoints/smpl_models/smplx/SMPLX_NEUTRAL.npz \
         --out_dir ref_repo/MotionStreamer/prism_272_predictions
 """
 
@@ -121,7 +125,8 @@ def quaternion_to_matrix(quaternions):
 
 
 def matrix_to_rotation_6d(matrix):
-    """Convert rotation matrix to 6D representation (first two columns)."""
+    """Convert rotation matrix to 6D representation (first two ROWS = row-major convention).
+    This matches MotionStreamer/pytorch3d convention where rot6d = [row0, row1] of R."""
     # matrix: (..., 3, 3) -> (..., 6)
     return matrix[..., :2, :].clone().reshape(*matrix.size()[:-2], 6)
 
@@ -289,48 +294,51 @@ def face_z_transform(global_orient_aa, body_pose_aa, trans, betas):
 
 # ============ Forward Kinematics ============
 
-def run_fk_smplx(smpl_85_face_z, smplx_model, device='cuda'):
+def run_fk_smpl(smpl_85_face_z, smpl_model, device='cuda'):
     """
-    Run forward kinematics using SMPLX model.
+    Run forward kinematics using SMPL model (NOT SMPLX!).
+
+    The GT 272-dim representation was computed with SMPL body model.
+    Using SMPLX produces physically impossible skeletons due to different body templates.
+
+    PRISM outputs 63-dim body_pose (21 SMPLX body joints). We pad to 69-dim
+    (23 SMPL body joints) with zeros for the last 2 hand joints.
 
     Args:
         smpl_85_face_z: (T, 85) face-Z-transformed parameters
-        smplx_model: SMPLX model instance
+            [0:3] root orient, [3:66] body_pose(21j), [66:72] zeros, [72:75] trans, [75:85] betas
+        smpl_model: SMPL model instance (from smplx.create with model_type='smpl')
         device: computation device
 
     Returns:
-        joints: (T, num_joints, 3) joint positions
+        joints: (T, 22, 3) joint positions
     """
     T = smpl_85_face_z.shape[0]
 
     root_orient = torch.from_numpy(smpl_85_face_z[:, :3]).float().to(device)
-    body_pose = torch.from_numpy(smpl_85_face_z[:, 3:66]).float().to(device)
+    body_pose_21j = torch.from_numpy(smpl_85_face_z[:, 3:66]).float().to(device)  # (T, 63)
     trans = torch.from_numpy(smpl_85_face_z[:, 72:75]).float().to(device)
     betas = torch.from_numpy(smpl_85_face_z[:, 75:85]).float().to(device)
 
-    # Run SMPLX FK in batches to avoid OOM
+    # Pad body_pose from 63 (21 joints) to 69 (23 joints) for SMPL
+    # Last 2 joints (L_Hand, R_Hand) set to zero (neutral hand pose)
+    body_pose_23j = torch.zeros(T, 69, device=device)
+    body_pose_23j[:, :63] = body_pose_21j
+
+    # Run SMPL FK in batches to avoid OOM
     batch_size = 512
     all_joints = []
 
     for start in range(0, T, batch_size):
         end = min(start + batch_size, T)
-        bs = end - start
         with torch.no_grad():
-            output = smplx_model(
+            output = smpl_model(
                 global_orient=root_orient[start:end],
-                body_pose=body_pose[start:end],
+                body_pose=body_pose_23j[start:end],
                 transl=trans[start:end],
                 betas=betas[start:end],
-                # Must pass all pose params explicitly with correct batch size
-                # (SMPLX defaults are shape (1,...) and won't broadcast)
-                jaw_pose=torch.zeros(bs, 3, device=device),
-                leye_pose=torch.zeros(bs, 3, device=device),
-                reye_pose=torch.zeros(bs, 3, device=device),
-                left_hand_pose=torch.zeros(bs, 45, device=device),
-                right_hand_pose=torch.zeros(bs, 45, device=device),
-                expression=torch.zeros(bs, 10, device=device),
             )
-        # output.joints: (batch, 127, 3) for SMPLX - we need first 22
+        # output.joints: (batch, 24, 3) for SMPL - we need first 22
         joints_batch = output.joints[:, :22, :].detach().cpu().numpy()
         all_joints.append(joints_batch)
 
@@ -417,14 +425,11 @@ def compute_representation_272(joints_22, smpl_85_face_z):
     final_x[0, 2] = 1  # first column of identity = [1,0,0] but in 6D = cols 0,1 of 3x3
     final_x[0, 6] = 1  # second column of identity
 
-    # Heading angular velocity as 6D rotation
-    try:
-        final_x[1:, 2:8] = matrix_to_rotation_6d(
-            torch.from_numpy(global_heading_diff_rot).float()
-        ).numpy()
-    except Exception as e:
-        print(f"  Warning: matrix_to_rotation_6d failed: {e}")
-        return None
+    # Heading angular velocity as 6D rotation (first 2 rows of rotation matrix, matching matrix_to_rotation_6d)
+    # global_heading_diff_rot shape: (T-1, 3, 3)
+    # Extract first 2 rows: [R[0,0], R[0,1], R[0,2], R[1,0], R[1,1], R[1,2]]
+    heading_6d = global_heading_diff_rot[..., :2, :]  # (T-1, 2, 3)
+    final_x[1:, 2:8] = heading_6d.reshape(heading_6d.shape[0], -1)  # (T-1, 6)
 
     # Root XZ velocity (heading removed)
     final_x[1:, :2] = velocities_root_xy_no_heading
@@ -437,9 +442,12 @@ def compute_representation_272(joints_22, smpl_85_face_z):
 
     # Local rotations as 6D (heading removed from root)
     # rotations_matrix shape: (T, 22, 3, 3)
-    # Take first 2 columns: (T, 22, 3, 2) -> reshape to (T, 22*6)
+    # Extract first 2 ROWS to match GT representation_272.py line 116:
+    # rotations_matrix[..., :2, :] shape (T, 22, 2, 3)
+    # This produces: [R[0,0], R[0,1], R[0,2], R[1,0], R[1,1], R[1,2]] per joint per frame
+    rot6d = rotations_matrix[..., :2, :]  # (T, 22, 2, 3)
     final_x[:, 8 + 6 * njoint:8 + 12 * njoint] = np.reshape(
-        rotations_matrix[..., :2, :], (nfrm, -1)
+        rot6d, (nfrm, -1)
     )
 
     return final_x
@@ -479,14 +487,14 @@ def build_id_mapping(annotation_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert PRISM SMPLX predictions to 272-dim representation')
+    parser = argparse.ArgumentParser(description='Convert PRISM predictions to 272-dim representation')
     parser.add_argument('--pred_dir', type=str, required=True,
                         help='Directory containing PRISM prediction NPZ files')
     parser.add_argument('--annotation', type=str, required=True,
                         help='Path to test_hml3d.json for ID mapping')
-    parser.add_argument('--smplx_model_path', type=str,
-                        default='checkpoints/smpl_models/smplx/SMPLX_NEUTRAL.npz',
-                        help='Path to SMPLX neutral model')
+    parser.add_argument('--smpl_model_dir', type=str,
+                        default='checkpoints/smpl_models',
+                        help='Directory containing SMPL models (with smpl/ subdirectory)')
     parser.add_argument('--out_dir', type=str, required=True,
                         help='Output directory for 272-dim NPY files')
     parser.add_argument('--device', type=str, default='cuda',
@@ -514,20 +522,18 @@ def main():
     for mhub_id, orig_id in id_mapping.items():
         reverse_mapping[orig_id] = mhub_id
 
-    # Initialize SMPLX model for FK
-    print("Loading SMPLX model...")
-    smplx_model_dir = os.path.dirname(args.smplx_model_path)
+    # Initialize SMPL model for FK (NOT SMPLX!)
+    print("Loading SMPL model...")
     body_model = smplx.create(
-        model_path=smplx_model_dir,
-        model_type='smplx',
+        model_path=args.smpl_model_dir,
+        model_type='smpl',
         gender='neutral',
         num_betas=10,
-        use_pca=False,
     ).to(args.device)
     body_model.eval()
     for p in body_model.parameters():
         p.requires_grad = False
-    print(f"  SMPLX model loaded on {args.device}")
+    print(f"  SMPL model loaded on {args.device}")
 
     # Find all prediction files
     pred_files = [f for f in os.listdir(args.pred_dir) if f.endswith('.npz')]
@@ -590,9 +596,9 @@ def main():
             fail_count += 1
             continue
 
-        # Step 2: FK to get joint positions
+        # Step 2: FK to get joint positions (using SMPL, NOT SMPLX!)
         try:
-            joints_22 = run_fk_smplx(smpl_85_fz, body_model, device=args.device)
+            joints_22 = run_fk_smpl(smpl_85_fz, body_model, device=args.device)
         except Exception as e:
             print(f"  FK failed for {pred_file}: {e}")
             fail_count += 1
