@@ -105,8 +105,8 @@ class SMPLPoseProcessor(nn.Module):
         else:
             self.smooth_model = None
 
-        self.register_buffer("mean", mean, persistent=False)  # (D,)
-        self.register_buffer("std", std, persistent=False)  # (D,)
+        self.register_buffer("mean", mean, persistent=True)  # (D,)
+        self.register_buffer("std", std, persistent=True)  # (D,)
 
         self.freeze()
 

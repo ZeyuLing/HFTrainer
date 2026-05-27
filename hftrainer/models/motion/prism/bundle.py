@@ -65,12 +65,12 @@ class PrismBundle(ModelBundle):
         self.register_buffer(
             'latents_mean',
             torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1),
-            persistent=False,
+            persistent=True,
         )
         self.register_buffer(
             'latents_std',
             torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1),
-            persistent=False,
+            persistent=True,
         )
 
     @classmethod
