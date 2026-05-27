@@ -472,7 +472,16 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list,
     # Previous A/B test showing margin=0.02 "helped" was likely an artifact of
     # wrong initial conditions (incorrect ground offset or penetrating pose).
     # With correct ground offset, margin=0 is stable and physically correct.
-    log.info("  Contact margin: 0 (MuJoCo default, matches ProtoMotions MuJoCo backend)")
+    margin_override = os.environ.get("PHYSFLOW_GEOM_MARGIN")
+    if margin_override is not None:
+        margin_value = float(margin_override)
+        model.geom_margin[:] = margin_value
+        log.info(f"  Contact margin override: {margin_value}")
+    else:
+        log.info(
+            "  Contact margin: MJCF values "
+            f"[{model.geom_margin.min():.4f}, {model.geom_margin.max():.4f}]"
+        )
 
     # Zero passive forces (match training conditions)
     # ProtoMotions deployment script (test_tracker_mujoco.py) zeros all three.
@@ -561,14 +570,25 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list,
     #
     # Actually simpler: just set all body geoms conaffinity=0 to disable self-collision.
     # Floor contact still works because floor's conaffinity matches body's contype.
-    floor_geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
-    for geom_id in range(model.ngeom):
-        if geom_id == floor_geom_id:
-            continue  # Don't modify floor
-        # Keep contype (body can still contact floor via floor's conaffinity)
-        # Zero conaffinity so other bodies' contype doesn't match → no self-collision
-        model.geom_conaffinity[geom_id] = 0
-    log.info("  Disabled body-body self-collision (set body geom conaffinity=0)")
+    self_collision_mode = os.environ.get(
+        "PHYSFLOW_SELF_COLLISIONS", "false"
+    ).strip().lower()
+    if self_collision_mode not in {"true", "false"}:
+        raise ValueError(
+            "PHYSFLOW_SELF_COLLISIONS must be 'true' or 'false', "
+            f"got {self_collision_mode!r}"
+        )
+    if self_collision_mode == "false":
+        floor_geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+        for geom_id in range(model.ngeom):
+            if geom_id == floor_geom_id:
+                continue  # Don't modify floor
+            # Keep contype (body can still contact floor via floor's conaffinity)
+            # Zero conaffinity so other bodies' contype doesn't match -> no self-collision
+            model.geom_conaffinity[geom_id] = 0
+        log.info("  Disabled body-body self-collision (set body geom conaffinity=0)")
+    else:
+        log.info("  Body-body self-collision: enabled from MJCF")
 
     log.info(f"  {num_actuators} actuators, {model.nbody} bodies, "
              f"nq={model.nq}, nv={model.nv}")
@@ -969,6 +989,20 @@ def run_rl_tracker(
     motion_meta = yaml_meta["motion"]
     control = yaml_meta["control"]
     runtime = yaml_meta["_runtime"]
+    history_action_mode = os.environ.get("PHYSFLOW_HISTORY_ACTION_MODE", "raw").strip().lower()
+    if history_action_mode not in {"raw", "processed"}:
+        raise ValueError(
+            "PHYSFLOW_HISTORY_ACTION_MODE must be 'raw' or 'processed', "
+            f"got {history_action_mode!r}"
+        )
+    virtual_floor_enabled = os.environ.get(
+        "PHYSFLOW_VIRTUAL_FLOOR", "true"
+    ).strip().lower()
+    if virtual_floor_enabled not in {"true", "false"}:
+        raise ValueError(
+            "PHYSFLOW_VIRTUAL_FLOOR must be 'true' or 'false', "
+            f"got {virtual_floor_enabled!r}"
+        )
 
     anchor_body_index = robot_meta["anchor_body_index"]  # 0 for SMPL
     num_bodies = robot_meta["num_bodies"]                # 24
@@ -981,6 +1015,8 @@ def run_rl_tracker(
     stiffness = control["stiffness"]                     # 69 values
     damping_ctrl = control["damping"]                    # 69 values
     onnx_name_to_key = runtime["onnx_name_to_in_key"]
+    log.info(f"  Historical action feedback mode: {history_action_mode}")
+    log.info(f"  Virtual floor spring: {virtual_floor_enabled}")
 
     T_ref = ref_qpos.shape[0]
     dt_ref = 1.0 / motion_fps
@@ -1321,26 +1357,14 @@ def run_rl_tracker(
                 model.actuator_biasprm[i, 1] = -kp
                 model.actuator_biasprm[i, 2] = -kd
 
-        # Store RAW POLICY OUTPUT (pre-tanh) for historical.actions input.
-        #
-        # The ONNX model's historical_actions input expects the RAW policy
-        # output (pre-tanh MLP output), NOT the processed joint_pos_targets.
-        #
-        # Evidence chain:
-        #   1. mlp.py line 73: previous_actions_factory(history_steps=1)
-        #      with default processed=False → reads raw actions
-        #   2. component_factories.py line 242-246: processed=False →
-        #      uses EnvContext.historical.actions (raw buffer)
-        #   3. state_history_buffer.py line 393: self.actions[:, 0] = actions
-        #      stores raw policy output; self.processed_actions stores post-tanh
-        #   4. export_utils.py line 649-653: current code assigns
-        #      output_key="actions" for historical_actions (not "robot_action")
-        #   5. action_functions.py: tanh(raw) * scale + offset = joint_pos_targets
-        #      — these are very different value ranges!
-        #
-        # The YAML's output_key="robot_action" is from an older export_utils
-        # version and is misleading. The actual training code feeds raw actions.
-        prev_actions = out_dict["actions"].squeeze().copy()
+        # Historical action feedback is a major deployment ambiguity:
+        # some ProtoMotions paths feed raw policy actions, while the standalone
+        # MuJoCo deployment loop feeds the processed PD target. Keep raw as the
+        # default, but allow ablation without editing code.
+        if history_action_mode == "processed":
+            prev_actions = joint_pos_targets.copy()
+        else:
+            prev_actions = out_dict["actions"].squeeze().copy()
 
         # ---- Apply control and step physics ----
         data.ctrl[:] = joint_pos_targets
@@ -1348,7 +1372,8 @@ def run_rl_tracker(
             # Virtual floor spring: emulate IsaacGym contact_offset=0.02m
             # Clear previous external forces and apply virtual spring
             data.xfrc_applied[:] = 0.0
-            _apply_virtual_floor_spring(model, data, foot_bodies)
+            if virtual_floor_enabled == "true":
+                _apply_virtual_floor_spring(model, data, foot_bodies)
             mujoco.mj_step(model, data)
             # NaN guard: break substep loop early if simulation diverged
             if np.any(np.isnan(data.qpos[:7])):

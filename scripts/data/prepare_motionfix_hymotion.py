@@ -56,6 +56,100 @@ def _make_smplx_poses(rots_66: np.ndarray) -> np.ndarray:
     return poses
 
 
+# ─── Z-up → Y-up Coordinate Conversion ───────────────────────────────────────
+# MotionFix data comes from AMASS/SMPL-X pipeline which uses Z-up convention.
+# HyMotion training pipeline expects Y-up convention (matching PerMo, academic, etc.).
+#
+# Conversion: Rotate world frame by -90° around X-axis
+#   new_X = old_X
+#   new_Y = old_Z  (old up → new up)
+#   new_Z = -old_Y (old forward → new backward, preserving right-handedness)
+#
+# For poses: only global orient (joint 0) needs rotation; local joints stay the same.
+# For trans: apply the coordinate swap.
+#
+# Height restoration: MotionFix is origin-normalized (trans[0]=[0,0,0]) so absolute
+# pelvis height is lost. We restore it using bone_offsets (pelvis-to-foot ≈ 0.92m).
+
+# R_x(-90°) rotation matrix
+_RX_NEG90 = np.array([
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, -1.0, 0.0],
+], dtype=np.float32)
+
+# Approximate pelvis standing height above ground (from bone_offsets_22.pt:
+# pelvis→l_hip→l_knee→l_ankle→l_foot chain Y distance = 0.92m)
+_PELVIS_STANDING_HEIGHT = 0.92
+
+
+def _matrix_to_axis_angle(rot_matrices: np.ndarray) -> np.ndarray:
+    """Convert rotation matrices to axis-angle. Shape: (..., 3, 3) -> (..., 3)."""
+    # Use Rodrigues' formula inverse
+    batch_shape = rot_matrices.shape[:-2]
+    R = rot_matrices.reshape(-1, 3, 3)
+    n = R.shape[0]
+
+    # trace = R00 + R11 + R22
+    trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+    # angle = arccos((trace - 1) / 2)
+    cos_angle = np.clip((trace - 1.0) / 2.0, -1.0, 1.0)
+    angle = np.arccos(cos_angle)  # (n,)
+
+    # axis from skew-symmetric part: [R21-R12, R02-R20, R10-R01] / (2*sin(angle))
+    axis = np.stack([
+        R[:, 2, 1] - R[:, 1, 2],
+        R[:, 0, 2] - R[:, 2, 0],
+        R[:, 1, 0] - R[:, 0, 1],
+    ], axis=-1)  # (n, 3)
+
+    sin_angle = np.sin(angle)[:, None]
+    # Avoid division by zero for small angles
+    safe_sin = np.where(np.abs(sin_angle) < 1e-8, np.ones_like(sin_angle), sin_angle)
+    axis = axis / (2.0 * safe_sin)
+
+    # For small angles, axis-angle ≈ 0
+    aa = axis * angle[:, None]
+    aa = np.where(angle[:, None] < 1e-8, np.zeros_like(aa), aa)
+
+    return aa.reshape(batch_shape + (3,)).astype(np.float32)
+
+
+def _convert_zup_to_yup(rots_66: np.ndarray, trans: np.ndarray) -> tuple:
+    """Convert MotionFix Z-up data to Y-up convention.
+
+    Args:
+        rots_66: (T, 66) axis-angle rotations for 22 joints
+        trans: (T, 3) root translation in Z-up frame
+
+    Returns:
+        (rots_66_yup, trans_yup): converted data in Y-up frame with absolute height.
+    """
+    rots_66 = np.asarray(rots_66, dtype=np.float32)
+    trans = np.asarray(trans, dtype=np.float32)
+
+    # 1. Convert translation: [x, z, -y]
+    trans_yup = np.empty_like(trans)
+    trans_yup[:, 0] = trans[:, 0]      # X stays
+    trans_yup[:, 1] = trans[:, 2]      # new Y = old Z (up)
+    trans_yup[:, 2] = -trans[:, 1]     # new Z = -old Y
+
+    # 2. Restore absolute pelvis height (lost due to origin normalization)
+    trans_yup[:, 1] += _PELVIS_STANDING_HEIGHT
+
+    # 3. Rotate global orient: R_new = R_x(-90) @ R_old
+    global_aa = rots_66[:, :3]  # (T, 3) — joint 0 axis-angle
+    R_old = _axis_angle_to_matrix(global_aa)  # (T, 3, 3)
+    R_new = np.einsum('ij,tjk->tik', _RX_NEG90, R_old)  # (T, 3, 3)
+    global_aa_new = _matrix_to_axis_angle(R_new)  # (T, 3)
+
+    # 4. Replace global orient, keep local joints unchanged
+    rots_66_yup = rots_66.copy()
+    rots_66_yup[:, :3] = global_aa_new
+
+    return rots_66_yup, trans_yup
+
+
 def _axis_angle_to_matrix(axis_angle: np.ndarray) -> np.ndarray:
     axis_angle = np.asarray(axis_angle, dtype=np.float32)
     theta = np.linalg.norm(axis_angle, axis=-1, keepdims=True)
@@ -95,9 +189,19 @@ def _motion_135(poses_156: np.ndarray, trans: np.ndarray) -> np.ndarray:
     return np.concatenate([trans.astype(np.float32), rot6d.astype(np.float32)], axis=-1)
 
 
-def _save_motion_npz(path: Path, rots_66: np.ndarray, trans: np.ndarray, fps: float) -> np.ndarray:
+def _save_motion_npz(path: Path, rots_66: np.ndarray, trans: np.ndarray, fps: float) -> tuple:
+    """Save motion NPZ with Z-up → Y-up conversion.
+
+    Returns:
+        (poses_156, trans_yup): converted poses and translation for downstream use.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    rots_66 = np.asarray(rots_66, dtype=np.float32)
     trans = np.asarray(trans, dtype=np.float32)
+
+    # Convert Z-up → Y-up coordinate system
+    rots_66, trans = _convert_zup_to_yup(rots_66, trans)
+
     poses = _make_smplx_poses(rots_66)
     np.savez(
         path,
@@ -108,7 +212,7 @@ def _save_motion_npz(path: Path, rots_66: np.ndarray, trans: np.ndarray, fps: fl
         gender=np.array("neutral"),
         num_frames=np.array(trans.shape[0], dtype=np.int64),
     )
-    return poses
+    return poses, trans
 
 
 def _caption_payload(instruction: str) -> Dict:
@@ -195,25 +299,25 @@ def convert_smpl_and_text(
 
             if overwrite or not source_npz.exists():
                 src = item["motion_source"]
-                src_poses = _save_motion_npz(
+                src_poses, src_trans_yup = _save_motion_npz(
                     source_npz,
                     _to_numpy(src["rots"]),
                     _to_numpy(src["trans"]),
                     fps,
                 )
                 source_135.parent.mkdir(parents=True, exist_ok=True)
-                np.save(source_135, _motion_135(src_poses, _to_numpy(src["trans"])).astype(np.float32))
+                np.save(source_135, _motion_135(src_poses, src_trans_yup).astype(np.float32))
 
             if overwrite or not target_npz.exists():
                 tgt = item["motion_target"]
-                tgt_poses = _save_motion_npz(
+                tgt_poses, tgt_trans_yup = _save_motion_npz(
                     target_npz,
                     _to_numpy(tgt["rots"]),
                     _to_numpy(tgt["trans"]),
                     fps,
                 )
                 target_135.parent.mkdir(parents=True, exist_ok=True)
-                np.save(target_135, _motion_135(tgt_poses, _to_numpy(tgt["trans"])).astype(np.float32))
+                np.save(target_135, _motion_135(tgt_poses, tgt_trans_yup).astype(np.float32))
 
             if overwrite or not caption_path.exists():
                 _json_dump(caption_path, _caption_payload(instruction))
