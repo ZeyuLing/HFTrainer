@@ -10,9 +10,9 @@ Key difference from run_prism_infer_lowmem.py:
 
 Usage:
     python3 scripts/inference/run_prism_infer_t5cached.py \
-        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py \
-        --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-iter_15000 \
-        --output-dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral/eval_15k_t5cached
+        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached.py \
+        --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral_unified/checkpoint-iter_15000 \
+        --output-dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral_unified/eval_15k_t5cached
 """
 
 import argparse

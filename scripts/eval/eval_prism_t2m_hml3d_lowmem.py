@@ -6,7 +6,7 @@ This allows running on GPUs with ~15GB VRAM (e.g., Tesla T4).
 
 Usage:
     python3 scripts/eval/eval_prism_t2m_hml3d_lowmem.py \
-        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py \
+        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py \
         --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_2 \
         --output-dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral/eval_hml3d_epoch2_50samples \
         --max-samples 50
@@ -84,7 +84,7 @@ def main():
         description='PRISM T2M eval — Low-memory single-GPU version.',
     )
     parser.add_argument('--config', type=str,
-                        default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py')
+                        default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py')
     parser.add_argument('--checkpoint', type=str,
                         default='work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_2')
     parser.add_argument('--anno-file', type=str,

@@ -20,10 +20,10 @@ PRISM uses a total of 23 joint positions:
 This 1+22 structure is maintained throughout all RoPE modes:
   - Translation token: identity RoPE (cos=1, sin=0) across all modes
   - Body joints: mode-specific RoPE based on position encoding
-    * Sequential: indices 0-21 (after translation at index 0)
+    * Sequential: full-token positions 0..22; body tokens occupy 1..22
     * Spectral: eigenvector coordinates from kinematic tree
-    * Spectral_unified: L2 norm of spectral coordinates
-    * DFS: depth-first-search ordering of kinematic tree
+    * Spectral_unified: body positions 1..22 plus a small signed spectral residual
+    * DFS: depth-first-search ordering of kinematic tree, shifted to 1..22
 
 When input has shape (B, C, T, J) with J=23:
   - VAE outputs motion with 23 joint positions
@@ -36,8 +36,9 @@ Supports four joint position modes:
     - "spectral": Laplacian eigenvector coordinates from SMPL-22 kinematic tree.
       Encodes kinematic distance as RoPE attention bias. Per-mode frequency
       decomposition — NOT compatible with sequential pretrained weights.
-    - "spectral_unified": Spectral L2-norm scalar positions with full j_dim
-      frequency basis. Compatible with sequential pretrained weights.
+    - "spectral_unified": Sequential body-token positions with a signed
+      topology residual and full j_dim frequency basis. Compatible with
+      sequential pretrained weights while avoiding translation/body collision.
     - "dfs": Depth-first-search ordering of the kinematic tree.
 
 Reference:
@@ -174,6 +175,58 @@ def _compute_dfs_ordering(num_joints: int = 22) -> np.ndarray:
     return dfs_order
 
 
+def _compute_projected_spectral_positions(
+    num_joints: int = 22,
+    num_modes: int = 4,
+    spectral_scale: float = 22.0,
+    position_offset: float = 1.0,
+    topology_mix: float = 0.25,
+    tie_break_eps: float = 1e-3,
+) -> np.ndarray:
+    """
+    Project signed Laplacian spectral coordinates to scalar RoPE positions.
+
+    The result is a topology-aware perturbation of the pretrained sequential
+    positions, not a wholesale re-indexing.  Body tokens therefore stay close to
+    positions 1..22 while translation keeps the unique identity position 0.
+    This preserves the pretrained RoPE phase geometry and injects SMPL tree
+    topology through relative phase residuals.
+    """
+    spectral_coords = _compute_spectral_coords(
+        num_joints=num_joints, num_modes=num_modes
+    )
+
+    base_weights = np.array([1.0, 1.7, 2.9, 4.3], dtype=np.float64)
+    if num_modes <= len(base_weights):
+        weights = base_weights[:num_modes]
+    else:
+        extra = np.arange(len(base_weights) + 1, num_modes + 1, dtype=np.float64)
+        weights = np.concatenate([base_weights, extra * 1.3 + 0.7])
+
+    dfs_order = _compute_dfs_ordering(num_joints=num_joints)
+    raw_positions = spectral_coords @ weights
+    raw_positions = raw_positions + tie_break_eps * dfs_order
+
+    min_pos = raw_positions.min()
+    max_pos = raw_positions.max()
+    if max_pos - min_pos < 1e-8:
+        raise ValueError("Projected spectral positions collapsed to a constant.")
+
+    centered = raw_positions - raw_positions.mean()
+    denom = np.max(np.abs(centered))
+    if denom < 1e-8:
+        raise ValueError("Projected spectral positions collapsed after centering.")
+    topology_residual = topology_mix * centered / denom
+
+    base_positions = np.linspace(
+        position_offset,
+        spectral_scale,
+        num_joints,
+        dtype=np.float64,
+    )
+    return base_positions + topology_residual
+
+
 class MotionWanRotaryPosEmbed(nn.Module):
     """
     2D Rotary Position Embedding for motion sequences with proper handling of 23 joint positions.
@@ -216,9 +269,9 @@ class MotionWanRotaryPosEmbed(nn.Module):
           is further split across spectral modes. NOT compatible with sequential
           pretrained weights (different frequency basis).
         - "spectral_unified": Like "spectral" but uses a single scalar position
-          per joint (L2 norm of spectral coords) with the FULL j_dim frequency
-          basis. Compatible with sequential pretrained weights — same frequency
-          components, only position values change from integers to spectral scalars.
+          per joint. The scalar is the pretrained sequential body position
+          (1..22) plus a small signed spectral residual, with the FULL j_dim
+          frequency basis. Compatible with sequential pretrained weights.
         - "dfs": DFS ordering of the kinematic tree as joint indices.
 
     Args:
@@ -303,8 +356,8 @@ class MotionWanRotaryPosEmbed(nn.Module):
                 repeat_interleave_real=True,
                 freqs_dtype=freqs_dtype,
             )
-            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=True)
-            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=True)
+            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=False)
+            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=False)
 
             # Compute spectral coordinates for 22 body joints (NOT including translation)
             spectral_coords = _compute_spectral_coords(
@@ -367,10 +420,10 @@ class MotionWanRotaryPosEmbed(nn.Module):
             joint_freqs_sin = torch.stack(joint_freqs_sin_list, dim=0)
 
             self.register_buffer(
-                "joint_freqs_cos", joint_freqs_cos, persistent=True
+                "joint_freqs_cos", joint_freqs_cos, persistent=False
             )
             self.register_buffer(
-                "joint_freqs_sin", joint_freqs_sin, persistent=True
+                "joint_freqs_sin", joint_freqs_sin, persistent=False
             )
 
             # For the TRANSLATION token (position 0 in J=23 sequence),
@@ -379,8 +432,8 @@ class MotionWanRotaryPosEmbed(nn.Module):
             # This is concatenated with joint RoPE in forward() to create (23, j_dim).
             trans_cos = torch.ones(j_dim, dtype=torch.float32)
             trans_sin = torch.zeros(j_dim, dtype=torch.float32)
-            self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
-            self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
+            self.register_buffer("trans_freqs_cos", trans_cos, persistent=False)
+            self.register_buffer("trans_freqs_sin", trans_sin, persistent=False)
 
         elif joint_pos_mode == "spectral_unified":
             # Spectral Unified mode: same frequency basis as sequential (full j_dim),
@@ -394,9 +447,11 @@ class MotionWanRotaryPosEmbed(nn.Module):
             #     sequential mode, only changing positions from integers to spectral
             #     scalars. Fully compatible with sequential pretrained weights.
             #
-            # Position computation: L2 norm of the spectral coordinate vector,
-            # scaled so the maximum matches spectral_scale (default 22 = num_joints).
-            # This preserves kinematic distance relationships while being a scalar.
+            # Position computation: sequential body-token positions (1..22)
+            # plus a small signed spectral residual.  This preserves most of
+            # the pretrained RoPE phase while injecting kinematic topology and
+            # avoiding the L2-norm collapse of mirrored limbs.  Position 0 is
+            # reserved exclusively for the translation token.
 
             # Temporal axis: standard sequential RoPE (identical to sequential mode)
             freq_cos_t, freq_sin_t = get_1d_rotary_pos_embed(
@@ -407,26 +462,16 @@ class MotionWanRotaryPosEmbed(nn.Module):
                 repeat_interleave_real=True,
                 freqs_dtype=freqs_dtype,
             )
-            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=True)
-            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=True)
+            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=False)
+            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=False)
 
-            # Compute spectral coordinates for 22 body joints
-            spectral_coords = _compute_spectral_coords(
-                num_joints=22, num_modes=num_spectral_modes
-            )
-            # spectral_coords: (22, num_modes) — multi-dimensional per joint
-
-            # Derive scalar position per joint: L2 norm of spectral coordinate
-            # This preserves kinematic distance: joints close in the tree have
-            # similar norms, distant joints have different norms.
-            spectral_positions = np.linalg.norm(spectral_coords, axis=1)  # (22,)
-
-            # Scale so that the maximum position matches spectral_scale
-            # (default 22.0 = num_joints, matching sequential range [0, 22])
             scale = spectral_scale if spectral_scale is not None else 22.0
-            max_pos = spectral_positions.max()
-            if max_pos > 1e-8:
-                spectral_positions = spectral_positions * (scale / max_pos)
+            spectral_positions = _compute_projected_spectral_positions(
+                num_joints=22,
+                num_modes=num_spectral_modes,
+                spectral_scale=scale,
+                position_offset=1.0,
+            )
 
             # Now use get_1d_rotary_pos_embed with these fractional positions
             # (same j_dim=64 frequency basis as sequential mode)
@@ -451,18 +496,18 @@ class MotionWanRotaryPosEmbed(nn.Module):
             joint_freqs_sin = sin_vals.repeat_interleave(2, dim=1)  # (22, j_dim)
 
             self.register_buffer(
-                "joint_freqs_cos", joint_freqs_cos, persistent=True
+                "joint_freqs_cos", joint_freqs_cos, persistent=False
             )
             self.register_buffer(
-                "joint_freqs_sin", joint_freqs_sin, persistent=True
+                "joint_freqs_sin", joint_freqs_sin, persistent=False
             )
 
             # Translation token: identity RoPE (same as spectral mode)
             # Concatenated in forward() to create (23, j_dim) buffer
             trans_cos = torch.ones(j_dim, dtype=torch.float32)
             trans_sin = torch.zeros(j_dim, dtype=torch.float32)
-            self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
-            self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
+            self.register_buffer("trans_freqs_cos", trans_cos, persistent=False)
+            self.register_buffer("trans_freqs_sin", trans_sin, persistent=False)
 
         elif joint_pos_mode == "dfs":
             # DFS mode: use DFS ordering as joint positions
@@ -475,12 +520,13 @@ class MotionWanRotaryPosEmbed(nn.Module):
                 repeat_interleave_real=True,
                 freqs_dtype=freqs_dtype,
             )
-            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=True)
-            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=True)
+            self.register_buffer("freqs_cos_t", freq_cos_t, persistent=False)
+            self.register_buffer("freqs_sin_t", freq_sin_t, persistent=False)
 
             # Compute DFS ordering and use as positions for joint RoPE
-            dfs_order = _compute_dfs_ordering(num_joints=22)
-            # dfs_order shape: (22,) with values 0..21 in DFS visit order
+            dfs_order = _compute_dfs_ordering(num_joints=22) + 1
+            # dfs_order shape: (22,) with values 1..22 in DFS visit order.
+            # Position 0 is reserved for the translation token.
 
             # Pre-compute per-joint RoPE using DFS positions
             # Use get_1d_rotary_pos_embed for max positions, then index
@@ -499,10 +545,10 @@ class MotionWanRotaryPosEmbed(nn.Module):
             joint_freqs_sin = freq_sin_j[dfs_indices].float()  # (22, j_dim)
 
             self.register_buffer(
-                "joint_freqs_cos", joint_freqs_cos, persistent=True
+                "joint_freqs_cos", joint_freqs_cos, persistent=False
             )
             self.register_buffer(
-                "joint_freqs_sin", joint_freqs_sin, persistent=True
+                "joint_freqs_sin", joint_freqs_sin, persistent=False
             )
 
             # Translation token (position 0): use identity RoPE (cos=1, sin=0)
@@ -510,8 +556,8 @@ class MotionWanRotaryPosEmbed(nn.Module):
             # Concatenated in forward() to create (23, j_dim) buffer
             trans_cos = torch.ones(j_dim, dtype=torch.float32)
             trans_sin = torch.zeros(j_dim, dtype=torch.float32)
-            self.register_buffer("trans_freqs_cos", trans_cos, persistent=True)
-            self.register_buffer("trans_freqs_sin", trans_sin, persistent=True)
+            self.register_buffer("trans_freqs_cos", trans_cos, persistent=False)
+            self.register_buffer("trans_freqs_sin", trans_sin, persistent=False)
 
         else:
             raise ValueError(

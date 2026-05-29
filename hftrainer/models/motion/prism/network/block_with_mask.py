@@ -220,6 +220,8 @@ class WanTransformerBlockWithMask(nn.Module):
         norm_hidden_states = (
             self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
         )
+        attn1_dtype = self.attn1.to_q.weight.dtype
+        norm_hidden_states = norm_hidden_states.to(dtype=attn1_dtype)
 
         # Self-attention with rotary embeddings and optional masking
         # - encoder_hidden_states=None indicates self-attention (Q, K, V from hidden_states)
@@ -247,6 +249,9 @@ class WanTransformerBlockWithMask(nn.Module):
         # ========== 2. Cross-attention ==========
         # Apply layer normalization (may be identity if cross_attn_norm=False)
         norm_hidden_states = self.norm2(hidden_states.float())
+        attn2_dtype = self.attn2.to_q.weight.dtype
+        norm_hidden_states = norm_hidden_states.to(dtype=attn2_dtype)
+        encoder_hidden_states = encoder_hidden_states.to(dtype=attn2_dtype)
 
         # Cross-attention: Query from hidden_states, Key/Value from encoder_hidden_states
         # - attention_mask=encoder_hidden_states_mask masks padding in conditioning sequence
@@ -266,6 +271,7 @@ class WanTransformerBlockWithMask(nn.Module):
         norm_hidden_states = (
             self.norm3(hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa
         )
+        norm_hidden_states = norm_hidden_states.to(dtype=attn2_dtype)
 
         # Feed-forward network — under fp16 autocast, Linear layers use fp16 tensor
         # cores (fp16×fp16 with fp32 accumulation on V100). GELU-tanh computes x^3

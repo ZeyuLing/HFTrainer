@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 def main():
     device = torch.device('cuda:0')
-    config_path = 'configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py'
+    config_path = 'configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py'
     checkpoint_dir = 'work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_2'
     gt_npz_path = 'data/motionhub/humanact12/smplx_55/010541.npz'
     output_dir = 'work_dirs/prism_1b_tp2m_multiframe_kt_spectral/vae_roundtrip_test'

@@ -12,7 +12,7 @@ from hftrainer.models.motion.components.utils.geometry.rotation_convert import r
 
 
 def main():
-    config_path = 'configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py'
+    config_path = 'configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py'
     ckpt_dir = 'work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_0'
 
     print("Loading model...")

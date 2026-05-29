@@ -6,7 +6,7 @@
 
 Usage (on debug machine):
     python3 scripts/debug/diagnose_prism_jitter.py \
-        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py \
+        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py \
         --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_0 \
         --eval-dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral/eval_hml3d_rewritten \
         --gpu 1
@@ -238,7 +238,7 @@ def check_normalization_stats(bundle):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
-                       default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py')
+                       default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py')
     parser.add_argument('--checkpoint', type=str,
                        default='work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_0')
     parser.add_argument('--eval-dir', type=str,

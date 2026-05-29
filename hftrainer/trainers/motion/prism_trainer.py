@@ -188,6 +188,13 @@ class PrismTrainer(BaseTrainer):
 
         w_t = self.translation_loss_weight
         loss = w_t * loss_transl + (1.0 - w_t) * loss_rot
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                'Non-finite PRISM loss: '
+                f'loss={loss.detach().item()}, '
+                f'loss_transl={loss_transl.detach().item()}, '
+                f'loss_rot={loss_rot.detach().item()}'
+            )
         return {
             'loss': loss,
             'loss_flow': loss.detach(),

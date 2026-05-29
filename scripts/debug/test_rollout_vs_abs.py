@@ -6,7 +6,7 @@ Specifically targets the worst-case stationary motions where drift is catastroph
 
 Usage:
     python3 scripts/debug/test_rollout_vs_abs.py \
-        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py \
+        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py \
         --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_2 \
         --output-dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral/debug_rollout_test
 """
@@ -33,7 +33,7 @@ sys.path.insert(0, str(HF_ROOT))
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
-                        default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py')
+                        default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py')
     parser.add_argument('--checkpoint', type=str,
                         default='work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_2')
     parser.add_argument('--output-dir', type=str,

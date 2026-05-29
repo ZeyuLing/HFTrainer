@@ -488,6 +488,7 @@ class PrismTransformerMotionModel(WanTransformer3DModel):
         # ==========================================================
         # 9. Output projection
         # ==========================================================
+        hidden_states = hidden_states.to(dtype=self.proj_out.weight.dtype)
         hidden_states = self.proj_out(hidden_states)
 
         # ==========================================================

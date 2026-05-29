@@ -17,6 +17,11 @@ model = dict(
         num_spectral_modes=4,  # First 4 Laplacian eigenvectors
         spectral_scale=22.0,  # Scale spectral coords (default = num_joints)
     ),
+    # ``load_from`` overwrites these frozen modules with the sequential PRISM
+    # checkpoint versions.  Keep them in model.pt so saved KT checkpoints replay
+    # in the same latent/statistics space used during training.
+    vae=dict(save_ckpt=True),
+    smpl_pose_processor=dict(save_ckpt=True),
 )
 
 # Fix checkpoint saving

@@ -425,11 +425,13 @@ def compute_representation_272(joints_22, smpl_85_face_z):
     final_x[0, 2] = 1  # first column of identity = [1,0,0] but in 6D = cols 0,1 of 3x3
     final_x[0, 6] = 1  # second column of identity
 
-    # Heading angular velocity as 6D rotation (first 2 rows of rotation matrix, matching matrix_to_rotation_6d)
+    # Heading angular velocity as 6D rotation (row-major, matching GT matrix_to_rotation_6d)
     # global_heading_diff_rot shape: (T-1, 3, 3)
-    # Extract first 2 rows: [R[0,0], R[0,1], R[0,2], R[1,0], R[1,1], R[1,2]]
-    heading_6d = global_heading_diff_rot[..., :2, :]  # (T-1, 2, 3)
-    final_x[1:, 2:8] = heading_6d.reshape(heading_6d.shape[0], -1)  # (T-1, 6)
+    # Extract first 2 ROWS: [R[0,0], R[0,1], R[0,2], R[1,0], R[1,1], R[1,2]]
+    # This matches GT representation_272.py line 109:
+    #   matrix_to_rotation_6d(torch.from_numpy(global_heading_diff_rot)).numpy()
+    heading_6d = global_heading_diff_rot[:, :2, :].reshape(-1, 6)  # (T-1, 6)
+    final_x[1:, 2:8] = heading_6d
 
     # Root XZ velocity (heading removed)
     final_x[1:, :2] = velocities_root_xy_no_heading
@@ -442,13 +444,11 @@ def compute_representation_272(joints_22, smpl_85_face_z):
 
     # Local rotations as 6D (heading removed from root)
     # rotations_matrix shape: (T, 22, 3, 3)
-    # Extract first 2 ROWS to match GT representation_272.py line 116:
-    # rotations_matrix[..., :2, :] shape (T, 22, 2, 3)
-    # This produces: [R[0,0], R[0,1], R[0,2], R[1,0], R[1,1], R[1,2]] per joint per frame
-    rot6d = rotations_matrix[..., :2, :]  # (T, 22, 2, 3)
-    final_x[:, 8 + 6 * njoint:8 + 12 * njoint] = np.reshape(
-        rot6d, (nfrm, -1)
-    )
+    # Extract first 2 ROWS (row-major) to match GT representation_272.py line 116:
+    #   np.reshape(rotations_matrix[..., :, :2, :], (nfrm,-1))
+    # Per joint: [R[0,0], R[0,1], R[0,2], R[1,0], R[1,1], R[1,2]]
+    rot6d_row_major = rotations_matrix[:, :, :2, :].reshape(nfrm, -1)  # (T, 132)
+    final_x[:, 8 + 6 * njoint:8 + 12 * njoint] = rot6d_row_major
 
     return final_x
 

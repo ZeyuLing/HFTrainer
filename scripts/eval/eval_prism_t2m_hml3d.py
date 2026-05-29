@@ -10,7 +10,7 @@ Saves per-sample NPZ files for downstream metric computation.
 Usage:
     # 8-GPU parallel (default: use all available GPUs)
     python scripts/eval/eval_prism_t2m_hml3d.py \
-        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py \
+        --config configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py \
         --checkpoint work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_0 \
         --output-dir work_dirs/prism_1b_tp2m_multiframe_kt_spectral/eval_hml3d_rewritten \
         --num-inference-steps 50 \
@@ -216,7 +216,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument('--config', type=str,
-                        default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral.py')
+                        default='configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified.py')
     parser.add_argument('--checkpoint', type=str,
                         default='work_dirs/prism_1b_tp2m_multiframe_kt_spectral/checkpoint-epoch_0')
     parser.add_argument('--anno-file', type=str,
