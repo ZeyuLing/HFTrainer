@@ -152,7 +152,7 @@ def main():
 
     # Load model
     from mmengine import Config
-    cfg = Config.fromfile('configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py')
+    cfg = Config.fromfile('configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py')
     from hftrainer.models.motion.hymotion_m2m.bundle import HyMotionM2MBundle
     from hftrainer.pipelines.motion.hymotion_m2m_pipeline import HyMotionM2MPipeline
 

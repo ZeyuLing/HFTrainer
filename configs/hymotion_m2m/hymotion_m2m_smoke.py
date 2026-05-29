@@ -1,16 +1,20 @@
+# HyMotion M2M v2 smoke test config — 198-dim, tiny model.
+#
+# Uses HyMotionM2MSyntheticDataset with motion_dim=198.
+# Tiny model (feat_dim=64, 3 layers) for fast validation.
+
 _base_ = '../_base_/default_runtime.py'
 
-# Tiny HunyuanMotionMMDiT for smoke testing.
-# Uses small feat_dim, few layers, and synthetic random data.
+_motion_dim = 198
+
 model = dict(
     type='HyMotionM2MBundle',
     motion_transformer=dict(
         type='HunyuanMotionMMDiT',
         trainable=True,
-        # ----- tiny dims for smoke test -----
-        input_dim=135 + 3 * 135,       # motion_dim + 3 * motion_dim (VACE context)
+        input_dim=_motion_dim * 3,   # 594: x_t + reactive + mask (no_inactive)
         feat_dim=64,
-        output_dim=135,
+        output_dim=_motion_dim,      # 198
         ctxt_input_dim=64,
         vtxt_input_dim=64,
         num_layers=3,
@@ -28,7 +32,6 @@ model = dict(
         insert_start_token=False,
         with_long_skip_connection=False,
     ),
-    # No text encoder: use null embeddings (uncondition mode)
     text_encoder=None,
     mean_std_dir=None,
     motion_type='smpl_22',
@@ -44,7 +47,7 @@ model = dict(
     noise_scheduler_cfg=dict(method='euler'),
     infer_noise_scheduler_cfg=dict(validation_steps=2),
     cond_mask_prob=0.0,
-    vace_condition_mode='split_reactive',
+    vace_condition_mode='no_inactive',
     vtxt_input_dim=64,
     ctxt_input_dim=64,
     body_model_path=None,
@@ -53,6 +56,7 @@ model = dict(
 trainer = dict(
     type='HyMotionM2MTrainer',
     val_num_steps=2,
+    mask_aware_noise=True,
 )
 
 train_dataloader = dict(
@@ -63,7 +67,7 @@ train_dataloader = dict(
         type='HyMotionM2MSyntheticDataset',
         num_samples=8,
         max_frame=16,
-        motion_dim=135,
+        motion_dim=198,   # v2: 198-dim
         mask_ratio=0.5,
     ),
 )

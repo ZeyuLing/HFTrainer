@@ -2,9 +2,9 @@
 tools/train.py — Main training entry point for hftrainer.
 
 Usage:
-    python tools/train.py configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py [--work-dir WORK_DIR]
+    python tools/train.py configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py [--work-dir WORK_DIR]
     # or with accelerate:
-    accelerate launch tools/train.py configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py
+    accelerate launch tools/train.py configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py
 """
 
 import argparse

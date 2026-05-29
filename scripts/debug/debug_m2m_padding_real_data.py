@@ -23,7 +23,7 @@ from mmengine.config import Config
 from hftrainer.registry import DATASETS
 
 
-CONFIG_PATH = 'configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py'
+CONFIG_PATH = 'configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py'
 NUM_SAMPLES = 64
 CLIP_LEN = 360
 

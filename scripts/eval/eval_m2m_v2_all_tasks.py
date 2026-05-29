@@ -96,28 +96,28 @@ def _lookup_caption_embedding(caption: str
 
 V2_MODELS = {
     'uncond_local': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_uncond_local_046b',
         'desc': 'v2 Unconditioned + Local rotation',
         'has_caption': False,
         'rotation_space': 'local',
     },
     'uncond_global': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_global_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_uncond_global_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_uncond_global_046b',
         'desc': 'v2 Unconditioned + Global rotation',
         'has_caption': False,
         'rotation_space': 'global',
     },
     'caption_local': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_046b',
         'desc': 'v2 Caption + Local rotation (mixed training)',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'caption_global': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_046b',
         'desc': 'v2 Caption + Global rotation (mixed training)',
         'has_caption': True,
@@ -125,14 +125,14 @@ V2_MODELS = {
     },
     # Phase 1 variants: pure T2M curriculum (no completion tasks)
     'caption_local_phase1': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase1.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase1.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_phase1',
         'desc': 'v2 Caption + Local rotation (Phase 1: pure T2M)',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'caption_global_phase1': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_phase1.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_phase1.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_phase1',
         'desc': 'v2 Caption + Global rotation (Phase 1: pure T2M)',
         'has_caption': True,
@@ -140,14 +140,14 @@ V2_MODELS = {
     },
     # Phase 2 variants: T2M base + completion curriculum (longer training)
     'caption_local_phase2': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_phase2',
         'desc': 'v2 Caption + Local rotation (Phase 2: T2M + completion)',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'caption_global_phase2': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_phase2.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_phase2.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_phase2',
         'desc': 'v2 Caption + Global rotation (Phase 2: T2M + completion)',
         'has_caption': True,
@@ -155,35 +155,35 @@ V2_MODELS = {
     },
     # Phase 0 root-representation ablations trained on the 2026-05-14 data.
     'M2M_v2_KIMODO_root_caption_permo_resume_E4': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_caption_permo_resume_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_kimodo_caption_permo_resume_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_resume_E4',
         'desc': 'v2 KIMODO Root + Caption + PerMo Resume (E4)',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'smpl_caption_E2': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_E2',
         'desc': 'v2 SMPL Root + Caption (E2)',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'smpl_caption_resume_E2': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_resume_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_resume_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_resume_E2',
         'desc': 'v2 SMPL Root + Caption Resume (E2)',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'M2M_v2_KIMODO_root_uncond_E3': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_kimodo_uncond_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_kimodo_uncond_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_uncond_E3',
         'desc': 'v2 KIMODO Root + Unconditioned (E3)',
         'has_caption': False,
         'rotation_space': 'local',
     },
     'smpl_uncond_E1': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_uncond_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_uncond_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_uncond_E1',
         'desc': 'v2 SMPL Root + Unconditioned (E1)',
         'has_caption': False,

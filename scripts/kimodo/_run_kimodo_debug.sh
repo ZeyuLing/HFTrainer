@@ -13,7 +13,7 @@ mkdir -p "$(dirname "$OUT")"
 CUDA_VISIBLE_DEVICES=1 \
 PYTHONPATH=. \
 accelerate launch --num_processes=1 --main_process_port=29501 \
-  tools/train.py configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py \
+  tools/train.py configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py \
   --cfg-options \
     train_dataloader.batch_size=2 \
     train_dataloader.num_workers=0 \

@@ -163,7 +163,7 @@ def print_comparison_table(captions, raw_sims, enc_sims, raw_dists, enc_dists,
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    E2_CONFIG = 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py'
+    E2_CONFIG = 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py'
     E2_CKPT = 'work_dirs/hymotion_m2m_v2_smpl_caption_E2/checkpoint-epoch_90'
     CACHE_PATH = 'data/eval/m2m_v2/caption_embeddings/cache.pt'
 

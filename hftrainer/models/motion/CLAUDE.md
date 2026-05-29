@@ -929,25 +929,9 @@ Config 目录: `configs/hymotion_m2m/`
 | caption_fm_man | `..._caption_fm_man_046b.py` | `..._caption_fm_man_046b` | — | 带文本 |
 | 等 | ... | ... | — | FM/JiT × MAN × caption/uncond × local/global 组合 |
 
-### Text-Free (DiT, 从零训练)
+### Text-Free DiT（已废弃）
 
-> **⚠️ Config 目录**: `configs/hymotion_dit/`（**不是** `configs/hymotion_m2m/*textfree*`）
->
-> `configs/hymotion_m2m/*textfree*` 是早期重复实现，与 `configs/hymotion_dit/` 功能完全一致（同架构、同参数量、同训练数据、同 loss），仅 work_dir 不同。**应使用 `configs/hymotion_dit/` 作为标准配置。**
-
-使用 `HunyuanMotionDiT`（纯 single-stream），无文本编码器，从零训练。
-
-| 变体 | 参数量 | Config | Work Dir | Epoch | 状态 |
-|------|-------|--------|----------|-------|------|
-| dit_fm_man_s | 49M | `hymotion_dit_fm_man_s.py` | `hymotion_dit_fm_man_s` | 762 | ✅ 训练中 |
-| dit_fm_man_b | 288M | `hymotion_dit_fm_man_b.py` | `hymotion_dit_fm_man_b` | 806 | ✅ 训练中 |
-| dit_fm_man_l | 383M | `hymotion_dit_fm_man_l.py` | `hymotion_dit_fm_man_l` | 19 | ❌ 需重新启动 |
-| dit_fm_man_globalrot_s | 49M | `hymotion_dit_fm_man_globalrot_s.py` | `hymotion_dit_fm_man_globalrot_s` | 757 | ✅ 训练中 |
-| dit_fm_man_globalrot_b | 288M | `hymotion_dit_fm_man_globalrot_b.py` | `hymotion_dit_fm_man_globalrot_b` | 833 | ✅ 训练中 |
-| dit_fm_man_globalrot_l | 383M | `hymotion_dit_fm_man_globalrot_l.py` | `hymotion_dit_fm_man_globalrot_l` | 21 | ❌ 需重新启动 |
-| dit_fm_man_m / dit_jit_* | — | 有 config | — | — | ❌ 未启动训练 |
-
-**注意**: M-size (162M) 和所有 JiT 变体有 config 但从未训练。
+`configs/hymotion_dit/` 已删除（2026-05）。历史实验使用 `HunyuanMotionDiT`（纯 single-stream、无文本），checkpoint 仍可能在 `work_dirs/hymotion_dit_*`；新训练请用 `configs/hymotion_m2m/` 主线。
 
 ---
 
@@ -984,7 +968,7 @@ HyMotionM2MSoarTrainer(HyMotionM2MTrainer)
 
 **新增文件**：
 - `hftrainer/trainers/motion/hymotion_m2m_soar_trainer.py` — 新 trainer（~200 行）+ 3 个内置单元测试
-- `configs/hymotion_m2m_v2/soar/hymotion_m2m_v2_{uncond,caption}_{local,global}_046b_soar.py` — 4 份后训练 config
+- `configs/hymotion_m2m/soar/hymotion_m2m_{uncond,caption}_{local,global}_046b_soar.py` — 4 份后训练 config
 
 **重构文件**：
 - `hftrainer/trainers/motion/hymotion_m2m_trainer.py` — 把 `train_step` 拆为 `_prepare_and_forward` + `_compute_base_loss` + 薄 `train_step`，**行为不变**
@@ -1006,10 +990,10 @@ HyMotionM2MSoarTrainer(HyMotionM2MTrainer)
 
 | Config | SFT load_from | Taiji task_flag | GPU | Status |
 |--------|--------------|-----------------|-----|--------|
-| `hymotion_m2m_v2_uncond_local_046b_soar.py` | `uncond_local_046b/checkpoint-epoch_485` | `m2m_v2_uncond_local_soar` | 4×8 V100 | 🟢 running |
-| `hymotion_m2m_v2_caption_local_046b_soar.py` | `caption_local_046b/checkpoint-epoch_498` | `m2m_v2_caption_local_soar` | 4×8 V100 | 🟢 running |
-| `hymotion_m2m_v2_uncond_global_046b_soar.py` | `uncond_global_046b/checkpoint-epoch_544` | — | — | 待提交 |
-| `hymotion_m2m_v2_caption_global_046b_soar.py` | `caption_global_046b/checkpoint-epoch_548` | — | — | 待提交 |
+| `hymotion_m2m_uncond_local_046b_soar.py` | `uncond_local_046b/checkpoint-epoch_485` | `m2m_v2_uncond_local_soar` | 4×8 V100 | 🟢 running |
+| `hymotion_m2m_caption_local_046b_soar.py` | `caption_local_046b/checkpoint-epoch_498` | `m2m_v2_caption_local_soar` | 4×8 V100 | 🟢 running |
+| `hymotion_m2m_uncond_global_046b_soar.py` | `uncond_global_046b/checkpoint-epoch_544` | — | — | 待提交 |
+| `hymotion_m2m_caption_global_046b_soar.py` | `caption_global_046b/checkpoint-epoch_548` | — | — | 待提交 |
 
 ### 验证现状（本地 400 iter quickcheck，单卡 V100）
 
@@ -1027,7 +1011,7 @@ HyMotionM2MSoarTrainer(HyMotionM2MTrainer)
 
 ```python
 # 方案 A：改 max_iters=10000 重新提交（等价于一次跑 10K，因 lr_scheduler=None 恒定 LR）
-_base_ = '../hymotion_m2m_v2_uncond_local_046b.py'
+_base_ = '../hymotion_m2m_uncond_local_046b.py'
 # ...
 load_from = dict(
     path='work_dirs/hymotion_m2m_v2_uncond_local_046b/checkpoint-epoch_485',  # 仍从 SFT
@@ -1233,11 +1217,11 @@ python -m pytest tests/integration/test_t2m_to_m2m_integration.py -v
 
 **Configuration Examples**:
 
-See `configs/hymotion_m2m_v2/hymotion_m2m_v2_046b_t2m_pretrained.py` for full config example.
+See `configs/hymotion_m2m/hymotion_m2m_046b_t2m_pretrained.py` for full config example.
 
 Key config additions:
 ```python
-_base_ = '_base_hymotion_m2m_v2_046b.py'
+_base_ = '_base_hymotion_m2m_046b.py'
 
 model = dict(
     t2m_pretrained_path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
@@ -1260,7 +1244,7 @@ load_from = dict(
 
 **Related Code**:
 - Implementation: `hftrainer/models/motion/hymotion_m2m/checkpoint_loading.py`
-- Config template: `configs/hymotion_m2m_v2/hymotion_m2m_v2_046b_t2m_pretrained.py`
+- Config template: `configs/hymotion_m2m/hymotion_m2m_046b_t2m_pretrained.py`
 - Unit tests: `tests/unit/test_t2m_to_m2m_checkpoint_loading.py`
 - Integration tests: `tests/integration/test_t2m_to_m2m_integration.py`
 
@@ -1536,12 +1520,12 @@ To make MoGenDIT respect the adaptive mask for imputation, one would need to mod
 **Root cause**: `model.safetensors` format doesn't include bundle-level nn.Parameters (they're saved in `model.pt::__bundle_params__`). When `load_from.path` points to a `.safetensors` file, `_patch_zero_null_embeddings_from_pretrained()` falls back to that same path, which also lacks null embeddings. Only configs loading directly from T2M pretrained (`.ckpt` format) got patched automatically.
 
 **Fix**: Added `null_embedding_source='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt'` to 6 v2 caption configs:
-- `hymotion_m2m_v2_caption_local_phase1.py`
-- `hymotion_m2m_v2_caption_local_phase2.py`
-- `hymotion_m2m_v2_caption_global_phase1.py`
-- `hymotion_m2m_v2_caption_global_phase2.py`
-- `soar/hymotion_m2m_v2_caption_local_046b_soar.py`
-- `soar/hymotion_m2m_v2_caption_global_046b_soar.py`
+- `hymotion_m2m_caption_local_phase1.py`
+- `hymotion_m2m_caption_local_phase2.py`
+- `hymotion_m2m_caption_global_phase1.py`
+- `hymotion_m2m_caption_global_phase2.py`
+- `soar/hymotion_m2m_caption_local_046b_soar.py`
+- `soar/hymotion_m2m_caption_global_046b_soar.py`
 
 ### 2026-05-15: Caption not follow — vtxt_encoder (MLPEncoder) collapse in M2M v2
 

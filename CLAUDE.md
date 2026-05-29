@@ -85,7 +85,7 @@ taiji_client stop <task_flag>         # 停止任务
 ## Smoke Test Policy
 
 - Entry: `python3 -m pytest -m smoke tests/smoke/test_task_startup.py`
-- Covers: prism, prism_mcm, vermo, hymotion_m2m, hymotion_m2m_v2, hymotion_t2m
+- Covers: prism, prism_mcm, vermo, hymotion_m2m, hymotion_t2m
 - Each case: generate temp config -> train 1 step -> infer
 - New task stacks must add a smoke case
 
@@ -167,7 +167,7 @@ All HyMotion M2M configs currently train on **unfiltered** `data/annotation/trai
 | Motion (PRISM MCM) | `PrismMCMBundle` | `PrismMCMTrainer` | `PrismMCMPipeline` | `RandomMotionAudioDataset` | `prism/prism_mcm_smoke.py` |
 | Motion (VerMo) | `VerMoBundle` | `VerMoTrainer` | `VerMoPipeline` | `MotionhubMultiTaskMultiAgentDataset` | `vermo/vermo_smoke.py` |
 | Motion (HyMotion M2M) | `HyMotionM2MBundle` | `HyMotionM2MTrainer` | `HyMotionM2MPipeline` | `MotionhubMultiTaskMultiAgentDataset` | `hymotion_m2m/` |
-| Motion (HyMotion M2M SOAR post-train) | `HyMotionM2MBundle` | `HyMotionM2MSoarTrainer` | `HyMotionM2MPipeline` | `MotionhubMultiTaskMultiAgentDataset` | `hymotion_m2m_v2/soar/` |
+| Motion (HyMotion M2M SOAR post-train) | `HyMotionM2MBundle` | `HyMotionM2MSoarTrainer` | `HyMotionM2MPipeline` | `MotionhubMultiTaskMultiAgentDataset` | `hymotion_m2m/soar/` |
 | Motion Repair (MoGenDIT) | — (external) | — | `MoGenDITRepairPipeline` | — | `scripts/repair/mogendit_repair.py` |
 
 ### MoGenDIT Integration (External)
@@ -180,6 +180,7 @@ External diffusion repair framework at `/apdcephfs_cq10/share_1467498/home/cheng
 | Representation | 201-dim: pose(22x6 rot6d) + joint(22x3) + trans(3) |
 | Models | 0.1B (recommended), 0.03B, 0.3B |
 | Checkpoint | `checkpoints/mogendit/MoreDiff-0.1B/` (symlink) |
+| SMPL body model | `checkpoints/motion_process/body_model/` (symlink to MoGenDIT) |
 | Repair modes | denoise, ada_denoise, trans_regen |
 | Pipeline | `hftrainer/pipelines/motion/mogendit_pipeline.py` |
 

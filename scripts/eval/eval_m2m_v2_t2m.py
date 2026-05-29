@@ -60,38 +60,38 @@ BONE_OFFSETS_PATH = 'data/hymotion_m2m_data/bone_offsets_22.pt'
 
 MODELS = {
     'uncond_local': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_uncond_local_046b',
         'has_caption': False,
         'rotation_space': 'local',
     },
     'uncond_global': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_global_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_uncond_global_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_uncond_global_046b',
         'has_caption': False,
         'rotation_space': 'global',
     },
     'caption_local': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_046b',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'caption_global': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_046b.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_046b',
         'has_caption': True,
         'rotation_space': 'global',
     },
     # Phase 1 variants: pure T2M curriculum (no completion tasks)
     'caption_local_phase1': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase1.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase1.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_phase1',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'caption_global_phase1': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_phase1.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_phase1.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_phase1',
         'has_caption': True,
         'rotation_space': 'global',
@@ -99,13 +99,13 @@ MODELS = {
     # Phase 2: pretrained T2M + completion / editing curriculum.  Bundle
     # architecture identical to phase1, only loss/data pipeline differs.
     'caption_local_phase2': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_phase2',
         'has_caption': True,
         'rotation_space': 'local',
     },
     'caption_global_phase2': {
-        'config': 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_global_phase2.py',
+        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_phase2.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_phase2',
         'has_caption': True,
         'rotation_space': 'global',

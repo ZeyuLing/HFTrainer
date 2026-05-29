@@ -47,7 +47,7 @@ def main():
     """
     Examples:
     Motion/vector model:
-    `python tools/analysis_tools/get_flops.py configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py --shape 1 196`
+    `python tools/analysis_tools/get_flops.py configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py --shape 1 196`
 
     Video-like model:
     `python tools/analysis_tools/get_flops.py configs/prism/prism_smoke.py --shape 5 3 256 256`

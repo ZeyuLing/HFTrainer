@@ -72,7 +72,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 # Constants
 # =============================================================================
 
-CONFIG_PATH = 'configs/hymotion_m2m_v2/hymotion_m2m_v2_overfit_100_caption_046b.py'
+CONFIG_PATH = 'configs/hymotion_m2m/hymotion_m2m_overfit_100_caption_046b.py'
 WORK_DIR = 'work_dirs/hymotion_m2m_v2_overfit_100_v2'
 ANNO_FILE = 'data/annotation/overfit_100_caption_20260526.json'
 MOTION_DATA_DIR = 'data/motionhub'

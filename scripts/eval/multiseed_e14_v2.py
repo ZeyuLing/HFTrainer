@@ -55,7 +55,7 @@ def main():
     parser.add_argument('--threshold', type=float, default=0.10,
                         help='Only process cases with skating > this')
     parser.add_argument('--bone-offsets', default='data/hymotion_m2m_data/bone_offsets_22.pt')
-    parser.add_argument('--config', default='configs/hymotion_m2m_v2/hymotion_m2m_v2_uncond_local_046b.py')
+    parser.add_argument('--config', default='configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py')
     parser.add_argument('--checkpoint', default='work_dirs/hymotion_m2m_v2_uncond_local_046b/checkpoint-epoch_2740/model.pt')
     parser.add_argument('--datalist', default='data/eval/m2m_v2/eval_e14_hq400h_static100.json')
     args = parser.parse_args()

@@ -98,13 +98,6 @@ def _customize_hymotion_m2m(cfg: Config, has_cuda: bool):
     cfg.accelerator.mixed_precision = 'no'
 
 
-def _customize_hymotion_m2m_v2(cfg: Config, has_cuda: bool):
-    cfg.train_dataloader.batch_size = 1
-    cfg.train_dataloader.num_workers = 0
-    cfg.train_dataloader.dataset.num_samples = 2
-    cfg.accelerator.mixed_precision = 'no'
-
-
 def _customize_hymotion_t2m(cfg: Config, has_cuda: bool):
     cfg.train_dataloader.batch_size = 1
     cfg.train_dataloader.num_workers = 0
@@ -143,15 +136,6 @@ def _vermo_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
 
 
 def _hymotion_m2m_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
-    return [
-        '--output', str(output_path),
-        '--num-steps', '2',
-        '--num-frames', '16',
-        '--device', _device_for_infer(has_cuda),
-    ]
-
-
-def _hymotion_m2m_v2_infer_args(repo_root: Path, has_cuda: bool, output_path: Path):
     return [
         '--output', str(output_path),
         '--num-steps', '2',
@@ -244,21 +228,6 @@ SMOKE_CASES = [
     ),
     pytest.param(
         SmokeCase(
-            name='hymotion_m2m_v2',
-            config_path='configs/hymotion_m2m_v2/hymotion_m2m_v2_smoke.py',
-            required_paths=[],
-            customize_cfg=_customize_hymotion_m2m_v2,
-            build_infer_args=_hymotion_m2m_v2_infer_args,
-            validate_infer=_validate_file_output,
-            requires_cuda=False,
-            train_timeout=900,
-            infer_timeout=900,
-        ),
-        marks=pytest.mark.smoke,
-        id='hymotion-m2m-v2',
-    ),
-    pytest.param(
-        SmokeCase(
             name='hymotion_t2m',
             config_path='configs/hymotion_t2m/hymotion_t2m_smoke.py',
             required_paths=[],
@@ -293,7 +262,7 @@ def test_train_and_infer_startup(case: SmokeCase, tmp_path: Path, repo_root: Pat
 
     work_dir = tmp_path / case.name
     output_path = work_dir / f'{case.name}_infer_output'
-    if case.name in {'prism', 'prism_mcm', 'hymotion_m2m', 'hymotion_m2m_v2', 'hymotion_t2m'}:
+    if case.name in {'prism', 'prism_mcm', 'hymotion_m2m', 'hymotion_t2m'}:
         output_path = output_path.with_suffix('.npz')
     elif case.name == 'vermo':
         output_path = output_path.with_suffix('.txt')

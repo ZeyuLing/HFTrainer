@@ -18,7 +18,7 @@ Usage:
 
     # HyMotion M2M (motion editing / completion)
     python tools/infer.py \\
-        --config configs/hymotion_m2m_v2/hymotion_m2m_v2_smoke.py \\
+        --config configs/hymotion_m2m/hymotion_m2m_smoke.py \\
         --checkpoint work_dirs/hymotion_m2m_smoke/checkpoint-iter_10 \\
         --input src_motion.npz \\
         --output output/edited.npz

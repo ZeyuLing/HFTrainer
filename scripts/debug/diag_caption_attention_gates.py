@@ -308,11 +308,11 @@ def analyze_model(label, bundle, vtxt, ctxt, ctxt_len, ctxt_mask, null_vtxt, nul
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    E2_CONFIG = 'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py'
+    E2_CONFIG = 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py'
     E2_CKPT = 'work_dirs/hymotion_m2m_v2_smpl_caption_E2/checkpoint-epoch_90'
 
     # Also load parent for comparison
-    PARENT_CONFIG = 'configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py'
+    PARENT_CONFIG = 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py'
     PARENT_CKPT = 'work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_3370'
 
     CACHE_PATH = 'data/eval/m2m_v2/caption_embeddings/cache.pt'

@@ -37,7 +37,7 @@ def main():
     from hftrainer.utils.checkpoint_utils import load_checkpoint
     from hftrainer.runner.accelerate_runner import AccelerateRunner
 
-    cfg = Config.fromfile('configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_046b.py')
+    cfg = Config.fromfile('configs/hymotion_m2m/hymotion_m2m_caption_local_046b.py')
     model_cfg = cfg.model.copy()
     model_cfg.pop('type', None)
     model_cfg['text_encoder'] = None

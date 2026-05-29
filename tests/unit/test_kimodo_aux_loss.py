@@ -558,7 +558,7 @@ class TestTrainerIntegration:
 
         cfg_path = os.path.join(
             _REPO_ROOT,
-            'configs/hymotion_m2m_v2/_base_hymotion_m2m_v2_046b.py',
+            'configs/hymotion_m2m/_base_hymotion_m2m_046b.py',
         )
         cfg = Config.fromfile(cfg_path)
         aux_kwargs = dict(cfg.model.kimodo_aux_loss_cfg)
@@ -693,7 +693,7 @@ class TestE1E2ConfigIntegration:
         from mmengine.config import Config
         return Config.fromfile(os.path.join(
             _REPO_ROOT,
-            'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_uncond_046b.py',
+            'configs/hymotion_m2m/hymotion_m2m_smpl_uncond_046b.py',
         ))
 
     @staticmethod
@@ -701,7 +701,7 @@ class TestE1E2ConfigIntegration:
         from mmengine.config import Config
         return Config.fromfile(os.path.join(
             _REPO_ROOT,
-            'configs/hymotion_m2m_v2/hymotion_m2m_v2_smpl_caption_046b.py',
+            'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
         ))
 
     def test_e1_velocity_loss_reduction_component_mean(self):

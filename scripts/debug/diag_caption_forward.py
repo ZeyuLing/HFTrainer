@@ -161,7 +161,7 @@ def forward_test(bundle, caption_emb, B=1, T=120, device='cuda:0', seed=0):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--config', default='configs/hymotion_m2m_v2/hymotion_m2m_v2_caption_local_phase2.py')
+    p.add_argument('--config', default='configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py')
     p.add_argument('--ckpt', default='work_dirs/hymotion_m2m_v2_caption_local_phase2/checkpoint-epoch_1810/model.pt')
     p.add_argument('--n_captions', type=int, default=5)
     p.add_argument('--n_seeds', type=int, default=3)
