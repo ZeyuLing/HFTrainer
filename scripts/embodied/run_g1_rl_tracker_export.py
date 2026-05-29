@@ -38,6 +38,8 @@ Usage:
         --input-dir output/physflow/eval_demo/data/npz/ \
         --output-dir output/physflow/eval_demo/data/robot_mesh_rl/
 """
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -48,6 +50,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+from math import cos, sin
 
 import mujoco
 import numpy as np
@@ -92,10 +95,13 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 # ---------------------------------------------------------------------------
 
 def parse_body_mesh_mapping(mjcf_path: pathlib.Path) -> list:
-    """Parse MJCF XML to extract body name → mesh file mapping.
+    """Parse MJCF XML to extract body name -> raw STL visual mapping.
 
-    Returns a list of dicts: [{"name": body_name, "meshes": [file1.stl, ...]}, ...]
-    in the order bodies appear in MuJoCo (excluding world body).
+    The browser viewer loads the original STL files directly. MuJoCo's compiled
+    ``geom_pos``/``geom_quat`` are for compiler-normalized mesh vertices and
+    must not be applied to raw STL vertices, otherwise visual meshes are offset
+    and rotated twice. For web visualization we therefore preserve the XML geom
+    transform only.
     """
     tree = ET.parse(str(mjcf_path))
     root = tree.getroot()
@@ -110,22 +116,76 @@ def parse_body_mesh_mapping(mjcf_path: pathlib.Path) -> list:
             if name and filename:
                 mesh_name_to_file[name] = filename
 
-    # Walk body hierarchy in DFS order (same as MuJoCo body indexing)
-    bodies = []
+    def parse_float_list(value: str | None, default: list[float]) -> list[float]:
+        if value is None:
+            return list(default)
+        return [float(x) for x in value.split()]
 
-    def walk_body(elem):
+    def quat_from_axis_angle(axis_angle: str | None) -> list[float] | None:
+        if axis_angle is None:
+            return None
+        values = [float(x) for x in axis_angle.split()]
+        if len(values) != 4:
+            return None
+        axis = np.asarray(values[:3], dtype=np.float64)
+        angle = values[3]
+        norm = np.linalg.norm(axis)
+        if norm < 1e-12:
+            return [1.0, 0.0, 0.0, 0.0]
+        axis = axis / norm
+        half = 0.5 * angle
+        xyz = axis * sin(half)
+        return [float(cos(half)), float(xyz[0]), float(xyz[1]), float(xyz[2])]
+
+    def quat_from_euler(euler: str | None) -> list[float] | None:
+        if euler is None:
+            return None
+        values = [float(x) for x in euler.split()]
+        if len(values) != 3:
+            return None
+        cx, cy, cz = (cos(v * 0.5) for v in values)
+        sx, sy, sz = (sin(v * 0.5) for v in values)
+        return [
+            cx * cy * cz + sx * sy * sz,
+            sx * cy * cz - cx * sy * sz,
+            cx * sy * cz + sx * cy * sz,
+            cx * cy * sz - sx * sy * cz,
+        ]
+
+    def geom_mesh_record(geom: ET.Element) -> dict | None:
+        if geom.get("type") not in (None, "mesh") and not geom.get("mesh"):
+            return None
+        mesh_name = geom.get("mesh", "")
+        if mesh_name not in mesh_name_to_file:
+            return None
+        quat = (
+            parse_float_list(geom.get("quat"), [1.0, 0.0, 0.0, 0.0])
+            if geom.get("quat") is not None
+            else quat_from_axis_angle(geom.get("axisangle"))
+            or quat_from_euler(geom.get("euler"))
+            or [1.0, 0.0, 0.0, 0.0]
+        )
+        return {
+            "file": mesh_name_to_file[mesh_name],
+            "pos": parse_float_list(geom.get("pos"), [0.0, 0.0, 0.0]),
+            "quat": quat,
+        }
+
+    bodies = []
+    def walk_body(elem: ET.Element) -> None:
         body_name = elem.get("name", "unnamed")
-        meshes = []
-        # Find geoms with type="mesh" in this body
+        mesh_records = []
+        seen_files = set()
         for geom in elem.findall("geom"):
-            if geom.get("type") == "mesh":
-                mesh_name = geom.get("mesh", "")
-                if mesh_name in mesh_name_to_file:
-                    stl_file = mesh_name_to_file[mesh_name]
-                    if stl_file not in meshes:
-                        meshes.append(stl_file)
-        bodies.append({"name": body_name, "meshes": meshes})
-        # Recurse into child bodies
+            mesh_record = geom_mesh_record(geom)
+            if mesh_record is None:
+                continue
+            stl_file = mesh_record["file"]
+            if stl_file in seen_files:
+                continue
+            seen_files.add(stl_file)
+            mesh_records.append(mesh_record)
+        bodies.append({"name": body_name, "meshes": mesh_records})
         for child in elem.findall("body"):
             walk_body(child)
 
@@ -133,7 +193,6 @@ def parse_body_mesh_mapping(mjcf_path: pathlib.Path) -> list:
     if worldbody is not None:
         for top_body in worldbody.findall("body"):
             walk_body(top_body)
-
     return bodies
 
 
@@ -232,6 +291,7 @@ def load_mujoco_model(mjcf_path: str, stiffness: list, damping: list, physics_dt
 
 def read_robot_state(data, anchor_body_index: int, root_body_index: int = 0):
     """Read robot state from MuJoCo buffers."""
+    body_pos = data.xpos[1:].copy()
     body_rot_wxyz = data.xquat[1:].copy()
     body_rot = mujoco_wxyz_to_xyzw(body_rot_wxyz)
 
@@ -244,6 +304,7 @@ def read_robot_state(data, anchor_body_index: int, root_body_index: int = 0):
     return {
         "dof_pos":            data.qpos[7:].copy().astype(np.float32),
         "dof_vel":            data.qvel[6:].copy().astype(np.float32),
+        "body_pos":           body_pos.astype(np.float32),
         "body_rot":           body_rot.astype(np.float32),
         "root_local_ang_vel": root_local_ang_vel,
     }
@@ -266,28 +327,50 @@ def set_initial_pose(model, data, motion_player):
 # ONNX inference
 # ---------------------------------------------------------------------------
 
-def build_onnx_inputs(robot_state, future_refs, onnx_name_to_key, anchor_body_index, num_dofs, prev_actions=None):
+def build_onnx_inputs(
+    robot_state,
+    ref_state,
+    future_refs,
+    onnx_name_to_key,
+    anchor_body_index,
+    num_dofs,
+    prev_actions=None,
+):
     """Assemble ONNX input dict from robot state + motion futures."""
     dof_pos = robot_state["dof_pos"]
     dof_vel = robot_state["dof_vel"]
+    body_pos = robot_state["body_pos"]
     body_rot = robot_state["body_rot"]
     root_local_ang_vel = robot_state["root_local_ang_vel"]
 
+    anchor_pos = body_pos[anchor_body_index]
     anchor_rot = compute_anchor_rot_np(body_rot, anchor_body_index)
 
     if prev_actions is None:
         prev_actions = np.zeros(num_dofs, dtype=np.float32)
 
     future_anchor_rot = future_refs["body_rot"][:, anchor_body_index, :]
+    future_anchor_pos = future_refs["body_pos"][:, anchor_body_index, :]
+    future_anchor_vel = future_refs["body_vel"][:, anchor_body_index, :]
+    future_anchor_ang_vel = future_refs["body_ang_vel"][:, anchor_body_index, :]
+    ref_anchor_pos = ref_state["body_pos"][anchor_body_index]
 
     key_to_array = {
         "current.dof_pos":             dof_pos[None],
         "current.dof_vel":             dof_vel[None],
+        "current.anchor_pos":          anchor_pos[None],
         "current.anchor_rot":          anchor_rot[None],
         "current.root_local_ang_vel":  root_local_ang_vel[None],
         "historical.processed_actions": prev_actions[None, None],
+        "mimic.ref_anchor_pos":        ref_anchor_pos[None],
+        "mimic.future_anchor_pos":     future_anchor_pos[None],
         "mimic.future_anchor_rot":     future_anchor_rot[None],
+        "mimic.future_anchor_vel":     future_anchor_vel[None],
+        "mimic.future_anchor_ang_vel": future_anchor_ang_vel[None],
+        "mimic.future_pos":            future_refs["body_pos"][None],
         "mimic.future_rot":            future_refs["body_rot"][None],
+        "mimic.future_vel":            future_refs["body_vel"][None],
+        "mimic.future_ang_vel":        future_refs["body_ang_vel"][None],
         "mimic.future_dof_pos":        future_refs["dof_pos"][None],
         "mimic.future_dof_vel":        future_refs["dof_vel"][None],
     }
@@ -298,6 +381,71 @@ def build_onnx_inputs(robot_state, future_refs, onnx_name_to_key, anchor_body_in
             onnx_inputs[onnx_name] = key_to_array[sem_key].astype(np.float32)
 
     return onnx_inputs
+
+
+def apply_heading_offset_to_positions(offset_quat_xyzw: np.ndarray, body_pos: np.ndarray, origin: np.ndarray) -> np.ndarray:
+    """Rotate world positions around an origin by a yaw-only heading offset."""
+    x, y, z, w = offset_quat_xyzw
+    yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    c = np.cos(yaw)
+    s = np.sin(yaw)
+    shifted = body_pos - origin
+    aligned = shifted.copy()
+    aligned[..., 0] = c * shifted[..., 0] - s * shifted[..., 1]
+    aligned[..., 1] = s * shifted[..., 0] + c * shifted[..., 1]
+    return aligned + origin
+
+
+def apply_heading_offset_to_vectors(offset_quat_xyzw: np.ndarray, vectors: np.ndarray) -> np.ndarray:
+    """Rotate world velocity vectors by a yaw-only heading offset."""
+    x, y, z, w = offset_quat_xyzw
+    yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    c = np.cos(yaw)
+    s = np.sin(yaw)
+    aligned = vectors.copy()
+    aligned[..., 0] = c * vectors[..., 0] - s * vectors[..., 1]
+    aligned[..., 1] = s * vectors[..., 0] + c * vectors[..., 1]
+    return aligned
+
+
+def _compute_root_tracking_stats(ref_root_positions, sim_root_positions) -> dict:
+    """Compare simulated root XY motion against the reference trajectory."""
+    if not ref_root_positions or not sim_root_positions:
+        return {
+            "root_displacement_ref_m": 0.0,
+            "root_displacement_track_m": 0.0,
+            "root_displacement_error_m": 0.0,
+            "root_trajectory_error_mean_m": 0.0,
+            "root_trajectory_error_final_m": 0.0,
+        }
+
+    ref = np.asarray(ref_root_positions, dtype=np.float64)
+    sim = np.asarray(sim_root_positions, dtype=np.float64)
+    n = min(len(ref), len(sim))
+    ref = ref[:n]
+    sim = sim[:n]
+    if n < 2:
+        return {
+            "root_displacement_ref_m": 0.0,
+            "root_displacement_track_m": 0.0,
+            "root_displacement_error_m": 0.0,
+            "root_trajectory_error_mean_m": 0.0,
+            "root_trajectory_error_final_m": 0.0,
+        }
+
+    ref_xy = ref[:, :2] - ref[0, :2]
+    sim_xy = sim[:, :2] - sim[0, :2]
+    traj_error = np.linalg.norm(sim_xy - ref_xy, axis=-1)
+    ref_disp = ref_xy[-1]
+    sim_disp = sim_xy[-1]
+
+    return {
+        "root_displacement_ref_m": float(np.linalg.norm(ref_disp)),
+        "root_displacement_track_m": float(np.linalg.norm(sim_disp)),
+        "root_displacement_error_m": float(np.linalg.norm(sim_disp - ref_disp)),
+        "root_trajectory_error_mean_m": float(np.mean(traj_error)),
+        "root_trajectory_error_final_m": float(traj_error[-1]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -384,11 +532,14 @@ def simulate_and_export(
 
     # Collect frames
     frames_data = []
+    ref_root_positions = []
+    sim_root_positions = []
     total_steps = 0
     max_pd_diff = 0.0
     fall_detected = False
 
     t_start = time.perf_counter()
+    initial_ref_pos = player.get_state_at_frame(0)["body_pos"][anchor_body_index]
 
     for frame_idx in range(player.total_frames):
         # Read robot state
@@ -401,12 +552,29 @@ def simulate_and_export(
             heading_offset = compute_yaw_offset_np(robot_anchor_rot, motion_anchor_rot)
 
         # Get future motion references
+        ref_state = player.get_state_at_frame(frame_idx)
+        ref_state = dict(ref_state)
+        ref_state["body_pos"] = apply_heading_offset_to_positions(
+            heading_offset,
+            ref_state["body_pos"],
+            initial_ref_pos,
+        )
+        ref_state["body_vel"] = apply_heading_offset_to_vectors(heading_offset, ref_state["body_vel"])
+        ref_state["body_ang_vel"] = apply_heading_offset_to_vectors(heading_offset, ref_state["body_ang_vel"])
         future_refs = player.get_future_references(frame_idx, future_step_indices)
+        future_refs["body_pos"] = apply_heading_offset_to_positions(
+            heading_offset,
+            future_refs["body_pos"],
+            initial_ref_pos,
+        )
+        future_refs["body_vel"] = apply_heading_offset_to_vectors(heading_offset, future_refs["body_vel"])
+        future_refs["body_ang_vel"] = apply_heading_offset_to_vectors(heading_offset, future_refs["body_ang_vel"])
         future_refs["body_rot"] = apply_heading_offset_np(heading_offset, future_refs["body_rot"])
 
         # Build ONNX inputs
         onnx_inputs = build_onnx_inputs(
             robot_state=robot_state,
+            ref_state=ref_state,
             future_refs=future_refs,
             onnx_name_to_key=onnx_name_to_key,
             anchor_body_index=anchor_body_index,
@@ -451,6 +619,8 @@ def simulate_and_export(
             break
 
         # Export frame (subsample)
+        ref_root_positions.append(ref_state["body_pos"][0].copy())
+        sim_root_positions.append(data.xpos[1].copy())
         if frame_idx % subsample_factor == 0:
             # body_pos: data.xpos[1:] (skip world body), shape [num_bodies, 3]
             body_pos = data.xpos[1:num_bodies+1].copy()
@@ -463,7 +633,7 @@ def simulate_and_export(
             })
 
         # Track ref error
-        ref_dof_pos = player.get_state_at_frame(frame_idx)["dof_pos"]
+        ref_dof_pos = ref_state["dof_pos"]
         diff = float(np.abs(data.qpos[7:] - ref_dof_pos).max())
         if diff > max_pd_diff:
             max_pd_diff = diff
@@ -500,6 +670,8 @@ def simulate_and_export(
     file_size_mb = os.path.getsize(output_json_path) / 1e6
     log.info(f"  Saved: {output_json_path} ({file_size_mb:.1f} MB, {len(frames_data)} frames)")
 
+    root_stats = _compute_root_tracking_stats(ref_root_positions, sim_root_positions)
+
     stats = {
         "total_steps": total_steps,
         "total_frames_exported": len(frames_data),
@@ -508,6 +680,7 @@ def simulate_and_export(
         "root_height_final": float(data.qpos[2]),
         "elapsed_seconds": elapsed,
         "output_fps": output_fps,
+        **root_stats,
     }
     return stats
 
@@ -522,6 +695,9 @@ def retarget_npz_to_motion(
     smpl_model_path: str = None,
     urdf_path: str = None,
     fps: int = 30,
+    pyroki_max_iterations: int = 800,
+    subsample_factor: int = 1,
+    target_raw_frames: int = 450,
 ) -> pathlib.Path:
     """Run retargeting pipeline: motion_135 NPZ → .motion file.
 
@@ -551,6 +727,10 @@ def retarget_npz_to_motion(
         "--urdf", urdf_path,
         "--fps", str(fps),
         "--keep-intermediates",
+        "--pyroki-max-iterations", str(pyroki_max_iterations),
+        "--subsample-factor", str(subsample_factor),
+        "--target-raw-frames", str(target_raw_frames),
+        "--output-fps", str(max(1, int(round(fps / max(subsample_factor, 1))))),
     ]
 
     log.info(f"  Running retargeting: {npz_path.name}")

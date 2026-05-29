@@ -99,10 +99,13 @@ def main():
     parser.add_argument("--target-raw-frames", type=int, default=450,
                         help="Target raw frames for PyRoki (default: 450)")
     # ProtoMotions convert options
-    parser.add_argument("--output-fps", type=int, default=30,
-                        help="Output FPS for ProtoMotions .motion (default: 30)")
+    parser.add_argument("--output-fps", type=int, default=None,
+                        help="Output FPS for ProtoMotions .motion. Defaults to fps/subsample-factor.")
     parser.add_argument("--robot-type", default="g1",
                         help="Robot type (default: g1)")
+    parser.add_argument("--pyroki-max-iterations", type=int,
+                        default=int(os.environ.get("PYROKI_MAX_ITERATIONS", "800")),
+                        help="Maximum PyRoki/JAXLS solver iterations (default: 800; lower for smoke tests)")
     args = parser.parse_args()
 
     input_path = pathlib.Path(args.input).resolve()
@@ -111,6 +114,12 @@ def main():
     if not input_path.exists():
         print(f"ERROR: Input file not found: {input_path}")
         sys.exit(1)
+
+    effective_output_fps = (
+        args.output_fps
+        if args.output_fps is not None
+        else max(1, int(round(args.fps / max(args.subsample_factor, 1))))
+    )
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +172,7 @@ def main():
             "--subsample-factor", str(args.subsample_factor),
             "--target-raw-frames", str(args.target_raw_frames),
             "--input-fps", str(args.fps),
+            "--max-iterations", str(args.pyroki_max_iterations),
         ]
         run_step(contacts_cmd, "Extract foot contact labels")
 
@@ -180,8 +190,10 @@ def main():
             "--subsample-factor", str(args.subsample_factor),
             "--target-raw-frames", str(args.target_raw_frames),
             "--input-fps", str(args.fps),
+            "--max-iterations", str(args.pyroki_max_iterations),
         ]
-        run_step(retarget_cmd, "PyRoki retargeting (keypoints -> robot NPZ)")
+        run_step(retarget_cmd, "PyRoki retargeting (keypoints -> robot NPZ)",
+                 env_extra={"PYROKI_MAX_ITERATIONS": str(args.pyroki_max_iterations)})
 
         # Verify retargeted file exists
         retargeted_npz = retarget_dir / f"{stem}.npz"
@@ -202,7 +214,7 @@ def main():
             "--retargeted-motion-dir", str(retarget_dir),
             "--output-dir", str(output_dir),
             "--input-fps", str(args.fps),
-            "--output-fps", str(args.output_fps),
+            "--output-fps", str(effective_output_fps),
             "--robot-type", str(args.robot_type),
             "--force-remake",  # Always overwrite existing .motion files to ensure contacts are applied
         ]
@@ -216,7 +228,7 @@ def main():
             pythonpath_extra = f"{data_scripts_dir}:{pythonpath_extra}" if pythonpath_extra else data_scripts_dir
         run_step(proto_cmd, "Retargeted NPZ -> ProtoMotions .motion",
                  cwd=str(PROTOMOTIONS_ROOT),
-                 env_extra={"PYTHONPATH": pythonpath_extra, "MUJOCO_GL": "egl"})
+                 env_extra={"PYTHONPATH": pythonpath_extra, "MUJOCO_GL": "disable"})
 
         # ==================================================================
         # Done!
