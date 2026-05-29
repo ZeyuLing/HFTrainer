@@ -13,7 +13,7 @@ Usage:
         --task T1 T2 T3 T4 T5 T6 T7 T8 \
         --models uncond_fm_man uncond_fm_man_globalrot \
         --max-samples 100 --num-steps 50 \
-        --output-dir eval_results/m2m/ --save-viz
+        --output-dir output/eval_results/m2m/ --save-viz
 
 Task → Representative Setting:
     T1: T1-C (首尾各5帧, UMO setting)
@@ -73,7 +73,7 @@ UPPER_BODY_JOINTS = [3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 LOWER_BODY_JOINTS = [0, 1, 2, 4, 5, 7, 8, 10, 11]
 
 # ============================================================================
-# Model registry — 2 primary + 2 DiT + textfree variants
+# Model registry — primary uncond variants
 # ============================================================================
 M2M_CONFIGS = {
     "uncond_fm_man": {
@@ -86,62 +86,6 @@ M2M_CONFIGS = {
         "config": "configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_globalrot_046b.py",
         "work_dir": "hymotion_m2m_completion_uncond_fm_man_globalrot_046b",
         "desc": "Uncond FM MAN 0.46B (global rot, epoch 527)",
-        "needs_text": False,
-    },
-    # DiT text-free variants (configs/hymotion_dit/)
-    "dit_fm_man_s": {
-        "config": "configs/hymotion_dit/hymotion_dit_fm_man_s.py",
-        "work_dir": "hymotion_dit_fm_man_s",
-        "desc": "DiT-S(49M) FM+MAN",
-        "needs_text": False,
-    },
-    "dit_fm_man_b": {
-        "config": "configs/hymotion_dit/hymotion_dit_fm_man_b.py",
-        "work_dir": "hymotion_dit_fm_man_b",
-        "desc": "DiT-B(288M) FM+MAN",
-        "needs_text": False,
-    },
-    "dit_fm_man_l": {
-        "config": "configs/hymotion_dit/hymotion_dit_fm_man_l.py",
-        "work_dir": "hymotion_dit_fm_man_l",
-        "desc": "DiT-L(383M) FM+MAN",
-        "needs_text": False,
-    },
-    "dit_fm_man_globalrot_s": {
-        "config": "configs/hymotion_dit/hymotion_dit_fm_man_globalrot_s.py",
-        "work_dir": "hymotion_dit_fm_man_globalrot_s",
-        "desc": "DiT-S(49M) FM+MAN+GlobalRot",
-        "needs_text": False,
-    },
-    "dit_fm_man_globalrot_b": {
-        "config": "configs/hymotion_dit/hymotion_dit_fm_man_globalrot_b.py",
-        "work_dir": "hymotion_dit_fm_man_globalrot_b",
-        "desc": "DiT-B(288M) FM+MAN+GlobalRot",
-        "needs_text": False,
-    },
-    "dit_fm_man_globalrot_l": {
-        "config": "configs/hymotion_dit/hymotion_dit_fm_man_globalrot_l.py",
-        "work_dir": "hymotion_dit_fm_man_globalrot_l",
-        "desc": "DiT-L(383M) FM+MAN+GlobalRot",
-        "needs_text": False,
-    },
-    # DiT No-Inactive VACE ablation (reactive+mask only, no inactive channel)
-    "dit_noinact_fm_man_s": {
-        "config": "configs/hymotion_dit/hymotion_dit_no_inactive_fm_man_s.py",
-        "work_dir": "hymotion_dit_no_inactive_fm_man_s",
-        "desc": "DiT-S(49M) FM+MAN NoInactive",
-        "needs_text": False,
-    },
-    "dit_noinact_fm_man_b": {
-        "config": "configs/hymotion_dit/hymotion_dit_no_inactive_fm_man_b.py",
-        "work_dir": "hymotion_dit_no_inactive_fm_man_b",
-        "desc": "DiT-B(288M) FM+MAN NoInactive",
-        "needs_text": False,
-    },
-    "dit_noinact_fm_man_l": {
-        "config": "configs/hymotion_dit/hymotion_dit_no_inactive_fm_man_l.py",
-        "work_dir": "hymotion_dit_no_inactive_fm_man_l",
-        "desc": "DiT-L(383M) FM+MAN NoInactive",
         "needs_text": False,
     },
 }
@@ -1047,7 +991,7 @@ def main():
     parser.add_argument("--max-samples", type=int, default=100)
     parser.add_argument("--num-steps", type=int, default=50)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--output-dir", type=str, default="eval_results/m2m")
+    parser.add_argument("--output-dir", type=str, default="../output/eval_results/m2m")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save-viz", action="store_true",
                         help="Save output NPZ files for visualization")

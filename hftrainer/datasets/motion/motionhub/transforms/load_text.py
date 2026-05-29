@@ -228,12 +228,14 @@ class LoadPreExtractedT5Feature(BaseTransform):
         max_seq_length: int = 256,
         allow_none: bool = True,
         hidden_dim: int = 4096,
+        select_idx: Optional[int] = None,
     ):
         self.feature_dir = feature_dir
         self.data_dir = data_dir
         self.max_seq_length = max_seq_length
         self.allow_none = allow_none
         self.hidden_dim = hidden_dim
+        self.select_idx = select_idx
 
     def _caption_path_to_t5_path(self, caption_path: str) -> str:
         """Map caption_path to the corresponding T5 feature .pt path.
@@ -300,8 +302,11 @@ class LoadPreExtractedT5Feature(BaseTransform):
                 return None
             raise ValueError(f"No embeddings found in {pt_path}")
 
-        # Randomly select one variant (data augmentation, same as LoadCompatibleCaption)
-        idx = random.randint(0, len(embeddings) - 1)
+        if self.select_idx is None:
+            # Randomly select one variant (data augmentation, same as LoadCompatibleCaption).
+            idx = random.randint(0, len(embeddings) - 1)
+        else:
+            idx = int(self.select_idx) % len(embeddings)
         emb = embeddings[idx]       # [seq_len_i, hidden_dim] bf16
         seq_len = seq_lens[idx]
         caption = captions[idx] if idx < len(captions) else ''

@@ -257,6 +257,9 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
             "speaker_id": raw_data_info.get("speaker_id"),
             # editing pair: source motion for Neutral→Emotion style transfer
             "source_motion_path": source_motion_path,
+            # deterministic task tag for small overfit/debug datasets
+            "overfit_task": raw_data_info.get("overfit_task"),
+            "overfit_source_key": raw_data_info.get("overfit_source_key"),
         }
         candidate_tasks = self._resolve_candidate_tasks(task_bucket)
         # determine what tasks can be trained on this data

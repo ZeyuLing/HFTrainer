@@ -3,7 +3,7 @@
 Run MoGenDIT ada_denoise repair on the same 100 T7 eval cases for comparison
 with M2M repair results.
 
-Output goes into: eval_results/m2m/T7/mogendit_ada_denoise/case_XXXX/
+Output goes into: output/eval_results/m2m/T7/mogendit_ada_denoise/case_XXXX/
   - output.npz: repaired motion
   - gt.npz: symlink to original gt
   - meta.json: metrics + comparison info
@@ -25,7 +25,7 @@ import torch
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-EVAL_ROOT = PROJECT_ROOT / "eval_results" / "m2m" / "T7"
+EVAL_ROOT = PROJECT_ROOT.parent / "output" / "eval_results" / "m2m" / "T7"
 REF_CONFIG = "uncond_fm_man"  # use this config's cases as reference
 DATA_ROOT = PROJECT_ROOT / "data" / "hymotion_data"
 

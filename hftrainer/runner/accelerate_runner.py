@@ -1171,19 +1171,25 @@ class AccelerateRunner:
             os.makedirs(ckpt_dir, exist_ok=True)
         self.accelerator.wait_for_everyone()
 
+        # Save selective model weights before accelerator.save_state().
+        # With FSDP, Accelerator.save_state() also enters FSDP state-dict
+        # contexts.  Collecting our model-only state first keeps model.pt an
+        # exact snapshot of the live in-memory model used for the last forward.
+        state_dict = self._state_dict_to_save()
+
+        if self.accelerator.is_main_process:
+            import torch
+            torch.save(state_dict, os.path.join(ckpt_dir, 'model.pt'))
+
+        self.accelerator.wait_for_everyone()
+
         # Save the accelerator state on every process so distributed backends
-        # can write their rank-local shards and RNG state.
+        # can write their rank-local shards, optimizer, scheduler and RNG state.
         self.accelerator.save_state(ckpt_dir)
         self.accelerator.wait_for_everyone()
 
-        # Save selective model weights in a backend-aware way.
-        state_dict = self._state_dict_to_save()
-
         if not self.accelerator.is_main_process:
             return
-
-        import torch
-        torch.save(state_dict, os.path.join(ckpt_dir, 'model.pt'))
 
         # Save meta using completed step / epoch counts for exact resume.
         meta = {'global_step': self.global_step, 'current_epoch': self.current_epoch}
@@ -1438,8 +1444,16 @@ class AccelerateRunner:
 
     def _get_module_state_dict(self, module: nn.Module) -> dict:
         """Return a saveable state dict without forcing unnecessary backend imports."""
+        if self.accelerator.distributed_type == DistributedType.FSDP:
+            module_state = self.accelerator.get_state_dict(module)
+            if not self.accelerator.is_main_process:
+                return {}
+            return {
+                key: value.detach().cpu().clone()
+                for key, value in module_state.items()
+            }
+
         if self.accelerator.distributed_type in {
-            DistributedType.FSDP,
             DistributedType.DEEPSPEED,
             DistributedType.MEGATRON_LM,
         }:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Batch quality check for M2M eval outputs.
 
-Runs MotionQualityChecker on all eval_results/m2m/<task>/<model>/<case>/output.npz
+Runs MotionQualityChecker on all output/eval_results/m2m/<task>/<model>/<case>/output.npz
 and saves quality.json alongside each.
 
 Usage:
@@ -23,7 +23,9 @@ from hftrainer.evaluation.quality_check_rules.motion_quality_checker import Moti
 
 def main():
     parser = argparse.ArgumentParser(description="Batch quality check for M2M eval outputs")
-    parser.add_argument("--eval-dir", default=os.path.join(PROJECT_ROOT, "eval_results", "m2m"),
+    parser.add_argument(
+        "--eval-dir",
+        default=os.path.normpath(os.path.join(PROJECT_ROOT, "..", "output", "eval_results", "m2m")),
                         help="M2M eval results directory")
     parser.add_argument("--device", default="cuda", help="Device for checker (default: cuda)")
     parser.add_argument("--force", action="store_true", help="Re-check even if quality.json exists")

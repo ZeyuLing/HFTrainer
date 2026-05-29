@@ -16,6 +16,7 @@ import sys
 import tempfile
 import logging
 import importlib.util
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +40,20 @@ MOGENDIT_CKPT_ROOT = os.environ.get(
     str(_DEFAULT_CKPT_ROOT if _DEFAULT_CKPT_ROOT.exists()
         else _LEGACY_MOGENDIT_ROOT / 'save' / 'ckpt'),
 )
+CHECKPOINTS_DIR = PROJECT_ROOT / 'checkpoints'
+MOTION_PROCESS_DIR = CHECKPOINTS_DIR / 'motion_process'
+
+
+@contextmanager
+def _mogendit_cwd():
+    """MoGenDIT resolves SMPL assets via ./motion_process relative to cwd."""
+    CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    prev = os.getcwd()
+    try:
+        os.chdir(CHECKPOINTS_DIR)
+        yield
+    finally:
+        os.chdir(prev)
 
 
 def _ensure_mogendit_imports():
@@ -46,18 +61,13 @@ def _ensure_mogendit_imports():
     if MOGENDIT_ROOT not in sys.path:
         sys.path.insert(0, MOGENDIT_ROOT)
 
-    # body_model symlink: motion_process/body_model must be accessible from cwd.
-    # The MoGenDIT NpzMotion.load_data -> smplh_to_body_motion -> AnimoSMPLBody
-    # needs ./motion_process/body_model/ to resolve SMPL body models.
-    local_mp = Path('./motion_process')
-    local_bm = local_mp / 'body_model'
+    # Canonical location: checkpoints/motion_process/body_model.
+    # MoGenDIT's smplh_processor loads ./motion_process/body_model/ from cwd;
+    # callers should use _mogendit_cwd() (cwd=checkpoints/) when loading NPZ.
+    local_bm = MOTION_PROCESS_DIR / 'body_model'
     target_bm = Path(MOGENDIT_ROOT) / 'motion_process' / 'body_model'
     if not local_bm.exists() and target_bm.exists():
-        local_mp.mkdir(parents=True, exist_ok=True)
-        # Create __init__.py if needed
-        init_file = local_mp / '__init__.py'
-        if not init_file.exists():
-            init_file.touch()
+        MOTION_PROCESS_DIR.mkdir(parents=True, exist_ok=True)
         try:
             os.symlink(str(target_bm), str(local_bm))
             logger.info(f'Created body_model symlink: {local_bm} -> {target_bm}')
@@ -246,7 +256,7 @@ class MoGenDITRepairPipeline:
             raise FileNotFoundError(f'NPZ file not found: {npz_path}')
 
         # NpzMotion.load_data expects a directory; create tmpdir with symlink
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _mogendit_cwd(), tempfile.TemporaryDirectory() as tmpdir:
             link_path = Path(tmpdir) / npz_path.name
             os.symlink(str(npz_path.resolve()), str(link_path))
             data_dict = NpzMotion.load_data(tmpdir, fps=30)

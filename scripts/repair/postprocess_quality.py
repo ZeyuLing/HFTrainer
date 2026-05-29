@@ -87,7 +87,7 @@ def process_one(case_dir_str: str) -> str | None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--eval-dir", default="eval_results/m2m")
+    parser.add_argument("--eval-dir", default="output/eval_results/m2m")
     parser.add_argument("--tasks", nargs="*", default=None, help="Tasks to process (default: all)")
     parser.add_argument("--force", action="store_true", help="Recompute existing quality.json")
     parser.add_argument("--workers", type=int, default=16, help="Number of parallel workers")

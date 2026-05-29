@@ -18,17 +18,19 @@ Output layout under --output-root:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import pickle
 import sys
+import types
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -79,8 +81,14 @@ _RX_NEG90 = np.array([
 ], dtype=np.float32)
 
 # Approximate pelvis standing height above ground (from bone_offsets_22.pt:
-# pelvis→l_hip→l_knee→l_ankle→l_foot chain Y distance = 0.92m)
+# pelvis->l_hip->l_knee->l_ankle->l_foot chain Y distance = 0.92m). This is
+# only a first-pass restoration before FK-based pair grounding below.
 _PELVIS_STANDING_HEIGHT = 0.92
+
+_SMPL22_PARENTS = [
+    -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19
+]
+_BONE_OFFSETS_CACHE = None
 
 
 def _matrix_to_axis_angle(rot_matrices: np.ndarray) -> np.ndarray:
@@ -177,6 +185,132 @@ def _axis_angle_to_matrix(axis_angle: np.ndarray) -> np.ndarray:
     return np.where(theta[..., None] < 1e-8, eye, rot).astype(np.float32)
 
 
+def _yaw_matrix(yaw: float) -> np.ndarray:
+    c, s = np.cos(yaw), np.sin(yaw)
+    return np.array(
+        [[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]],
+        dtype=np.float32,
+    )
+
+
+def _apply_world_yaw(
+    rots_66: np.ndarray,
+    trans: np.ndarray,
+    R_yaw: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply one world yaw rotation to translation and root orientation."""
+    rots_66 = np.asarray(rots_66, dtype=np.float32).copy()
+    trans = np.asarray(trans, dtype=np.float32).copy()
+
+    trans = (R_yaw @ trans.T).T.astype(np.float32)
+
+    root_R = _axis_angle_to_matrix(rots_66[:, :3])
+    root_R = np.einsum("ij,tjk->tik", R_yaw, root_R)
+    rots_66[:, :3] = _matrix_to_axis_angle(root_R)
+    return rots_66, trans
+
+
+def _fk_min_y(motions_135: List[np.ndarray]) -> float:
+    """Compute the minimum FK joint height over one or more 135-dim motions."""
+    global _BONE_OFFSETS_CACHE
+    if _BONE_OFFSETS_CACHE is None:
+        bone_offsets_path = REPO_ROOT / "data" / "hymotion_m2m_data" / "bone_offsets_22.pt"
+        _BONE_OFFSETS_CACHE = torch.load(
+            bone_offsets_path, map_location="cpu", weights_only=True
+        ).float().numpy()
+    bone_offsets = _BONE_OFFSETS_CACHE
+
+    min_y = float("inf")
+    for motion in motions_135:
+        world_pos = _motion135_to_positions_np(motion, bone_offsets)
+        min_y = min(min_y, float(world_pos[..., 1].min()))
+    return min_y
+
+
+def _motion135_to_positions_np(motion_135: np.ndarray, bone_offsets: np.ndarray) -> np.ndarray:
+    """Self-contained FK for local row-major rot6d + translation."""
+    motion_135 = np.asarray(motion_135, dtype=np.float32)
+    trans = motion_135[:, :3]
+    rot6d = motion_135[:, 3:135].reshape(-1, 22, 6)
+    local_rot = _rot6d_row_to_matrix_np(rot6d)
+
+    T = motion_135.shape[0]
+    world_rot = np.zeros((T, 22, 3, 3), dtype=np.float32)
+    world_pos = np.zeros((T, 22, 3), dtype=np.float32)
+
+    for j, parent in enumerate(_SMPL22_PARENTS):
+        if parent < 0:
+            world_rot[:, j] = local_rot[:, j]
+            world_pos[:, j] = trans + bone_offsets[j]
+        else:
+            world_rot[:, j] = np.einsum("tij,tjk->tik", world_rot[:, parent], local_rot[:, j])
+            offset = np.einsum("tij,j->ti", world_rot[:, parent], bone_offsets[j])
+            world_pos[:, j] = world_pos[:, parent] + offset
+    return world_pos
+
+
+def _rot6d_row_to_matrix_np(rot6d: np.ndarray) -> np.ndarray:
+    """Convert HYMotion row-major rot6d to rotation matrix via Gram-Schmidt."""
+    rot6d = np.asarray(rot6d, dtype=np.float32)
+    a1 = rot6d[..., [0, 2, 4]]
+    a2 = rot6d[..., [1, 3, 5]]
+    b1 = _normalize_vec(a1)
+    b2 = _normalize_vec(a2 - (b1 * a2).sum(axis=-1, keepdims=True) * b1)
+    b3 = np.cross(b1, b2, axis=-1)
+    return np.stack([b1, b2, b3], axis=-1).astype(np.float32)
+
+
+def _normalize_vec(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    norm = np.linalg.norm(x, axis=-1, keepdims=True)
+    return x / np.maximum(norm, eps)
+
+
+def _canonicalize_motionfix_pair(
+    src_rots_66: np.ndarray,
+    src_trans: np.ndarray,
+    tgt_rots_66: np.ndarray,
+    tgt_trans: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict]:
+    """Convert MotionFix source/target to the HYMotion training convention.
+
+    The same rigid transform is applied to source and target so the editing
+    pair remains geometrically aligned:
+      1. MotionFix Z-up -> HYMotion Y-up.
+      2. Rotate by the source first-frame yaw so source starts facing +Z.
+      3. Shift XZ by the source first-frame pelvis location.
+      4. Shift Y so the combined source/target FK minimum sits at y=0.
+    """
+    src_rots_66, src_trans = _convert_zup_to_yup(src_rots_66, src_trans)
+    tgt_rots_66, tgt_trans = _convert_zup_to_yup(tgt_rots_66, tgt_trans)
+
+    src_root_R0 = _axis_angle_to_matrix(src_rots_66[:1, :3])[0]
+    forward0 = src_root_R0 @ np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    yaw0 = float(np.arctan2(forward0[0], forward0[2]))
+    R_yaw = _yaw_matrix(-yaw0)
+
+    src_rots_66, src_trans = _apply_world_yaw(src_rots_66, src_trans, R_yaw)
+    tgt_rots_66, tgt_trans = _apply_world_yaw(tgt_rots_66, tgt_trans, R_yaw)
+
+    xz0 = src_trans[0, [0, 2]].copy()
+    src_trans[:, 0] -= xz0[0]
+    src_trans[:, 2] -= xz0[1]
+    tgt_trans[:, 0] -= xz0[0]
+    tgt_trans[:, 2] -= xz0[1]
+
+    src_motion_135 = _motion_135(_make_smplx_poses(src_rots_66), src_trans)
+    tgt_motion_135 = _motion_135(_make_smplx_poses(tgt_rots_66), tgt_trans)
+    min_y = _fk_min_y([src_motion_135, tgt_motion_135])
+    src_trans[:, 1] -= min_y
+    tgt_trans[:, 1] -= min_y
+
+    meta = {
+        "source_anchor_yaw_rad": yaw0,
+        "source_anchor_xz": [float(xz0[0]), float(xz0[1])],
+        "ground_shift_y": float(-min_y),
+    }
+    return src_rots_66, src_trans, tgt_rots_66, tgt_trans, meta
+
+
 def _smpl22_axis_angle_to_rot6d_row_major(poses_156: np.ndarray) -> np.ndarray:
     aa = np.asarray(poses_156[:, :66], dtype=np.float32).reshape(-1, 22, 3)
     rot = _axis_angle_to_matrix(aa.reshape(-1, 3)).reshape(aa.shape[0], 22, 3, 3)
@@ -190,17 +324,14 @@ def _motion_135(poses_156: np.ndarray, trans: np.ndarray) -> np.ndarray:
 
 
 def _save_motion_npz(path: Path, rots_66: np.ndarray, trans: np.ndarray, fps: float) -> tuple:
-    """Save motion NPZ with Z-up → Y-up conversion.
+    """Save one already-canonicalized MotionFix motion NPZ.
 
     Returns:
-        (poses_156, trans_yup): converted poses and translation for downstream use.
+        (poses_156, trans): converted poses and translation for downstream use.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     rots_66 = np.asarray(rots_66, dtype=np.float32)
     trans = np.asarray(trans, dtype=np.float32)
-
-    # Convert Z-up → Y-up coordinate system
-    rots_66, trans = _convert_zup_to_yup(rots_66, trans)
 
     poses = _make_smplx_poses(rots_66)
     np.savez(
@@ -270,6 +401,7 @@ def convert_smpl_and_text(
     splits: List[str],
     fps: float,
     overwrite: bool,
+    max_items_per_split: int = 0,
 ) -> List[Dict]:
     data_list: Dict[str, Dict] = {}
     hymotion_root = output_root.parents[1]
@@ -279,7 +411,9 @@ def convert_smpl_and_text(
         split_data = _load_split(split_path)
         print(f"[INFO] {split}: {len(split_data)} pairs")
 
-        for motionfix_id, item in split_data.items():
+        for item_idx, (motionfix_id, item) in enumerate(split_data.items()):
+            if max_items_per_split > 0 and item_idx >= max_items_per_split:
+                break
             instruction = str(item["text"]).strip()
             pair_stem = str(motionfix_id)
 
@@ -297,24 +431,27 @@ def convert_smpl_and_text(
             caption_path = hymotion_root / caption_rel
             pair_path = hymotion_root / pair_rel
 
-            if overwrite or not source_npz.exists():
-                src = item["motion_source"]
-                src_poses, src_trans_yup = _save_motion_npz(
-                    source_npz,
+            src = item["motion_source"]
+            tgt = item["motion_target"]
+            src_rots, src_trans, tgt_rots, tgt_trans, canonical_meta = (
+                _canonicalize_motionfix_pair(
                     _to_numpy(src["rots"]),
                     _to_numpy(src["trans"]),
-                    fps,
+                    _to_numpy(tgt["rots"]),
+                    _to_numpy(tgt["trans"]),
+                )
+            )
+
+            if overwrite or not source_npz.exists():
+                src_poses, src_trans_yup = _save_motion_npz(
+                    source_npz, src_rots, src_trans, fps
                 )
                 source_135.parent.mkdir(parents=True, exist_ok=True)
                 np.save(source_135, _motion_135(src_poses, src_trans_yup).astype(np.float32))
 
             if overwrite or not target_npz.exists():
-                tgt = item["motion_target"]
                 tgt_poses, tgt_trans_yup = _save_motion_npz(
-                    target_npz,
-                    _to_numpy(tgt["rots"]),
-                    _to_numpy(tgt["trans"]),
-                    fps,
+                    target_npz, tgt_rots, tgt_trans, fps
                 )
                 target_135.parent.mkdir(parents=True, exist_ok=True)
                 np.save(target_135, _motion_135(tgt_poses, tgt_trans_yup).astype(np.float32))
@@ -331,6 +468,7 @@ def convert_smpl_and_text(
                 "source_motion_135_path": source_135_rel,
                 "target_motion_135_path": target_135_rel,
                 "caption_path": caption_rel,
+                "canonicalization": canonical_meta,
                 "source_timestamp": item["motion_source"].get("timestamp"),
                 "target_timestamp": item["motion_target"].get("timestamp"),
             }
@@ -347,6 +485,9 @@ def convert_smpl_and_text(
                 "duration": duration,
                 "num_frames": int(_to_numpy(item["motion_target"]["trans"]).shape[0]),
                 "language": "en",
+                # Training loader reads source_motion_path. Keep
+                # source_smplx_path as a compatibility alias for old scripts.
+                "source_motion_path": source_npz_rel,
                 "source_smplx_path": source_npz_rel,
                 "edit_pair_path": pair_rel,
             }
@@ -380,6 +521,42 @@ def convert_smpl_and_text(
     ]
 
 
+def _load_hy_text_model_class():
+    """Load HYTextModel without importing hftrainer package-level registries."""
+    package_name = "_motionfix_hymotion_text"
+    network_dir = REPO_ROOT / "hftrainer" / "models" / "motion" / "hymotion_m2m" / "network"
+
+    if package_name not in sys.modules:
+        package_module = types.ModuleType(package_name)
+        package_module.__path__ = [str(network_dir)]
+        sys.modules[package_name] = package_module
+
+    constants_name = f"{package_name}.text_constants"
+    if constants_name not in sys.modules:
+        constants_spec = importlib.util.spec_from_file_location(
+            constants_name,
+            network_dir / "text_constants.py",
+        )
+        if constants_spec is None or constants_spec.loader is None:
+            raise RuntimeError("failed to load text_constants.py")
+        constants_module = importlib.util.module_from_spec(constants_spec)
+        sys.modules[constants_name] = constants_module
+        constants_spec.loader.exec_module(constants_module)
+
+    encoder_name = f"{package_name}.text_encoder"
+    encoder_spec = importlib.util.spec_from_file_location(
+        encoder_name,
+        network_dir / "text_encoder.py",
+    )
+    if encoder_spec is None or encoder_spec.loader is None:
+        raise RuntimeError("failed to load text_encoder.py")
+    encoder_module = importlib.util.module_from_spec(encoder_spec)
+    encoder_module.__package__ = package_name
+    sys.modules[encoder_name] = encoder_module
+    encoder_spec.loader.exec_module(encoder_module)
+    return encoder_module.HYTextModel
+
+
 def extract_embeddings(
     records: List[Dict],
     hymotion_root: Path,
@@ -401,7 +578,7 @@ def extract_embeddings(
         if record_idx % num_shards != shard_id:
             continue
         caption_path = hymotion_root / record["caption_rel"]
-        emb_rel = record["caption_rel"].replace("/augmented_caption/", "/qwen3embedding_augmented/")
+        emb_rel = record["caption_rel"].replace("/augmented_caption/", "/qwen3_augmented/")
         emb_rel = emb_rel[:-5] + ".pt"
         emb_path = hymotion_root / emb_rel
         if emb_path.exists() and not overwrite:
@@ -416,7 +593,7 @@ def extract_embeddings(
         return
 
     print(f"[INFO] shard {shard_id}/{num_shards}: encoding {len(pending)} instructions on {device}")
-    from hftrainer.models.motion.hymotion_m2m.network.text_encoder import HYTextModel
+    HYTextModel = _load_hy_text_model_class()
 
     dtype = {
         "auto": None,
@@ -481,6 +658,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--splits", nargs="+", default=["train", "val", "test"])
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--max-items-per-split",
+        type=int,
+        default=0,
+        help="Debug limit. 0 means process all items.",
+    )
     parser.add_argument("--skip-embeddings", action="store_true")
     parser.add_argument(
         "--only-embeddings",
@@ -516,6 +699,7 @@ def main() -> None:
             splits=args.splits,
             fps=args.fps,
             overwrite=args.overwrite,
+            max_items_per_split=args.max_items_per_split,
         )
     if not args.skip_embeddings:
         hymotion_root = output_root.parents[1]

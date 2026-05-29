@@ -38,6 +38,9 @@ from hftrainer.datasets.motion.motionhub.transforms.prepare_m2m_v2 import (
 from hftrainer.datasets.motion.motionhub.transforms.prepare_m2m_v2_fullmask import (
     PrepareM2Mv2FullMask,
 )
+from hftrainer.datasets.motion.motionhub.transforms.prepare_m2m_v2_overfit_case import (
+    PrepareM2Mv2OverfitCase,
+)
 
 __all__ = [
     'ComposeMultiPerson',
@@ -62,6 +65,7 @@ __all__ = [
     'Compute198DimPosition',
     'PrepareM2Mv2Condition',
     'PrepareM2Mv2FullMask',
+    'PrepareM2Mv2OverfitCase',
     'CropAudioToMotion',
     'RemapMotionPathToO6dp',
     'SplitInbetween',

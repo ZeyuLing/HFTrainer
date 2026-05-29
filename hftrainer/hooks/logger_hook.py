@@ -2,6 +2,7 @@
 
 import time
 from collections import deque
+import torch
 from hftrainer.registry import HOOKS
 from hftrainer.utils.logger import get_logger
 
@@ -100,6 +101,8 @@ class LoggerHook:
         if output is None:
             return
 
+        output = self._mean_scalar_output_across_ranks(output)
+
         if self.by_epoch:
             # Accumulate metrics for epoch summary
             for k, v in output.items():
@@ -120,6 +123,36 @@ class LoggerHook:
             # Iter-based: log every N iters
             if (global_step + 1) % self.interval == 0:
                 self._log(global_step, output, data_time=data_time, train_time=train_time)
+
+    def _mean_scalar_output_across_ranks(self, output: dict) -> dict:
+        """Mean scalar log metrics across all distributed ranks.
+
+        Training uses per-rank losses for backward; this hook runs after the
+        optimizer step and only prepares detached values for logging. Without
+        this reduction, multi-GPU logs report rank-0's local mini-batch and can
+        look overfit while other ranks remain high.
+        """
+        if self.runner is None:
+            return output
+
+        accelerator = self.runner.accelerator
+        if getattr(accelerator, "num_processes", 1) <= 1:
+            return output
+
+        reduced = {}
+        device = accelerator.device
+        for k, v in output.items():
+            if isinstance(v, torch.Tensor) and v.numel() == 1:
+                metric = v.detach().float()
+                if metric.device != device:
+                    metric = metric.to(device)
+                reduced[k] = accelerator.reduce(metric, reduction="mean")
+            elif isinstance(v, (int, float)):
+                metric = torch.tensor(float(v), device=device)
+                reduced[k] = accelerator.reduce(metric, reduction="mean")
+            else:
+                reduced[k] = v
+        return reduced
 
     def after_train_epoch(self, epoch: int):
         if not self.by_epoch:
