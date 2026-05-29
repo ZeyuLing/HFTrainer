@@ -23,4 +23,13 @@ echo "Downloading WAN-T2V-1.3B..."
 huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --local-dir "$CKPT_DIR/Wan2.1-T2V-1.3B-Diffusers"
 
+# MoGenDIT SMPL body models (used by repair pipeline; paths are relative to checkpoints/)
+MOTION_PROCESS_DIR="$CKPT_DIR/motion_process"
+MOTION_PROCESS_TARGET="${MOGENDIT_ROOT:-ref_repo/MoGenDiT}/motion_process/body_model"
+if [ ! -e "$MOTION_PROCESS_DIR/body_model" ] && [ -e "$MOTION_PROCESS_TARGET" ]; then
+    mkdir -p "$MOTION_PROCESS_DIR"
+    ln -sfn "$(realpath "$MOTION_PROCESS_TARGET")" "$MOTION_PROCESS_DIR/body_model"
+    echo "Linked $MOTION_PROCESS_DIR/body_model -> $MOTION_PROCESS_TARGET"
+fi
+
 echo "All checkpoints downloaded to $CKPT_DIR/"

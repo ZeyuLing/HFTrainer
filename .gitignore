@@ -119,10 +119,7 @@ tools/*.so
 tools/nvml_shim/
 core.*
 logs/
-eval_out/
-eval_results/
 output/
-motion_process/
 eval_dashboard.db
 papers/
 papers/
