@@ -4,7 +4,7 @@ export them as MotionStreamer 272-dim features for the (validated) TMR evaluator
 
     HY-Lite (HunyuanMotionMMDiT, 201-dim, 30 fps)
       -> latent_denorm[..., :135]   (trans3 + 22x6 rot6d, 30 fps)
-      -> motion135_to_272           (SMPL-H FK -> 272, validated round-trip)
+      -> motion135_to_272           (canonical SMPL-X-272 skeleton FK -> 272)
       -> save <out>/<id>.npy        (272, 30 fps)
 
 The <id>.npy plug straight into the native validated evaluator:
@@ -122,7 +122,12 @@ def main():
     bundle._text_encoder_cfg = {
         "llm_type": "qwen3", "max_length_llm": 128,
         "sentence_emb_type": "clipl", "max_length_sentence_emb": 77,
-        "enable_llm_padding": False,
+        # MUST be True for BATCHED encoding: captions in a batch have different
+        # token lengths, so without max_length padding the tokenizer cannot
+        # stack them into one tensor (ValueError: expected sequence of length
+        # N got M). Padding to max_length_llm is numerically irrelevant -- the
+        # motion model attends via ctxt_length (right-padding + attn mask).
+        "enable_llm_padding": True,
     }
     ckpt_path = cfg.load_from["path"] if isinstance(cfg.load_from, dict) else cfg.load_from
     assert os.path.exists(ckpt_path), f"checkpoint not found: {ckpt_path}"
