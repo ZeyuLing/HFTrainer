@@ -85,7 +85,9 @@ def main():
         Rg[:, 0] = rot[:, 0]; pos[:, 0] = offs[0][None] + root
         for j in range(1, NJ):
             p = parents[j]; Rg[:, j] = np.matmul(Rg[:, p], rot[:, j])
-            pos[:, j] = pos[:, p] + np.matmul(Rg[:, p], (offs[j] - offs[p])[None, :, None]).squeeze(-1)
+            # off_canon is PARENT-RELATIVE (same convention as differentiable_fk
+            # / motion135_to_fk) -> use offs[j] directly, NOT offs[j]-offs[p].
+            pos[:, j] = pos[:, p] + np.matmul(Rg[:, p], offs[j][None, :, None]).squeeze(-1)
         return pos
 
     eh, ec = [], []
