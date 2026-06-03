@@ -1646,8 +1646,13 @@ def _build_tasks() -> Dict[str, EvalTask]:
                 use_caption=False),
         },
         default_metrics=[
-            'mpjpe_masked', 'mpjpe_unmasked', 'boundary_accel_jump',
-            'jitter_pos', 'foot_skating_ratio',
+            # UMO in-betweening protocol: 'mpjpe_all' = full-sequence MPJPE
+            # (UMO "MPJPE"); 'p_mpjpe' = MPJPE on [preserve] frames (UMO
+            # "[P]-MPJPE", ~0 for hard imputation). 'mpjpe_masked' /
+            # 'pa_mpjpe_masked' are infill-region diagnostics only.
+            'mpjpe_all', 'p_mpjpe', 'mpjpe_unmasked', 'mpjpe_masked',
+            'pa_mpjpe_masked',
+            'boundary_accel_jump', 'jitter_pos', 'foot_skating_ratio',
         ],
         needs_gt=True,
         # 2026-04-26: needs_caption=False so settings with use_caption=None

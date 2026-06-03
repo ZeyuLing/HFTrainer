@@ -22,6 +22,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +60,35 @@ def convert_smplx_npz_to_135d(npz_path: Path) -> np.ndarray:
     return motion135.astype(np.float32)
 
 
+def _conv_worker_init():
+    """Pool initializer: hide GPU so conversion stays CPU-only.
+
+    rotation_convert math is CPU torch; importing hftrainer pulls deepspeed
+    which otherwise initializes a CUDA context per worker. With many forked
+    workers that contends/OOMs the single GPU and deadlocks imap. Forcing
+    CUDA invisible keeps conversion purely on CPU.
+    """
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
+
+def _convert_one(task):
+    """Worker for parallel conversion. Returns (status, name, msg).
+
+    status: 'ok' | 'skip' | 'fail'. Skips when target .npy already exists
+    so re-runs only process newly generated samples (incremental).
+    """
+    npz_path, npy_path = task
+    npz_path, npy_path = Path(npz_path), Path(npy_path)
+    if npy_path.exists():
+        return ('skip', npz_path.stem, '')
+    try:
+        motion135 = convert_smplx_npz_to_135d(npz_path)
+        np.save(str(npy_path), motion135)
+        return ('ok', npz_path.stem, '')
+    except Exception as e:  # noqa: BLE001
+        return ('fail', npz_path.stem, str(e))
+
+
 def main():
     parser = argparse.ArgumentParser(description='KAFS metric computation')
     parser.add_argument('--kafs-dir', type=str, required=True,
@@ -68,6 +98,10 @@ def main():
                         help='KAFS modes to evaluate')
     parser.add_argument('--anno-file', type=str,
                         default='data/annotation/test_motionhub_t2m.json')
+    parser.add_argument('--rewritten-caption-file', type=str, default=None,
+                        help='Standalone {motion_id: caption} JSON. When set, metrics '
+                             'are computed against rewritten captions (consistent '
+                             'generate-rewritten + evaluate-rewritten protocol).')
     parser.add_argument('--data-dir', type=str,
                         default='data/motionhub')
     parser.add_argument('--evaluator-ckpt', type=str,
@@ -80,8 +114,14 @@ def main():
                         help='Limit number of test pairs (for fast debug)')
     parser.add_argument('--n-repeats', type=int, default=20,
                         help='Number of repeats for metric averaging')
+    parser.add_argument('--chunk-size', type=int, default=256,
+                        help='R-Precision/MM-Dist pool size. Paper main-table '
+                             'protocol uses 64; TMRMetric default is 256.')
     parser.add_argument('--skip-convert', action='store_true',
                         help='Skip NPZ->135d conversion (use existing .npy)')
+    parser.add_argument('--workers', type=int, default=16,
+                        help='Parallel processes for NPZ->135d conversion. '
+                             'cephfs reads benefit from high concurrency.')
     parser.add_argument('--gpu', type=int, default=0)
     args = parser.parse_args()
 
@@ -101,22 +141,44 @@ def main():
         print(f'Mode: {mode}  ({len(npz_files)} NPZ files)')
         print(f'{"="*60}')
 
-        # Step 1: Convert NPZ to 135-dim .npy
+        # Step 1: Convert NPZ to 135-dim .npy (parallel, incremental)
         if not args.skip_convert:
             npy_dir.mkdir(parents=True, exist_ok=True)
-            converted = 0
-            failed = 0
-            for npz_file in npz_files:
-                name = npz_file.stem
-                npy_file = npy_dir / f'{name}.npy'
-                try:
-                    motion135 = convert_smplx_npz_to_135d(npz_file)
-                    np.save(str(npy_file), motion135)
+            tasks = [
+                (str(f), str(npy_dir / f'{f.stem}.npy')) for f in npz_files
+            ]
+            converted = skipped = failed = 0
+            n_workers = max(1, args.workers)
+            print(f'  Converting with {n_workers} workers '
+                  f'({len(tasks)} files, skip-existing)...')
+            t0 = time.time()
+            if n_workers == 1:
+                results_iter = (_convert_one(t) for t in tasks)
+            else:
+                import multiprocessing as mp
+                pool = mp.Pool(n_workers, initializer=_conv_worker_init)
+                results_iter = pool.imap_unordered(_convert_one, tasks, chunksize=8)
+            done = 0
+            for status, name, msg in results_iter:
+                done += 1
+                if status == 'ok':
                     converted += 1
-                except Exception as e:
-                    print(f'  [WARN] Failed to convert {npz_file.name}: {e}')
+                elif status == 'skip':
+                    skipped += 1
+                else:
                     failed += 1
-            print(f'  Converted: {converted}, Failed: {failed} -> {npy_dir}')
+                    if failed <= 10:
+                        print(f'  [WARN] Failed to convert {name}: {msg}')
+                if done % 500 == 0:
+                    rate = done / max(1e-6, time.time() - t0)
+                    print(f'    progress {done}/{len(tasks)} '
+                          f'({rate:.0f}/s, new={converted} skip={skipped} fail={failed})')
+            if n_workers > 1:
+                pool.close()
+                pool.join()
+            print(f'  Converted(new)={converted}, Skipped(existing)={skipped}, '
+                  f'Failed={failed} -> {npy_dir} '
+                  f'({time.time()-t0:.0f}s)')
         else:
             npy_files = list(npy_dir.glob('*.npy'))
             print(f'  Skipping conversion, found {len(npy_files)} .npy files')
@@ -135,6 +197,9 @@ def main():
             '--n_repeats', str(args.n_repeats),
             '--seed', '42',
         ]
+        if args.rewritten_caption_file:
+            eval_cmd.extend(['--rewritten_caption_file', args.rewritten_caption_file])
+        eval_cmd.extend(['--chunk_size', str(args.chunk_size)])
         if args.max_pairs:
             eval_cmd.extend(['--max_pairs', str(args.max_pairs)])
 

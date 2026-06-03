@@ -50,6 +50,15 @@ model = dict(
         with_long_skip_connection=False,
         time_factor=1000.0,
     ),
+    # Empty on purpose: TRAINING never runs a text encoder -- captions are fed
+    # as PRE-EXTRACTED embeddings (LoadPreExtractedTextEmbedding reads the
+    # `qwen3_*` dirs, dumped by scripts/data/extract_permo_embeddings.py).
+    # Those dirs are **Qwen3-8B *CausalLM*** features (== HYTextModel default
+    # `llm_type="qwen3"`, chat template, hidden_states[-1]), NOT Qwen3-Embedding-8B.
+    # >>> INFERENCE MUST MATCH: build the text encoder with `llm_type="qwen3"`.
+    # Using `llm_type="qwen3_embedding"` feeds OOD text features from a different
+    # model+template and collapses text conditioning (caused the weak-T2M bug,
+    # fixed 2026-06-01 in gen_m2m_h3d_pred263.py / eval_m2m_v2_t2m.py).
     text_encoder=dict(),
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim',
     motion_type='smpl_22',

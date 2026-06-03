@@ -189,6 +189,23 @@ V2_MODELS = {
         'has_caption': False,
         'rotation_space': 'local',
     },
+    # --- Final experiment checkpoints (editfix continuations) ---
+    # These point at single-checkpoint symlink dirs so find_latest_checkpoint
+    # locks the exact epoch (the real work_dirs have higher epochs).
+    'kimodo_caption_editfix_ep240': {
+        'config': 'configs/hymotion_m2m/hymotion_m2m_kimodo_caption_permo_046b.py',
+        'work_dir': 'work_dirs/_eval_kimodo_editfix_ep240',
+        'desc': 'v2 KIMODO Root + Caption + PerMo, editfix from ep890 (ep240)',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
+    'smpl_caption_editfix_ep230': {
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
+        'work_dir': 'work_dirs/_eval_smpl_editfix_ep230',
+        'desc': 'v2 SMPL Root + Caption, editfix from ep870 (ep230)',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
 }
 
 # Also allow running v1 models for comparison
@@ -3647,6 +3664,18 @@ def evaluate_sample(
             print(f'    [warn] QC checker failed: {e!r}')
 
     metrics['inference_time'] = round(elapsed, 2)
+    # Stash GT motion + editing mask so the save_npz path can persist them for
+    # the multi-task mesh viewer (condition / GT / pred). These are big arrays
+    # and MUST be popped before the metrics dict is JSON-serialized for DB
+    # import (done right after the NPZ write in the main loop).
+    #   _src_mask: (T, motion_dim) editing mask, 0 = known/condition, 1 = generate.
+    #   _gt_motion_135: (T, 135) ground-truth target the model was asked to match
+    #     (equals pred for no-GT tasks like T2M / free transition regions).
+    try:
+        metrics['_gt_motion_135'] = np.asarray(gt_motion_135, dtype=np.float32)
+        metrics['_src_mask'] = np.asarray(mask, dtype=np.float32)
+    except Exception:
+        pass
     # Expose transition/prepend/loop layout so save_npz path can embed it
     # and the dashboard can cut gray context at the correct frame.
     if _layout is not None:
@@ -4072,10 +4101,31 @@ def main():
                                 if _kfi:
                                     _save_kw['keyframe_indices'] = np.asarray(
                                         _kfi, dtype=np.int32)
+                                # Multi-task mesh viewer extras: GT target,
+                                # editing mask (0=condition/known, 1=generate),
+                                # caption text, and the task/setting tag so the
+                                # viewer can render condition / GT / pred meshes
+                                # with per-joint condition coloring.
+                                _gt = metrics.get('_gt_motion_135', None)
+                                if _gt is not None:
+                                    _save_kw['gt_motion_135'] = np.asarray(
+                                        _gt, dtype=np.float32)
+                                _sm = metrics.get('_src_mask', None)
+                                if _sm is not None:
+                                    _save_kw['src_mask'] = np.asarray(
+                                        _sm, dtype=np.float32)
+                                _cap = sample.get('caption', '') or ''
+                                _save_kw['caption'] = np.array(str(_cap))
+                                _save_kw['task_key'] = np.array(str(task_key))
                                 np.savez_compressed(npz_path, **_save_kw)
                                 metrics['_npz_path'] = npz_path
                             except Exception:
                                 pass
+                        # Drop the big GT/mask arrays before the metrics dict is
+                        # JSON-serialized for DB import (they would bloat the
+                        # eval_v2_*.json by T*333 floats per sample).
+                        metrics.pop('_gt_motion_135', None)
+                        metrics.pop('_src_mask', None)
 
                         # Store sample info for DB import
                         metrics['_sample_idx'] = i

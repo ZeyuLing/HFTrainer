@@ -241,8 +241,13 @@ def run_model_on_gpu(
 
         # For caption models: inject text_encoder config for runtime encoding
         if model_info['has_caption'] and bundle._text_encoder_cfg is None:
+            # Must match TRAINING encoder: pre-extracted train embeddings come
+            # from Qwen3-8B *CausalLM* (llm_type="qwen3"), NOT Qwen3-Embedding-8B.
+            # Using qwen3_embedding feeds OOD text features and collapses text
+            # conditioning. See scripts/data/extract_permo_embeddings.py and
+            # load_text.py CAPTION_TO_QWEN3_DIR (qwen3_* dirs = CausalLM).
             bundle._text_encoder_cfg = {
-                'llm_type': 'qwen3_embedding',
+                'llm_type': 'qwen3',
                 'max_length_llm': 512,
                 'sentence_emb_type': 'clipl',
                 'max_length_sentence_emb': 77,

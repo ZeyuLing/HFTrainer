@@ -6,6 +6,18 @@ For FK-based metrics (MPJPE, end-effector error), bone_offsets are required.
 Units: all position-based metrics output in **meters** by default (matching
 the training data coordinate system). Callers can multiply by 1000 for mm.
 
+MPJPE coordinate space (IMPORTANT for UMO/CondMDI comparison):
+  ``compute_mpjpe`` here operates on **global world-space** FK joint positions,
+  so for under-constrained temporal completion (e.g. minimal in-betweening with
+  only first+last frame observed) it is dominated by *global trajectory drift*
+  (the interior path is not uniquely determined by two endpoints), yielding
+  50+ cm even when local pose is faithful (~11 cm). UMO and the HumanML3D
+  in-betweening literature instead report MPJPE in the **HumanML3D-272
+  representation space** (per-frame heading-canonicalized, root-relative joint
+  channels ``m272[:, 8:74]``), which removes that global drift. To reproduce
+  UMO-comparable MPJPE / [P]-MPJPE, use ``scripts/eval/aggregate_mib_umo.py``
+  (272-ric space), NOT the raw world-space ``compute_mpjpe`` below.
+
 Supported metrics:
   - MPJPE (mean per-joint position error via FK)
   - Jitter (3rd-order finite difference on positions)
@@ -204,6 +216,88 @@ def compute_mpjpe(
         'mpjpe_mean': mpjpe_mean,
         'mpjpe_per_joint': mpjpe_per_joint,
     }
+
+
+def _procrustes_align_frame(pred: np.ndarray, gt: np.ndarray,
+                            with_scale: bool = True) -> np.ndarray:
+    """Rigid+scale (similarity) Procrustes align ``pred`` (J,3) onto ``gt``.
+
+    Returns the aligned ``pred``. Solves for s, R, t minimising
+    ``|| s R pred + t - gt ||`` via SVD (Kabsch + Umeyama scale).
+    """
+    mu_p = pred.mean(axis=0)
+    mu_g = gt.mean(axis=0)
+    p0 = pred - mu_p
+    g0 = gt - mu_g
+    H = p0.T @ g0                      # (3,3)
+    U, S, Vt = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(Vt.T @ U.T))
+    Dm = np.diag([1.0, 1.0, d])
+    R = Vt.T @ Dm @ U.T                # optimal rotation
+    if with_scale:
+        var_p = (p0 ** 2).sum()
+        scale = (S * np.array([1.0, 1.0, d])).sum() / (var_p + 1e-12)
+    else:
+        scale = 1.0
+    return scale * (p0 @ R.T) + mu_g
+
+
+def compute_pa_mpjpe(
+    pred_pos: np.ndarray,
+    gt_pos: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+    joint_indices: Optional[List[int]] = None,
+    with_scale: bool = True,
+) -> Dict[str, float]:
+    """Procrustes-Aligned MPJPE (pose-fidelity DIAGNOSTIC).
+
+    Per frame, similarity-align (scale+rotation+translation) the predicted
+    skeleton onto the GT skeleton, then measure the mean per-joint L2 error.
+    This isolates pose fidelity from the global root drift that dominates raw
+    MPJPE under minimal-evidence in-betweening (only first+last frame observed).
+
+    WARNING: This is NOT the UMO "[P]-MPJPE" metric. In UMO, ``[P]`` stands for
+    ``[preserve]`` (the conditioning frames), and ``[P]-MPJPE`` is the *raw*
+    MPJPE restricted to those preserve frames (see ``mpjpe_unmasked`` /
+    ``p_mpjpe`` in :func:`compute_all_metrics`). There is no Procrustes
+    alignment in UMO. This function is kept only as an internal diagnostic.
+
+    Args/units mirror :func:`compute_mpjpe` (positions in meters in, mean out).
+    """
+    T = pred_pos.shape[0]
+    assert pred_pos.shape == gt_pos.shape == (T, 22, 3)
+
+    if mask is not None:
+        frame_mask = mask.max(axis=-1) > 0.5
+        if frame_mask.shape[0] != T:
+            T_mask = frame_mask.shape[0]
+            if T_mask < T:
+                pad_total = T - T_mask
+                left = pad_total // 2
+                frame_mask = np.concatenate(
+                    [np.zeros(left, dtype=bool), frame_mask,
+                     np.zeros(T - T_mask - left, dtype=bool)], axis=0)
+            else:
+                start = (T_mask - T) // 2
+                frame_mask = frame_mask[start:start + T]
+    else:
+        frame_mask = np.ones(T, dtype=bool)
+
+    if not frame_mask.any():
+        return {'pa_mpjpe_mean': 0.0}
+
+    pred_sel = pred_pos[frame_mask]
+    gt_sel = gt_pos[frame_mask]
+    errs = []
+    for t in range(pred_sel.shape[0]):
+        aligned = _procrustes_align_frame(pred_sel[t], gt_sel[t], with_scale)
+        if joint_indices is not None:
+            aligned = aligned[joint_indices]
+            gtf = gt_sel[t][joint_indices]
+        else:
+            gtf = gt_sel[t]
+        errs.append(np.linalg.norm(aligned - gtf, axis=-1).mean())
+    return {'pa_mpjpe_mean': float(np.mean(errs))}
 
 
 # =====================================================================
@@ -779,15 +873,31 @@ def compute_all_metrics(
             mpjpe_all = compute_mpjpe(pred_pos, gt_pos)
             metrics['mpjpe_all'] = mpjpe_all['mpjpe_mean']
 
-            # MPJPE - masked region only
+            # MPJPE - masked region only (generated in-between frames). This is
+            # a diagnostic for infill reconstruction quality; it is NOT the UMO
+            # "MPJPE" column (which is the full-sequence ``mpjpe_all`` above).
             if mask is not None:
                 mpjpe_masked = compute_mpjpe(pred_pos, gt_pos, mask=mask)
                 metrics['mpjpe_masked'] = mpjpe_masked['mpjpe_mean']
 
-                # MPJPE - unmasked region (should be ~0 for imputation)
+                # [P]-MPJPE (UMO definition): raw MPJPE restricted to the
+                # [preserve] / condition frames (mask=0), measuring how
+                # faithfully the model respects the conditioning frames. UMO,
+                # Sec. "Evaluation Metrics": "[P]-MPJPE (cm) restricted to
+                # frames assigned [preserve] tokens". For hard-imputation
+                # methods (ours, replacement guidance) this is ~0; UMO's
+                # in-context soft conditioning leaks (0.73-0.92 cm on
+                # in-betweening). NOTE: [P] = [preserve], NOT Procrustes.
                 inv_mask = 1.0 - mask
                 mpjpe_unmasked = compute_mpjpe(pred_pos, gt_pos, mask=inv_mask)
                 metrics['mpjpe_unmasked'] = mpjpe_unmasked['mpjpe_mean']
+                metrics['p_mpjpe'] = mpjpe_unmasked['mpjpe_mean']
+
+                # Procrustes-aligned MPJPE on the generated region — kept as an
+                # optional pose-fidelity diagnostic (global drift removed). This
+                # is NOT a UMO metric; do not report it as "[P]-MPJPE".
+                pa = compute_pa_mpjpe(pred_pos, gt_pos, mask=mask)
+                metrics['pa_mpjpe_masked'] = pa['pa_mpjpe_mean']
 
     if mask is not None:
         bnd = compute_boundary_smoothness(
