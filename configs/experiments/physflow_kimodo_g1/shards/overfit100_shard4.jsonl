@@ -1,0 +1,16 @@
+{"id": "hml_004", "prompt": "a person stands while moving their right arm as if eating something with a spoon or fork three times.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_010", "prompt": "a man walks around in a circle clockwise.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_016", "prompt": "a man moves backwards to the left and dodges something, then diagonally and dodges something else.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_022", "prompt": "a person is pulling something and then walks and puts their arms out", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_028", "prompt": "the person is sitting completely still.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_034", "prompt": "person puts their hands up to their mouth area like they're shouting", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_040", "prompt": "a man is doing jumping jacks by hopping while moving his arms up and down in rythm with the hops", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_046", "prompt": "a person moves into a fighting stance.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_052", "prompt": "a man is dancing in place while spinning around.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_058", "prompt": "the person was walking forward on a balance beam.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_064", "prompt": "a person walking confidently.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_070", "prompt": "walking and then swinging arm back and forth.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_076", "prompt": "a person walks backwards in a counterclockwise curve.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_082", "prompt": "a person moved to right direction backwards", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_088", "prompt": "a person walks forward then drastically to the left like they have been pushed then returns to walking normally", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_094", "prompt": "a person stretches out his arms.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}

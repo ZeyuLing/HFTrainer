@@ -390,6 +390,16 @@ def build_next_iteration_plan(
 ) -> dict[str, Any]:
     hard_bank = str(hard_prompt_bank) if hard_prompt_bank else report.get("global_hard_prompt_bank")
     tracker_pool = str(tracker_motion_pool) if tracker_motion_pool else report.get("global_tracker_motion_pool")
+    next_g1_onnx = getattr(args, "next_g1_onnx", None)
+    if not next_g1_onnx:
+        tracker_artifacts = report.get("global_tracker_artifacts", [])
+        unique_trackers = {
+            (artifact.get("g1_onnx_path"), artifact.get("g1_onnx_md5"))
+            for artifact in tracker_artifacts
+            if artifact.get("g1_onnx_path")
+        }
+        if len(unique_trackers) == 1:
+            next_g1_onnx = next(iter(unique_trackers))[0]
     hard_prompt_count = len(report.get("global_hardest", []))
     if hard_bank and Path(hard_bank).is_file():
         hard_prompt_count = sum(1 for line in Path(hard_bank).read_text().splitlines() if line.strip())
@@ -400,10 +410,16 @@ def build_next_iteration_plan(
     min_tracker_motions = int(args.min_tracker_motions_for_update)
 
     hard_max_prompts = max(1, min(int(args.next_max_prompts), hard_prompt_count or int(args.next_max_prompts)))
+    next_g1_onnx_env = (
+        f"PHYSFLOW_G1_ONNX={shlex.quote(str(next_g1_onnx))} "
+        if next_g1_onnx
+        else ""
+    )
     adv_sweep_cmd = (
         f"PHYSFLOW_PROMPT_BANK={shlex.quote(str(hard_bank))} "
         "PHYSFLOW_PROMPT_SPLIT=adversarial_hard "
         "PHYSFLOW_MODE=adv-sweep "
+        f"{next_g1_onnx_env}"
         f"PHYSFLOW_MAX_PROMPTS={hard_max_prompts} "
         f"PHYSFLOW_SAMPLES_PER_PROMPT={int(args.next_samples_per_prompt)} "
         f"PHYSFLOW_HARD_CASES={int(args.hard_bank_limit)} "
@@ -428,6 +444,7 @@ def build_next_iteration_plan(
         "score_formula": report["score_formula"],
         "tracker_pool_thresholds": report["tracker_pool_thresholds"],
         "hard_prompt_min_score": float(args.hard_min_score),
+        "next_g1_onnx": str(next_g1_onnx) if next_g1_onnx else None,
         "min_tracker_motions_for_update": min_tracker_motions,
         "commands": {
             "submit_next_adversarial_sweep": adv_sweep_cmd,
@@ -592,6 +609,11 @@ def main() -> None:
     )
     parser.add_argument("--next-max-prompts", type=int, default=8)
     parser.add_argument("--next-samples-per-prompt", type=int, default=4)
+    parser.add_argument(
+        "--next-g1-onnx",
+        default=None,
+        help="Explicit G1 tracker ONNX to use for the next adversarial sweep.",
+    )
     parser.add_argument("--next-tracker-steps", type=int, default=20000)
     parser.add_argument(
         "--min-tracker-motions-for-update",

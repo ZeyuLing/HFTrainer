@@ -91,6 +91,43 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
 
 # ---------------------------------------------------------------------------
+# Heavy-asset caches
+# ---------------------------------------------------------------------------
+# When this module is used as the per-candidate scorer inside the PhysFlow
+# online loop, ``simulate_and_export`` is called many times per training step
+# (best-of-N candidates x judges). Re-creating the ONNX session and re-parsing
+# the MJCF on every call dominated step time (~11-13s/step, with the MuJoCo
+# rollout itself only ~0.6s). These process-level caches load each heavy asset
+# once and reuse it; only the lightweight per-rollout ``MjData`` is recreated.
+_ONNX_SESSION_CACHE: dict = {}
+_MJMODEL_CACHE: dict = {}
+
+
+def _get_onnx_session(onnx_path: str):
+    sess = _ONNX_SESSION_CACHE.get(onnx_path)
+    if sess is None:
+        log.info(f"Loading ONNX (cache miss): {onnx_path}")
+        sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+        _ONNX_SESSION_CACHE[onnx_path] = sess
+    return sess
+
+
+def _get_cached_mujoco_model(mjcf_path: str, stiffness, damping, physics_dt: float):
+    """Return a fully-configured (cached) MjModel; create fresh MjData per call.
+
+    The model is configured deterministically from (mjcf, stiffness, damping,
+    physics_dt) and is never mutated during a rollout (the sim only writes to
+    MjData), so it is safe to share across candidate rollouts.
+    """
+    key = (str(mjcf_path), tuple(stiffness), tuple(damping), float(physics_dt))
+    model = _MJMODEL_CACHE.get(key)
+    if model is None:
+        model, _ = load_mujoco_model(mjcf_path, stiffness, damping, physics_dt)
+        _MJMODEL_CACHE[key] = model
+    return model
+
+
+# ---------------------------------------------------------------------------
 # MJCF parsing: body→mesh mapping
 # ---------------------------------------------------------------------------
 
@@ -501,8 +538,7 @@ def simulate_and_export(
     action_ema_alpha = control.get("action_ema_alpha", 1.0)
     onnx_name_to_key = runtime["onnx_name_to_in_key"]
 
-    log.info(f"Loading ONNX: {onnx_path}")
-    session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    session = _get_onnx_session(onnx_path)
     actual_out_names = [out.name for out in session.get_outputs()]
 
     # Load motion
@@ -511,8 +547,9 @@ def simulate_and_export(
     log.info(f"  Motion: {player.total_frames} frames @ {1.0/control_dt:.0f}Hz "
              f"(duration={player.total_frames * control_dt:.2f}s)")
 
-    # Load MuJoCo model
-    model, data = load_mujoco_model(mjcf_path, stiffness, damping, physics_dt)
+    # Cached, fully-configured MuJoCo model; fresh per-rollout state buffer.
+    model = _get_cached_mujoco_model(mjcf_path, stiffness, damping, physics_dt)
+    data = mujoco.MjData(model)
 
     # Verify body count matches
     mj_num_bodies = model.nbody - 1  # exclude world body

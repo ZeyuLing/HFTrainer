@@ -212,6 +212,7 @@ def test_adversarial_outputs_record_active_tracker_artifact(tmp_path):
     assert selection["active_g1_tracker"]["g1_onnx_md5"] == expected["g1_onnx_md5"]
     assert selection["hard_cases"][0]["g1_onnx_path"] == str(tracker_onnx)
     assert selection["hard_cases"][0]["g1_yaml_md5"] == expected["g1_yaml_md5"]
+    assert f"PHYSFLOW_G1_ONNX={tracker_onnx}" in selection["next_commands"]["continue_t2m_hard_prompt_adv_sweep"]
 
 
 def test_hard_prompt_bank_deduplicates_multi_seed_prompts(tmp_path):

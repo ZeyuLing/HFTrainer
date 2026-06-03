@@ -90,6 +90,9 @@ echo "[physflow] launching train_agent.py"
     --checkpoint "${CHECKPOINT}" \
     --skip-initial-eval \
     --headless True \
-    --overrides "agent.save_last_checkpoint_every=${SAVE_EVERY}"
+    --overrides \
+        "agent.save_last_checkpoint_every=${SAVE_EVERY}" \
+        "agent.evaluator.eval_metrics_every=${PHYSFLOW_EVAL_EVERY:-50}" \
+        ${PHYSFLOW_EXTRA_OVERRIDES:-}
 
 echo "[physflow] finished $(date)"

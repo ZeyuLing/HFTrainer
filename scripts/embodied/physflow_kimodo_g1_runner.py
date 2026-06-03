@@ -626,9 +626,15 @@ def write_adversarial_outputs(records: List[KimodoRecord], args: argparse.Namesp
 
     next_hard_out = out_dir / "next_hard_adv_sweep"
     next_hard_cmd = None
+    g1_onnx_env = (
+        f"PHYSFLOW_G1_ONNX={shlex.quote(str(args.g1_onnx))} "
+        if getattr(args, "g1_onnx", None)
+        else ""
+    )
     if hard_records:
         next_hard_cmd = (
             f"PHYSFLOW_MODE=adv-sweep "
+            f"{g1_onnx_env}"
             f"PHYSFLOW_PROMPT_BANK={shlex.quote(str(hard_path))} "
             f"PHYSFLOW_PROMPT_SPLIT=adversarial_hard "
             f"PHYSFLOW_MAX_PROMPTS={len(hard_records)} "

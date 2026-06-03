@@ -1,0 +1,13 @@
+{
+  "_doc": "ABLATION CONTROL arm: judge is ALWAYS the released frozen tracker (no sync). Same outer-loop schedule as the other arms, so any difference vs trainee/anchor isolates the effect of feeding the trainee back into the judge.",
+  "arm_name": "frozen",
+  "judge_mode": "frozen",
+  "anchor_alpha": 1.0,
+  "num_rounds": 12,
+  "gen_iters": 120,
+  "trainee_epochs": 150,
+  "gpu": 1,
+  "num_envs": 1024,
+  "batch_size": 8192,
+  "trainee_init_ckpt": "ref_repo/ProtoMotions/results/physflow_online_g1_trainee_gpu/last.ckpt"
+}

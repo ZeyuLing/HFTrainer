@@ -1,0 +1,13 @@
+{
+  "_doc": "PURE-ADVERSARIAL arm: each round the judge is fully REPLACED by the latest co-trained trainee tracker. Tests whether a judge that co-adapts with the generator yields better physical realism -- at the risk of the generator reward-hacking a drifting tracker.",
+  "arm_name": "trainee",
+  "judge_mode": "trainee",
+  "anchor_alpha": 0.0,
+  "num_rounds": 12,
+  "gen_iters": 120,
+  "trainee_epochs": 150,
+  "gpu": 2,
+  "num_envs": 1024,
+  "batch_size": 8192,
+  "trainee_init_ckpt": "ref_repo/ProtoMotions/results/physflow_online_g1_trainee_gpu/last.ckpt"
+}

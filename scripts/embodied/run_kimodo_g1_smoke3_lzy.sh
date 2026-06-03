@@ -19,6 +19,12 @@ GOOD_MIN_COMPLETION="${PHYSFLOW_GOOD_MIN_COMPLETION:-0.95}"
 GOOD_MAX_JOINT_ERROR="${PHYSFLOW_GOOD_MAX_JOINT_ERROR:-0.7}"
 GOOD_MAX_ROOT_TRAJECTORY_ERROR="${PHYSFLOW_GOOD_MAX_ROOT_TRAJECTORY_ERROR:-0.25}"
 GOOD_MAX_ROOT_DISPLACEMENT_ERROR="${PHYSFLOW_GOOD_MAX_ROOT_DISPLACEMENT_ERROR:-0.35}"
+G1_ONNX="${PHYSFLOW_G1_ONNX:-}"
+
+G1_ONNX_ARGS=()
+if [[ -n "${G1_ONNX}" ]]; then
+  G1_ONNX_ARGS=(--g1-onnx "${G1_ONNX}")
+fi
 
 mkdir -p "${OUT_DIR}"
 export CUDA_VISIBLE_DEVICES="${GPU_ID}"
@@ -45,4 +51,5 @@ export CUDA_VISIBLE_DEVICES="${GPU_ID}"
   --cfg-weight 2.0 2.0 \
   --local-cache \
   --require-ready \
-  --robot-json-subsample 1
+  --robot-json-subsample 1 \
+  "${G1_ONNX_ARGS[@]}"

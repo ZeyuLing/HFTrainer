@@ -1,0 +1,13 @@
+{
+  "_doc": "ANCHORED-ADVERSARIAL arm: each round the judge is a BLEND of the released frozen tracker (weight=anchor_alpha) and the latest trainee (weight=1-alpha). A motion must be trackable by BOTH to be accepted. The frozen anchor is meant to stop the generator from reward-hacking a drifting trainee while still letting the judge tighten over rounds.",
+  "arm_name": "anchor",
+  "judge_mode": "anchor",
+  "anchor_alpha": 0.5,
+  "num_rounds": 12,
+  "gen_iters": 120,
+  "trainee_epochs": 150,
+  "gpu": 3,
+  "num_envs": 1024,
+  "batch_size": 8192,
+  "trainee_init_ckpt": "ref_repo/ProtoMotions/results/physflow_online_g1_trainee_gpu/last.ckpt"
+}

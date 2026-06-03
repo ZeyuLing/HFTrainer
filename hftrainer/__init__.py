@@ -133,6 +133,10 @@ def _import_task_modules():
         'hftrainer.trainers.motion.motion_clip_trainer',
         'hftrainer.pipelines.motion.motion_clip_pipeline',
         'hftrainer.datasets.motion.motionclip_synthetic_dataset',
+        # PhysFlow (KIMODO-G1 online adversarial)
+        'hftrainer.models.motion.physflow.bundle',
+        'hftrainer.models.motion.physflow.dataset',
+        'hftrainer.trainers.motion.physflow_trainer',
     ]
 
     for mod_name in modules_to_import:

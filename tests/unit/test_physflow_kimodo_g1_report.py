@@ -432,3 +432,89 @@ def test_next_iteration_plan_suppresses_tracker_command_below_motion_threshold(t
     assert plan["min_tracker_motions_for_update"] == 2
     assert plan["commands"]["train_position_aware_tracker"] is None
     assert "below threshold" in script.read_text()
+
+
+def test_next_iteration_plan_propagates_g1_onnx_to_adversarial_sweep(tmp_path):
+    hard_bank = tmp_path / "hard.jsonl"
+    hard_bank.write_text(
+        json.dumps({"id": "walk", "prompt": "a humanoid robot walks forward.", "split": "adversarial_hard"})
+        + "\n"
+    )
+    tracker_onnx = tmp_path / "updated_tracker.onnx"
+    tracker_onnx.write_text("onnx")
+    args = type(
+        "Args",
+        (),
+        {
+            "out": tmp_path / "report.json",
+            "next_max_prompts": 8,
+            "next_samples_per_prompt": 4,
+            "next_g1_onnx": str(tracker_onnx),
+            "hard_bank_limit": 5,
+            "hard_min_score": 1.0,
+            "tracker_pool_limit": 7,
+            "min_tracker_motions_for_update": 2,
+            "next_tracker_experiment_name": "tracker_exp",
+            "next_tracker_steps": 123,
+            "submit_script": Path("scripts/embodied/submit_physflow_kimodo_adv_sweep_taiji.sh"),
+            "tracker_submit_script": Path("scripts/embodied/submit_physflow_g1_tracker_train_taiji.sh"),
+        },
+    )()
+    report = {
+        "global_hardest": [{"prompt": "walk"}],
+        "score_formula": {"completion": "1 - completion_ratio"},
+        "tracker_pool_thresholds": {"require_root_metrics": True},
+        "global_tracker_artifacts": [
+            {
+                "g1_onnx_path": "/old/tracker.onnx",
+                "g1_onnx_md5": "old",
+            }
+        ],
+    }
+
+    plan = build_next_iteration_plan(report, hard_bank, None, args)
+
+    assert plan["next_g1_onnx"] == str(tracker_onnx)
+    assert f"PHYSFLOW_G1_ONNX={tracker_onnx}" in plan["commands"]["submit_next_adversarial_sweep"]
+
+
+def test_next_iteration_plan_auto_uses_single_report_tracker_artifact(tmp_path):
+    hard_bank = tmp_path / "hard.jsonl"
+    hard_bank.write_text(
+        json.dumps({"id": "walk", "prompt": "a humanoid robot walks forward.", "split": "adversarial_hard"})
+        + "\n"
+    )
+    args = type(
+        "Args",
+        (),
+        {
+            "out": tmp_path / "report.json",
+            "next_max_prompts": 8,
+            "next_samples_per_prompt": 4,
+            "next_g1_onnx": None,
+            "hard_bank_limit": 5,
+            "hard_min_score": 1.0,
+            "tracker_pool_limit": 7,
+            "min_tracker_motions_for_update": 2,
+            "next_tracker_experiment_name": "tracker_exp",
+            "next_tracker_steps": 123,
+            "submit_script": Path("scripts/embodied/submit_physflow_kimodo_adv_sweep_taiji.sh"),
+            "tracker_submit_script": Path("scripts/embodied/submit_physflow_g1_tracker_train_taiji.sh"),
+        },
+    )()
+    report = {
+        "global_hardest": [{"prompt": "walk"}],
+        "score_formula": {"completion": "1 - completion_ratio"},
+        "tracker_pool_thresholds": {"require_root_metrics": True},
+        "global_tracker_artifacts": [
+            {
+                "g1_onnx_path": "/single/tracker.onnx",
+                "g1_onnx_md5": "single",
+            }
+        ],
+    }
+
+    plan = build_next_iteration_plan(report, hard_bank, None, args)
+
+    assert plan["next_g1_onnx"] == "/single/tracker.onnx"
+    assert "PHYSFLOW_G1_ONNX=/single/tracker.onnx" in plan["commands"]["submit_next_adversarial_sweep"]

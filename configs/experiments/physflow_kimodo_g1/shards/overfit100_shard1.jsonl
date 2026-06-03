@@ -1,0 +1,17 @@
+{"id": "hml_001", "prompt": "a person runs backwards, turns halfway then runs forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_007", "prompt": "a man is taking small steps before giant steps over objects that are in the way", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_013", "prompt": "a man leans forward very slightly, then sways as he looks off to his left.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_019", "prompt": "a person squats slightly moving from side to side then steps their left foot backward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_025", "prompt": "the person swings a golf club.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_031", "prompt": "the person was pushed but then stood up straight.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_037", "prompt": "both arms raised to the epole, fly", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_043", "prompt": "a person catches a small object and lightly throws it overhand 4 times", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_049", "prompt": "a person goes from being on one knee to two and puts their hands together.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_055", "prompt": "the person stands and lifts both arms.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_061", "prompt": "a person side steps to the right followed by the left and back to the right.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_067", "prompt": "a person stands looking left and right.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_073", "prompt": "a person puts their hands on their hips while looking right then left, then the person steps", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_079", "prompt": "a person steps from side to side, touches the ground, and swings his right leg up and around several times.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_085", "prompt": "stand up straight and bring your right arm out.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_091", "prompt": "a person tries to balance left foot infront of the right and wobbles slightly to the left.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_097", "prompt": "a person standing still shakes their body a bit.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}

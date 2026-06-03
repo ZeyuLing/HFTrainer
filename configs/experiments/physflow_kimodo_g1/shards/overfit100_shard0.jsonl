@@ -1,0 +1,17 @@
+{"id": "hml_000", "prompt": "a mother imitated being a teapot pouring out tea to her child while reciting a nursery rhyme.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_006", "prompt": "a person walks froward from one side to the other.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_012", "prompt": "person walks very slow to front", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_018", "prompt": "a person walks forward with intent", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_024", "prompt": "the person walks forward on a wobbly path.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_030", "prompt": "person is jogging in place.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_036", "prompt": "the person looks to be dancing with his hands", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_042", "prompt": "the person took a giant leap forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_048", "prompt": "a person slowly takes four steps forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_054", "prompt": "a person raised right arm straight out front and then to the right and then down by his side.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_060", "prompt": "the person was scratching and ready to attack.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_066", "prompt": "a person in a very delightful mood", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_072", "prompt": "a person slowly walked forward", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_078", "prompt": "a man is swinging his arms", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_084", "prompt": "the man takes 5 steps forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_090", "prompt": "a person walking forward and lifts something heavy.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_096", "prompt": "a perosn jumps up 12 times and then stands with feet and arms stretched apart", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
