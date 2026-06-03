@@ -12,6 +12,13 @@ for i in $(seq 0 $((SHARDS - 1))); do
   (
     export CUDA_VISIBLE_DEVICES=$i
     export PYTHONPATH=.
+    # Avoid the vermo-image NVML NVLink-topology probe that crashes on
+    # large-model .to(cuda) ("undefined symbol: nvmlDeviceGetNvLinkRemoteDeviceType").
+    # Native allocator (no expandable_segments) + no NVML device check + no P2P
+    # probe. Verified torch.zeros(1).cuda() works under these on V100.
+    export PYTORCH_CUDA_ALLOC_CONF=
+    export PYTORCH_NVML_BASED_CUDA_CHECK=0
+    export NCCL_P2P_DISABLE=1
     python3 scripts/caption/extract_eval_caption_embeddings.py \
       --force \
       --llm-type qwen3 \

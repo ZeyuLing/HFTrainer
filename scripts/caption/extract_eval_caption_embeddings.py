@@ -61,7 +61,8 @@ def _gather_unique_captions(prefer_rewritten: bool = True) -> List[str]:
     are fine because the set dedups them.
     """
     unique = set()
-    for pattern in ('eval_e*.json', 'eval_e*_rewritten.json'):
+    for pattern in ('eval_e*.json', 'eval_e*_rewritten.json',
+                    'eval_h3d_*.json'):
         for f in sorted(DATALIST_DIR.glob(pattern)):
             try:
                 items = json.load(open(f)).get('data_list', [])
@@ -89,11 +90,12 @@ def _load_existing_cache(force: bool) -> Dict[str, dict]:
         return {}
 
 
-def _save_cache(cache: Dict[str, dict], meta: dict):
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = OUT_FILE.with_suffix('.pt.tmp')
+def _save_cache(cache: Dict[str, dict], meta: dict, out_file: Path = OUT_FILE):
+    out_file = Path(out_file)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_file.with_suffix('.pt.tmp')
     torch.save({'cache': cache, 'meta': meta}, str(tmp))
-    os.replace(str(tmp), str(OUT_FILE))
+    os.replace(str(tmp), str(out_file))
 
 
 def main():
@@ -104,33 +106,97 @@ def main():
                    help='Texts per encoder call.')
     p.add_argument('--max-length-llm', type=int, default=512,
                    help='Max LLM token length.')
+    # IMPORTANT: the deployed caption_* / *_editfix bundles were trained with
+    # llm_type="qwen3" (HY-Motion-1.0-Lite text encoder, checkpoints/Qwen3-8B).
+    # The existing cache.pt meta confirms llm_type=qwen3. Extracting with
+    # qwen3_embedding here would produce embeddings that DO NOT match training
+    # -> silent conditioning corruption. Default is therefore qwen3.
+    p.add_argument('--llm-type', type=str, default='qwen3',
+                   choices=['qwen3', 'qwen3_embedding'],
+                   help='Text encoder LLM type (MUST match training; qwen3).')
+    p.add_argument('--num-shards', type=int, default=1,
+                   help='Split the TODO captions into N shards (multi-GPU).')
+    p.add_argument('--shard-index', type=int, default=0,
+                   help='Which shard this process handles (0-based).')
+    p.add_argument('--out-file', type=str, default=str(OUT_FILE),
+                   help='Output cache .pt path (per-shard for sharded runs).')
+    p.add_argument('--device', type=str, default=None,
+                   help="Override device, e.g. 'cpu' or 'cuda'.")
+    p.add_argument('--device-map', type=str, default=None,
+                   help="If 'auto', dispatch the 8B LLM across GPU+CPU via "
+                        "accelerate (fits Qwen3-8B fp16 on a single 16GB V100 "
+                        "by offloading a couple of layers to CPU). Avoids the "
+                        "Taiji multi-GPU NVML NVLink crash entirely.")
+    p.add_argument('--fp16', action='store_true',
+                   help='Load encoders in float16 (recommended for GPU).')
+    p.add_argument('--gpu-mem-gib', type=float, default=13.5,
+                   help='Per-GPU memory budget for --device-map auto.')
     args = p.parse_args()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Using device: {device}')
+    if args.device is not None:
+        device = torch.device(args.device)
+    else:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Using device: {device}  llm_type={args.llm_type}')
 
     print('Gathering unique captions across all rewritten datalists...')
     captions = _gather_unique_captions()
     print(f'  {len(captions)} unique captions')
 
-    cache = _load_existing_cache(args.force)
-    if cache:
-        print(f'  existing cache has {len(cache)} entries')
-    todo = [c for c in captions if c not in cache]
+    # Decide which existing cache to merge against. Sharded runs write to a
+    # dedicated --out-file, but still skip captions already in the MAIN cache.
+    main_cache = _load_existing_cache(args.force)
+    out_path = Path(args.out_file)
+    if out_path == OUT_FILE:
+        cache = main_cache
+    else:
+        cache = {} if args.force or not out_path.is_file() else (
+            torch.load(str(out_path), map_location='cpu',
+                       weights_only=False).get('cache', {}))
+    if main_cache:
+        print(f'  main cache has {len(main_cache)} entries')
+
+    todo = [c for c in captions if c not in main_cache and c not in cache]
+    # Shard the TODO list deterministically across processes.
+    if args.num_shards > 1:
+        todo = todo[args.shard_index::args.num_shards]
+        print(f'  shard {args.shard_index}/{args.num_shards}: '
+              f'{len(todo)} captions for this process')
     if not todo:
         print('  nothing to do!')
         return
     print(f'  {len(todo)} new captions to encode')
 
-    print('Loading HYTextModel (Qwen3-Embedding-8B + CLIP-L)...')
+    print(f'Loading HYTextModel (llm_type={args.llm_type} + CLIP-L)...')
     t0 = time.time()
+    dtype = torch.float16 if args.fp16 else None
     model = HYTextModel(
-        llm_type='qwen3_embedding',
+        llm_type=args.llm_type,
         max_length_llm=args.max_length_llm,
         sentence_emb_type='clipl',
         max_length_sentence_emb=77,
+        torch_dtype=dtype,
     )
-    model = model.to(device).eval()
+    model = model.eval()
+    if args.device_map == 'auto':
+        # Dispatch the big LLM across GPU + CPU; keep the small CLIP encoder on
+        # GPU so get_module_device(self) (= first param) reports cuda and inputs
+        # land on the GPU. accelerate hooks shuttle activations across devices.
+        from accelerate import dispatch_model, infer_auto_device_map
+        model.sentence_emb_text_encoder = model.sentence_emb_text_encoder.to(device)
+        llm = model.llm_text_encoder
+        no_split = list(getattr(llm, '_no_split_modules', None) or []) or ['Qwen3DecoderLayer']
+        dmap = infer_auto_device_map(
+            llm,
+            max_memory={0: f'{args.gpu_mem_gib}GiB', 'cpu': '60GiB'},
+            dtype=(dtype or torch.float16),
+            no_split_module_classes=no_split,
+        )
+        model.llm_text_encoder = dispatch_model(llm, device_map=dmap)
+        on_cpu = sum(1 for v in dmap.values() if v == 'cpu' or v == 'disk')
+        print(f'  device_map=auto: {len(dmap)} blocks, {on_cpu} on cpu/disk')
+    else:
+        model = model.to(device)
     print(f'  loaded in {time.time() - t0:.1f}s')
 
     t0 = time.time()
@@ -156,20 +222,22 @@ def main():
             rate = done / max(1e-3, time.time() - t0)
             eta = (len(todo) - done) / max(1e-3, rate)
             print(f'    [{done}/{len(todo)}] {rate:.1f}/s ETA {eta:.0f}s')
-            # checkpoint
-            _save_cache(cache, meta={
-                'model': 'HYTextModel (qwen3_embedding + clipl)',
+            _meta = {
+                'model': f'HYTextModel ({args.llm_type} + clipl)',
+                'llm_type': args.llm_type,
                 'max_length_llm': args.max_length_llm,
                 'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'num_entries': len(cache),
-            })
+            }
+            _save_cache(cache, meta=_meta, out_file=out_path)
     _save_cache(cache, meta={
-        'model': 'HYTextModel (qwen3_embedding + clipl)',
+        'model': f'HYTextModel ({args.llm_type} + clipl)',
+        'llm_type': args.llm_type,
         'max_length_llm': args.max_length_llm,
         'created_at': time.strftime('%Y-%m-%d %H:%M:%S'),
         'num_entries': len(cache),
-    })
-    print(f'\nDone. {len(cache)} entries at {OUT_FILE}')
+    }, out_file=out_path)
+    print(f'\nDone. {len(cache)} entries at {out_path}')
 
 
 if __name__ == '__main__':

@@ -16,6 +16,10 @@ class PrismPipeline(BasePipeline):
         super().__init__(bundle)
         from hftrainer.pipelines.motion.prism_backend import PrismARPipeline
 
+        # Forward backend-init options from config kwargs.
+        backend_init_keys = ("expand_timesteps", "is_causal", "dtype")
+        backend_kwargs = {k: kwargs[k] for k in backend_init_keys if k in kwargs}
+
         self.backend = PrismARPipeline(
             tokenizer=bundle.tokenizer,
             text_encoder=bundle.text_encoder,
@@ -23,6 +27,7 @@ class PrismPipeline(BasePipeline):
             scheduler=bundle.scheduler,
             smpl_processor=bundle.smpl_pose_processor,
             transformer=bundle.transformer,
+            **backend_kwargs,
         )
 
     def __call__(

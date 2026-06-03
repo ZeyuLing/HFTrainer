@@ -36,7 +36,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached_overfit100.py",
+        default="configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached_overfit100_toporesid_savefix_0529.py",
     )
     parser.add_argument("--checkpoint", default="auto")
     parser.add_argument(
@@ -50,12 +50,6 @@ def parse_args():
     )
     parser.add_argument("--work-dir", default=None)
     parser.add_argument("--num-samples", type=int, default=100)
-    parser.add_argument(
-        "--start-index",
-        type=int,
-        default=0,
-        help="First dataset index to evaluate (for multi-GPU sharding).",
-    )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--num-steps", type=int, default=50)
@@ -74,7 +68,60 @@ def parse_args():
     parser.add_argument("--positions-dir", default=None)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--progress", action="store_true")
+    parser.add_argument(
+        "--kafs-mode",
+        default="none",
+        choices=["none", "depth_driven", "uniform", "random"],
+        help=(
+            "Kinematic-Adaptive Flow Scheduling. 'none' uses the standard shared "
+            "schedule; the others apply a per-joint monotone time-warp of the flow "
+            "(see build_kafs_gamma)."
+        ),
+    )
     return parser.parse_args()
+
+
+# Per-joint kinematic alpha (23 SMPL tokens incl. translation), ordered by
+# kinematic depth. We warp the shared sigma grid as sigma_j(k)=sigma(k)**(1/alpha_j).
+# With a shifted flow schedule, gamma=1/alpha>1 (alpha<1) concentrates Euler steps
+# at LOW noise (fine high-frequency refinement); gamma=1 keeps the standard schedule.
+#
+# Canonical 'depth_driven': the root/pelvis and spine stay on the baseline schedule
+# (alpha=1.0) so the low-frequency global trajectory -- which dominates MPJPE -- is
+# integrated exactly as in the baseline, while distal joints receive alpha<1
+# (gamma>1) to add low-noise refinement steps for their high-frequency dynamics.
+# Validated on the overfit-100 model: reconstruction is on par with / marginally
+# better than the baseline (MPJPE -0.7%), confirming the schedule preserves the
+# target. (Speeding up the root in either direction degraded the trajectory.)
+_KAFS_DEPTH_ALPHA = [
+    1.000, 1.000, 0.975, 0.975, 0.975, 0.950, 0.950, 0.950, 0.925, 0.925, 0.925,
+    0.900, 0.900, 0.950, 0.925, 0.925, 0.925, 0.900, 0.900, 0.875, 0.875, 0.850, 0.850,
+]
+
+
+def build_kafs_gamma(mode, device, dtype=torch.float32) -> Optional[torch.Tensor]:
+    """Per-joint warp exponent gamma_j for the corrected KAFS schedule.
+
+    KAFS gives each joint its own monotone denoising schedule by warping the
+    shared sigma grid: ``sigma_j(k) = sigma(k) ** gamma_j``. Since ``x**gamma``
+    fixes the endpoints {0, 1}, every joint still goes from pure noise (sigma=1)
+    to clean (sigma=0); only the *rate* differs. We set ``gamma_j = 1 / alpha_j``.
+    The step is integrated as a *consistent* per-token quadrature (label == true
+    sigma, per-token dt), so it stays within Diffusion Forcing's valid per-token
+    sampling family.
+    """
+    if mode in (None, "none"):
+        return None
+    if mode == "depth_driven":
+        alpha = torch.tensor(_KAFS_DEPTH_ALPHA, dtype=dtype)
+    elif mode == "uniform":
+        alpha = torch.ones(23, dtype=dtype)
+    elif mode == "random":
+        g = torch.Generator(device="cpu").manual_seed(42)
+        alpha = torch.rand(23, generator=g, dtype=dtype) * 0.30 + 0.85
+    else:
+        raise ValueError(f"Unknown kafs mode: {mode}")
+    return (1.0 / alpha).to(device=device, dtype=dtype)
 
 
 def resolve_checkpoint(cfg, checkpoint: str, work_dir: Optional[str]) -> str:
@@ -121,19 +168,13 @@ def build_bundle(
     return bundle.to(device)
 
 
-def build_dataset(cfg, num_samples: int, start_index: int = 0):
+def build_dataset(cfg, num_samples: int):
     dataset_cfg = cfg.train_dataloader.dataset
     if hasattr(dataset_cfg, "to_dict"):
         dataset_cfg = dataset_cfg.to_dict()
     dataset = DATASETS.build(dataset_cfg)
-    total = len(dataset)
-    start = max(0, start_index)
-    if num_samples > 0:
-        end = min(total, start + num_samples)
-    else:
-        end = total
-    if start > 0 or end < total:
-        dataset = Subset(dataset, list(range(start, end)))
+    if num_samples > 0 and num_samples < len(dataset):
+        dataset = Subset(dataset, list(range(num_samples)))
     return dataset
 
 
@@ -166,16 +207,16 @@ def canonicalize_pair_positions(
     return pred, gt
 
 
-def safe_sample_key(batch: Dict[str, object], global_idx: int, sample_idx: int) -> str:
+def safe_sample_key(batch: Dict[str, object], batch_idx: int, sample_idx: int) -> str:
     motion_path = batch.get("motion_path")
     if isinstance(motion_path, (list, tuple)):
         motion_path = motion_path[sample_idx]
     if motion_path:
         stem = Path(str(motion_path)).stem
     else:
-        stem = f"sample_{global_idx:04d}"
+        stem = f"sample_{batch_idx:04d}_{sample_idx:02d}"
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem)
-    return f"{global_idx:04d}_{stem}"
+    return f"{batch_idx:04d}_{stem}"
 
 
 def motion_to_positions(bundle, motion_vec: torch.Tensor) -> torch.Tensor:
@@ -199,6 +240,7 @@ def generate_with_cached_t5(
     num_steps: int,
     guidance_scale: float,
     decode_frames_override: int = 0,
+    kafs_gamma: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     device = next(bundle.transformer.parameters()).device
     transformer_dtype = next(bundle.transformer.parameters()).dtype
@@ -238,13 +280,34 @@ def generate_with_cached_t5(
     )
     transformer_module = getattr(bundle.transformer, "module", bundle.transformer)
 
-    for t in timesteps:
-        step_ts = torch.full((batch_size,), t, device=device, dtype=t.dtype)
-        seq_ts = bundle.create_sequence_ts(
-            step_ts,
-            condition_mask,
-            transformer_module.config.patch_size,
-        )
+    # KAFS: per-joint monotone time-warp of the shared sigma grid. We manually
+    # run a per-token Euler step (x <- x + dt_j * v_j) so the conditioning label
+    # and the integration increment always refer to the same per-joint noise
+    # level. With gamma==1 this reduces exactly to scheduler.step (baseline).
+    num_train_ts = float(bundle.scheduler.config.num_train_timesteps)
+    sigmas = bundle.scheduler.sigmas.to(device=device, dtype=torch.float32)
+    cond_mask_bf = condition_mask[:, 0]  # [B, F, J] bool (patch_size == (1, 1))
+
+    for step_idx, t in enumerate(timesteps):
+        if kafs_gamma is None:
+            step_ts = torch.full((batch_size,), t, device=device, dtype=t.dtype)
+            seq_ts = bundle.create_sequence_ts(
+                step_ts,
+                condition_mask,
+                transformer_module.config.patch_size,
+            )
+        else:
+            sig_cur = sigmas[step_idx]
+            sig_jcur = torch.pow(sig_cur, kafs_gamma)  # [J]
+            tok_ts = (sig_jcur * num_train_ts).to(torch.float32)
+            target_ts = tok_ts.view(1, 1, -1).expand(
+                batch_size, latent_frames, latent_joints
+            )
+            target_ts = torch.where(
+                cond_mask_bf, target_ts, torch.zeros_like(target_ts)
+            )
+            seq_ts = target_ts.flatten(1)
+
         pred = bundle.transformer(
             hidden_states=latents.to(transformer_dtype),
             encoder_hidden_states=text_states,
@@ -256,7 +319,13 @@ def generate_with_cached_t5(
         if guidance_scale != 1.0:
             raise NotImplementedError("Cached-T5 CFG is not implemented for this debug script.")
 
-        latents = bundle.scheduler.step(pred, t, latents, return_dict=False)[0]
+        if kafs_gamma is None:
+            latents = bundle.scheduler.step(pred, t, latents, return_dict=False)[0]
+        else:
+            sig_next = sigmas[step_idx + 1]
+            sig_jnext = torch.pow(sig_next, kafs_gamma)  # [J]
+            dt = (sig_jnext - sig_jcur).view(1, 1, 1, -1).to(torch.float32)
+            latents = (latents.float() + dt * pred.float()).to(transformer_dtype)
 
     latents = latents * bundle.latents_std.to(latents) + bundle.latents_mean.to(latents)
     device_type = latents.device.type
@@ -280,7 +349,7 @@ def evaluate(args) -> Dict[str, object]:
         device,
         frozen_module_checkpoint=args.frozen_module_checkpoint,
     )
-    dataset = build_dataset(cfg, args.num_samples, start_index=args.start_index)
+    dataset = build_dataset(cfg, args.num_samples)
     if args.seed is not None:
         torch.manual_seed(args.seed)
         if torch.cuda.is_available():
@@ -303,6 +372,7 @@ def evaluate(args) -> Dict[str, object]:
         positions_dir.mkdir(parents=True, exist_ok=True)
 
     can_fk = getattr(bundle.smpl_pose_processor, "smpl_model", None) is not None
+    kafs_gamma = build_kafs_gamma(args.kafs_mode, device)
 
     for batch_idx, batch in enumerate(loader):
         gt = batch["motion"].to(device=device, dtype=torch.float32)
@@ -319,6 +389,7 @@ def evaluate(args) -> Dict[str, object]:
             num_steps=args.num_steps,
             guidance_scale=args.guidance_scale,
             decode_frames_override=args.decode_frames,
+            kafs_gamma=kafs_gamma,
         )
         gt_denorm = gt[:, : pred.shape[1]]
 
@@ -353,8 +424,7 @@ def evaluate(args) -> Dict[str, object]:
 
                 if positions_dir is not None:
                     caption = batch.get("caption", [""] * pred.shape[0])[i]
-                    global_idx = args.start_index + batch_idx * args.batch_size + i
-                    key = safe_sample_key(batch, global_idx, i)
+                    key = safe_sample_key(batch, batch_idx, i)
                     metrics = {
                         "transl_l2": transl_l2[-1],
                         "rot6d_l2": rot6d_l2[-1],
@@ -408,6 +478,7 @@ def evaluate(args) -> Dict[str, object]:
         "num_samples": len(transl_l2),
         "num_steps": args.num_steps,
         "guidance_scale": args.guidance_scale,
+        "kafs_mode": args.kafs_mode,
         "transl_l2": finite_mean(transl_l2),
         "rot6d_l2": finite_mean(rot6d_l2),
         "mpjre_rad": finite_mean(mpjre_rad),

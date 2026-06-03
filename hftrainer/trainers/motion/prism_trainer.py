@@ -165,7 +165,9 @@ class PrismTrainer(BaseTrainer):
                 encoder_hidden_states=text_states,
                 timestep=timesteps,
                 hidden_states_mask=padding_mask if num_frames is not None else None,
-                encoder_hidden_states_mask=text_mask,
+                # No text cross-attention mask: matches the official Wan
+                # implementation (text padded with zeros, context_lens=None).
+                encoder_hidden_states_mask=None,
             )
 
         # Loss computation in fp32 (outside autocast for numerical stability)

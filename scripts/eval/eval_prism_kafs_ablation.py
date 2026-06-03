@@ -319,12 +319,32 @@ def main():
         help='Key prefix for caption path in annotation.',
     )
     parser.add_argument(
+        '--rewritten-caption-file', type=str, default=None,
+        help='Optional {motion_id: caption} JSON. When set, overrides each sample\'s '
+             'generation caption with the rewritten one (matched by name). Frame counts '
+             'and motion paths still come from --anno-file. This matches the main-table '
+             'protocol: GENERATE on rewritten captions, but EVALUATE metrics against the '
+             'original captions in --anno-file.',
+    )
+    parser.add_argument(
         '--min-frames', type=int, default=24,
         help='Minimum number of frames to include a sample.',
     )
     parser.add_argument(
         '--max-frames', type=int, default=360,
         help='Maximum number of frames per sample.',
+    )
+    parser.add_argument(
+        '--num-shards', type=int, default=1,
+        help='Total number of parallel shards (for multi-GPU sharding).',
+    )
+    parser.add_argument(
+        '--shard-idx', type=int, default=0,
+        help='Index of this shard in [0, num_shards). Samples are split by stride.',
+    )
+    parser.add_argument(
+        '--skip-existing', action='store_true',
+        help='Skip samples whose output NPZ already exists (resume-friendly).',
     )
     args = parser.parse_args()
 
@@ -360,6 +380,35 @@ def main():
             f'No valid test samples found. Check --anno-file ({args.anno_file}) '
             f'and --data-dir ({args.data_dir}).'
         )
+
+    # ---- Optional: override GENERATION captions with rewritten ones ----
+    # (metrics are still computed against --anno-file's original captions downstream)
+    if args.rewritten_caption_file:
+        rw_raw = json.loads(Path(args.rewritten_caption_file).read_text())
+        rw_map = rw_raw['data_list'] if isinstance(rw_raw, dict) and 'data_list' in rw_raw else rw_raw
+        n_over = 0
+        kept = []
+        for s in samples:
+            cap = rw_map.get(s['name'])
+            if isinstance(cap, dict):  # tolerate nested {caption: ...}
+                cap = cap.get('caption') or cap.get('text')
+            if isinstance(cap, str) and cap.strip():
+                s['caption'] = cap.strip()
+                n_over += 1
+                kept.append(s)
+            # samples without a rewritten caption are dropped to stay consistent
+            # with the main-table rewritten test set
+        samples = kept
+        print(f'    Rewritten-caption override: {n_over} samples kept '
+              f'(from {args.rewritten_caption_file})')
+        if not samples:
+            raise RuntimeError('No samples left after rewritten-caption override; '
+                               'check motion_id keys match between files.')
+
+    # Multi-GPU sharding: keep a deterministic stride subset for this shard.
+    if args.num_shards > 1:
+        samples = samples[args.shard_idx::args.num_shards]
+        print(f'    Shard {args.shard_idx}/{args.num_shards}: {len(samples)} samples')
 
     # Optionally limit number of samples to generate
     if args.num_samples is not None and args.num_samples < len(samples):
@@ -413,6 +462,10 @@ def main():
         sample_name = sample['name']
         caption = sample['caption']
         num_frames = sample['num_frames']
+
+        if args.skip_existing and (out_dir / f'{sample_name}.npz').exists():
+            n_success += 1
+            continue
 
         try:
             smplx_dict = generate_motion(
@@ -482,8 +535,11 @@ def main():
     print(f'  Output dir:     {out_dir}')
     print('=' * 60)
 
-    # Save manifest
-    manifest_path = out_dir / 'manifest.json'
+    # Save manifest (shard-aware to avoid collisions across parallel shards)
+    if args.num_shards > 1:
+        manifest_path = out_dir / f'manifest_shard{args.shard_idx}of{args.num_shards}.json'
+    else:
+        manifest_path = out_dir / 'manifest.json'
     manifest_path.write_text(json.dumps(results_manifest, indent=2))
     print(f'[+] Saved manifest ({len(results_manifest)} entries) to {manifest_path}')
 

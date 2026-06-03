@@ -21,6 +21,8 @@ model = dict(
 )
 
 # ---- Trainer: add null_embedding_path for prompt dropout ----
+# Text cross-attention runs without a mask (matches the official Wan setup:
+# text padded with zeros, context_lens=None) — hardcoded in PrismTrainer.
 trainer = dict(
     null_embedding_path='data/t5_feature/_null_embedding.pt',
 )
