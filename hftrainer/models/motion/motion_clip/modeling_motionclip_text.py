@@ -26,7 +26,33 @@ from transformers.modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPooling,
 )
-from transformers.models.clip.modeling_clip import _create_4d_causal_attention_mask
+# `_create_4d_causal_attention_mask` lived in `transformers.models.clip.modeling_clip`
+# in older transformers, then moved to `transformers.modeling_attn_mask_utils`, and was
+# removed entirely in newer releases. Import it robustly with a local fallback so the
+# MotionCLIP evaluator works across transformers versions.
+try:
+    from transformers.models.clip.modeling_clip import _create_4d_causal_attention_mask
+except ImportError:
+    try:
+        from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask
+    except ImportError:
+        def _create_4d_causal_attention_mask(
+            input_shape, dtype, device, past_key_values_length=0, sliding_window=None
+        ):
+            bsz, tgt_len = input_shape
+            src_len = tgt_len + past_key_values_length
+            min_val = torch.finfo(dtype).min
+            mask = torch.full((tgt_len, src_len), min_val, dtype=dtype, device=device)
+            cond = torch.arange(src_len, device=device) <= (
+                torch.arange(tgt_len, device=device).view(-1, 1) + past_key_values_length
+            )
+            mask = mask.masked_fill(cond, 0.0)
+            if sliding_window is not None:
+                rows = torch.arange(tgt_len, device=device).view(-1, 1) + past_key_values_length
+                cols = torch.arange(src_len, device=device).view(1, -1)
+                window = (rows - cols) >= sliding_window
+                mask = mask.masked_fill(window, min_val)
+            return mask[None, None, :, :].expand(bsz, 1, tgt_len, src_len)
 
 try:
     from transformers.file_utils import ModelOutput

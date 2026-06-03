@@ -112,6 +112,12 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max_samples", type=int, default=None)
+    p.add_argument("--split", default=None,
+                   help="Optional path to a custom id list (overrides recon_root/test.txt).")
+    p.add_argument("--drop_mirrored", action="store_true",
+                   help="Exclude HumanML3D mirrored clips (ids starting with 'M'). The "
+                        "official published 'Real' metrics use unique (non-mirrored) "
+                        "motions; including mirror pairs deflates Diversity.")
     p.add_argument("--output", required=True)
     args = p.parse_args()
 
@@ -152,7 +158,12 @@ def main():
     std = np.load(str(Path(args.recon_root) / "Std.npy"))
 
     # ----------- build sample list -----------
-    test_ids = [s.strip() for s in (Path(args.recon_root) / "test.txt").read_text().splitlines() if s.strip()]
+    split_file = Path(args.split) if args.split else (Path(args.recon_root) / "test.txt")
+    test_ids = [s.strip() for s in split_file.read_text().splitlines() if s.strip()]
+    if args.drop_mirrored:
+        n0 = len(test_ids)
+        test_ids = [s for s in test_ids if not s.startswith("M")]
+        print(f"[+] drop_mirrored: {n0} -> {len(test_ids)} ids (removed {n0 - len(test_ids)} mirrored)")
     src = Path(args.src_h3d272)
 
     samples = []  # each: dict(name, motion_gt(263), text_dict, m_length)
@@ -345,12 +356,20 @@ def main():
         gt_mu, gt_cov = calculate_activation_statistics(em_gt)
         if args.mode == "pred":
             mu, cov = calculate_activation_statistics(em_pred)
-            fid = float(calculate_frechet_distance(gt_mu, gt_cov, mu, cov))
+            try:
+                fid = float(calculate_frechet_distance(gt_mu, gt_cov, mu, cov))
+            except ValueError as e:
+                # Small-sample degeneracy (singular covariance -> sqrtm imaginary
+                # blow-up). FID needs n >> embedding-dim (512); for pilot n<~512
+                # FID is undefined. R-Precision/MM-Dist/Diversity remain valid.
+                print(f"  [warn] FID undefined (n={len(samples)} too small): {e}")
+                fid = float("nan")
         else:
             fid = 0.0  # by construction GT vs GT is 0
 
-        div_real = float(calculate_diversity(em_gt, args.diversity_times if n > args.diversity_times else 100))
-        div_pred = float(calculate_diversity(em_pred, args.diversity_times if n > args.diversity_times else 100))
+        div_t = min(args.diversity_times, n - 1)  # calculate_diversity needs n > div_t
+        div_real = float(calculate_diversity(em_gt, div_t))
+        div_pred = float(calculate_diversity(em_pred, div_t))
 
         rprec_list.append([float(x) for x in rprec])
         rprec_real_list.append([float(x) for x in rprec_real])

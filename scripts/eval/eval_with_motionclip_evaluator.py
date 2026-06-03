@@ -212,12 +212,18 @@ def load_test_pairs(anno_file: Path,
                     caption_key: str = 'hierarchical_caption',
                     min_frames: int = 24,
                     max_frames: int = 360,
-                    max_pairs: Optional[int] = None) -> List[Tuple[str, str, np.ndarray, int]]:
+                    max_pairs: Optional[int] = None,
+                    rewritten_caption_file: Optional[Path] = None) -> List[Tuple[str, str, np.ndarray, int]]:
     """Load (name, caption, motion[135], num_frames) pairs from a motionhub anno file.
 
     Supports two layouts:
       - flat list[dict]
       - {meta_info, data_list: dict[name -> entry]} (motionhub canonical)
+
+    If ``rewritten_caption_file`` is given (a standalone {motion_id: caption} JSON),
+    each sample's caption is OVERRIDDEN by the rewritten one (matched by name).
+    This lets us measure R-Precision / MM-Dist against the rewritten captions, i.e.
+    the consistent "generate-on-rewritten + evaluate-on-rewritten" protocol.
     """
     raw = json.loads(Path(anno_file).read_text())
     if isinstance(raw, dict) and 'data_list' in raw:
@@ -232,6 +238,11 @@ def load_test_pairs(anno_file: Path,
     else:
         raise ValueError(f'Unrecognized annotation format in {anno_file}')
 
+    rw_map = None
+    if rewritten_caption_file is not None:
+        rw_raw = json.loads(Path(rewritten_caption_file).read_text())
+        rw_map = rw_raw['data_list'] if isinstance(rw_raw, dict) and 'data_list' in rw_raw else rw_raw
+
     pairs = []
     for name, entry in entries:
         m_rel = entry.get(f'{motion_key}_path')
@@ -240,9 +251,17 @@ def load_test_pairs(anno_file: Path,
             continue
         m_path = Path(data_dir) / m_rel
         c_path = Path(data_dir) / c_rel
-        caption = _load_caption(c_path)
-        if caption is None:
-            continue
+        if rw_map is not None:
+            caption = rw_map.get(name)
+            if isinstance(caption, dict):
+                caption = caption.get('caption') or caption.get('text')
+            if not (isinstance(caption, str) and caption.strip()):
+                continue  # no rewritten caption for this sample -> drop (stay on rewritten set)
+            caption = caption.strip()
+        else:
+            caption = _load_caption(c_path)
+            if caption is None:
+                continue
         motion = _load_smpl22_motion(m_path)
         if motion is None:
             continue
@@ -402,6 +421,10 @@ def main():
     p.add_argument('--data_dir', required=True, help='motionhub data root')
     p.add_argument('--motion_key', default='smplx')
     p.add_argument('--caption_key', default='hierarchical_caption')
+    p.add_argument('--rewritten_caption_file', default=None,
+                   help='Standalone {motion_id: caption} JSON. When set, overrides '
+                        'each sample caption with the rewritten one for metric computation '
+                        '(generate-rewritten + evaluate-rewritten consistent protocol).')
     p.add_argument('--clip_pretrained', default='checkpoints/clip-vit-base-patch32')
     p.add_argument('--stats_file', default='data/statistic/smplx55_stats_hymotion_aug.json')
 
@@ -444,6 +467,7 @@ def main():
         motion_key=args.motion_key, caption_key=args.caption_key,
         min_frames=args.min_frames, max_frames=args.max_frames,
         max_pairs=args.max_pairs,
+        rewritten_caption_file=Path(args.rewritten_caption_file) if args.rewritten_caption_file else None,
     )
     print(f'    loaded: {len(pairs)} (motion_135-dim, caption) pairs')
     if not pairs:
