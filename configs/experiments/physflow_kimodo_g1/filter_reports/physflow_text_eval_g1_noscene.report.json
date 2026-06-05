@@ -1,0 +1,231 @@
+{
+  "input": "configs/experiments/physflow_kimodo_g1/physflow_text_eval.jsonl",
+  "output": "configs/experiments/physflow_kimodo_g1/physflow_text_eval_g1_noscene.jsonl",
+  "n_input": 300,
+  "n_kept": 288,
+  "n_dropped": 12,
+  "drop_rate": 0.04,
+  "reason_counts": {
+    "non_floor_sit_or_lie": 9,
+    "stairs_ladder_or_elevation": 2,
+    "furniture_or_nonfloor_support": 1,
+    "fixed_scene_support": 1
+  },
+  "examples": {
+    "non_floor_sit_or_lie": [
+      {
+        "id": "ev_000003",
+        "prompt": "a person walks forward, turns around, sits down, stands up and continues walking."
+      },
+      {
+        "id": "ev_000083",
+        "prompt": "a man is sitting down with arms and legs splayed out to the sides of his body."
+      },
+      {
+        "id": "ev_000105",
+        "prompt": "person moves forward and sits in chair briefly before standing back up and walking away"
+      },
+      {
+        "id": "ev_000162",
+        "prompt": "the person held his arms out wide and put them down to his side while he was sitting."
+      },
+      {
+        "id": "ev_000163",
+        "prompt": "a person walks to their right, then lies down, then stands up."
+      },
+      {
+        "id": "ev_000173",
+        "prompt": "the person walked forward and sat down."
+      },
+      {
+        "id": "ev_000206",
+        "prompt": "person turns to left, takes three steps forward, sits down, and then walks back to starting place."
+      },
+      {
+        "id": "ev_000223",
+        "prompt": "walking back then sitting down."
+      }
+    ],
+    "stairs_ladder_or_elevation": [
+      {
+        "id": "ev_000040",
+        "prompt": "a person steps forward briskly, then climbs some stairs, stopping in a standing position."
+      },
+      {
+        "id": "ev_000091",
+        "prompt": "a person steps onto a narrow walkway, unsteadily moves across, and then back down to the ground."
+      }
+    ],
+    "furniture_or_nonfloor_support": [
+      {
+        "id": "ev_000105",
+        "prompt": "person moves forward and sits in chair briefly before standing back up and walking away"
+      }
+    ],
+    "fixed_scene_support": [
+      {
+        "id": "ev_000185",
+        "prompt": "a person runs along the fence holding his phone in his right hand, then he stops and walks back"
+      }
+    ]
+  },
+  "dropped": [
+    {
+      "id": "ev_000003",
+      "prompt": "a person walks forward, turns around, sits down, stands up and continues walking.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "BioMotionLab_NTroje",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000040",
+      "prompt": "a person steps forward briskly, then climbs some stairs, stopping in a standing position.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "EKUT",
+      "tags": [],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "ev_000083",
+      "prompt": "a man is sitting down with arms and legs splayed out to the sides of his body.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "TotalCapture",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000091",
+      "prompt": "a person steps onto a narrow walkway, unsteadily moves across, and then back down to the ground.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "EKUT",
+      "tags": [],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "ev_000105",
+      "prompt": "person moves forward and sits in chair briefly before standing back up and walking away",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "BioMotionLab_NTroje",
+      "tags": [],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000162",
+      "prompt": "the person held his arms out wide and put them down to his side while he was sitting.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "KIT",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000163",
+      "prompt": "a person walks to their right, then lies down, then stands up.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "MPI_HDM05",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000173",
+      "prompt": "the person walked forward and sat down.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "BioMotionLab_NTroje",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000185",
+      "prompt": "a person runs along the fence holding his phone in his right hand, then he stops and walks back",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "TotalCapture",
+      "tags": [],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "ev_000206",
+      "prompt": "person turns to left, takes three steps forward, sits down, and then walks back to starting place.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "BMLmovi",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000223",
+      "prompt": "walking back then sitting down.",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "BMLmovi",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "ev_000275",
+      "prompt": "a figure walks in a straight line, turns and sits facing away, then stands and walks away",
+      "category": "humanml3d",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "BioMotionLab_NTroje",
+      "tags": [],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    }
+  ]
+}

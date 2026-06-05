@@ -1,0 +1,11 @@
+{
+  "input": "configs/experiments/physflow_kimodo_g1/physflow_bench_hml3d_test.jsonl",
+  "output": "configs/experiments/physflow_kimodo_g1/physflow_bench_hml3d_test_g1_noscene.jsonl",
+  "n_input": 40,
+  "n_kept": 40,
+  "n_dropped": 0,
+  "drop_rate": 0.0,
+  "reason_counts": {},
+  "examples": {},
+  "dropped": []
+}

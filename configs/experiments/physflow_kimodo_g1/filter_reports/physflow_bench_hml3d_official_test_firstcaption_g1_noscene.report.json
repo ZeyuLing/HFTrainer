@@ -1,0 +1,4665 @@
+{
+  "input": "configs/experiments/physflow_kimodo_g1/physflow_bench_hml3d_official_test_firstcaption.jsonl",
+  "output": "configs/experiments/physflow_kimodo_g1/physflow_bench_hml3d_official_test_firstcaption_g1_noscene.jsonl",
+  "n_input": 4384,
+  "n_kept": 4136,
+  "n_dropped": 248,
+  "drop_rate": 0.056569,
+  "reason_counts": {
+    "non_floor_sit_or_lie": 156,
+    "stairs_ladder_or_elevation": 72,
+    "furniture_or_nonfloor_support": 30,
+    "fixed_scene_support": 24,
+    "vehicle_or_device": 2
+  },
+  "examples": {
+    "stairs_ladder_or_elevation": [
+      {
+        "id": "hml3dtest_002246_c00",
+        "prompt": "a person walks up stairs turns left and walks back down stairs."
+      },
+      {
+        "id": "hml3dtest_011997_c00",
+        "prompt": "a person walks up some stairs, turns around, and walks back down them."
+      },
+      {
+        "id": "hml3dtest_012388_c00",
+        "prompt": "this person ducks under something then climbs up and over it."
+      },
+      {
+        "id": "hml3dtest_006627_c00",
+        "prompt": "a figure uses a rail or bannister to support itself as it climbs up stairs"
+      },
+      {
+        "id": "hml3dtest_000421_c00",
+        "prompt": "a person slowly walks down some stairs."
+      },
+      {
+        "id": "hml3dtest_010248_c00",
+        "prompt": "a person climbs up some ladders"
+      },
+      {
+        "id": "hml3dtest_003331_c00",
+        "prompt": "a person walks forward up stairs"
+      },
+      {
+        "id": "hml3dtest_006814_c00",
+        "prompt": "a person walks forward and then up stairs"
+      }
+    ],
+    "fixed_scene_support": [
+      {
+        "id": "hml3dtest_002139_c00",
+        "prompt": "it looks like he is lifting a box on a shelf and grabbing another box to put on shelf as well."
+      },
+      {
+        "id": "hml3dtest_005278_c00",
+        "prompt": "the man walks while holding onto the rail."
+      },
+      {
+        "id": "hml3dtest_006627_c00",
+        "prompt": "a figure uses a rail or bannister to support itself as it climbs up stairs"
+      },
+      {
+        "id": "hml3dtest_011991_c00",
+        "prompt": "a person appears to be pushing against a wall."
+      },
+      {
+        "id": "hml3dtest_003138_c00",
+        "prompt": "a person opens a door and appears to be swimming."
+      },
+      {
+        "id": "hml3dtest_002247_c00",
+        "prompt": "a person walking and helping maintain their balance and support,  from holding onto a side rail or wall."
+      },
+      {
+        "id": "hml3dtest_005672_c00",
+        "prompt": "the person pulls the book off of the shelf"
+      },
+      {
+        "id": "hml3dtest_012084_c00",
+        "prompt": "a person is walking up a couple stairs while holding a railing."
+      }
+    ],
+    "non_floor_sit_or_lie": [
+      {
+        "id": "hml3dtest_001632_c00",
+        "prompt": "a man sits down and then stays still."
+      },
+      {
+        "id": "hml3dtest_007779_c00",
+        "prompt": "a person sits down and applauds."
+      },
+      {
+        "id": "hml3dtest_010552_c00",
+        "prompt": "walking to the side then sitting down and walking back."
+      },
+      {
+        "id": "hml3dtest_008887_c00",
+        "prompt": "a person walks forward, turns and then sits on a chair."
+      },
+      {
+        "id": "hml3dtest_004170_c00",
+        "prompt": "a person sits and moves their left arm"
+      },
+      {
+        "id": "hml3dtest_009689_c00",
+        "prompt": "a person walks forwards, sits."
+      },
+      {
+        "id": "hml3dtest_012673_c00",
+        "prompt": "a person slowly walked forward and sat on something"
+      },
+      {
+        "id": "hml3dtest_005106_c00",
+        "prompt": "a person is bent over with their arms around a dog.  they bounce around, let the dog stand up and pet it.  they let the dog sit down, look around, and lift the dog up momentarily before putting him back down to their original position."
+      }
+    ],
+    "furniture_or_nonfloor_support": [
+      {
+        "id": "hml3dtest_008887_c00",
+        "prompt": "a person walks forward, turns and then sits on a chair."
+      },
+      {
+        "id": "hml3dtest_004742_c00",
+        "prompt": "someone walking then sitting down in a chair."
+      },
+      {
+        "id": "hml3dtest_001675_c00",
+        "prompt": "person went around to sit on chair."
+      },
+      {
+        "id": "hml3dtest_000313_c00",
+        "prompt": "a man walks forward sits in a chair then with his right hand."
+      },
+      {
+        "id": "hml3dtest_014200_c00",
+        "prompt": "a person sits on a stool of some sort and brushes off their legs."
+      },
+      {
+        "id": "hml3dtest_011904_c00",
+        "prompt": "a person sits down at a chair, then moves the chair around while they are still in it."
+      },
+      {
+        "id": "hml3dtest_000886_c00",
+        "prompt": "a person sits down in a chair and then gets back up."
+      },
+      {
+        "id": "hml3dtest_010499_c00",
+        "prompt": "this person steps forward then sits on a stool to brush off his shoe."
+      }
+    ],
+    "vehicle_or_device": [
+      {
+        "id": "hml3dtest_000119_c00",
+        "prompt": "a person drive a car"
+      },
+      {
+        "id": "hml3dtest_M000119_c00",
+        "prompt": "a person drive a car"
+      }
+    ]
+  },
+  "dropped": [
+    {
+      "id": "hml3dtest_002246_c00",
+      "prompt": "a person walks up stairs turns left and walks back down stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.6,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002246",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_011997_c00",
+      "prompt": "a person walks up some stairs, turns around, and walks back down them.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011997",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_002139_c00",
+      "prompt": "it looks like he is lifting a box on a shelf and grabbing another box to put on shelf as well.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002139",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_001632_c00",
+      "prompt": "a man sits down and then stays still.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001632",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_007779_c00",
+      "prompt": "a person sits down and applauds.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007779",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_005278_c00",
+      "prompt": "the man walks while holding onto the rail.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "005278",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_012388_c00",
+      "prompt": "this person ducks under something then climbs up and over it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012388",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_010552_c00",
+      "prompt": "walking to the side then sitting down and walking back.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.2,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010552",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_008887_c00",
+      "prompt": "a person walks forward, turns and then sits on a chair.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008887",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_004170_c00",
+      "prompt": "a person sits and moves their left arm",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004170",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_009689_c00",
+      "prompt": "a person walks forwards, sits.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009689",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_012673_c00",
+      "prompt": "a person slowly walked forward and sat on something",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.7,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012673",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_005106_c00",
+      "prompt": "a person is bent over with their arms around a dog.  they bounce around, let the dog stand up and pet it.  they let the dog sit down, look around, and lift the dog up momentarily before putting him back down to their original position.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "005106",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_006627_c00",
+      "prompt": "a figure uses a rail or bannister to support itself as it climbs up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006627",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation",
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_000421_c00",
+      "prompt": "a person slowly walks down some stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 1.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000421",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_010248_c00",
+      "prompt": "a person climbs up some ladders",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010248",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_008177_c00",
+      "prompt": "a person in a sitting position wiggles around while remaining in that position.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008177",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_010392_c00",
+      "prompt": "a person sits their motion stutters",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010392",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_004742_c00",
+      "prompt": "someone walking then sitting down in a chair.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004742",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002747_c00",
+      "prompt": "a person is sitting down and turning a steering wheel.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002747",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_003331_c00",
+      "prompt": "a person walks forward up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 3.8,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003331",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_013777_c00",
+      "prompt": "a man sits down with crossed legs then gets up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.2,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "013777",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000119_c00",
+      "prompt": "a person drive a car",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000119",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "vehicle_or_device"
+      ]
+    },
+    {
+      "id": "hml3dtest_004424_c00",
+      "prompt": "someone steps back with their right foot and then sits down while placing his hands on his knees with elbows out.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004424",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_001675_c00",
+      "prompt": "person went around to sit on chair.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001675",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002070_c00",
+      "prompt": "a person sits down, stands up, and jumps in place.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.533,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002070",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_011991_c00",
+      "prompt": "a person appears to be pushing against a wall.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011991",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_006814_c00",
+      "prompt": "a person walks forward and then up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.633,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006814",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_014395_c00",
+      "prompt": "a person seeming to be sitting down and reaching over seeming to be taking a drink and sipping from it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014395",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_006263_c00",
+      "prompt": "walking backwards and then sitting.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.233,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006263",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_008378_c00",
+      "prompt": "a man climbs up and seems to be putting something away with both hands",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008378",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_014347_c00",
+      "prompt": "a person is sitting down, using a phone with their hands and puts it up to their ear.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014347",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002388_c00",
+      "prompt": "someone carefully looks behind them while backing up, then uses both hands to dip into a slight sitting motion.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002388",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000104_c00",
+      "prompt": "a man walks forward and takes two steps, turns clockwise and then goesni to a sitting position from standing.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000104",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_010617_c00",
+      "prompt": "a person walks forward then climbs up something.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010617",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_003886_c00",
+      "prompt": "person moves to side and climbs some steps",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003886",
+      "caption_index": 0,
+      "num_full_captions": 1,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_009903_c00",
+      "prompt": "a person begins to walk forward up the stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.033,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009903",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_004865_c00",
+      "prompt": "a person steps to the right and sits down, then stands back up and moves back.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.633,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004865",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_005712_c00",
+      "prompt": "sitting down crisscrossed, the right arm chucks forward and chucks forward again.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "005712",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_006811_c00",
+      "prompt": "a person is sitting down with both hands up, and moves his right hand up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006811",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_010895_c00",
+      "prompt": "a person is sitting with both hands together.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010895",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_007121_c00",
+      "prompt": "a person walks up four steps with their hands by their sides and their lean forward slightly as they go up the stairs and once they've stopped going up the stairs, they straighten up again",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.133,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007121",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_003486_c00",
+      "prompt": "a person walks down some stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003486",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_003138_c00",
+      "prompt": "a person opens a door and appears to be swimming.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003138",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_011536_c00",
+      "prompt": "this person is sitting and moving his right arm as if to eat.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011536",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002247_c00",
+      "prompt": "a person walking and helping maintain their balance and support,  from holding onto a side rail or wall.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.033,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002247",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_006531_c00",
+      "prompt": "the person walks up a ramp.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006531",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_004120_c00",
+      "prompt": "said person walked over and sit down",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.833,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004120",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_004823_c00",
+      "prompt": "a person walks down stairs holding on to something on the right.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.733,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004823",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_004601_c00",
+      "prompt": "someone is climbing a ladder,  they walk up 3 steps and then back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004601",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_000601_c00",
+      "prompt": "person is sitting down scratching head i think.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000601",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_014588_c00",
+      "prompt": "the person walks down a series of stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.8,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014588",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_002399_c00",
+      "prompt": "a person stands up, walks in a circle, and sits back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002399",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000313_c00",
+      "prompt": "a man walks forward sits in a chair then with his right hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000313",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_004947_c00",
+      "prompt": "a person sits down then uses left arm to push up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.6,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004947",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_001437_c00",
+      "prompt": "the person turns to their left and begins walking up what seem to be 3 stair steps. after the third step the person turns around and takes one step back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001437",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_013546_c00",
+      "prompt": "this person is seated as if playing the drums.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "013546",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_007946_c00",
+      "prompt": "a person is sitting with the chin in hand, stands up, and then returns to sitting",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007946",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_008068_c00",
+      "prompt": "the person is sitting down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008068",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_008633_c00",
+      "prompt": "a man confidently walks down a ramp with a measured pace.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 3.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008633",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_013778_c00",
+      "prompt": "a person sits down, turns to their right, then stands.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "013778",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_005674_c00",
+      "prompt": "a person sits down, jiggles his right knee, raises both hands quickly to his shoulders then rubs his stomach with his left hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "005674",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_009373_c00",
+      "prompt": "a figure appears to climb stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009373",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_011035_c00",
+      "prompt": "a person is walking then stops and sits down",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.833,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011035",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_014200_c00",
+      "prompt": "a person sits on a stool of some sort and brushes off their legs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014200",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_005672_c00",
+      "prompt": "the person pulls the book off of the shelf",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 3.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "005672",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_001636_c00",
+      "prompt": "a person steps to their left and sits down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.133,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001636",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_014185_c00",
+      "prompt": "a person who is standing on a balance beam takes three steps forward and then steps down off the beam.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.033,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014185",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_013811_c00",
+      "prompt": "a person is sitting with both arms out in front of themselves holding something, then they move their right hand away and make sliding motions with it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "013811",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002357_c00",
+      "prompt": "a headless line figure takes four steps forward, down a ramp, toward the viewer.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.6,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002357",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_012993_c00",
+      "prompt": "a person in a seated position uses their elbows and forearms to raise up to a standing position.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.533,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012993",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_009609_c00",
+      "prompt": "person is sitting reading a newspaper.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009609",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_003761_c00",
+      "prompt": "a person sitting and readjusting position to the left.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003761",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_012084_c00",
+      "prompt": "a person is walking up a couple stairs while holding a railing.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012084",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation",
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_010135_c00",
+      "prompt": "a person is sitting and makes slight movements of his hands",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010135",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_011904_c00",
+      "prompt": "a person sits down at a chair, then moves the chair around while they are still in it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011904",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_008818_c00",
+      "prompt": "the person is sitting and put his right finger up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008818",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_009171_c00",
+      "prompt": "a person sits down to avoid pressure on their knees.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009171",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_013980_c00",
+      "prompt": "a person slowly walked backward, and sat on the knee and hands",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "013980",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000886_c00",
+      "prompt": "a person sits down in a chair and then gets back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.1,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000886",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_011755_c00",
+      "prompt": "person turns to left, takes three steps forward, sits down, and then walks back to starting place.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.833,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011755",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_010499_c00",
+      "prompt": "this person steps forward then sits on a stool to brush off his shoe.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010499",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_012290_c00",
+      "prompt": "someone walks up a flight of stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012290",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_000066_c00",
+      "prompt": "a man stands up, walks clock-wise in a circle, then sits back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000066",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_003432_c00",
+      "prompt": "a person sits on a ledge",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003432",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000337_c00",
+      "prompt": "a person walks down stairs while holding a railing with his right hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.7,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000337",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation",
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_001467_c00",
+      "prompt": "person side steps to the left and then sits down. then, gets back up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001467",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000265_c00",
+      "prompt": "a person is in a seated position and making a steering gesture.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000265",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002317_c00",
+      "prompt": "a person steps around something then sits down on the item and rests each hand on the corresponding thigh",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002317",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_005050_c00",
+      "prompt": "a person climbs up something, turns around and climbs back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.967,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "005050",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_001307_c00",
+      "prompt": "the man sits on a stool and looks around.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001307",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_007550_c00",
+      "prompt": "the person climbs on a ladder and picks up something from a shelf",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007550",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_011252_c00",
+      "prompt": "the person is walking up the stairs and stood still.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011252",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_009135_c00",
+      "prompt": "a person walks in a counter clockwise circle then sits down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009135",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_011046_c00",
+      "prompt": "a person walks backwards and then steps up stairs backwards as well",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011046",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_012527_c00",
+      "prompt": "a person walking forward steps up onto something and then steps down off the other side, then again up onto something and down the other side, then turns right and walks forward, then turns right again and steps up onto something.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012527",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_011471_c00",
+      "prompt": "a person sits on the ledge of something then gets off and walks away.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011471",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_006214_c00",
+      "prompt": "a person stands up from a sitting position, makes an overhand throw motion, and underhand throw motion, then a basketball shot motion.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006214",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_001473_c00",
+      "prompt": "a person sits in a  chair then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.433,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001473",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_007581_c00",
+      "prompt": "a man sits down, brings his hands to his face and then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007581",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_006567_c00",
+      "prompt": "a person sits on a chair behind them and then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006567",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_012023_c00",
+      "prompt": "a person walks while holding a hand rail",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012023",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_006692_c00",
+      "prompt": "a person stands with their arms stretched out then sits down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006692",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_008653_c00",
+      "prompt": "a person walks up four steps while holding onto the railing with their right hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "008653",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_000268_c00",
+      "prompt": "someone slouched in a sitting position gets up and begins walking in a circle.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000268",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_000086_c00",
+      "prompt": "a person is holding his arms straight out to the sides then lowers them, claps, and steps forward to sit in a chair",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "000086",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_012060_c00",
+      "prompt": "a person walks up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012060",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_006986_c00",
+      "prompt": "a sitting person sits up straight, than stands and finally sits back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006986",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002171_c00",
+      "prompt": "a person who sits down on there knees",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002171",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_011716_c00",
+      "prompt": "a person is climbing up a ladder and cleaning",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "011716",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_012601_c00",
+      "prompt": "the person sat down and crossed his legs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.733,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "012601",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_003083_c00",
+      "prompt": "the person starts by sitting and dials with their right hand then holds the phone with their left and starts by turning in their chair, before standing up walking to the left around the back of the chair then sitting down again.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003083",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_014506_c00",
+      "prompt": "figure walks forward, raises foot to step up and over, uses other foot to drop down, walks forward and stops.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.967,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014506",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_004996_c00",
+      "prompt": "the person is sat down and their arms are shaking",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "004996",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_009905_c00",
+      "prompt": "bending down and sitting criss cross.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "009905",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_001789_c00",
+      "prompt": "a person steps up and right in one motion.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "001789",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_007365_c00",
+      "prompt": "person walks up the stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007365",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_003537_c00",
+      "prompt": "person opens something on the middle shelf, takes something from the top puts it on the ground, then takes something from the ground then puts it on middle shelf.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "003537",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_014043_c00",
+      "prompt": "a person sits down on something and then stands back up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.633,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014043",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_007556_c00",
+      "prompt": "sits down than brushes off knees",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "007556",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_002346_c00",
+      "prompt": "a person sitting down on something",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "002346",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_014108_c00",
+      "prompt": "a person steps back and sits down, then stands back up again and walks forward",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.433,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "014108",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_010773_c00",
+      "prompt": "a seated person motions in a \"come here\" movement with their right arm",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "010773",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_006295_c00",
+      "prompt": "a person sits down, rests their hands on their knees, and then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "006295",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002246_c00",
+      "prompt": "a person walks up stairs turns right and walks back down stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.6,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002246",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011997_c00",
+      "prompt": "a person walks up some stairs, turns around, and walks back down them.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011997",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002139_c00",
+      "prompt": "it looks like he is lifting a box on a shelf and grabbing another box to put on shelf as well.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002139",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001632_c00",
+      "prompt": "a man sits down and then stays still.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001632",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007779_c00",
+      "prompt": "a person sits down and applauds.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007779",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M005278_c00",
+      "prompt": "the man walks while holding onto the rail.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M005278",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012388_c00",
+      "prompt": "this person ducks under something then climbs up and over it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012388",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010552_c00",
+      "prompt": "walking to the side then sitting down and walking back.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.2,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010552",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008887_c00",
+      "prompt": "a person walks forward, turns and then sits on a chair.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008887",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004170_c00",
+      "prompt": "a person sits and moves their right arm",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004170",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009689_c00",
+      "prompt": "a person walks forwards, sits.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009689",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012673_c00",
+      "prompt": "a person slowly walked forward and sat on something",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.7,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012673",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M005106_c00",
+      "prompt": "a person is bent over with their arms around a dog.  they bounce around, let the dog stand up and pet it.  they let the dog sit down, look around, and lift the dog up momentarily before putting him back down to their original position.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M005106",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006627_c00",
+      "prompt": "a figure uses a rail or bannister to support itself as it climbs up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006627",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation",
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000421_c00",
+      "prompt": "a person slowly walks down some stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 1.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000421",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010248_c00",
+      "prompt": "a person climbs up some ladders",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010248",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008177_c00",
+      "prompt": "a person in a sitting position wiggles around while remaining in that position.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008177",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010392_c00",
+      "prompt": "a person sits their motion stutters",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010392",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004742_c00",
+      "prompt": "someone walking then sitting down in a chair.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004742",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002747_c00",
+      "prompt": "a person is sitting down and turning a steering wheel.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002747",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003331_c00",
+      "prompt": "a person walks forward up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 3.8,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003331",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M013777_c00",
+      "prompt": "a man sits down with crossed legs then gets up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.2,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M013777",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000119_c00",
+      "prompt": "a person drive a car",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000119",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "vehicle_or_device"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004424_c00",
+      "prompt": "someone steps back with their left foot and then sits down while placing his hands on his knees with elbows out.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004424",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001675_c00",
+      "prompt": "person went around to sit on chair.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001675",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002070_c00",
+      "prompt": "a person sits down, stands up, and jumps in place.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.533,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002070",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011991_c00",
+      "prompt": "a person appears to be pushing against a wall.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011991",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006814_c00",
+      "prompt": "a person walks forward and then up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.633,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006814",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014395_c00",
+      "prompt": "a person seeming to be sitting down and reaching over seeming to be taking a drink and sipping from it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014395",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006263_c00",
+      "prompt": "walking backwards and then sitting.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.233,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006263",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008378_c00",
+      "prompt": "a man climbs up and seems to be putting something away with both hands",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008378",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014347_c00",
+      "prompt": "a person is sitting down, using a phone with their hands and puts it up to their ear.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014347",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002388_c00",
+      "prompt": "someone carefully looks behind them while backing up, then uses both hands to dip into a slight sitting motion.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002388",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000104_c00",
+      "prompt": "a man walks forward and takes two steps, turns counterclockwise and then goesni to a sitting position from standing.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000104",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010617_c00",
+      "prompt": "a person walks forward then climbs up something.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010617",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003886_c00",
+      "prompt": "person moves to side and climbs some steps",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003886",
+      "caption_index": 0,
+      "num_full_captions": 1,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009903_c00",
+      "prompt": "a person begins to walk forward up the stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.033,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009903",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004865_c00",
+      "prompt": "a person steps to the left and sits down, then stands back up and moves back.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.633,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004865",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M005712_c00",
+      "prompt": "sitting down crisscrossed, the left arm chucks forward and chucks forward again.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M005712",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006811_c00",
+      "prompt": "a person is sitting down with both hands up, and moves his left hand up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006811",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010895_c00",
+      "prompt": "a person is sitting with both hands together.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010895",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007121_c00",
+      "prompt": "a person walks up four steps with their hands by their sides and their lean forward slightly as they go up the stairs and once they've stopped going up the stairs, they straighten up again",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.133,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007121",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003486_c00",
+      "prompt": "a person walks down some stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003486",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003138_c00",
+      "prompt": "a person opens a door and appears to be swimming.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003138",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011536_c00",
+      "prompt": "this person is sitting and moving his left arm as if to eat.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011536",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002247_c00",
+      "prompt": "a person walking and helping maintain their balance and support,  from holding onto a side rail or wall.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.033,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002247",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006531_c00",
+      "prompt": "the person walks up a ramp.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006531",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004120_c00",
+      "prompt": "said person walked over and sit down",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.833,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004120",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004823_c00",
+      "prompt": "a person walks down stairs holding on to something on the left.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.733,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004823",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004601_c00",
+      "prompt": "someone is climbing a ladder,  they walk up 3 steps and then back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004601",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000601_c00",
+      "prompt": "person is sitting down scratching head i think.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000601",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014588_c00",
+      "prompt": "the person walks down a series of stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.8,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014588",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002399_c00",
+      "prompt": "a person stands up, walks in a circle, and sits back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002399",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000313_c00",
+      "prompt": "a man walks forward sits in a chair then with his left hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000313",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004947_c00",
+      "prompt": "a person sits down then uses right arm to push up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.6,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004947",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001437_c00",
+      "prompt": "the person turns to their right and begins walking up what seem to be 3 stair steps. after the third step the person turns around and takes one step back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001437",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M013546_c00",
+      "prompt": "this person is seated as if playing the drums.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M013546",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007946_c00",
+      "prompt": "a person is sitting with the chin in hand, stands up, and then returns to sitting",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007946",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008068_c00",
+      "prompt": "the person is sitting down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008068",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008633_c00",
+      "prompt": "a man confidently walks down a ramp with a measured pace.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 3.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008633",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M013778_c00",
+      "prompt": "a person sits down, turns to their left, then stands.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M013778",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M005674_c00",
+      "prompt": "a person sits down, jiggles his left knee, raises both hands quickly to his shoulders then rubs his stomach with his right hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M005674",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009373_c00",
+      "prompt": "a figure appears to climb stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009373",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011035_c00",
+      "prompt": "a person is walking then stops and sits down",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.833,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011035",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014200_c00",
+      "prompt": "a person sits on a stool of some sort and brushes off their legs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014200",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M005672_c00",
+      "prompt": "the person pulls the book off of the shelf",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 3.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M005672",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001636_c00",
+      "prompt": "a person steps to their right and sits down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.133,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001636",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014185_c00",
+      "prompt": "a person who is standing on a balance beam takes three steps forward and then steps down off the beam.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.033,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014185",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M013811_c00",
+      "prompt": "a person is sitting with both arms out in front of themselves holding something, then they move their left hand away and make sliding motions with it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M013811",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002357_c00",
+      "prompt": "a headless line figure takes four steps forward, down a ramp, toward the viewer.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.6,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002357",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012993_c00",
+      "prompt": "a person in a seated position uses their elbows and forearms to raise up to a standing position.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.533,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012993",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009609_c00",
+      "prompt": "person is sitting reading a newspaper.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009609",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003761_c00",
+      "prompt": "a person sitting and readjusting position to the right.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003761",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012084_c00",
+      "prompt": "a person is walking up a couple stairs while holding a railing.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012084",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation",
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010135_c00",
+      "prompt": "a person is sitting and makes slight movements of his hands",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010135",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011904_c00",
+      "prompt": "a person sits down at a chair, then moves the chair around while they are still in it.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011904",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008818_c00",
+      "prompt": "the person is sitting and put his left finger up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008818",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009171_c00",
+      "prompt": "a person sits down to avoid pressure on their knees.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009171",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M013980_c00",
+      "prompt": "a person slowly walked backward, and sat on the knee and hands",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M013980",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000886_c00",
+      "prompt": "a person sits down in a chair and then gets back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.1,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000886",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011755_c00",
+      "prompt": "person turns to right, takes three steps forward, sits down, and then walks back to starting place.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.833,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011755",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010499_c00",
+      "prompt": "this person steps forward then sits on a stool to brush off his shoe.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010499",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012290_c00",
+      "prompt": "someone walks up a flight of stairs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012290",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000066_c00",
+      "prompt": "a man stands up, walks counterclockwise in a circle, then sits back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000066",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003432_c00",
+      "prompt": "a person sits on a ledge",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003432",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000337_c00",
+      "prompt": "a person walks down stairs while holding a railing with his left hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.7,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000337",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation",
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001467_c00",
+      "prompt": "person side steps to the right and then sits down. then, gets back up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001467",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000265_c00",
+      "prompt": "a person is in a seated position and making a steering gesture.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000265",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002317_c00",
+      "prompt": "a person steps around something then sits down on the item and rests each hand on the corresponding thigh",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002317",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M005050_c00",
+      "prompt": "a person climbs up something, turns around and climbs back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.967,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M005050",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001307_c00",
+      "prompt": "the man sits on a stool and looks around.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001307",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007550_c00",
+      "prompt": "the person climbs on a ladder and picks up something from a shelf",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007550",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011252_c00",
+      "prompt": "the person is walking up the stairs and stood still.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011252",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009135_c00",
+      "prompt": "a person walks in a counter counterclockwise circle then sits down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009135",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011046_c00",
+      "prompt": "a person walks backwards and then steps up stairs backwards as well",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011046",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012527_c00",
+      "prompt": "a person walking forward steps up onto something and then steps down off the other side, then again up onto something and down the other side, then turns left and walks forward, then turns left again and steps up onto something.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012527",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011471_c00",
+      "prompt": "a person sits on the ledge of something then gets off and walks away.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011471",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006214_c00",
+      "prompt": "a person stands up from a sitting position, makes an overhand throw motion, and underhand throw motion, then a basketball shot motion.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006214",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001473_c00",
+      "prompt": "a person sits in a  chair then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 9.433,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001473",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007581_c00",
+      "prompt": "a man sits down, brings his hands to his face and then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007581",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006567_c00",
+      "prompt": "a person sits on a chair behind them and then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006567",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012023_c00",
+      "prompt": "a person walks while holding a hand rail",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.933,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012023",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006692_c00",
+      "prompt": "a person stands with their arms stretched out then sits down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 8.3,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006692",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M008653_c00",
+      "prompt": "a person walks up four steps while holding onto the railing with their left hand.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M008653",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000268_c00",
+      "prompt": "someone slouched in a sitting position gets up and begins walking in a circle.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000268",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M000086_c00",
+      "prompt": "a person is holding his arms straight out to the sides then lowers them, claps, and steps forward to sit in a chair",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M000086",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012060_c00",
+      "prompt": "a person walks up stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012060",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006986_c00",
+      "prompt": "a sitting person sits up straight, than stands and finally sits back down.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006986",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002171_c00",
+      "prompt": "a person who sits down on there knees",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002171",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M011716_c00",
+      "prompt": "a person is climbing up a ladder and cleaning",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M011716",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M012601_c00",
+      "prompt": "the person sat down and crossed his legs.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 7.733,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M012601",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003083_c00",
+      "prompt": "the person starts by sitting and dials with their left hand then holds the phone with their right and starts by turning in their chair, before standing up walking to the right around the back of the chair then sitting down again.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003083",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "furniture_or_nonfloor_support",
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014506_c00",
+      "prompt": "figure walks forward, raises foot to step up and over, uses other foot to drop down, walks forward and stops.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.967,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014506",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M004996_c00",
+      "prompt": "the person is sat down and their arms are shaking",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M004996",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M009905_c00",
+      "prompt": "bending down and sitting criss cross.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M009905",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M001789_c00",
+      "prompt": "a person steps up and left in one motion.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M001789",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007365_c00",
+      "prompt": "person walks up the stairs",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.333,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007365",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "stairs_ladder_or_elevation"
+      ]
+    },
+    {
+      "id": "hml3dtest_M003537_c00",
+      "prompt": "person opens something on the middle shelf, takes something from the top puts it on the ground, then takes something from the ground then puts it on middle shelf.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M003537",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "fixed_scene_support"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014043_c00",
+      "prompt": "a person sits down on something and then stands back up",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.633,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014043",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M007556_c00",
+      "prompt": "sits down than brushes off knees",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M007556",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M002346_c00",
+      "prompt": "a person sitting down on something",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 4.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M002346",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M014108_c00",
+      "prompt": "a person steps back and sits down, then stands back up again and walks forward",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 6.433,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M014108",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M010773_c00",
+      "prompt": "a seated person motions in a \"come here\" movement with their left arm",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 10.0,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M010773",
+      "caption_index": 0,
+      "num_full_captions": 2,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    },
+    {
+      "id": "hml3dtest_M006295_c00",
+      "prompt": "a person sits down, rests their hands on their knees, and then stands back up.",
+      "category": "humanml3d_official_test",
+      "difficulty": 0,
+      "duration_sec": 5.4,
+      "split": "test",
+      "source": "HumanML3D-official-test",
+      "hml3d_id": "M006295",
+      "caption_index": 0,
+      "num_full_captions": 3,
+      "tags": [
+        "official_humanml3d_test"
+      ],
+      "drop_reasons": [
+        "non_floor_sit_or_lie"
+      ]
+    }
+  ]
+}
