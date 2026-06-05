@@ -9,7 +9,8 @@ TMM paper.
 
 Three input modes:
   --gt_only            : real motions, real motions; sanity-check (FID -> 0).
-  --pred_dir DIR       : (motion_<id>.npy, 135-dim) predictions vs GT motions.
+  --pred_dir DIR       : (<id>.npy 135-dim or <id>.npz SMPL/motion_135)
+                         predictions vs GT motions.
   --pred_npz NPZ       : single .npz with arrays {names, motions, lengths},
                          each motion 135-dim aligned with the test split.
 
@@ -50,7 +51,7 @@ import torch
 from torch import Tensor
 
 THIS_DIR = Path(__file__).resolve().parent
-HF_ROOT = THIS_DIR.parent
+HF_ROOT = THIS_DIR.parent.parent
 sys.path.insert(0, str(HF_ROOT))
 
 
@@ -206,6 +207,36 @@ def _load_smpl22_motion(motion_path: Path) -> Optional[np.ndarray]:
     return motion135.astype(np.float32)
 
 
+def _load_pred_motion(pred_path: Path) -> Optional[np.ndarray]:
+    """Load one prediction as (T, 135).
+
+    Prediction directories historically stored ``<id>.npy`` arrays. Newer
+    baseline dumps may store per-sample SMPL-style ``<id>.npz`` files.
+    """
+    if pred_path.suffix == '.npy':
+        if not pred_path.exists():
+            return None
+        try:
+            pred = np.load(str(pred_path)).astype(np.float32)
+        except Exception:
+            return None
+        return pred if pred.ndim == 2 and pred.shape[-1] == 135 else None
+
+    if pred_path.suffix == '.npz':
+        if not pred_path.exists():
+            return None
+        try:
+            z = np.load(str(pred_path), allow_pickle=True)
+        except Exception:
+            return None
+        if 'motion_135' in z.files:
+            pred = np.asarray(z['motion_135'], dtype=np.float32)
+            return pred if pred.ndim == 2 and pred.shape[-1] == 135 else None
+        return _load_smpl22_motion(pred_path)
+
+    return None
+
+
 def load_test_pairs(anno_file: Path,
                     data_dir: Path,
                     motion_key: str = 'smplx',
@@ -213,7 +244,8 @@ def load_test_pairs(anno_file: Path,
                     min_frames: int = 24,
                     max_frames: int = 360,
                     max_pairs: Optional[int] = None,
-                    rewritten_caption_file: Optional[Path] = None) -> List[Tuple[str, str, np.ndarray, int]]:
+                    rewritten_caption_file: Optional[Path] = None,
+                    allowed_names: Optional[set[str]] = None) -> List[Tuple[str, str, np.ndarray, int]]:
     """Load (name, caption, motion[135], num_frames) pairs from a motionhub anno file.
 
     Supports two layouts:
@@ -245,6 +277,8 @@ def load_test_pairs(anno_file: Path,
 
     pairs = []
     for name, entry in entries:
+        if allowed_names is not None and name not in allowed_names:
+            continue
         m_rel = entry.get(f'{motion_key}_path')
         c_rel = entry.get(f'{caption_key}_path')
         if not (m_rel and c_rel):
@@ -462,12 +496,18 @@ def main():
     print(f'[+] device = {device}')
 
     print('[+] Loading test pairs ...')
+    pred_dir = Path(args.pred_dir) if args.pred_dir else None
+    allowed_names = None
+    if pred_dir is not None:
+        allowed_names = {p.stem for p in pred_dir.glob('*.npy')}
+        allowed_names.update(p.stem for p in pred_dir.glob('*.npz'))
     pairs = load_test_pairs(
         Path(args.anno_file), Path(args.data_dir),
         motion_key=args.motion_key, caption_key=args.caption_key,
         min_frames=args.min_frames, max_frames=args.max_frames,
         max_pairs=args.max_pairs,
         rewritten_caption_file=Path(args.rewritten_caption_file) if args.rewritten_caption_file else None,
+        allowed_names=allowed_names,
     )
     print(f'    loaded: {len(pairs)} (motion_135-dim, caption) pairs')
     if not pairs:
@@ -482,7 +522,6 @@ def main():
 
     # Aligned (real, pred) selection
     captions, real_motions, pred_motions, lengths = [], [], [], []
-    pred_dir = Path(args.pred_dir) if args.pred_dir else None
     pred_lookup = None
     if args.pred_npz:
         z = np.load(args.pred_npz, allow_pickle=True)
@@ -503,8 +542,10 @@ def main():
         elif pred_dir is not None:
             pred_file = pred_dir / f'{name}.npy'
             if not pred_file.exists():
+                pred_file = pred_dir / f'{name}.npz'
+            pred = _load_pred_motion(pred_file)
+            if pred is None:
                 continue
-            pred = np.load(str(pred_file)).astype(np.float32)
             pred_ml = int(pred.shape[0])
         elif pred_lookup is not None:
             if name not in pred_lookup:

@@ -43,8 +43,14 @@ DATALIST = "eval_h3d_editing.json"
 DUMMY_CONFIG = "configs/hymotion_m2m/hymotion_m2m_kimodo_caption_permo_046b.py"
 
 MODELS = {
-    "kimodo_caption_editfix_ep240": ("kimodo460", "work_dirs/_eval_kimodo_ep460"),
-    "smpl_caption_editfix_ep230": ("smpl390", "work_dirs/_eval_smpl_ep390"),
+    "kimodo_caption_editfix_latest": (
+        "kimodo_latest",
+        "work_dirs/hymotion_m2m_v2_kimodo_caption_permo_E4plus_editfix_from890_20260528",
+    ),
+    "smpl_caption_editfix_latest": (
+        "smpl_latest",
+        "work_dirs/hymotion_m2m_v2_smpl_caption_editfix_from870_20260528",
+    ),
 }
 
 # setting tag -> (text_guidance_scale, extra eval flags)

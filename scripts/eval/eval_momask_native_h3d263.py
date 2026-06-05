@@ -118,6 +118,9 @@ def main():
                    help="Exclude HumanML3D mirrored clips (ids starting with 'M'). The "
                         "official published 'Real' metrics use unique (non-mirrored) "
                         "motions; including mirror pairs deflates Diversity.")
+    p.add_argument("--caption_selection", choices=["random", "first"], default="random",
+                   help="Debug switch. Official-style eval samples captions randomly; "
+                        "'first' matches offline predictions generated from the first caption.")
     p.add_argument("--output", required=True)
     args = p.parse_args()
 
@@ -244,7 +247,10 @@ def main():
 
         for s in samples:
             t_eff = s["length"]
-            text_data = random.choice(s["text_list"])
+            if args.caption_selection == "first":
+                text_data = s["text_list"][0]
+            else:
+                text_data = random.choice(s["text_list"])
             tokens = text_data["tokens"]
             tokens, sent_len = _tokenise(tokens, args.max_text_len)
             word_embs = []

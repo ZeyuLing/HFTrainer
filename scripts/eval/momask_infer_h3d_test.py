@@ -32,10 +32,12 @@ Caveats:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -97,8 +99,106 @@ def _load_test_pairs(humanml3d_272: Path):
             ml = (T_gt // 4) * 4
             if ml < 60:
                 continue
-            pairs.append((name, caption, ml))
+            pairs.append((name, caption, ml, 30.0))
     return pairs
+
+
+def _load_json(path: Path):
+    return json.loads(path.read_text())
+
+
+def _iter_motionhub_entries(raw):
+    if isinstance(raw, dict) and "data_list" in raw:
+        data = raw["data_list"]
+        if isinstance(data, dict):
+            for name, entry in data.items():
+                yield str(name), entry
+        else:
+            for i, entry in enumerate(data):
+                yield str(entry.get("motion_id") or entry.get("id") or i), entry
+    elif isinstance(raw, list):
+        for i, entry in enumerate(raw):
+            yield str(entry.get("motion_id") or entry.get("id") or i), entry
+    else:
+        raise ValueError("Unrecognized annotation format")
+
+
+def _load_rewritten(path: Optional[Path]):
+    if path is None:
+        return {}
+    raw = _load_json(path)
+    if isinstance(raw, dict) and "data_list" in raw:
+        raw = raw["data_list"]
+    if not isinstance(raw, dict):
+        raise ValueError(f"rewritten caption file must be a dict: {path}")
+    out = {}
+    for key, value in raw.items():
+        if isinstance(value, str):
+            cap = value
+        elif isinstance(value, dict):
+            cap = value.get("caption") or value.get("text") or value.get("short_caption")
+        else:
+            cap = None
+        if isinstance(cap, str) and cap.strip():
+            out[str(key)] = cap.strip()
+    return out
+
+
+def _load_caption_from_json(path: Path):
+    try:
+        data = _load_json(path)
+    except Exception:
+        return None
+    pool = []
+    if isinstance(data, dict) and all(isinstance(data.get(k), list) for k in ("macro", "meso", "micro")):
+        for group in ("macro", "meso", "micro"):
+            for item in data[group]:
+                if isinstance(item, str) and item.strip():
+                    pool.append(item.strip())
+    elif isinstance(data, dict) and isinstance(data.get("result"), list):
+        for item in data["result"]:
+            if not isinstance(item, dict):
+                continue
+            for key in ("short_caption_rewritten", "short caption_rewritten"):
+                vals = item.get(key)
+                if isinstance(vals, list):
+                    pool.extend(v.strip() for v in vals if isinstance(v, str) and v.strip())
+                    break
+            else:
+                for key in ("short_caption", "short caption"):
+                    val = item.get(key)
+                    if isinstance(val, str) and val.strip():
+                        pool.append(val.strip())
+                        break
+    return pool[0] if pool else None
+
+
+def _load_annotation_pairs(anno_file: Path, data_dir: Path, rewritten_file: Optional[Path],
+                           caption_protocol: str, default_fps: float):
+    rewritten = _load_rewritten(rewritten_file)
+    pairs = []
+    for name, entry in _iter_motionhub_entries(_load_json(anno_file)):
+        caption = None
+        if caption_protocol == "rewritten":
+            caption = rewritten.get(name)
+        if not caption and caption_protocol in {"original", "fallback"} and entry.get("hierarchical_caption_path"):
+            caption = _load_caption_from_json(data_dir / entry["hierarchical_caption_path"])
+        if not caption and caption_protocol in {"rewritten", "fallback"}:
+            caption = rewritten.get(name)
+        if not isinstance(caption, str) or not caption.strip():
+            continue
+        src_fps = float(entry.get("fps") or default_fps)
+        length = int(entry.get("num_frames") or round(float(entry.get("duration", 0.0)) * src_fps))
+        if length <= 0:
+            continue
+        pairs.append((name, caption.strip(), length, src_fps))
+    return pairs
+
+
+def _select_shard(items, num_shards: int, shard_index: int):
+    if num_shards <= 1:
+        return items
+    return [item for i, item in enumerate(items) if i % num_shards == shard_index]
 
 
 def main():
@@ -126,6 +226,15 @@ def main():
                         "MoMask runs at 20 fps internally, so we scale lengths "
                         "by 20/gt_fps before passing to the model.")
     p.add_argument("--momask_fps", type=float, default=20.0)
+    p.add_argument("--anno_file", default=None,
+                   help="Optional motionhub-format annotation. When set, sample ids/captions/lengths "
+                        "come from this file instead of the official HumanML3D split.")
+    p.add_argument("--data_dir", default="data/motionhub")
+    p.add_argument("--rewritten_file", default=None)
+    p.add_argument("--caption_protocol", choices=["rewritten", "original", "fallback"], default="rewritten")
+    p.add_argument("--num_shards", type=int, default=1)
+    p.add_argument("--shard_index", type=int, default=0)
+    p.add_argument("--skip_existing", action="store_true")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -230,8 +339,18 @@ def main():
     res_transformer.eval().to(device)
 
     # ----- 4. Build test prompt list -----
-    print("[+] Loading HumanML3D test pairs ...")
-    pairs = _load_test_pairs(humanml3d_272)
+    print("[+] Loading test pairs ...")
+    if args.anno_file:
+        pairs = _load_annotation_pairs(
+            Path(args.anno_file),
+            Path(args.data_dir),
+            Path(args.rewritten_file) if args.rewritten_file else None,
+            args.caption_protocol,
+            args.gt_fps,
+        )
+    else:
+        pairs = _load_test_pairs(humanml3d_272)
+    pairs = _select_shard(pairs, args.num_shards, args.shard_index)
     print(f"    {len(pairs)} (id, caption, T) prompts (one per caption line)")
 
     # The downstream MotionStreamer evaluator expects ONE pred motion per `name`
@@ -242,22 +361,27 @@ def main():
     # Also rescale the GT motion length (which is in --gt_fps frames) to MoMask's
     # internal 20 fps so the *physical duration* matches the GT once we later
     # upsample MoMask outputs back to 30 fps.
-    fps_ratio = args.momask_fps / args.gt_fps  # 20/30 ~= 0.667
     indexed_pairs = []
     seen = set()
-    for name, caption, ml in pairs:
+    src_fps_values = []
+    for name, caption, ml, src_fps in pairs:
         if name in seen:
             continue
         seen.add(name)
-        ml_momask = int(round(ml * fps_ratio))
+        ml_momask = int(round(ml * args.momask_fps / src_fps))
         ml_momask = (ml_momask // 4) * 4
         if ml_momask < 40:  # MoMask expects at least 10 latent tokens
             ml_momask = 40
         indexed_pairs.append((name, caption, ml_momask))
+        src_fps_values.append(src_fps)
 
     if args.max_samples:
         indexed_pairs = indexed_pairs[: args.max_samples]
     print(f"    will generate {len(indexed_pairs)} motions (one per name, first caption)")
+    if src_fps_values:
+        print(f"    source_fps min/median/max="
+              f"{min(src_fps_values):.3g}/{float(np.median(src_fps_values)):.3g}/{max(src_fps_values):.3g}; "
+              f"momask_fps={args.momask_fps:.3g}")
 
     # ----- 5. Generate in batches -----
     bs = args.batch_size
@@ -291,8 +415,11 @@ def main():
             data = pred_motions * std + mean
 
             for k, (sid, caption, ml) in enumerate(chunk):
+                out_path = out_dir / f"{sid}.npy"
+                if args.skip_existing and out_path.exists():
+                    continue
                 m = data[k, : int(ml)]
-                np.save(out_dir / f"{sid}.npy", m.astype(np.float32))
+                np.save(out_path, m.astype(np.float32))
                 written += 1
 
     elapsed = time.time() - t0

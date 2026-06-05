@@ -206,6 +206,20 @@ V2_MODELS = {
         'has_caption': True,
         'rotation_space': 'local',
     },
+    'kimodo_caption_editfix_latest': {
+        'config': 'configs/hymotion_m2m/hymotion_m2m_kimodo_caption_permo_046b.py',
+        'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_E4plus_editfix_from890_20260528',
+        'desc': 'v2 KIMODO Root + Caption + PerMo, editfix latest checkpoint',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
+    'smpl_caption_editfix_latest': {
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
+        'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_editfix_from870_20260528',
+        'desc': 'v2 SMPL Root + Caption, editfix latest checkpoint',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
 }
 
 # Also allow running v1 models for comparison

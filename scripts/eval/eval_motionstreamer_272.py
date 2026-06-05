@@ -30,6 +30,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import codecs as cs
@@ -209,24 +210,39 @@ def crop_and_norm(motion, mean, std, rng):
     return motion.astype(np.float32), m_length
 
 
-def build_items(ids, motion_source, mean, std, rng):
-    """motion_source(cid) -> (T,272) raw, or None. Returns list of (cap,motion,len)."""
-    items = []
-    skipped = 0
-    for cid in ids:
+def build_items(ids, motion_source, mean, std, rng, io_workers=32):
+    """motion_source(cid) -> (T,272) raw, or None. Returns list of (cap,motion,len).
+
+    I/O (caption text + motion npz) is prefetched concurrently with a thread pool
+    (FUSE/CephFS reads release the GIL, so threads massively cut cold-cache wall
+    time). ``crop_and_norm`` is then applied SEQUENTIALLY in original id order so
+    the rng draw sequence stays identical to the single-threaded version.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fetch(cid):
         cap = read_caption(cid)
         if cap is None:
-            skipped += 1
-            continue
+            return (cid, None, None)
         raw = motion_source(cid)
-        if raw is None:
-            skipped += 1
-            continue
-        m, L = crop_and_norm(raw, mean, std, rng)
-        if m is None:
-            skipped += 1
-            continue
-        items.append((cap, m, L))
+        return (cid, cap, raw)
+
+    items = []
+    skipped = 0
+    n = len(ids)
+    with ThreadPoolExecutor(max_workers=io_workers) as ex:
+        for i, (cid, cap, raw) in enumerate(ex.map(_fetch, ids)):
+            if cap is None or raw is None:
+                skipped += 1
+            else:
+                m, L = crop_and_norm(raw, mean, std, rng)
+                if m is None:
+                    skipped += 1
+                else:
+                    items.append((cap, m, L))
+            if (i + 1) % 500 == 0:
+                print(f"  build_items {i+1}/{n} (kept={len(items)} skipped={skipped})",
+                      flush=True)
     return items, skipped
 
 
@@ -288,6 +304,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred-dir", default=None,
                     help="dir with <id>.npz containing motion_135; omit for GT-only")
+    ap.add_argument("--gt-272-dir", default=None,
+                    help="Protocol-A: use <id>.npz motion_272 as the GT-real reference "
+                         "(unified joints->IK->272 chain) instead of native motion_data")
     ap.add_argument("--tag", default="pred")
     ap.add_argument("--real-encoding", choices=["native", "refk"], default="native",
                     help="native=GT272 as-is (Gate B); refk=decode->SMPL-H FK->encode "
@@ -297,6 +316,7 @@ def main():
     ap.add_argument("--max-samples", type=int, default=0, help="0 = all")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--out-json", default=None)
     args = ap.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available()
@@ -310,7 +330,13 @@ def main():
         all_ids = [ln.strip() for ln in f.readlines() if ln.strip()]
 
     # restrict to ids that have GT + (pred if requested)
+    gt272_dir = None
+    if args.gt_272_dir:
+        gt272_dir = args.gt_272_dir if os.path.isabs(args.gt_272_dir) else os.path.join(REPO, args.gt_272_dir)
+
     def has_gt(cid):
+        if gt272_dir is not None:
+            return os.path.exists(os.path.join(gt272_dir, cid + ".npz"))
         return os.path.exists(os.path.join(GT_MOTION_DIR, cid + ".npy"))
 
     pred_cache = {}
@@ -333,6 +359,9 @@ def main():
 
     # --- build GT-real items -------------------------------------------
     def gt_source(cid):
+        if gt272_dir is not None:
+            return np.asarray(np.load(os.path.join(gt272_dir, cid + ".npz"))["motion_272"],
+                              dtype=np.float32)
         return np.load(os.path.join(GT_MOTION_DIR, cid + ".npy"))
 
     rng = np.random.RandomState(args.seed)
@@ -357,6 +386,22 @@ def main():
     print(f" n_batches={real['n_batches']} nb={real['nb']}")
 
     real_mu, real_cov = calculate_activation_statistics(real["em"])
+    result = {
+        "tag": args.tag,
+        "pred_dir": args.pred_dir,
+        "gt_272_dir": args.gt_272_dir,
+        "real_encoding": args.real_encoding,
+        "seed": args.seed,
+        "ids_with_required_files": int(len(ids)),
+        "gt_real": {
+            "r_precision": real["R"].tolist(),
+            "matching_score": float(real["matching"]),
+            "diversity": float(real_div),
+            "self_fid_split_halves": float(real_self_fid),
+            "n_batches": int(real["n_batches"]),
+            "nb": int(real["nb"]),
+        },
+    }
 
     # --- optional refk real baseline -----------------------------------
     refk_em = None
@@ -374,6 +419,13 @@ def main():
         print("\n========== GT-REAL (refk: decode->SMPL-H FK->encode) ==========")
         print(f" R@1={refk['R'][0]:.4f}  R@2={refk['R'][1]:.4f}  R@3={refk['R'][2]:.4f}")
         print(f" MM-Dist={refk['matching']:.4f}  Diversity={refk_div:.4f}")
+        result["gt_refk"] = {
+            "r_precision": refk["R"].tolist(),
+            "matching_score": float(refk["matching"]),
+            "diversity": float(refk_div),
+            "n_batches": int(refk["n_batches"]),
+            "nb": int(refk["nb"]),
+        }
 
     # --- predictions ----------------------------------------------------
     if pred_dir:
@@ -381,6 +433,13 @@ def main():
 
         def pred_source(cid):
             d = np.load(os.path.join(pred_dir, cid + ".npz"), allow_pickle=True)
+            # Baselines (CondMDI/MotionLab/KIMODO) that only produce joints are
+            # pre-encoded to native-272 @30fps and stored under "motion_272".
+            if "motion_272" in d:
+                m272 = np.asarray(d["motion_272"], dtype=np.float32)
+                if m272.shape[0] < UNIT_LENGTH + 1:
+                    return None
+                return m272
             m135 = d["motion_135"]
             if m135.shape[0] < UNIT_LENGTH + 1:
                 return None
@@ -404,6 +463,24 @@ def main():
         print(f" R@1={pred['R'][0]:.4f}  R@2={pred['R'][1]:.4f}  R@3={pred['R'][2]:.4f}")
         print(f" MM-Dist={pred['matching']:.4f}  Diversity={pred_div:.4f}")
         print(f" n_batches={pred['n_batches']} nb={pred['nb']}")
+        result["pred"] = {
+            "fid_vs_gt_native": float(fid_native),
+            "r_precision": pred["R"].tolist(),
+            "matching_score": float(pred["matching"]),
+            "diversity": float(pred_div),
+            "n_batches": int(pred["n_batches"]),
+            "nb": int(pred["nb"]),
+        }
+        if refk_em is not None:
+            result["pred"]["fid_vs_gt_refk"] = float(fid_refk)
+
+    if args.out_json:
+        out_dir = os.path.dirname(args.out_json)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(args.out_json, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"[done] wrote {args.out_json}")
 
 
 if __name__ == "__main__":

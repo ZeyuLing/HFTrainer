@@ -58,6 +58,8 @@ def _world_positions(m135: np.ndarray) -> np.ndarray:
 MODELS = {
     "kimodo": "kimodo_caption_editfix_ep240",
     "smpl": "smpl_caption_editfix_ep230",
+    "kimodo_latest": "kimodo_caption_editfix_latest",
+    "smpl_latest": "smpl_caption_editfix_latest",
 }
 SETTINGS = ["blank", "cfg20"]
 _NJ = 22
