@@ -340,9 +340,16 @@ class LoadPreExtractedT5Feature(BaseTransform):
 
 @TRANSFORMS.register_module(force=True)
 class LoadHierarchicalCaption(BaseTransform):
-    def __init__(self, key="caption", allow_none: bool = False):
+    def __init__(
+        self,
+        key="caption",
+        allow_none: bool = False,
+        select_mode: str = "random",
+    ):
         self.key = key
         self.allow_none = allow_none
+        self.select_mode = select_mode
+        assert self.select_mode in ["random", "first"]
 
     def transform(self, results: Dict) -> Dict:
         filename = results.get(f"{self.key}_path")
@@ -360,7 +367,11 @@ class LoadHierarchicalCaption(BaseTransform):
                 caption_list.append(caption)
                 granularity_list.append(granularity)
         assert len(caption_list) > 0, f"{filename} contains no captions"
-        select_idx = random.randint(0, len(caption_list) - 1)
+        select_idx = (
+            0
+            if self.select_mode == "first"
+            else random.randint(0, len(caption_list) - 1)
+        )
         results["caption"] = caption_list[select_idx]
         results["granularity"] = granularity_list[select_idx]
         results["caption_list"] = caption_list
@@ -370,9 +381,16 @@ class LoadHierarchicalCaption(BaseTransform):
 
 @TRANSFORMS.register_module(force=True)
 class LoadHYMotionCaption(BaseTransform):
-    def __init__(self, key="caption", allow_none: bool = False):
+    def __init__(
+        self,
+        key="caption",
+        allow_none: bool = False,
+        select_mode: str = "random",
+    ):
         self.key = key
         self.allow_none = allow_none
+        self.select_mode = select_mode
+        assert self.select_mode in ["random", "first"]
 
     def transform(self, results: Dict) -> Dict:
         filename = results.get(f"{self.key}_path")
@@ -432,9 +450,16 @@ class LoadCompatibleCaption(BaseTransform):
     如果两种格式都不符合，抛出异常。
     """
 
-    def __init__(self, key="caption", allow_none: bool = False):
+    def __init__(
+        self,
+        key="caption",
+        allow_none: bool = False,
+        select_mode: str = "random",
+    ):
         self.key = key
         self.allow_none = allow_none
+        self.select_mode = select_mode
+        assert self.select_mode in ["random", "first"]
 
     def _is_hierarchical_format(self, data: Dict) -> bool:
         """判断是否为 LoadHierarchicalCaption 格式（包含 macro, meso, micro）"""
@@ -461,11 +486,7 @@ class LoadCompatibleCaption(BaseTransform):
                 return True
         return False
 
-    def transform(self, results: Dict) -> Dict:
-        filename = results.get(f"{self.key}_path")
-        if filename is None and self.allow_none:
-            return results
-
+    def _select_caption_from_file(self, filename: str):
         hierarchical_caption = read_json(filename)
         caption_list = []
         granularity_list = []
@@ -479,11 +500,6 @@ class LoadCompatibleCaption(BaseTransform):
                     caption_list.append(caption)
                     granularity_list.append(granularity)
             assert len(caption_list) > 0, f"{filename} contains no captions"
-            select_idx = random.randint(0, len(caption_list) - 1)
-            results["caption"] = caption_list[select_idx]
-            results["granularity"] = granularity_list[select_idx]
-            results["caption_list"] = caption_list
-            results["granularity_list"] = granularity_list
 
         elif self._is_hymotion_format(hierarchical_caption):
             # LoadHYMotionCaption 格式
@@ -513,9 +529,6 @@ class LoadCompatibleCaption(BaseTransform):
                     if len(short_caption) > 0:
                         caption_list.append(short_caption)
             assert len(caption_list) > 0, f"{filename} contains no captions"
-            select_idx = random.randint(0, len(caption_list) - 1)
-            results["caption"] = caption_list[select_idx]
-            results["caption_list"] = caption_list
 
         else:
             # 两种格式都不符合，抛出异常
@@ -524,6 +537,48 @@ class LoadCompatibleCaption(BaseTransform):
                 f"  - LoadHierarchicalCaption: requires 'macro', 'meso', 'micro' keys\n"
                 f"  - LoadHYMotionCaption: requires 'result' array with 'short_caption' or 'short_caption_rewritten'"
             )
+
+        select_idx = (
+            0
+            if self.select_mode == "first"
+            else random.randint(0, len(caption_list) - 1)
+        )
+        granularity = (
+            granularity_list[select_idx]
+            if select_idx < len(granularity_list)
+            else None
+        )
+        return caption_list[select_idx], caption_list, granularity, granularity_list
+
+    def transform(self, results: Dict) -> Dict:
+        filename = results.get(f"{self.key}_path")
+        if filename is None and self.allow_none:
+            return results
+
+        caption, caption_list, granularity, granularity_list = (
+            self._select_caption_from_file(filename)
+        )
+        results["caption"] = caption
+        results["caption_list"] = caption_list
+        if granularity is not None:
+            results["granularity"] = granularity
+            results["granularity_list"] = granularity_list
+
+        person_caption_paths = results.get("person_caption_paths")
+        if isinstance(person_caption_paths, (list, tuple)) and person_caption_paths:
+            person_captions = []
+            person_caption_lists = []
+            for person_caption_path in person_caption_paths:
+                if person_caption_path is None:
+                    continue
+                person_caption, person_caption_list, _, _ = (
+                    self._select_caption_from_file(person_caption_path)
+                )
+                person_captions.append(person_caption)
+                person_caption_lists.append(person_caption_list)
+            if len(person_captions) == len(person_caption_paths):
+                results["person_captions"] = person_captions
+                results["person_caption_lists"] = person_caption_lists
 
         return results
 

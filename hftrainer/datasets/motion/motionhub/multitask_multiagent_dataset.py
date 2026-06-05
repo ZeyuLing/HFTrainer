@@ -6,7 +6,11 @@ from tqdm import tqdm
 
 from overrides import override
 import mmengine
-from hftrainer.models.motion.vermo.task_utils import ALL_TASKS, abbr_list_to_task_list
+from hftrainer.models.motion.vermo.task_utils import (
+    ABBR_TASK_MAPPING,
+    ALL_TASKS,
+    abbr_list_to_task_list,
+)
 from hftrainer.models.motion.vermo.task_utils.modality import Audio, Caption, Modality
 from hftrainer.models.motion.vermo.task_utils.task_lib.base_task import BaseTask
 from hftrainer.models.motion.vermo.task_utils.task_lib.completion_tasks.motion_inbetween import MotionInbetween
@@ -209,6 +213,27 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
             motion_path = [os.path.join(self.data_dir, path) for path in motion_path]
             num_person = len(motion_path)
 
+        person_caption_paths = raw_data_info.get(
+            "person_caption_paths", raw_data_info.get("sep_hierarchical_caption_path")
+        )
+        if isinstance(person_caption_paths, str):
+            person_caption_paths = [person_caption_paths]
+        if isinstance(person_caption_paths, (list, tuple)):
+            resolved_caption_paths = []
+            for path in person_caption_paths:
+                if not path:
+                    continue
+                path = os.path.join(self.data_dir, path)
+                if os.path.exists(path):
+                    resolved_caption_paths.append(path)
+            person_caption_paths = (
+                resolved_caption_paths
+                if len(resolved_caption_paths) == num_person
+                else None
+            )
+        else:
+            person_caption_paths = None
+
         # load music
         music_path = raw_data_info.get("music_path", None)
         if music_path is not None:
@@ -245,6 +270,7 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
             "num_frames": raw_data_info["num_frames"],
             # text related
             "caption_path": caption_path,
+            "person_caption_paths": person_caption_paths,
             # sound related
             "sr": raw_data_info.get("sr"),
             # music related
@@ -257,16 +283,40 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
             "speaker_id": raw_data_info.get("speaker_id"),
             # editing pair: source motion for Neutral→Emotion style transfer
             "source_motion_path": source_motion_path,
-            # deterministic task tag for small overfit/debug datasets
+            # deterministic task tag for overfit/debug datasets
             "overfit_task": raw_data_info.get("overfit_task"),
             "overfit_source_key": raw_data_info.get("overfit_source_key"),
+            "overfit_source_annotation": raw_data_info.get("overfit_source_annotation"),
+            "overfit_multi_kind": raw_data_info.get("overfit_multi_kind"),
+            "_motion_audio_crop_start": raw_data_info.get("_motion_audio_crop_start"),
+            "_motion_audio_crop_duration": raw_data_info.get("_motion_audio_crop_duration"),
+            "_motion_audio_crop_start_frame": raw_data_info.get(
+                "_motion_audio_crop_start_frame"
+            ),
+            "_motion_audio_crop_num_frames": raw_data_info.get(
+                "_motion_audio_crop_num_frames"
+            ),
         }
         candidate_tasks = self._resolve_candidate_tasks(task_bucket)
+        overfit_task_abbr = raw_data_info.get("overfit_task")
+        if overfit_task_abbr:
+            if overfit_task_abbr not in ABBR_TASK_MAPPING:
+                raise KeyError(
+                    f"Unknown overfit_task={overfit_task_abbr!r}; "
+                    f"available tasks={sorted(ABBR_TASK_MAPPING)}"
+                )
+            overfit_task = ABBR_TASK_MAPPING[overfit_task_abbr]
+            if overfit_task not in candidate_tasks:
+                raise ValueError(
+                    f"overfit_task={overfit_task_abbr!r} is not enabled by "
+                    f"task_mode/task_bucket_mode for data {motion_path}"
+                )
+            candidate_tasks = [overfit_task]
         # determine what tasks can be trained on this data
         available_tasks = self.assign_task_for_data(data_info, candidate_tasks)
         # randomly assign a task for the data info
         if available_tasks:
-            task = random.choice(available_tasks)
+            task = available_tasks[0] if overfit_task_abbr else random.choice(available_tasks)
 
             data_info["task"] = task
             self.task_counter[task.abbr] += 1
@@ -275,7 +325,8 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
                 print_log(self.task_counter, logger="current")
             return data_info
         raise ValueError(
-            f"No available task in {self.preset_tasks} for data {motion_path}"
+            f"No available task in {[task.abbr for task in candidate_tasks]} "
+            f"for data {motion_path}"
         )
 
     def _resolve_candidate_tasks(

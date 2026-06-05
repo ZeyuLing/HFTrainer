@@ -82,6 +82,13 @@ def flexible_collate(data_batch: SeqType[Any]) -> Any:
     # 5) General Sequence (list/tuple but not str/bytes)
     # -------------------------------------------------------------------------
     if isinstance(first, Sequence) and not isinstance(first, (str, bytes)):
+        if all(
+            isinstance(x, Sequence)
+            and not isinstance(x, (str, bytes))
+            and all(isinstance(y, str) for y in x)
+            for x in data_batch
+        ):
+            return list(data_batch)
         lengths = [len(x) for x in data_batch]
         if len(set(lengths)) == 1:
             # Transpose and collate element-wise

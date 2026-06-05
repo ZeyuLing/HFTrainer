@@ -354,10 +354,11 @@ class ComposeMultiPerson(BaseTransform):
             f"ComposeMultiPerson: built index of {len(indices)} single-person samples"
         )
 
-    def _sample_additional_entry(self) -> Optional[Dict]:
+    def _sample_additional_entry(self, exclude_motion_paths: Optional[set] = None) -> Optional[Dict]:
         """Sample a random single-person entry from the dataset, loading its raw npz and caption."""
         if not self._single_person_indices:
             return None
+        exclude_motion_paths = exclude_motion_paths or set()
 
         idx = random.choice(self._single_person_indices)
         raw_data_info = self._dataset.data_list[idx]
@@ -367,6 +368,8 @@ class ComposeMultiPerson(BaseTransform):
         # Load motion
         motion_path = raw_data_info[f"{motion_key}_path"]
         if isinstance(motion_path, list):
+            return None
+        if str(motion_path) in exclude_motion_paths:
             return None
         full_motion_path = os.path.join(data_dir, motion_path)
         if not os.path.exists(full_motion_path):
@@ -392,6 +395,7 @@ class ComposeMultiPerson(BaseTransform):
             "poses": poses,
             "fps": fps,
             "caption": caption,
+            "motion_path": str(motion_path),
         }
 
     def _load_caption(self, caption_path: str) -> Optional[str]:
@@ -577,12 +581,13 @@ class ComposeMultiPerson(BaseTransform):
         person_motions = [motion]  # person 0's already-processed motion vector
         person_joints = [joints_0]
         person_captions = [caption_0]
+        used_motion_paths = {str(motion_path)}
         T_0 = motion.shape[0]
 
         for _ in range(num_target - 1):
             placed = False
             for _retry in range(self.max_retries):
-                entry = self._sample_additional_entry()
+                entry = self._sample_additional_entry(used_motion_paths)
                 if entry is None:
                     continue
 
@@ -624,6 +629,7 @@ class ComposeMultiPerson(BaseTransform):
                 person_motions.append(motion_vec_k)
                 person_joints.append(joints_k)
                 person_captions.append(entry.get("caption"))
+                used_motion_paths.add(entry.get("motion_path"))
                 placed = True
                 break
 
@@ -653,17 +659,13 @@ class ComposeMultiPerson(BaseTransform):
         if torch.any(torch.isnan(stacked)):
             raise ValueError("ComposeMultiPerson: NaN in composed multi-person motion")
 
-        # Compose caption
-        caption_parts = []
-        for i, cap in enumerate(person_captions):
-            if cap is not None and isinstance(cap, str) and len(cap.strip()) > 0:
-                part = self.caption_template.format(idx=i + 1, caption=cap.strip())
-                caption_parts.append(part)
-
-        if caption_parts:
-            composed_caption = self.caption_separator.join(caption_parts)
-        else:
-            composed_caption = results.get(self.caption_key)
+        # Keep per-person captions structured. VermoProcessor serializes this
+        # list into explicit "Person N caption" text tokens at training time.
+        structured_captions = [
+            cap.strip()
+            for cap in person_captions
+            if cap is not None and isinstance(cap, str) and len(cap.strip()) > 0
+        ]
 
         # Update results
         results[self.motion_key] = stacked
@@ -672,6 +674,10 @@ class ComposeMultiPerson(BaseTransform):
         # Store per-person original frame counts so downstream (VermoProcessor)
         # can trim padding tokens per person and avoid training on replicated frames.
         results["per_person_num_frames"] = np.array(per_person_num_frames, dtype=np.int64)
-        results[self.caption_key] = composed_caption
+        if structured_captions:
+            results[self.caption_key] = structured_captions
+            results["person_captions"] = structured_captions
+        else:
+            results[self.caption_key] = results.get(self.caption_key)
 
         return results

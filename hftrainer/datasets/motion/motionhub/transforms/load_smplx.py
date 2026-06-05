@@ -282,6 +282,69 @@ class LoadSmplx55(BaseTransform):
         self.require_same_T = bool(require_same_T)
         self.require_same_fps = bool(require_same_fps)
 
+    @staticmethod
+    def _has_crop_metadata(results: Dict) -> bool:
+        return any(
+            results.get(key) is not None
+            for key in (
+                "_motion_audio_crop_start_frame",
+                "_motion_audio_crop_start",
+                "_motion_audio_crop_num_frames",
+                "_motion_audio_crop_duration",
+            )
+        )
+
+    @staticmethod
+    def _crop_bounds_from_results(results: Dict, fps: Union[int, float, None], total_frames: int) -> Tuple[int, int]:
+        """Return deterministic crop bounds carried by annotation metadata.
+
+        The keys are shared with ``LoadAudio``/``MotionAudioRandomCrop`` so an
+        overfit annotation can crop motion and audio/music to the same segment
+        before tokenization.  Datasets without these keys keep the full clip.
+        """
+        if total_frames <= 0:
+            return 0, 0
+        if fps is None:
+            fps = 0
+        fps = float(fps)
+
+        def has_value(key: str) -> bool:
+            return results.get(key) is not None
+
+        has_crop = LoadSmplx55._has_crop_metadata(results)
+        if not has_crop:
+            return 0, int(total_frames)
+
+        if has_value("_motion_audio_crop_start_frame"):
+            start = int(round(float(results["_motion_audio_crop_start_frame"])))
+        elif fps > 0 and has_value("_motion_audio_crop_start"):
+            start = int(round(float(results["_motion_audio_crop_start"]) * fps))
+        else:
+            start = 0
+
+        if has_value("_motion_audio_crop_num_frames"):
+            num_frames = int(round(float(results["_motion_audio_crop_num_frames"])))
+        elif fps > 0 and has_value("_motion_audio_crop_duration"):
+            num_frames = int(round(float(results["_motion_audio_crop_duration"]) * fps))
+        else:
+            num_frames = int(total_frames) - start
+
+        start = max(0, min(start, int(total_frames) - 1))
+        num_frames = max(1, min(num_frames, int(total_frames) - start))
+        return start, num_frames
+
+    @staticmethod
+    def _write_crop_metadata(results: Dict, fps: Union[int, float, None], start: int, num_frames: int) -> None:
+        if fps is None:
+            return
+        fps = float(fps)
+        if fps <= 0:
+            return
+        results["_motion_audio_crop_start_frame"] = int(start)
+        results["_motion_audio_crop_num_frames"] = int(num_frames)
+        results["_motion_audio_crop_start"] = float(start / fps)
+        results["_motion_audio_crop_duration"] = float(num_frames / fps)
+
     def _sample_group_transform(self) -> Tuple[bool, float, np.ndarray, np.ndarray]:
         """采样群体统一的增强：是否增强、yaw(deg)、R_y[3,3]、offset[3]（y=0）。"""
         do_aug = (self.transl_aug_prob > 0.0) and (
@@ -348,7 +411,9 @@ class LoadSmplx55(BaseTransform):
         """
         motion = np.asarray(data["motion_135"], dtype=np.float32)  # [T, 135]
         fps = int(data["mocap_framerate"]) if "mocap_framerate" in data else None
-        T = motion.shape[0]
+        start, T = self._crop_bounds_from_results(results, fps, motion.shape[0])
+        motion = motion[start : start + T]
+        self._write_crop_metadata(results, fps, start, T)
 
         results[self.key] = torch.from_numpy(motion)  # [T, 135]
         results["num_person"] = 1
@@ -386,6 +451,10 @@ class LoadSmplx55(BaseTransform):
             abs_trans = np.asarray(data["trans"], dtype=np.float32)
             poses = np.asarray(data["poses"], dtype=np.float32)
             fps = int(data["mocap_framerate"]) if "mocap_framerate" in data else None
+            start, crop_frames = self._crop_bounds_from_results(results, fps, abs_trans.shape[0])
+            abs_trans = abs_trans[start : start + crop_frames]
+            poses = poses[start : start + crop_frames]
+            self._write_crop_metadata(results, fps, start, crop_frames)
 
             do_aug, yaw_deg, R_y, offset = self._sample_group_transform()
             transl, pose = self._process_one_person(
@@ -430,10 +499,12 @@ class LoadSmplx55(BaseTransform):
             _read_one_person_npz(p) for p in paths
         ]
 
-        # 基本一致性校验
+        # 基本一致性校验。固定 crop 的伪多人样本允许原始长度不同，
+        # 但 crop 后仍必须对齐。
         T_list = [arr[0].shape[0] for arr in persons]  # 每人的 T
         fps_list = [arr[2] for arr in persons]
-        if self.require_same_T and len(set(T_list)) != 1:
+        has_crop = self._has_crop_metadata(results)
+        if self.require_same_T and len(set(T_list)) != 1 and not has_crop:
             raise ValueError(
                 f"{self.__class__.__name__}: all persons must have the same T when require_same_T=True, "
                 f"got {T_list} for paths={paths}"
@@ -446,6 +517,34 @@ class LoadSmplx55(BaseTransform):
 
         # 采样一组群体共享的增强
         do_aug, yaw_deg, R_y, offset = self._sample_group_transform()
+
+        crop_start, crop_frames = self._crop_bounds_from_results(
+            results,
+            fps_list[0] if fps_list else None,
+            min(T_list) if T_list else 0,
+        )
+        if crop_frames > 0:
+            persons = [
+                (
+                    abs_trans[crop_start : crop_start + crop_frames],
+                    poses_axis_angle[crop_start : crop_start + crop_frames],
+                    _fps,
+                )
+                for abs_trans, poses_axis_angle, _fps in persons
+            ]
+            self._write_crop_metadata(
+                results,
+                fps_list[0] if fps_list else None,
+                crop_start,
+                crop_frames,
+                )
+
+        T_after_crop = [arr[0].shape[0] for arr in persons]
+        if self.require_same_T and len(set(T_after_crop)) != 1:
+            raise ValueError(
+                f"{self.__class__.__name__}: all persons must have the same T after crop when "
+                f"require_same_T=True, got {T_after_crop} for paths={paths}"
+            )
 
         # 逐人处理并堆叠
         transl_list, pose_list = [], []
