@@ -1,0 +1,17 @@
+bvh_cuda.cpython-310-x86_64-linux-gnu.so,sha256=6BVV4ApCjKiOAJwljlpyGstoBeWMM_Yi7r5BXCgNXMg,13147592
+mesh_intersection-0.1.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+mesh_intersection-0.1.0.dist-info/LICENSE,sha256=IjLy-cj2IpxXnEUVrEtUGCTJzvWX05wNxMF-rL9gEUw,6228
+mesh_intersection-0.1.0.dist-info/METADATA,sha256=QBz6W3EG5oZOeWEGWoTjaXTQJtmnIjSYynJ4FbE5pVE,7314
+mesh_intersection-0.1.0.dist-info/RECORD,,
+mesh_intersection-0.1.0.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+mesh_intersection-0.1.0.dist-info/WHEEL,sha256=ajFZpXEWjoF3CE-pJ2B52cATZBlVc3sJLvDIL5I6Tak,105
+mesh_intersection-0.1.0.dist-info/direct_url.json,sha256=A8MxDD6otFd6V6QtARV--32dq8dllwP_3iG5FlYwcJo,117
+mesh_intersection-0.1.0.dist-info/top_level.txt,sha256=yphdYsPmMIt515fUheHzLU-1yoEz9CuT3xf599OmHww,27
+mesh_intersection/__init__.py,sha256=tYKRugzHR7sXhjHPyiKg2X6CiFkzLDmX23Hie7TPZus,743
+mesh_intersection/__pycache__/__init__.cpython-310.pyc,,
+mesh_intersection/__pycache__/bvh_search_tree.cpython-310.pyc,,
+mesh_intersection/__pycache__/filter_faces.cpython-310.pyc,,
+mesh_intersection/__pycache__/loss.cpython-310.pyc,,
+mesh_intersection/bvh_search_tree.py,sha256=VK9gSw0ggrhZvyuUi1g_HzDDBk1w0vpJtjKfCKC9Mww,1676
+mesh_intersection/filter_faces.py,sha256=OZJWwiNMY5iUHFA9pHAyXXKNp6UDbx3DM5vxFej4Gsc,4150
+mesh_intersection/loss.py,sha256=gv6r7vWfPrTqqPrq8oDDYIeNlp01lhqqJxaEBM8jKh4,14050

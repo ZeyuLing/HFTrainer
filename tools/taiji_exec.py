@@ -16,7 +16,7 @@ Examples:
 import subprocess, os, pty, time, select, sys, re
 
 
-def taiji_exec(task_flag, instance_id, command, timeout=60):
+def taiji_exec(task_flag, instance_id, command, timeout=60, host_index=None):
     """Run a command on a Taiji container and return (stdout_text, exit_code)."""
     master, slave = pty.openpty()
     # Pass command via bash -c so we don't need interactive I/O
@@ -29,6 +29,8 @@ def taiji_exec(task_flag, instance_id, command, timeout=60):
     os.close(slave)
 
     output = b''
+    selected_host = False
+    host_index = os.environ.get("TAIJI_EXEC_HOST_INDEX", "0") if host_index is None else str(host_index)
     start = time.time()
     while time.time() - start < timeout:
         r, _, _ = select.select([master], [], [], 1)
@@ -36,6 +38,9 @@ def taiji_exec(task_flag, instance_id, command, timeout=60):
             try:
                 data = os.read(master, 8192)
                 output += data
+                if not selected_host and b"choose one host to execute command" in output:
+                    os.write(master, f"{host_index}\n".encode())
+                    selected_host = True
             except OSError:
                 break
         if proc.poll() is not None:
@@ -94,7 +99,8 @@ if __name__ == '__main__':
     instance_id = sys.argv[2]
     command = sys.argv[3]
     timeout = int(sys.argv[4]) if len(sys.argv) > 4 else 60
+    host_index = sys.argv[5] if len(sys.argv) > 5 else None
 
-    result, code = taiji_exec(task_flag, instance_id, command, timeout)
+    result, code = taiji_exec(task_flag, instance_id, command, timeout, host_index)
     print(result)
     sys.exit(code)

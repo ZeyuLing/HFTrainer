@@ -51,7 +51,7 @@ def get_token():
 
 
 def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False,
-           start_cmd_override=None, host_gpu_num=None):
+           start_cmd_override=None, host_gpu_num=None, gpu_name=None):
     """Submit a training task to Taiji.
 
     Args:
@@ -78,6 +78,8 @@ def submit(task_flag, config_path, host_num=4, business_flag=None, elastic=False
     tmpl["designated_resource"]["is_elasticity"] = elastic
     if host_gpu_num is not None:
         tmpl["designated_resource"]["host_gpu_num"] = float(host_gpu_num)
+    if gpu_name is not None:
+        tmpl["designated_resource"]["GPUName"] = gpu_name
 
     # Force RDMA for multi-node training (guard against CephFS caching stale template)
     if host_num > 1:
@@ -206,6 +208,8 @@ def main():
     parser.add_argument("--host_num", type=int, default=4, help="Number of hosts (default: 4, each with 8 GPUs)")
     parser.add_argument("--host_gpu_num", type=int, default=None,
                         help="Override per-host GPU count (default from template)")
+    parser.add_argument("--gpu_name", default=None,
+                        help="Override GPU type, e.g. V100 or A100")
     parser.add_argument("--elastic", action="store_true", help="Use elastic (preemptible) GPUs")
     parser.add_argument("--business_flag", "-b", default=None, help="Override business flag")
     parser.add_argument("--start-cmd", default=None,
@@ -216,7 +220,7 @@ def main():
 
     submit(args.task_flag, args.config_path, args.host_num, args.business_flag,
            args.elastic, start_cmd_override=args.start_cmd,
-           host_gpu_num=args.host_gpu_num)
+           host_gpu_num=args.host_gpu_num, gpu_name=args.gpu_name)
 
 
 if __name__ == "__main__":
