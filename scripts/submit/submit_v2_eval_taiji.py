@@ -141,7 +141,7 @@ def main():
             cmd = (
                 f"cd {proj} && "
                 f"export PYTHONPATH={proj}:${{PYTHONPATH:-}} && "
-                f"python3 tools/eval_m2m_v2_all_tasks.py "
+                f"python3 scripts/eval/eval_m2m_v2_all_tasks.py "
                 f"--models {model} --all-tasks "
                 f"--max-samples {args.max_samples} --num-steps 50 "
                 f"--replacement-guidance skip_last --text-guidance-scale 1.0 "

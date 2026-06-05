@@ -26,7 +26,7 @@ echo "============================================================"
 # Parse optional --models argument, default to all 4 v2 models
 MODELS="${@:---models caption_local caption_global uncond_local uncond_global}"
 
-python3 tools/eval_m2m_v2_all_tasks.py \
+python3 scripts/eval/eval_m2m_v2_all_tasks.py \
     ${MODELS} \
     --all-tasks \
     --max-samples 80 \

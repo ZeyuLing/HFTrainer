@@ -22,7 +22,7 @@ mkdir -p "$OUT/logs"
 echo "OUT=$OUT" | tee "$OUT/logs/run_meta.txt"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader | tee -a "$OUT/logs/run_meta.txt"
 
-EVAL=tools/eval_m2m_v2_all_tasks.py
+EVAL=scripts/eval/eval_m2m_v2_all_tasks.py
 COMMON="--max-samples 250 --num-steps 50 --save-npz"
 # --use-rewritten only matters for caption models; harmless for uncond
 COMMON_CAP="$COMMON --use-rewritten"

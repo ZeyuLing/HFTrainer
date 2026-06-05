@@ -35,8 +35,8 @@ TEMPLATE_PATH = os.path.join(SCRIPT_DIR, "taiji_template.json")
 API_URL = "http://taijiapi.oa.com/taskmanagement/task_server/task_management/api/training_task"
 
 M2M_MODELS = ['uncond_local', 'uncond_global', 'caption_local', 'caption_global']
-EVAL_SCRIPT = "tools/eval_m2m_v2_all_tasks.py"
-KIMODO_SCRIPT = "tools/run_kimodo_all_tasks.py"
+EVAL_SCRIPT = "scripts/eval/eval_m2m_v2_all_tasks.py"
+KIMODO_SCRIPT = "scripts/kimodo/run_kimodo_all_tasks.py"
 EVAL_OUTPUT_DIR = "work_dirs/m2m_v2_eval_latest"
 
 

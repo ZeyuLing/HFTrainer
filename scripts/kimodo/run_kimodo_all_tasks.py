@@ -2058,7 +2058,7 @@ def main():
 
                     # ---- E15: prepend to start pose (2026-04-27 v2) ----
                     # Mirrors the M2M pipeline's `_use_start_pose` branch
-                    # in tools/eval_m2m_v2_all_tasks.py so KIMODO and
+                    # in scripts/eval/eval_m2m_v2_all_tasks.py so KIMODO and
                     # HyMotion solve the same problem geometry.
                     elif task_id == 'E15' and '_use_start_pose' in setting_kwargs:
                         target_path = sample.get('target_motion_path', '')
@@ -2348,7 +2348,7 @@ def main():
                     # layout.N_cond_a / N_cond_b / N_transition to slice
                     # the gray prefix/suffix at the correct frames. The
                     # M2M v2 pipeline already writes this (see
-                    # tools/eval_m2m_v2_all_tasks.py L3261-3293), but
+                    # scripts/eval/eval_m2m_v2_all_tasks.py L3261-3293), but
                     # KIMODO had been silently dropping it — so the
                     # dashboard fell back to the legacy 5/15/30 estimate
                     # for KIMODO, which now (post v5 dynamic budgets,

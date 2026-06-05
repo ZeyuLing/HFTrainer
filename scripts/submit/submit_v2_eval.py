@@ -48,7 +48,7 @@ def main():
         cmd = (
             f"cd {PROJ_ROOT} && "
             f"export PYTHONPATH={PROJ_ROOT}:${{PYTHONPATH:-}} && "
-            f"python3 tools/eval_m2m_v2_all_tasks.py "
+            f"python3 scripts/eval/eval_m2m_v2_all_tasks.py "
             f"--models {model} "
             f"--all-tasks "
             f"--max-samples {args.max_samples} "

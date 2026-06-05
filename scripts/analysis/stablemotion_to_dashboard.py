@@ -119,7 +119,7 @@ def main():
                 # Keep the dashboard-wide convention: qc_<checker> is a
                 # PASS flag (1 = checker passed, 0 = failed). Aggregating
                 # these fields gives per-checker pass rates, matching
-                # tools/eval_m2m_v2_all_tasks.py and the E9 UI.
+                # scripts/eval/eval_m2m_v2_all_tasks.py and the E9 UI.
                 metrics[f'qc_{ch_name}'] = 1.0 if is_valid else 0.0
 
         # Embed dashboard-required fields

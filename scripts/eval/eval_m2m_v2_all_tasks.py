@@ -9,16 +9,16 @@ Evaluates 4 model variants:
 
 Usage:
     # Run Phase 1 tasks (E2, E3, E4, E5) on all models
-    python tools/eval_m2m_v2_all_tasks.py --tasks E2 E3 E5 --max-samples 50
+    python scripts/eval/eval_m2m_v2_all_tasks.py --tasks E2 E3 E5 --max-samples 50
 
     # Run specific task with specific setting
-    python tools/eval_m2m_v2_all_tasks.py --tasks E2 --settings A B --models uncond_local
+    python scripts/eval/eval_m2m_v2_all_tasks.py --tasks E2 --settings A B --models uncond_local
 
     # Run all tasks (full evaluation)
-    python tools/eval_m2m_v2_all_tasks.py --all-tasks --max-samples 100
+    python scripts/eval/eval_m2m_v2_all_tasks.py --all-tasks --max-samples 100
 
     # With replacement guidance for MAN imputation
-    python tools/eval_m2m_v2_all_tasks.py --tasks E2 --replacement-guidance skip_last
+    python scripts/eval/eval_m2m_v2_all_tasks.py --tasks E2 --replacement-guidance skip_last
 
 Requires: torch>=2.0, mmengine, safetensors
 """
