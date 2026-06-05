@@ -4,7 +4,16 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
 
 if [[ -z "${TOKEN:-}" ]]; then
-  echo "ERROR: TOKEN is not set. Export TOKEN before submitting a Taiji task." >&2
+  for token_file in /root/.claude-dashboard/taiji_token /root/.codex/skills/taiji/.token; do
+    if [[ -r "${token_file}" ]]; then
+      TOKEN="$(<"${token_file}")"
+      export TOKEN
+      break
+    fi
+  done
+fi
+if [[ -z "${TOKEN:-}" ]]; then
+  echo "ERROR: TOKEN is not set and no readable Taiji token file was found." >&2
   exit 1
 fi
 

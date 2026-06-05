@@ -90,10 +90,20 @@ def _qpos_jump(qpos: np.ndarray, length: int) -> float:
 
 @torch.no_grad()
 def _generate_qpos(bundle, feats: List[torch.Tensor], lengths: List[int],
-                   diffusion_steps: int, gen_batch: int) -> List[np.ndarray]:
-    """Greedy (deterministic) generation, one motion per prompt, batched."""
+                   diffusion_steps: int, gen_batch: int,
+                   seed: Optional[int] = None) -> List[np.ndarray]:
+    """Sample one KIMODO motion per prompt, batched.
+
+    KIMODO's DDIM loop is deterministic only after the initial random latent is
+    fixed; pass ``seed`` to make eval/viz reproducible.
+    """
     out: List[np.ndarray] = []
     for s in range(0, len(feats), gen_batch):
+        if seed is not None:
+            batch_seed = int(seed) + s
+            torch.manual_seed(batch_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(batch_seed)
         chunk = feats[s:s + gen_batch]
         seq = chunk[0].shape[0]
         text_feat = torch.stack(chunk, dim=0)
@@ -142,7 +152,8 @@ def _aggregate(metrics: List[Dict[str, float]], jumps: List[float]) -> Dict[str,
 
 def evaluate_checkpoint(bundle, reward, dataset, ckpt_dir: Path, iter_num: int,
                         diffusion_steps: int, gen_batch: int,
-                        rollout_dir: Optional[str]) -> Dict[str, float]:
+                        rollout_dir: Optional[str],
+                        seed: Optional[int]) -> Dict[str, float]:
     _load_checkpoint(bundle, ckpt_dir)
     bundle.denoiser.eval()
 
@@ -150,7 +161,7 @@ def evaluate_checkpoint(bundle, reward, dataset, ckpt_dir: Path, iter_num: int,
     lengths = [int(dataset[i]["num_frames"]) for i in range(len(dataset))]
     prompts = [dataset[i]["prompt"] for i in range(len(dataset))]
 
-    qpos_list = _generate_qpos(bundle, feats, lengths, diffusion_steps, gen_batch)
+    qpos_list = _generate_qpos(bundle, feats, lengths, diffusion_steps, gen_batch, seed=seed)
     jumps = [_qpos_jump(q, lengths[i]) for i, q in enumerate(qpos_list)]
 
     ctx = tempfile.TemporaryDirectory(prefix=f"physflow_eval_it{iter_num}_", dir=rollout_dir)
@@ -207,6 +218,8 @@ def main() -> None:
     ap.add_argument("--max-frames", type=int, default=150)
     ap.add_argument("--diffusion-steps", type=int, default=20)
     ap.add_argument("--gen-batch", type=int, default=8)
+    ap.add_argument("--seed", type=int, default=None,
+                    help="optional KIMODO sampling seed for reproducible eval")
     ap.add_argument("--ckpt", default=None, help="evaluate a single checkpoint dir and exit")
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--poll-sec", type=int, default=90)
@@ -240,6 +253,7 @@ def main() -> None:
         agg = evaluate_checkpoint(
             bundle, reward, dataset, ckpt_dir, iter_num,
             args.diffusion_steps, args.gen_batch, args.rollout_dir,
+            args.seed,
         )
         with open(metrics_path, "a") as f:
             f.write(json.dumps(agg) + "\n")

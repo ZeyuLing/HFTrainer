@@ -64,7 +64,7 @@ def build(col_specs: list[tuple[str, Path, str, str]], out_dir: Path, iteration:
 
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
-    for stem, base_rec in sorted(base_records.items()):
+    for idx, (stem, base_rec) in enumerate(sorted(base_records.items())):
         columns = {}
         for slot, recs, title, kind in all_records:
             rec = recs.get(stem)
@@ -83,8 +83,8 @@ def build(col_specs: list[tuple[str, Path, str, str]], out_dir: Path, iteration:
                 columns[slot] = _tracker_column(rec, title)
         ref_rec = base_rec
         rows.append({
-            "iteration": iteration,
-            "iteration_label": f"iter_{iteration:06d}",
+            "iteration": idx,
+            "iteration_label": f"Case {idx:02d}  ·  {ref_rec.get('prompt_id', stem)}",
             "prompt_id": ref_rec.get("prompt_id", stem),
             "prompt": ref_rec.get("prompt", ""),
             "category": ref_rec.get("category", ""),
@@ -99,6 +99,7 @@ def build(col_specs: list[tuple[str, Path, str, str]], out_dir: Path, iteration:
         "project": "PhysFlow KIMODO-G1 — Tracker Comparison",
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "generated_from": {slot: str(rd) for slot, rd, _t, _k in col_specs},
+        "group_label": "case",
         "rows": rows,
     }
     manifest_path = out_dir / "manifest.json"

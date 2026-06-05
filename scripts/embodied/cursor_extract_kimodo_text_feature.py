@@ -91,11 +91,21 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--limit", type=int, default=0, help="Debug: only process first N unique prompts.")
+    ap.add_argument("--num-shards", type=int, default=1,
+                    help="Split unique prompts into N deterministic shards.")
+    ap.add_argument("--shard-index", type=int, default=0,
+                    help="Shard index to process when --num-shards > 1.")
+    ap.add_argument("--manifest-name", default="manifest.jsonl",
+                    help="Manifest filename inside the namespace directory.")
     ap.add_argument("--hf-home", default=str(PROJECT_ROOT / "checkpoints" / "kimodo"),
                     help="HF cache for the LLM2Vec weights (matches the runner).")
     ap.add_argument("--online", action="store_true",
                     help="Allow online HF access (default: offline, weights must be cached).")
     args = ap.parse_args()
+    if args.num_shards < 1:
+        raise ValueError("--num-shards must be >= 1")
+    if args.shard_index < 0 or args.shard_index >= args.num_shards:
+        raise ValueError("--shard-index must be in [0, num_shards)")
 
     # HF cache lives at <hf-home>/hub (contains the gated meta-llama base too).
     # Set ONLY HF_HOME and let huggingface compute the hub cache as HF_HOME/hub.
@@ -143,10 +153,16 @@ def main() -> None:
     prompts = read_unique_prompts(corpus_paths)
     if args.limit > 0:
         prompts = prompts[: args.limit]
+    if args.num_shards > 1:
+        prompts = [p for i, p in enumerate(prompts) if i % args.num_shards == args.shard_index]
     n = len(prompts)
-    print(f"[extract] {n} unique prompts from {len(corpus_paths)} file(s) -> {cache_dir / args.namespace}", flush=True)
+    print(
+        f"[extract] {n} unique prompts from {len(corpus_paths)} file(s) "
+        f"shard={args.shard_index}/{args.num_shards} -> {cache_dir / args.namespace}",
+        flush=True,
+    )
 
-    manifest_path = cache_dir / args.namespace / "manifest.jsonl"
+    manifest_path = cache_dir / args.namespace / args.manifest_name
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path = cache_dir / args.namespace / "meta.json"
 
