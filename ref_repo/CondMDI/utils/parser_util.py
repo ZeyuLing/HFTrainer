@@ -357,7 +357,7 @@ class CondSyntOptions:
     edit_mode: str = field(
         default='benchmark_sparse',
         metadata={
-            "choices": ['lower_body', 'benchmark_sparse', 'benchmark_clip', 'pelvis', 'right_wrist', 'random_frames', 'random_joints', 'random', 'gmd_keyframes', 'uncond', 'pelvis_vr', 'pelvis_feet'],
+            "choices": ['lower_body', 'benchmark_sparse', 'benchmark_clip', 'pelvis', 'right_wrist', 'random_frames', 'random_joints', 'random', 'gmd_keyframes', 'uncond', 'pelvis_vr', 'pelvis_feet', 'first_last'],
             "help": "Defines which parts of the input motion will be observed while rest are syhtesized.\n"
                     "(1) lower_body - lower body joints taken from input motion, upper body is generated.\n"
                     "(2) benchmark_sparse - keyframes are observed every trans_length frames, starting from the initial frame.\n"

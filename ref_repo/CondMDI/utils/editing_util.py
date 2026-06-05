@@ -99,6 +99,14 @@ def get_keyframes_mask(data, lengths, edit_mode='benchmark_sparse', trans_length
             gt_indices = np.array(list(range(end_frame)) + list(range(end_frame + trans_length, length)))
             obs_joint_mask[i, :, :, gt_indices] = True  # set keyframes
 
+    elif edit_mode == 'first_last':
+        # Observe ONLY the first and last valid frame (minimal in-betweening,
+        # matches our E2 both_1f protocol). All intermediate frames generated.
+        for i, length in enumerate(lengths.cpu().numpy()):
+            length = int(length)
+            gt_indices = np.array([0, max(0, length - 1)])
+            obs_joint_mask[i, :, :, gt_indices] = True  # set keyframes
+
     elif edit_mode == 'uncond':
         # Observe no frames
         # used for inference

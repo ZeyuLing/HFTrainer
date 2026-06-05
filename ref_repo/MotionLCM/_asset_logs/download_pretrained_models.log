@@ -1,0 +1,29 @@
+Downloading experiments_t2m!
+Failed to retrieve file url:
+
+	Cannot retrieve the public link of the file. You may need to change
+	the permission to 'Anyone with the link', or have had many accesses.
+	Check FAQ in https://github.com/wkentaro/gdown?tab=readme-ov-file#faq.
+
+You may still be able to access the file from the browser:
+
+	https://drive.google.com/uc?id=1RpNumy8g2X2lI4H-kO9xkZVYRDDgyu6Y
+
+but Gdown can't. Please check connections and permissions.
+unzip:  cannot find or open experiments_t2m.zip, experiments_t2m.zip.zip or experiments_t2m.zip.ZIP.
+Downloading experiments_control!
+Failed to retrieve file url:
+
+	Cannot retrieve the public link of the file. You may need to change
+	the permission to 'Anyone with the link', or have had many accesses.
+	Check FAQ in https://github.com/wkentaro/gdown?tab=readme-ov-file#faq.
+
+You may still be able to access the file from the browser:
+
+	https://drive.google.com/uc?id=1_xrSGWHo4pRz-AJj22rt8qmRX0SflJ6V
+
+but Gdown can't. Please check connections and permissions.
+unzip:  cannot find or open experiments_control.zip, experiments_control.zip.zip or experiments_control.zip.ZIP.
+rm: cannot remove 'experiments_t2m.zip': No such file or directory
+rm: cannot remove 'experiments_control.zip': No such file or directory
+Downloading done!

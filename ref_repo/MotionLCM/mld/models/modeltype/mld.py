@@ -30,6 +30,7 @@ class MLD(BaseModel):
         self.nfeats = cfg.DATASET.NFEATS
         self.njoints = cfg.DATASET.NJOINTS
         self.latent_dim = cfg.model.latent_dim
+        self.latent_code_dim = self.latent_dim[1] if len(self.latent_dim) >= 3 else self.latent_dim[-1]
         self.guidance_scale = cfg.model.guidance_scale
         self.guidance_uncondp = cfg.model.guidance_uncondp
         self.datamodule = datamodule
@@ -186,7 +187,7 @@ class MLD(BaseModel):
             bsz = bsz // 2
 
         latents = torch.randn(
-            (bsz, self.latent_dim[0], self.latent_dim[-1]),
+            (bsz, self.latent_dim[0], self.latent_code_dim),
             device=encoder_hidden_states.device,
             dtype=torch.float,
         )

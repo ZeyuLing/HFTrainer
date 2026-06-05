@@ -5,7 +5,12 @@ import numpy as np
 
 import torch.nn as nn
 
-from mld.models.metrics import TM2TMetrics, MMMetrics, ControlMetrics
+try:
+    from mld.models.metrics import TM2TMetrics, MMMetrics, ControlMetrics
+except ImportError:
+    TM2TMetrics = None
+    MMMetrics = None
+    ControlMetrics = None
 
 
 class BaseModel(nn.Module):
@@ -68,16 +73,22 @@ class BaseModel(nn.Module):
     def configure_metrics(self) -> None:
         for metric in self.metrics_dict:
             if metric == "TM2TMetrics":
+                if TM2TMetrics is None:
+                    raise ImportError("TM2TMetrics is unavailable in this environment")
                 self.TM2TMetrics = TM2TMetrics(
                     diversity_times=self.cfg.TEST.DIVERSITY_TIMES,
                     dist_sync_on_step=self.cfg.METRIC.DIST_SYNC_ON_STEP,
                 )
             elif metric == 'ControlMetrics':
+                if ControlMetrics is None:
+                    raise ImportError("ControlMetrics is unavailable in this environment")
                 self.ControlMetrics = ControlMetrics(dist_sync_on_step=self.cfg.METRIC.DIST_SYNC_ON_STEP)
             else:
                 raise NotImplementedError(f"Do not support Metric Type {metric}")
 
         if "TM2TMetrics" in self.metrics_dict:
+            if MMMetrics is None:
+                raise ImportError("MMMetrics is unavailable in this environment")
             self.MMMetrics = MMMetrics(
                 mm_num_times=self.cfg.TEST.MM_NUM_TIMES,
                 dist_sync_on_step=self.cfg.METRIC.DIST_SYNC_ON_STEP)

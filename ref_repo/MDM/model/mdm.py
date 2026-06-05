@@ -3,9 +3,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import clip
-from model.rotation2xyz import Rotation2xyz
 from model.BERT.BERT_encoder import load_bert
 from utils.misc import WeightedSum
+
+try:
+    from model.rotation2xyz import Rotation2xyz
+except ModuleNotFoundError as exc:
+    Rotation2xyz = None
+    _ROT2XYZ_IMPORT_ERROR = exc
 
 
 class MDM(nn.Module):
@@ -132,7 +137,12 @@ class MDM(nn.Module):
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
 
-        self.rot2xyz = Rotation2xyz(device='cpu', dataset=self.dataset)
+        if self.data_rep == 'hml_vec':
+            self.rot2xyz = None
+        else:
+            if Rotation2xyz is None:
+                raise _ROT2XYZ_IMPORT_ERROR
+            self.rot2xyz = Rotation2xyz(device='cpu', dataset=self.dataset)
 
     def parameters_wo_clip(self):
         return [p for name, p in self.named_parameters() if not name.startswith('clip_model.')]
@@ -285,12 +295,14 @@ class MDM(nn.Module):
 
     def _apply(self, fn):
         super()._apply(fn)
-        self.rot2xyz.smpl_model._apply(fn)
+        if self.rot2xyz is not None:
+            self.rot2xyz.smpl_model._apply(fn)
 
 
     def train(self, *args, **kwargs):
         super().train(*args, **kwargs)
-        self.rot2xyz.smpl_model.train(*args, **kwargs)
+        if self.rot2xyz is not None:
+            self.rot2xyz.smpl_model.train(*args, **kwargs)
 
 
 class PositionalEncoding(nn.Module):

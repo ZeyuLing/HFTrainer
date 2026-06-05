@@ -33,7 +33,12 @@ class MldVae(nn.Module):
         super().__init__()
 
         self.latent_size = latent_dim[0]
-        self.latent_dim = latent_dim[-1]
+        if len(latent_dim) >= 3:
+            self.latent_code_dim = latent_dim[1]
+            self.latent_dim = latent_dim[2]
+        else:
+            self.latent_code_dim = latent_dim[-1]
+            self.latent_dim = latent_dim[-1]
         input_feats = nfeats
         output_feats = nfeats
         self.arch = arch
@@ -78,6 +83,13 @@ class MldVae(nn.Module):
         self.global_motion_token = nn.Parameter(
             torch.randn(self.latent_size * 2, self.latent_dim))
 
+        if self.latent_code_dim != self.latent_dim:
+            self.latent_pre = nn.Linear(self.latent_dim, self.latent_code_dim)
+            self.latent_post = nn.Linear(self.latent_code_dim, self.latent_dim)
+        else:
+            self.latent_pre = nn.Identity()
+            self.latent_post = nn.Identity()
+
         self.skel_embedding = nn.Linear(input_feats, self.latent_dim)
         self.final_layer = nn.Linear(self.latent_dim, output_feats)
 
@@ -118,6 +130,7 @@ class MldVae(nn.Module):
         xseq = self.query_pos_encoder(xseq)
         dist = self.encoder(xseq, src_key_padding_mask=~aug_mask)[:dist.shape[0]]
 
+        dist = self.latent_pre(dist)
         mu = dist[0:self.latent_size, ...]
         logvar = dist[self.latent_size:, ...]
 
@@ -130,6 +143,7 @@ class MldVae(nn.Module):
     def decode(self, z: torch.Tensor, lengths: list[int]) -> torch.Tensor:
         mask = lengths_to_mask(lengths, z.device)
         bs, nframes = mask.shape
+        z = self.latent_post(z)
         queries = torch.zeros(nframes, bs, self.latent_dim, device=z.device)
 
         if self.arch == "all_encoder":

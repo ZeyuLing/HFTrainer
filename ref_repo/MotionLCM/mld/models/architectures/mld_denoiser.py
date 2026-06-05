@@ -34,7 +34,12 @@ class MldDenoiser(nn.Module):
 
         super().__init__()
 
-        self.latent_dim = latent_dim[-1]
+        if len(latent_dim) >= 3:
+            self.latent_code_dim = latent_dim[1]
+            self.latent_dim = latent_dim[2]
+        else:
+            self.latent_code_dim = latent_dim[-1]
+            self.latent_dim = latent_dim[-1]
         self.text_encoded_dim = text_encoded_dim
 
         self.arch = arch
@@ -85,6 +90,13 @@ class MldDenoiser(nn.Module):
         else:
             raise ValueError(f"Not supported architecture: {self.arch}!")
 
+        if self.latent_code_dim != self.latent_dim:
+            self.latent_pre = nn.Linear(self.latent_code_dim, self.latent_dim)
+            self.latent_post = nn.Linear(self.latent_dim, self.latent_code_dim)
+        else:
+            self.latent_pre = nn.Identity()
+            self.latent_post = nn.Identity()
+
         self.is_controlnet = is_controlnet
 
         def zero_module(module):
@@ -114,10 +126,12 @@ class MldDenoiser(nn.Module):
         # 0. dimension matching
         # sample [latent_dim[0], batch_size, latent_dim] <= [batch_size, latent_dim[0], latent_dim[1]]
         sample = sample.permute(1, 0, 2)
+        sample = self.latent_pre(sample)
 
         # 1. check if controlnet
         if self.is_controlnet:
             controlnet_cond = controlnet_cond.permute(1, 0, 2)
+            controlnet_cond = self.latent_pre(controlnet_cond)
             sample = sample + self.controlnet_cond_embedding(controlnet_cond)
 
         # 2. time_embedding
@@ -167,6 +181,7 @@ class MldDenoiser(nn.Module):
             raise TypeError(f"{self.arch} is not supported")
 
         # 5. [batch_size, latent_dim[0], latent_dim[1]] <= [latent_dim[0], batch_size, latent_dim[1]]
+        sample = self.latent_post(sample)
         sample = sample.permute(1, 0, 2)
 
         return sample

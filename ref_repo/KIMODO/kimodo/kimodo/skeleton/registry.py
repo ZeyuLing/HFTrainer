@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Factory helpers for building predefined skeleton variants."""
+from __future__ import annotations
 
 from pathlib import Path
 

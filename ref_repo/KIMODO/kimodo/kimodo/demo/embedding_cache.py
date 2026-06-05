@@ -87,7 +87,11 @@ class EmbeddingCache:
 
     def _save_index(self) -> None:
         os.makedirs(self._model_dir(), exist_ok=True)
-        tmp_path = f"{self._index_path()}.tmp"
+        # Multiple pre-extraction shard processes may share one cache namespace.
+        # A fixed temp path races: one process can os.replace() another process'
+        # temp file, leaving the loser with FileNotFoundError. Keep replacement
+        # atomic, but make the temp file process/thread unique.
+        tmp_path = f"{self._index_path()}.tmp.{os.getpid()}.{threading.get_ident()}"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._index, f)
         os.replace(tmp_path, self._index_path())
