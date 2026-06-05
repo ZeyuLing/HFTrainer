@@ -61,6 +61,7 @@ def parse_args():
     parser.add_argument('--past-motion', help='Past motion npz path for motion completion tasks.')
     parser.add_argument('--future-motion', help='Future motion npz path for inbetween tasks.')
     parser.add_argument('--music', help='Music/audio wav path for dance tasks.')
+    parser.add_argument('--past-music', help='Past music wav path for music continuation tasks.')
     parser.add_argument('--audio', help='Audio wav path for speech tasks.')
     parser.add_argument('--speech-script', help='Optional transcript for speech tasks.')
     parser.add_argument('--genre', help='Optional genre string for dance tasks.')
@@ -182,6 +183,7 @@ def infer_vermo(bundle, args):
         num_person=args.num_person,
         duration=args.duration,
         music=args.music,
+        past_music=args.past_music,
         genre=args.genre,
         audio=args.audio,
         speech_script=args.speech_script,
@@ -202,6 +204,18 @@ def infer_vermo(bundle, args):
             os.makedirs(os.path.dirname(target) if os.path.dirname(target) else '.', exist_ok=True)
             bundle.processor.smpl_pose_processor.save_smplx_npz(target, value)
             print(f'Saved motion to: {target}')
+            saved = True
+            break
+        if modal_name in {'audio', 'music', 'future_music'} and hasattr(value, 'detach'):
+            target = output_path or f'output_{modal_name}.wav'
+            os.makedirs(os.path.dirname(target) if os.path.dirname(target) else '.', exist_ok=True)
+            import torchaudio
+
+            waveform = value.detach().cpu()
+            if waveform.ndim == 1:
+                waveform = waveform.unsqueeze(0)
+            torchaudio.save(target, waveform, 24000)
+            print(f'Saved audio to: {target}')
             saved = True
             break
         if modal_name == 'caption' and isinstance(value, str):

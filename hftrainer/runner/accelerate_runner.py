@@ -31,6 +31,46 @@ from hftrainer.runner.loops import EpochBasedLoop, IterBasedLoop
 logger = get_logger()
 
 
+def _configure_sdpa_backends(cfg) -> Dict[str, Optional[bool]]:
+    """Configure PyTorch SDPA backend switches from config.
+
+    Config example:
+        sdpa_backends = dict(flash=False, mem_efficient=True, math=False)
+
+    Leaving a key unset keeps PyTorch's default for that backend.  This is
+    useful on V100 where FlashAttention kernels are unavailable, while the
+    memory-efficient SDPA backend can be much faster than eager/math attention.
+    """
+    sdpa_cfg = getattr(cfg, 'sdpa_backends', None)
+    if hasattr(sdpa_cfg, 'to_dict'):
+        sdpa_cfg = sdpa_cfg.to_dict()
+    sdpa_cfg = copy.deepcopy(sdpa_cfg) if sdpa_cfg is not None else {}
+
+    requested = {
+        'flash': sdpa_cfg.get('flash', None),
+        'mem_efficient': sdpa_cfg.get('mem_efficient', None),
+        'math': sdpa_cfg.get('math', None),
+    }
+
+    if requested['flash'] is not None and hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+        torch.backends.cuda.enable_flash_sdp(bool(requested['flash']))
+    if requested['mem_efficient'] is not None and hasattr(
+        torch.backends.cuda, 'enable_mem_efficient_sdp'
+    ):
+        torch.backends.cuda.enable_mem_efficient_sdp(bool(requested['mem_efficient']))
+    if requested['math'] is not None and hasattr(torch.backends.cuda, 'enable_math_sdp'):
+        torch.backends.cuda.enable_math_sdp(bool(requested['math']))
+
+    actual = {}
+    if hasattr(torch.backends.cuda, 'flash_sdp_enabled'):
+        actual['flash'] = torch.backends.cuda.flash_sdp_enabled()
+    if hasattr(torch.backends.cuda, 'mem_efficient_sdp_enabled'):
+        actual['mem_efficient'] = torch.backends.cuda.mem_efficient_sdp_enabled()
+    if hasattr(torch.backends.cuda, 'math_sdp_enabled'):
+        actual['math'] = torch.backends.cuda.math_sdp_enabled()
+    return {'requested': requested, 'actual': actual}
+
+
 class _LegacyOrphanStub:
     """Tiny stub used by ``_ensure_bundle_orphan_custom_ckpt`` to feed
     ``accelerate.checkpointing.save_custom_state`` (which requires a
@@ -195,6 +235,8 @@ class AccelerateRunner:
         work_dir = getattr(cfg, 'work_dir', 'work_dirs/default')
         os.makedirs(work_dir, exist_ok=True)
 
+        sdpa_backend_state = _configure_sdpa_backends(cfg)
+
         # ── Create timestamped run directory for logs/config/tensorboard ──
         # Checkpoints stay in work_dir (base) so auto_resume can always find them.
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -255,6 +297,7 @@ class AccelerateRunner:
                 logger.warning(f"Could not dump config: {e}")
             logger.info(f"Work dir: {work_dir}")
             logger.info(f"Run dir (logs/tb): {run_dir}")
+            logger.info(f"SDPA backends: {sdpa_backend_state}")
             logger.info(f"Environment info:\n{collect_env_info()}")
 
         # ── Build ModelBundle ──
@@ -1159,9 +1202,21 @@ class AccelerateRunner:
         else:
             raise ValueError(f"Unknown load_scope: {load_scope}. Expected 'model' or 'full'.")
 
-    def save_checkpoint(self):
-        """Save checkpoint. Directory name reflects training mode."""
-        by_epoch = self.train_cfg.get('by_epoch', False)
+    def save_checkpoint(self, by_epoch=None):
+        """Save checkpoint. Directory name reflects the SAVE trigger basis.
+
+        The naming basis MUST follow whatever basis triggered the save (the
+        checkpoint hook's ``by_epoch``), NOT the train-loop basis. Otherwise an
+        iteration-triggered save inside an epoch loop gets an epoch name
+        (`checkpoint-epoch_{current_epoch}`); since ``current_epoch`` is constant
+        within an epoch, repeated mid-epoch saves (and resumes of the same epoch)
+        all collide on the same directory and silently overwrite each other.
+
+        Callers pass ``by_epoch`` explicitly (the hook forwards ``self.by_epoch``).
+        ``None`` falls back to the train-loop basis for backward compatibility.
+        """
+        if by_epoch is None:
+            by_epoch = self.train_cfg.get('by_epoch', False)
         if by_epoch:
             ckpt_dir = os.path.join(self.work_dir, f'checkpoint-epoch_{self.current_epoch}')
         else:

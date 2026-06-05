@@ -38,13 +38,16 @@ class CheckpointHook:
     def after_train_iter(self, global_step: int, output: dict = None):
         if not self.by_epoch and (global_step + 1) % self.interval == 0:
             if self.runner is not None:
-                self.runner.save_checkpoint()
+                # Name by iteration to match the iteration-based trigger.
+                self.runner.save_checkpoint(by_epoch=False)
 
     def after_train_epoch(self, epoch: int):
         if self.by_epoch and (epoch + 1) % self.interval == 0:
             if self.runner is not None:
-                self.runner.save_checkpoint()
+                # Name by epoch to match the epoch-based trigger.
+                self.runner.save_checkpoint(by_epoch=True)
 
     def after_run(self):
         if self.save_last and self.runner is not None:
-            self.runner.save_checkpoint()
+            # save_last follows the hook's own basis, not the train-loop basis.
+            self.runner.save_checkpoint(by_epoch=self.by_epoch)
