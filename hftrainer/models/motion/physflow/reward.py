@@ -179,6 +179,11 @@ class PhysicsJudgeReward:
         falls: List[bool] = []
         joint_errs: List[float] = []
         traj_errs: List[float] = []
+        traj_final_errs: List[float] = []
+        disp_ref: List[float] = []
+        disp_track: List[float] = []
+        disp_errs: List[float] = []
+        root_metrics_available = False
         for ji, j in enumerate(self._judges):
             jout = out_json if len(self._judges) == 1 else out_json.with_name(
                 f"{out_json.stem}__{j['name']}{out_json.suffix}"
@@ -207,6 +212,15 @@ class PhysicsJudgeReward:
             falls.append(bool(stats.get("fall_detected", False)))
             joint_errs.append(float(stats.get("max_joint_error_rad", 0.0)))
             traj_errs.append(float(stats.get("root_trajectory_error_mean_m", 0.0)))
+            traj_final_errs.append(float(stats.get("root_trajectory_error_final_m", 0.0)))
+            disp_ref.append(float(stats.get("root_displacement_ref_m", 0.0)))
+            disp_track.append(float(stats.get("root_displacement_track_m", 0.0)))
+            disp_errs.append(float(stats.get("root_displacement_error_m", 0.0)))
+            root_metrics_available = root_metrics_available or (
+                "root_trajectory_error_mean_m" in stats
+                or "root_displacement_error_m" in stats
+                or "root_displacement_track_m" in stats
+            )
             per_judge[j["name"]] = {"score": s, "completion": completion,
                                     "fall_detected": falls[-1]}
         result = {
@@ -215,6 +229,11 @@ class PhysicsJudgeReward:
             "max_joint_error_rad": float(max(joint_errs)),
             "fall_detected": bool(any(falls)),
             "root_trajectory_error_mean_m": float(max(traj_errs)),
+            "root_trajectory_error_final_m": float(max(traj_final_errs)),
+            "root_displacement_ref_m": float(max(disp_ref)),
+            "root_displacement_track_m": float(max(disp_track)),
+            "root_displacement_error_m": float(max(disp_errs)),
+            "root_metrics_available": bool(root_metrics_available),
         }
         if len(self._judges) > 1:
             result["per_judge"] = per_judge
