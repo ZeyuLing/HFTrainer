@@ -1,7 +1,7 @@
 from collections import defaultdict
 import os
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from einops import rearrange
 
 from tokenizers import AddedToken
@@ -65,6 +65,18 @@ def obtain_data(
     return value
 
 
+def format_text_modal_data(modal: Modality, modal_data: Union[str, List[str], Tuple[str, ...]]) -> str:
+    if isinstance(modal_data, (list, tuple)):
+        texts = [str(x).strip() for x in modal_data if str(x).strip()]
+        if is_modal(modal, Caption):
+            return "\n".join(
+                f"Person {idx + 1} caption: {text}"
+                for idx, text in enumerate(texts)
+            )
+        return "\n".join(texts)
+    return str(modal_data)
+
+
 @MODELS.register_module()
 class VermoProcessor(nn.Module):
 
@@ -78,6 +90,8 @@ class VermoProcessor(nn.Module):
         audio_codebook_size: int = 4096,
         instruction_stage: bool = False,
         optional_input_modal_mode: str = "random",
+        task_template_mode: str = "random",
+        shuffle_modal_parts: bool = True,
         max_seq_len: int = 0,
     ):
         """
@@ -130,6 +144,8 @@ class VermoProcessor(nn.Module):
 
         self.instruction_stage = instruction_stage
         self.optional_input_modal_mode = optional_input_modal_mode
+        self.task_template_mode = task_template_mode
+        self.shuffle_modal_parts = bool(shuffle_modal_parts)
         assert self.optional_input_modal_mode in [
             "none",
             "all",
@@ -137,6 +153,7 @@ class VermoProcessor(nn.Module):
             "caption",
             "random",
         ]
+        assert self.task_template_mode in ["random", "first"]
         self.set_vocab()
 
     def _runtime_device(self) -> torch.device:
@@ -557,6 +574,8 @@ class VermoProcessor(nn.Module):
         if per_person_num_frames_list is None:
             per_person_num_frames_list = [None] * len(motions)
 
+        results: List = [None] * len(motions)
+
         # ── Step 1: Classify and record metadata ──────────────────────
         # group_key → list of (original_idx, motion_3d)
         # group_key = num_persons (1 for single-person, P for multi-person)
@@ -579,8 +598,6 @@ class VermoProcessor(nn.Module):
             else:
                 raise ValueError(f"Expected 2D or 3D motion tensor, got {motion.ndim}D")
             groups[P].append((orig_idx, motion_3d, T))
-
-        results: List = [None] * len(motions)
 
         # ── Step 2: Batched encode per group ──────────────────────────
         for P, items in groups.items():
@@ -774,7 +791,7 @@ class VermoProcessor(nn.Module):
         elif is_modal(modal, NumPerson):
             text = f"{int(modal_data)}"
         elif is_modal(modal, Text):
-            text = str(modal_data)
+            text = format_text_modal_data(modal, modal_data)
         else:
             # Fallback for any unknown modal
             modal_string = self.modal2string(modal, modal_data)
@@ -828,10 +845,10 @@ class VermoProcessor(nn.Module):
         else:
             # for text data, no need to additional processing
             assert is_modal(modal, Text), f"Invalid modal: {modal}, {modal_data}"
-            assert isinstance(
-                modal_data, str
-            ), f"Invalid modal {modal.name} modal data: {modal_data}"
-            modal_string = modal_data
+            assert isinstance(modal_data, (str, list, tuple)), (
+                f"Invalid modal {modal.name} modal data: {modal_data}"
+            )
+            modal_string = format_text_modal_data(modal, modal_data)
 
         modal_string = modal.bos + modal_string + modal.eos
         return modal_string
@@ -930,10 +947,12 @@ class VermoProcessor(nn.Module):
         """
 
         # 随机打乱并拼接 condition / output
-        random.shuffle(condition_parts)
+        if self.shuffle_modal_parts:
+            random.shuffle(condition_parts)
         condition_str = "".join(condition_parts)
 
-        random.shuffle(output_parts)
+        if self.shuffle_modal_parts:
+            random.shuffle(output_parts)
         output_str = "".join(output_parts)
 
         # ---- 把你原来的结构塞到 chat messages 里 ----
@@ -1078,9 +1097,13 @@ class VermoProcessor(nn.Module):
         per_sample_info: List[dict] = []
 
         for sample_idx, task in enumerate(tasks):
-            template: str = random.choice(task.templates)
+            template: str = (
+                task.templates[0]
+                if self.task_template_mode == "first"
+                else random.choice(task.templates)
+            )
             optional_input_modals: List[Modality] = self.sample_optional_input_modals(
-                task.optional_input_modality, mode="random"
+                task.optional_input_modality
             )
 
             # Force Caption when condition motion has very few frames
@@ -1189,8 +1212,9 @@ class VermoProcessor(nn.Module):
                 output_id_parts.append(ids)
 
             # Shuffle condition and output parts (same as fill_chat_template)
-            random.shuffle(condition_id_parts)
-            random.shuffle(output_id_parts)
+            if self.shuffle_modal_parts:
+                random.shuffle(condition_id_parts)
+                random.shuffle(output_id_parts)
 
             # Tokenize the task template text
             template_ids = self.text_tokenizer.encode(template, add_special_tokens=False)
@@ -1230,7 +1254,26 @@ class VermoProcessor(nn.Module):
         if self.max_seq_len > 0:
             for i in range(len(batch_seq_tensors)):
                 if batch_seq_tensors[i].numel() > self.max_seq_len:
-                    batch_seq_tensors[i] = batch_seq_tensors[i][:self.max_seq_len]
+                    seq_t = batch_seq_tensors[i]
+                    if self.instruction_stage:
+                        bos_positions = (
+                            seq_t == self.output_bos_id
+                        ).nonzero(as_tuple=False).flatten()
+                        if bos_positions.numel() > 0:
+                            bos_pos = int(bos_positions[-1].item())
+                            output_len = seq_t.numel() - bos_pos
+                            if output_len >= self.max_seq_len:
+                                batch_seq_tensors[i] = seq_t[
+                                    bos_pos : bos_pos + self.max_seq_len
+                                ]
+                            else:
+                                prefix_budget = self.max_seq_len - output_len
+                                prefix_start = max(0, bos_pos - prefix_budget)
+                                batch_seq_tensors[i] = torch.cat(
+                                    [seq_t[prefix_start:bos_pos], seq_t[bos_pos:]]
+                                )
+                            continue
+                    batch_seq_tensors[i] = seq_t[: self.max_seq_len]
 
         # ── Phase 3: Left-pad, attention mask, labels ──────────────────
         max_len = max(t.numel() for t in batch_seq_tensors)

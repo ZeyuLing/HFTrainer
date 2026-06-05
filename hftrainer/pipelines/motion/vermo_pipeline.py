@@ -24,10 +24,16 @@ TASK_PROMPTS = {
     'm2t_2p': 'Caption the given motion.',
     # Music2Dance.templates[42]  (short, no optional mention)
     'm2d': 'Dance to the given music.',
+    # Music2DanceWithInit.templates[0]
+    'm2d_ar': 'Continue the dance to the given music, starting from the provided initial motion.',
     # Dance2Music.templates[0]
     'd2m': 'Create music that matches the dance motion.',
+    # Dance2MusicWithInit.templates[0]
+    'd2m_ar': 'Continue the music for the given dance, starting from the provided initial music segment.',
     # Speech2Gesture.templates[0]
     's2g': 'Given the speech, generate the corresponding gesture motion.',
+    # Speech2GestureWithInit.templates[0]
+    's2g_ar': 'Continue the gesture motion for the given speech, starting from the provided initial pose.',
     # MotionPrediction.templates[0]
     'pred': 'Given the motion of past frames, predict the future motion',
     # MotionInbetween.templates[0]
@@ -58,6 +64,7 @@ class VermoPipeline(BasePipeline):
         num_person: Optional[int] = None,
         duration: Optional[float] = None,
         music: Optional[str] = None,
+        past_music: Optional[str] = None,
         genre: Optional[str] = None,
         audio: Optional[str] = None,
         speech_script: Optional[str] = None,
@@ -78,6 +85,7 @@ class VermoPipeline(BasePipeline):
             caption=caption,
             duration=duration,
             music=music,
+            past_music=past_music,
             genre=genre,
             audio=audio,
             speech_script=speech_script,
