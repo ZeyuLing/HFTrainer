@@ -111,7 +111,7 @@ class PrismARPipeline(DiffusionPipeline):
         device: Optional[torch.device] = None,
         first_frame_latents: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Prepare latents for denoising with optional first frame conditioning.
+        """Prepare latents for denoising with optional prefix-frame conditioning.
 
         Args:
             batch_size: Number of samples in the batch.
@@ -120,13 +120,13 @@ class PrismARPipeline(DiffusionPipeline):
             num_joints: Number of joints.
             dtype: Data type for tensors.
             device: Device to place tensors on.
-            first_frame_latents: Optional encoded first frame latents [B, C, 1, J].
+            first_frame_latents: Optional encoded condition latents [B, C, T_cond, J].
 
         Returns:
             latents: Random noise tensor [B, C, T_latent, J].
-            condition: Condition tensor with first frame encoded [B, C, T_latent, J].
+            condition: Condition tensor with prefix frames encoded [B, C, T_latent, J].
             first_frame_mask: Mask indicating which positions to denoise [B, C, T_latent, J].
-                0 for condition positions (first frame), 1 for positions to denoise.
+                0 for condition positions, 1 for positions to denoise.
         """
         num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
         shape = (
@@ -143,14 +143,13 @@ class PrismARPipeline(DiffusionPipeline):
         first_frame_mask = torch.ones_like(latents)
 
         if first_frame_latents is not None:
-            # first_frame_latents: [B, C, 1, J] or [1, C, 1, J]
+            # first_frame_latents: [B, C, T_cond, J] or [1, C, T_cond, J]
             # Expand batch dimension if needed
             if first_frame_latents.shape[0] == 1 and batch_size > 1:
                 first_frame_latents = first_frame_latents.expand(batch_size, -1, -1, -1)
-            # Set the first frame condition
-            condition[:, :, :1, :] = first_frame_latents
-            # Mask: 0 for first frame (keep condition), 1 for rest (to denoise)
-            first_frame_mask[:, :, :1, :] = 0.0
+            cond_latent_frames = min(first_frame_latents.shape[2], num_latent_frames)
+            condition[:, :, :cond_latent_frames, :] = first_frame_latents[:, :, :cond_latent_frames, :]
+            first_frame_mask[:, :, :cond_latent_frames, :] = 0.0
 
         return latents, condition, first_frame_mask
 
@@ -257,17 +256,19 @@ class PrismARPipeline(DiffusionPipeline):
             raise ValueError(f"Unknown KAFS mode: {mode}. Choose from: none, depth_driven, uniform, random, custom")
 
 
-    def load_condition_pose(self, motion_path: str) -> torch.Tensor:
+    def load_condition_pose(self, motion_path: str, condition_num_frames: int = 1) -> torch.Tensor:
         """Load and process condition pose from npz file.
 
         Args:
             motion_path: Path to the npz file containing motion data.
+            condition_num_frames: Number of observed prefix frames to use.
 
         Returns:
-            Processed motion tensor of shape [1, 1, J, C] ready for VAE encoding.
+            Processed motion tensor of shape [1, T_cond, J, C] ready for VAE encoding.
             Where C=6 (6D rotation representation), J=num_joints.
             VAE expects [B, T, K, C] format.
         """
+        condition_num_frames = max(1, int(condition_num_frames))
         device = self.vae.device
         dtype = self.vae.dtype
 
@@ -286,12 +287,13 @@ class PrismARPipeline(DiffusionPipeline):
 
         motion = rearrange(motion, "b t (j d) -> b t j d", d=6)
 
-        # Only use the first frame for condition
-        if motion.shape[1] != 1:
+        if motion.shape[1] != condition_num_frames:
+            used_frames = min(condition_num_frames, motion.shape[1])
             print_log(
-                f"Warning: Original motion has {motion.shape[1]} frames, only use the first frame for condition pose"
+                f"Condition pose: original motion has {motion.shape[1]} frames, "
+                f"use the first {used_frames} frame(s)"
             )
-            motion = motion[:, :1]  # [B, 1, J, 6]
+            motion = motion[:, :used_frames]  # [B, T_cond, J, 6]
 
         # Return in VAE expected format: [B, T, J, C]
         return motion.to(device=device, dtype=dtype)
@@ -506,7 +508,7 @@ class PrismARPipeline(DiffusionPipeline):
         if self.config.expand_timesteps and first_frame_latents is not None:
             latents = (1 - first_frame_mask) * condition + first_frame_mask * latents
 
-        # Decode to motion (fix applied later in post_process_motion in axis-angle space)
+        # Decode latents to motion (rot6d space)
         motion_vec = self.decode_motion(latents)
 
         return motion_vec
@@ -516,6 +518,7 @@ class PrismARPipeline(DiffusionPipeline):
         prompts: Union[str, List[str]],
         negative_prompt: Optional[str] = None,
         first_frame_motion_path: Optional[str] = None,
+        condition_num_frames: int = 1,
         num_frames_per_segment: Union[int, List[int]] = 129,
         num_joints: int = 23,
         num_inference_steps: int = 50,
@@ -537,7 +540,9 @@ class PrismARPipeline(DiffusionPipeline):
                 If a single string is provided, it will be wrapped in a list.
             negative_prompt: Negative prompt for classifier-free guidance.
             first_frame_motion_path: Optional path to npz file for first segment's
-                first frame condition.
+                prefix-frame condition.
+            condition_num_frames: Number of observed frames to condition on for the
+                first segment. Values larger than 1 evaluate TP2M-style prefix conditioning.
             num_frames_per_segment: Number of frames per segment (int for all segments, or list of int per segment).
             num_joints: Number of joints in the output motion.
             num_inference_steps: Number of denoising steps per segment.
@@ -586,11 +591,11 @@ class PrismARPipeline(DiffusionPipeline):
 
         # Load first frame condition if provided
         first_frame_motion = None
-        has_initial_conditioning = (first_frame_motion_path is not None)
         if first_frame_motion_path is not None:
-            first_frame_motion = self.load_condition_pose(first_frame_motion_path)
-            # Only use first frame
-            first_frame_motion = first_frame_motion[:, :1]
+            first_frame_motion = self.load_condition_pose(
+                first_frame_motion_path,
+                condition_num_frames=condition_num_frames,
+            )
 
         # Store all motion segments
         all_motion_segments = []
@@ -677,29 +682,22 @@ class PrismARPipeline(DiffusionPipeline):
         print_log(f"Total motion frames: {full_motion.shape[1]}")
 
         # Post-process to SMPL-X format
-        # Only apply first-chunk fix when there was no initial frame conditioning
-        # (i.e., this is a fresh generation, not conditioned on an external motion).
-        fix_first = not has_initial_conditioning
         smplx_dict = self.post_process_motion(
             full_motion,
             use_static=use_static,
             use_smooth=use_smooth,
             normalize=normalize,
-            fix_first_chunk=fix_first,
             mocap_framerate=mocap_framerate,
             gender=gender,
         )
 
         return smplx_dict
 
-    def decode_motion(self, latents: torch.Tensor, fix_first_chunk: bool = True) -> torch.Tensor:
+    def decode_motion(self, latents: torch.Tensor) -> torch.Tensor:
         """Decode latents to motion.
 
         Args:
             latents: Latent tensor of shape [B, C, T_latent, J].
-            fix_first_chunk: Whether to apply the first-chunk velocity spike fix
-                in normalized rot6d space. Note: the main fix is applied post
-                axis-angle conversion in post_process_motion() for better results.
 
         Returns:
             Motion tensor of shape [B, T, J, C].
@@ -718,7 +716,6 @@ class PrismARPipeline(DiffusionPipeline):
         use_static: bool = False,
         use_smooth: bool = False,
         normalize: bool = True,
-        fix_first_chunk: bool = True,
         mocap_framerate: float = 30.0,
         gender: str = "neutral",
     ) -> Dict:
@@ -729,9 +726,6 @@ class PrismARPipeline(DiffusionPipeline):
             use_static: Whether to use post-hoc static joint refinement.
             use_smooth: Whether to apply smoothing.
             normalize: Whether to normalize facing direction and ground plane.
-            fix_first_chunk: Whether to fix the first-chunk velocity spike.
-                Applied in axis-angle space after rot6d→aa conversion for
-                correct nonlinear handling.
             mocap_framerate: Frame rate of the motion.
             gender: Gender for SMPL model.
 
@@ -750,70 +744,6 @@ class PrismARPipeline(DiffusionPipeline):
         # rotation_6d_to_axis_angle expects column-major input — no permutation needed.
         pred_poses = rotation_6d_to_axis_angle(pred_poses)
         pred_poses = rearrange(pred_poses, "(b t) j d -> b t (j d)", b=1)
-
-        # ---- Fix VAE first-chunk velocity transient (BOUNDED de-spike) ----
-        # The Wan causal VAE decodes the first chunk with an empty feature cache
-        # (zero left-padding), producing a MILD velocity transient confined to the
-        # first few frames (verified by GT encode->decode roundtrip: frame-0
-        # reconstruction error is actually the lowest; only frames ~1-3 show a ~2x
-        # velocity bump that settles within ~scale frames).
-        #
-        # HISTORY: the previous implementation replaced up to T/3 (~30) frames with
-        # a BACKWARD LINEAR EXTRAPOLATION `anchor - (n_fix - i) * ref_vel` in
-        # axis-angle space. With even a moderate `ref_vel` this overshot into
-        # totally broken poses (observed frame-0 magnitudes up to 9.5 rad) and
-        # produced a long perfectly-linear "ramp" — i.e. the extrapolation itself
-        # was the source of the visible "first ~30 frames distorted" artifact.
-        #
-        # New behaviour: only inspect the first few frames and, for any frame whose
-        # step velocity spikes far above the local-stable median, replace it by
-        # BOUNDED linear interpolation between its surrounding clean frames (or a
-        # hold at the boundary). Interpolation keeps every replaced value inside the
-        # convex hull of nearby real frames, so it can never overshoot.
-        if fix_first_chunk and pred_poses.shape[1] >= 8:
-            T = pred_poses.shape[1]
-            scale = int(self.vae_scale_factor_temporal)  # typically 4
-            n_win = int(min(max(scale, 4), max(2, T // 4)))  # only the first few frames
-
-            def _bounded_despike(seq: torch.Tensor) -> torch.Tensor:
-                # seq: (1, T, D)
-                step = (seq[:, 1:] - seq[:, :-1]).norm(dim=-1).squeeze(0)  # (T-1,)
-                ref_lo, ref_hi = n_win, min(T - 1, n_win + 24)
-                if ref_hi <= ref_lo:
-                    return seq
-                thr = 4.0 * step[ref_lo:ref_hi].median() + 1e-6
-                # Mark "bad" early frames: a frame is bad if an adjacent step spikes.
-                bad = [False] * T
-                for k in range(1, n_win + 1):
-                    if step[k - 1] > thr or (k < T - 1 and step[k] > thr):
-                        bad[k] = True
-                # frame 0 is bad if its forward step spikes (handled by a hold to
-                # the first clean frame when no clean left-anchor exists).
-                if step[0] > thr:
-                    bad[0] = True
-                for k in range(0, n_win + 1):
-                    if not bad[k]:
-                        continue
-                    lo = k - 1
-                    while lo >= 0 and bad[lo]:
-                        lo -= 1
-                    hi = k + 1
-                    while hi < T and bad[hi]:
-                        hi += 1
-                    if lo < 0 and hi >= T:
-                        continue
-                    if lo < 0:
-                        seq[:, k] = seq[:, hi]
-                    elif hi >= T:
-                        seq[:, k] = seq[:, lo]
-                    else:
-                        w = (k - lo) / float(hi - lo)
-                        seq[:, k] = (1.0 - w) * seq[:, lo] + w * seq[:, hi]
-                return seq
-
-            pred_poses = _bounded_despike(pred_poses)
-            if transl.shape[1] == T:
-                transl = _bounded_despike(transl)
 
         if use_static:
             pred_poses = self.smpl_processor.post_hoc_static_refine(
@@ -1063,6 +993,7 @@ def main(
     prompts: str = "A person walks forward slowly;A person jumps up;A person turns around;A person walks forward quickly",
     negative_prompt: str = "",
     first_frame_motion_path: str = None,
+    condition_num_frames: int = 1,
     use_static: bool = False,
     use_smooth: bool = False,
     mocap_framerate: float = 30.0,
@@ -1084,6 +1015,7 @@ def main(
             Example: "A person walks forward;A person turns left;A person sits down"
         negative_prompt: Negative prompt for classifier-free guidance.
         first_frame_motion_path: Optional path to npz file for first frame condition.
+        condition_num_frames: Number of observed prefix frames to condition on.
         use_static: Whether to use static joint refinement.
         use_smooth: Whether to apply smoothing to output motion.
         mocap_framerate: Frame rate of the output motion.
@@ -1150,6 +1082,7 @@ def main(
         prompts=prompt_list,
         negative_prompt=negative_prompt,
         first_frame_motion_path=first_frame_motion_path,
+        condition_num_frames=condition_num_frames,
         use_static=use_static,
         use_smooth=use_smooth,
         mocap_framerate=mocap_framerate,

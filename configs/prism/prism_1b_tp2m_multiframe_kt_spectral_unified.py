@@ -24,14 +24,21 @@ model = dict(
     smpl_pose_processor=dict(save_ckpt=True),
 )
 
-# Fix checkpoint saving
+# Checkpoint saving — epoch-based to match the epoch-based train loop.
+# IMPORTANT: the trigger basis (hook.by_epoch) and the naming basis
+# (save_checkpoint uses train_cfg.by_epoch) MUST agree. With an epoch loop,
+# a by_epoch=False (iteration-triggered) save still gets named
+# `checkpoint-epoch_{current_epoch}`; since current_epoch is constant within an
+# epoch, every mid-epoch save (and every resume of the same epoch) overwrites the
+# SAME dir instead of advancing. Use by_epoch=True so saves fire in
+# after_train_epoch (after current_epoch += 1) and names increase monotonically.
 default_hooks = dict(
     checkpoint=dict(
         type='CheckpointHook',
-        interval=2000,
+        interval=1,          # every 1 epoch
         max_keep_ckpts=5,
         save_last=True,
-        by_epoch=False,
+        by_epoch=True,
     ),
 )
 
