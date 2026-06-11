@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Retarget HumanML3D-263 predictions to SMPL-style motion_135.
+"""Retarget HumanML3D-263 predictions to SMPL-style motion_135 (thin CLI).
 
-This script intentionally avoids the repository's existing HumanML3D-to-SMPL
-conversion path. It only uses the canonical HumanML3D RIC decoder, scipy's
-vector alignment, and the public smplx layer:
+The IK implementation now lives in the public motion library at
+``hftrainer.motion.retarget.hml263_smpl``; this script is a thin batch/IO wrapper
+around :func:`hftrainer.motion.retarget.hml263_smpl.retarget_hml263_clip`.
 
     HML3D-263 -> 22 joints -> hierarchical IK on SMPL rest skeleton
               -> global_orient/body_pose/transl + motion_135
@@ -11,6 +11,10 @@ vector alignment, and the public smplx layer:
 The conversion is not mathematically exact: HumanML3D-263 does not uniquely
 determine SMPL pose twist, shape, or mesh details. The saved fit MPJPE is a
 diagnostic for how well the SMPL skeleton tracks the recovered 22 joints.
+
+NOTE on rot6d: this CLI defaults to ``--rot6d-convention column`` (MotionCLIP
+evaluator) for backward compatibility. For the MS272 chain use ``row`` (or just
+call ``hftrainer.motion.representation.convert.hml263_to_motion272``).
 """
 from __future__ import annotations
 
@@ -21,393 +25,75 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-import torch
-from scipy.spatial.transform import Rotation as R
-
-
-def _patch_numpy_chumpy_aliases() -> None:
-    """Keep legacy SMPL/chumpy pickles loadable under newer NumPy releases."""
-    aliases = {
-        "bool": np.bool_,
-        "int": int,
-        "float": float,
-        "complex": complex,
-        "object": object,
-        "unicode": str,
-        "str": str,
-        "int_": np.int64,
-        "float_": np.float64,
-        "complex_": np.complex128,
-        "object_": object,
-        "unicode_": str,
-        "str_": str,
-    }
-    for name, value in aliases.items():
-        if name not in np.__dict__:
-            setattr(np, name, value)
-
-
-_patch_numpy_chumpy_aliases()
 
 REPO = Path(__file__).resolve().parents[2]
-MS272_ROOT = REPO / "ref_repo" / "MotionStreamer" / "272-dim-Motion-Representation"
-VENDORED_SMPLX = MS272_ROOT / "utils" / "smplx"
-try:
-    import smplx  # noqa: E402
-except ModuleNotFoundError:
-    if MS272_ROOT.exists():
-        sys.path.insert(0, str(MS272_ROOT))
-    if VENDORED_SMPLX.exists():
-        sys.path.insert(0, str(VENDORED_SMPLX))
-    import smplx  # noqa: E402
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from hftrainer.motion.retarget.hml263_smpl import (  # noqa: E402
+    load_gmm_pose_prior,
+    load_smpl_rest,
+    retarget_hml263_clip,
+)
 
 
-# HumanML3D 22-joint skeleton order follows the first 22 SMPL joints.
-N_JOINTS = 22
+def retarget_one(in_path: Path, out_path: Path, smpl_rest, mean, std, gmm_pose_prior, args) -> dict:
+    arr = np.load(str(in_path)).astype(np.float32)
+    # Joint-native inputs (e.g. CondMDI) arrive as (T,22,3); IK runs directly on
+    # the world joints. HML263 inputs arrive as (T,263).
+    joints_world = None
+    feats = None
+    if arr.ndim == 3 and arr.shape[1:] == (22, 3):
+        joints_world = arr
+    else:
+        feats = arr
+        if feats.ndim != 2 or feats.shape[-1] != 263:
+            raise ValueError(f"expected (T,263) or (T,22,3), got {feats.shape}")
+        if mean is not None and std is not None:
+            feats = feats * std + mean
 
-
-def _qinv(q: np.ndarray) -> np.ndarray:
-    return q * np.array([1, -1, -1, -1], dtype=q.dtype)
-
-
-def _qrot(q: np.ndarray, v: np.ndarray) -> np.ndarray:
-    qvec = q[..., 1:]
-    uv = np.cross(qvec, v)
-    uuv = np.cross(qvec, uv)
-    return v + 2 * (q[..., :1] * uv + uuv)
-
-
-def _recover_root_rot_pos(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    rot_vel = data[..., 0]
-    r_rot_ang = np.zeros_like(rot_vel)
-    r_rot_ang[..., 1:] = rot_vel[..., :-1]
-    r_rot_ang = np.cumsum(r_rot_ang, axis=-1)
-    r_rot_quat = np.zeros(data.shape[:-1] + (4,), dtype=data.dtype)
-    r_rot_quat[..., 0] = np.cos(r_rot_ang)
-    r_rot_quat[..., 2] = np.sin(r_rot_ang)
-    r_pos = np.zeros(data.shape[:-1] + (3,), dtype=data.dtype)
-    r_pos[..., 1:, [0, 2]] = data[..., :-1, 1:3]
-    r_pos = _qrot(_qinv(r_rot_quat), r_pos)
-    r_pos = np.cumsum(r_pos, axis=-2)
-    r_pos[..., 1] = data[..., 3]
-    return r_rot_quat, r_pos
-
-
-def recover_from_ric(data: np.ndarray, joints_num: int = N_JOINTS) -> np.ndarray:
-    data = np.asarray(data, dtype=np.float32)
-    r_rot_quat, r_pos = _recover_root_rot_pos(data)
-    positions = data[..., 4:(joints_num - 1) * 3 + 4]
-    positions = positions.reshape(positions.shape[:-1] + (-1, 3))
-    q = _qinv(r_rot_quat)[..., None, :]
-    q = np.broadcast_to(q, positions.shape[:-1] + (4,))
-    positions = _qrot(q, positions)
-    positions[..., 0] += r_pos[..., 0:1]
-    positions[..., 2] += r_pos[..., 2:3]
-    return np.concatenate([r_pos[..., None, :], positions], axis=-2)
-
-
-def resample_linear(x: np.ndarray, src_fps: float, dst_fps: float) -> np.ndarray:
-    x = np.asarray(x, dtype=np.float32)
-    if abs(src_fps - dst_fps) < 1e-6 or len(x) < 2:
-        return x
-    new_t = max(2, int(round(len(x) * dst_fps / src_fps)))
-    grid = np.linspace(0.0, len(x) - 1, new_t)
-    lo = np.floor(grid).astype(np.int64)
-    hi = np.minimum(lo + 1, len(x) - 1)
-    w = (grid - lo).astype(np.float32)
-    shape = (new_t,) + (1,) * (x.ndim - 1)
-    return x[lo] * (1.0 - w.reshape(shape)) + x[hi] * w.reshape(shape)
-
-
-def _safe_normalize(v: np.ndarray, eps: float = 1e-8) -> tuple[np.ndarray, np.ndarray]:
-    n = np.linalg.norm(v, axis=-1, keepdims=True)
-    valid = n[..., 0] > eps
-    return v / np.maximum(n, eps), valid
-
-
-def estimate_local_rotations(
-    target_joints: np.ndarray,
-    rest_joints: np.ndarray,
-    parents: np.ndarray,
-    orientation_mode: str = "bone",
-    parent_ref_weight: float = 0.25,
-) -> np.ndarray:
-    """Estimate local rotations by aligning SMPL rest bones to target bones."""
-    target_joints = np.asarray(target_joints, dtype=np.float64)
-    rest_joints = np.asarray(rest_joints, dtype=np.float64)
-    parents = np.asarray(parents[:N_JOINTS], dtype=np.int64)
-    children: list[list[int]] = [[] for _ in range(N_JOINTS)]
-    for j in range(1, N_JOINTS):
-        p = int(parents[j])
-        if 0 <= p < N_JOINTS:
-            children[p].append(j)
-
-    offsets = np.zeros((N_JOINTS, 3), dtype=np.float64)
-    for j in range(1, N_JOINTS):
-        offsets[j] = rest_joints[j] - rest_joints[int(parents[j])]
-
-    local = np.tile(np.eye(3, dtype=np.float64), (len(target_joints), N_JOINTS, 1, 1))
-    global_r = np.tile(np.eye(3, dtype=np.float64), (len(target_joints), N_JOINTS, 1, 1))
-
-    for t, joints in enumerate(target_joints):
-        for j in range(N_JOINTS):
-            child_ids = children[j]
-            parent = int(parents[j])
-            parent_global = np.eye(3) if parent < 0 else global_r[t, parent]
-            rest_vecs_list = [offsets[c] for c in child_ids]
-            target_vecs_list = [joints[c] - joints[j] for c in child_ids]
-            weights = [1.0] * len(rest_vecs_list)
-            if orientation_mode == "parent_frame" and parent >= 0:
-                # Position-only IK leaves twist around a single bone undefined.
-                # A weak joint-to-parent reference chooses a stable local frame
-                # without letting the virtual axis dominate child-bone fitting.
-                rest_vecs_list.append(rest_joints[parent] - rest_joints[j])
-                target_vecs_list.append(joints[parent] - joints[j])
-                weights.append(parent_ref_weight)
-            if not rest_vecs_list:
-                local[t, j] = np.eye(3)
-                global_r[t, j] = parent_global @ local[t, j]
-                continue
-
-            rest_vecs = np.stack(rest_vecs_list, axis=0)
-            target_vecs = np.stack(target_vecs_list, axis=0)
-            rest_unit, rest_valid = _safe_normalize(rest_vecs)
-            target_unit, target_valid = _safe_normalize(target_vecs)
-            valid = rest_valid & target_valid
-            if not np.any(valid):
-                rot_local = np.eye(3)
-            else:
-                src = rest_unit[valid]
-                dst_world = target_unit[valid]
-                dst_local = (parent_global.T @ dst_world.T).T
-                valid_weights = np.asarray(weights, dtype=np.float64)[valid]
-                try:
-                    rot_local = R.align_vectors(dst_local, src, weights=valid_weights)[0].as_matrix()
-                except Exception:
-                    rot_local = np.eye(3)
-            local[t, j] = rot_local
-            global_r[t, j] = parent_global @ rot_local
-    return local.astype(np.float32)
-
-
-def matrix_to_rot6d_rowmajor(rotmat: np.ndarray) -> np.ndarray:
-    return np.asarray(rotmat[..., :, :2], dtype=np.float32).reshape(*rotmat.shape[:-2], 6)
-
-
-def load_smpl_rest(model_dir: Path, device: torch.device):
-    model = smplx.create(
-        str(model_dir),
-        model_type="smpl",
-        gender="neutral",
-        ext="pkl",
-        batch_size=1,
-    ).to(device)
-    model.eval()
-    with torch.no_grad():
-        out = model(
-            betas=torch.zeros(1, 10, device=device),
-            body_pose=torch.zeros(1, 69, device=device),
-            global_orient=torch.zeros(1, 3, device=device),
-            transl=torch.zeros(1, 3, device=device),
-        )
-    rest = out.joints[0, :N_JOINTS].detach().cpu().numpy().astype(np.float32)
-    parents = model.parents.detach().cpu().numpy().astype(np.int64)
-    return model, rest, parents
-
-
-def smpl_forward_22(
-    model,
-    global_orient: np.ndarray,
-    body_pose_21: np.ndarray,
-    transl: np.ndarray | None,
-    batch_size: int,
-    device: torch.device,
-) -> np.ndarray:
-    n = len(global_orient)
-    chunks = []
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        b = end - start
-        body_23 = np.zeros((b, 69), dtype=np.float32)
-        body_23[:, :63] = body_pose_21[start:end]
-        tr = np.zeros((b, 3), dtype=np.float32) if transl is None else transl[start:end]
-        with torch.no_grad():
-            out = model(
-                betas=torch.zeros(b, 10, device=device),
-                body_pose=torch.from_numpy(body_23).to(device),
-                global_orient=torch.from_numpy(global_orient[start:end]).to(device),
-                transl=torch.from_numpy(tr).to(device),
-            )
-        chunks.append(out.joints[:, :N_JOINTS].detach().cpu().numpy().astype(np.float32))
-    return np.concatenate(chunks, axis=0)
-
-
-def refine_smpl_fit(
-    model,
-    target_joints: np.ndarray,
-    global_orient: np.ndarray,
-    body_pose_21: np.ndarray,
-    transl: np.ndarray,
-    iters: int,
-    lr: float,
-    pose_l2_weight: float,
-    angle_prior_weight: float,
-    device: torch.device,
-    smooth_weight: float = 1e-3,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Refine IK initialization by optimizing SMPL pose/transl against joints."""
-    if iters <= 0:
-        fitted = smpl_forward_22(model, global_orient, body_pose_21, transl, 512, device)
-        return global_orient, body_pose_21, transl, fitted
-
-    target = torch.from_numpy(target_joints.astype(np.float32)).to(device)
-    n = len(target_joints)
-    g = torch.tensor(global_orient, dtype=torch.float32, device=device, requires_grad=True)
-    b21 = torch.tensor(body_pose_21, dtype=torch.float32, device=device, requires_grad=True)
-    tr = torch.tensor(transl, dtype=torch.float32, device=device, requires_grad=True)
-    b21_init = b21.detach().clone()
-    opt = torch.optim.Adam([g, b21, tr], lr=lr)
-
-    for _ in range(iters):
-        body_23 = torch.zeros(n, 69, dtype=torch.float32, device=device)
-        body_23[:, :63] = b21
-        out = model(
-            betas=torch.zeros(n, 10, device=device),
-            body_pose=body_23,
-            global_orient=g,
-            transl=tr,
-        )
-        joints = out.joints[:, :N_JOINTS]
-        data_loss = ((joints - target) ** 2).sum(dim=-1).mean()
-        pose_keep = ((b21 - b21_init) ** 2).mean()
-        pose_prior = (body_23 ** 2).mean()
-        if angle_prior_weight > 0:
-            # SMPLify angle prior indices in the 69-dim body-pose vector:
-            # left/right knees and elbows are discouraged from bending backward.
-            idx = torch.tensor([55, 58, 12, 15], dtype=torch.long, device=device)
-            signs = torch.tensor([1.0, -1.0, -1.0, -1.0], dtype=torch.float32, device=device)
-            angle_prior = torch.exp(body_23[:, idx] * signs).pow(2).mean()
-        else:
-            angle_prior = torch.tensor(0.0, device=device)
-        if n >= 3:
-            tr_acc = tr[2:] - 2 * tr[1:-1] + tr[:-2]
-            pose_acc = b21[2:] - 2 * b21[1:-1] + b21[:-2]
-            smooth = (tr_acc ** 2).mean() + 1e-2 * (pose_acc ** 2).mean()
-        else:
-            smooth = torch.tensor(0.0, device=device)
-        loss = (
-            data_loss
-            + 1e-4 * pose_keep
-            + pose_l2_weight * pose_prior
-            + angle_prior_weight * angle_prior
-            + smooth_weight * smooth
-        )
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        opt.step()
-
-    with torch.no_grad():
-        body_23 = torch.zeros(n, 69, dtype=torch.float32, device=device)
-        body_23[:, :63] = b21
-        out = model(
-            betas=torch.zeros(n, 10, device=device),
-            body_pose=body_23,
-            global_orient=g,
-            transl=tr,
-        )
-        fitted = out.joints[:, :N_JOINTS].detach().cpu().numpy().astype(np.float32)
-    return (
-        g.detach().cpu().numpy().astype(np.float32),
-        b21.detach().cpu().numpy().astype(np.float32),
-        tr.detach().cpu().numpy().astype(np.float32),
-        fitted,
+    out = retarget_hml263_clip(
+        feats,
+        target_joints_world=joints_world,
+        smpl_rest=smpl_rest,
+        device=args.device,
+        source_fps=args.source_fps,
+        target_fps=args.target_fps,
+        batch_size=args.batch_size,
+        floor_align=args.floor_align,
+        refine_iters=args.refine_iters,
+        refine_lr=args.refine_lr,
+        rotation_init=args.rotation_init,
+        orientation_mode=args.orientation_mode,
+        parent_ref_weight=args.parent_ref_weight,
+        pose_l2_weight=args.pose_l2_weight,
+        angle_prior_weight=args.angle_prior_weight,
+        smooth_weight=args.smooth_weight,
+        joint_accel_weight=args.joint_accel_weight,
+        joint_fit_weight_preset=args.joint_fit_weight_preset,
+        gmm_pose_prior=gmm_pose_prior,
+        gmm_pose_prior_weight=args.gmm_pose_prior_weight,
+        rot6d_convention=args.rot6d_convention,
     )
-
-
-def retarget_one(
-    in_path: Path,
-    out_path: Path,
-    model,
-    rest_joints: np.ndarray,
-    parents: np.ndarray,
-    source_fps: float,
-    target_fps: float,
-    batch_size: int,
-    device: torch.device,
-    floor_align: bool,
-    refine_iters: int,
-    refine_lr: float,
-    orientation_mode: str,
-    parent_ref_weight: float,
-    pose_l2_weight: float,
-    angle_prior_weight: float,
-    mean: np.ndarray | None,
-    std: np.ndarray | None,
-) -> dict:
-    feats = np.load(str(in_path)).astype(np.float32)
-    if feats.ndim != 2 or feats.shape[-1] != 263:
-        raise ValueError(f"expected (T,263), got {feats.shape}")
-    if mean is not None and std is not None:
-        feats = feats * std + mean
-    target = recover_from_ric(feats, N_JOINTS)
-    target = resample_linear(target, source_fps, target_fps)
-    if floor_align:
-        target = target.copy()
-        target[..., 1] -= target[..., 1].min()
-
-    local_r = estimate_local_rotations(
-        target,
-        rest_joints,
-        parents,
-        orientation_mode=orientation_mode,
-        parent_ref_weight=parent_ref_weight,
-    )
-    aa = R.from_matrix(local_r.reshape(-1, 3, 3)).as_rotvec().astype(np.float32)
-    aa = aa.reshape(len(target), N_JOINTS, 3)
-    global_orient = aa[:, 0]
-    body_pose = aa[:, 1:].reshape(len(target), 63)
-
-    joints_no_trans = smpl_forward_22(model, global_orient, body_pose, None, batch_size, device)
-    transl = (target[:, 0] - joints_no_trans[:, 0]).astype(np.float32)
-    global_orient, body_pose, transl, fitted = refine_smpl_fit(
-        model,
-        target,
-        global_orient,
-        body_pose,
-        transl,
-        refine_iters,
-        refine_lr,
-        pose_l2_weight,
-        angle_prior_weight,
-        device,
-    )
-    local_r = R.from_rotvec(
-        np.concatenate([global_orient[:, None, :], body_pose.reshape(len(target), 21, 3)], axis=1)
-        .reshape(-1, 3)
-    ).as_matrix().reshape(len(target), N_JOINTS, 3, 3).astype(np.float32)
-    mpjpe_mm = np.linalg.norm(fitted - target, axis=-1).mean(axis=1).astype(np.float32) * 1000.0
-
-    motion_135 = np.concatenate(
-        [transl, matrix_to_rot6d_rowmajor(local_r).reshape(len(target), N_JOINTS * 6)],
-        axis=-1,
-    ).astype(np.float32)
+    mpjpe_mm = out["fit_mpjpe_mm"]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         str(out_path),
-        motion_135=motion_135,
-        transl=transl.astype(np.float32),
-        global_orient=global_orient.astype(np.float32),
-        body_pose=body_pose.astype(np.float32),
-        target_joints=target.astype(np.float32),
-        fitted_joints=fitted.astype(np.float32),
+        motion_135=out["motion_135"],
+        transl=out["transl"],
+        global_orient=out["global_orient"],
+        body_pose=out["body_pose"],
+        target_joints=out["target_joints"],
+        fitted_joints=out["fitted_joints"],
         fit_mpjpe_mm=mpjpe_mm,
-        source_fps=np.array(source_fps, dtype=np.float32),
-        target_fps=np.array(target_fps, dtype=np.float32),
-        refine_iters=np.array(refine_iters, dtype=np.int32),
+        source_fps=np.array(args.source_fps, dtype=np.float32),
+        target_fps=np.array(args.target_fps, dtype=np.float32),
+        refine_iters=np.array(args.refine_iters, dtype=np.int32),
+        rot6d_convention=np.array(args.rot6d_convention),
     )
     return {
         "sid": in_path.stem,
-        "frames": int(len(target)),
+        "frames": int(out["target_joints"].shape[0]),
         "mpjpe_mm_mean": float(mpjpe_mm.mean()),
         "mpjpe_mm_p95": float(np.percentile(mpjpe_mm, 95)),
     }
@@ -433,6 +119,8 @@ def iter_files(
 
 
 def main():
+    import torch
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--in-dir", required=True)
     ap.add_argument("--out-dir", required=True)
@@ -449,8 +137,31 @@ def main():
     ap.add_argument("--floor-align", action="store_true")
     ap.add_argument("--refine-iters", type=int, default=0)
     ap.add_argument("--refine-lr", type=float, default=2e-2)
+    ap.add_argument("--smooth-weight", type=float, default=1e-3)
+    ap.add_argument("--joint-accel-weight", type=float, default=0.0)
     ap.add_argument("--pose-l2-weight", type=float, default=0.0)
     ap.add_argument("--angle-prior-weight", type=float, default=0.0)
+    ap.add_argument("--gmm-pose-prior-weight", type=float, default=0.0)
+    ap.add_argument(
+        "--joint-fit-weight-preset",
+        choices=["uniform", "relaxed_torso", "relaxed_upper"],
+        default="uniform",
+    )
+    ap.add_argument("--foot-height-align", action="store_true", default=False)
+    ap.add_argument("--no-foot-height-align", dest="foot_height_align", action="store_false")
+    ap.add_argument(
+        "--rot6d-convention",
+        choices=["column", "row"],
+        default="column",
+        help="6D layout used for saved motion_135. MotionCLIP evaluator uses column; "
+        "MS272 chain uses row.",
+    )
+    ap.add_argument(
+        "--rotation-init",
+        choices=["position", "hml263"],
+        default="position",
+        help="Initialize SMPL pose from position-only IK or from the HumanML3D 126-D local rotation block.",
+    )
     ap.add_argument(
         "--orientation-mode",
         choices=["bone", "parent_frame"],
@@ -469,8 +180,9 @@ def main():
     )
     args = ap.parse_args()
 
-    device = torch.device(args.device)
-    model, rest_joints, parents = load_smpl_rest(Path(args.model_dir), device)
+    args.device = torch.device(args.device)
+    smpl_rest = load_smpl_rest(args.model_dir, args.device)
+    gmm_pose_prior = load_gmm_pose_prior(args.device) if args.gmm_pose_prior_weight > 0 else None
     if args.input_normalized:
         mean = np.load(args.mean_path).astype(np.float32)
         std = np.load(args.std_path).astype(np.float32)
@@ -491,7 +203,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(
         f"[setup] files={len(files)} shard={args.shard_index}/{args.num_shards} "
-        f"out={out_dir} device={device} target_fps={args.target_fps}",
+        f"out={out_dir} device={args.device} target_fps={args.target_fps}",
         flush=True,
     )
 
@@ -502,33 +214,14 @@ def main():
         if args.skip_existing and out_path.exists():
             continue
         try:
-            item = retarget_one(
-                in_path,
-                out_path,
-                model,
-                rest_joints,
-                parents,
-                args.source_fps,
-                args.target_fps,
-                args.batch_size,
-                device,
-                args.floor_align,
-                args.refine_iters,
-                args.refine_lr,
-                args.orientation_mode,
-                args.parent_ref_weight,
-                args.pose_l2_weight,
-                args.angle_prior_weight,
-                mean,
-                std,
-            )
+            item = retarget_one(in_path, out_path, smpl_rest, mean, std, gmm_pose_prior, args)
             summary.append(item)
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"[fail] {in_path.name}: {type(exc).__name__}: {exc}", flush=True)
         if i % 25 == 0 or i == len(files):
-            mean = np.mean([x["mpjpe_mm_mean"] for x in summary]) if summary else float("nan")
-            print(f"[progress] {i}/{len(files)} ok={len(summary)} fail={failed} mean_mpjpe_mm={mean:.2f}", flush=True)
+            running = np.mean([x["mpjpe_mm_mean"] for x in summary]) if summary else float("nan")
+            print(f"[progress] {i}/{len(files)} ok={len(summary)} fail={failed} mean_mpjpe_mm={running:.2f}", flush=True)
 
     if summary:
         stats = {
