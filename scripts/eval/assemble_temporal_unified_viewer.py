@@ -43,9 +43,20 @@ def src_for(model, proto, i, sid):
 
 
 def _splice_to_gt(npz_path):
-    """Load an eval npz and hard-keep GT on observed/condition frames so the
-    VIEWER shows a clean GT condition for every method (matching \\ours, whose
-    condition is verbatim GT). Only generated frames differ across methods."""
+    """Prepare a baseline clip for the VIEWER so it is directly comparable to GT.
+
+    Baselines emit a *globally coherent* sequence but in their own root frame:
+    their observed/condition root differs from GT by a near-constant rigid offset
+    (empirically a ~0.2 m vertical/grounding shift, ~0 heading), invisible to the
+    272 metrics (root-relative, xz-centered, heading-removed) but very visible in
+    absolute motion_135. Naively splicing GT onto the condition would then create
+    a large boundary jump between the GT condition and the model's own frame.
+
+    We therefore (1) rigidly align the whole sequence to GT by the mean condition
+    -frame root translation offset, then (2) hard-keep GT on the condition frames.
+    The generated region is shifted by the same offset, so it continues smoothly
+    from the GT condition (residual == the model's *own* boundary discontinuity).
+    """
     z = np.load(npz_path, allow_pickle=True)
     out = {k: z[k] for k in z.files}
     m = np.asarray(z["src_mask"], dtype=np.float32)
@@ -53,8 +64,11 @@ def _splice_to_gt(npz_path):
     gt = np.asarray(z["gt_motion_135"], dtype=np.float32)
     obs = m[:, :135].max(axis=-1) < 0.5          # True = observed/condition frame
     T = min(len(pred), len(gt), len(obs))
-    o = obs[:T]
-    pred[:T][o] = gt[:T][o]
+    pred, gt, o = pred[:T], gt[:T], obs[:T]
+    if o.any():
+        delta = (gt[o, :3] - pred[o, :3]).mean(axis=0)   # constant root offset
+        pred[:, :3] += delta
+    pred[o] = gt[o]
     out["motion_135"] = pred
     return out
 

@@ -51,8 +51,13 @@ def main():
     os.chdir(REPO)
     import numpy as _np
     from scripts.eval.eval_m2m_v2_all_tasks import load_eval_samples
-    from hftrainer.motion.retarget import KIMODOSOMAToSMPLRetargeter, SOMAToSMPLIKConfig
-    from hftrainer.models.motion.components.retarget.smpl_soma import SMPLSOMARetargeter
+    # Canonical public retarget API (smpl_soma is re-exported here; see the module
+    # note "New code should import from hftrainer.motion.retarget").
+    from hftrainer.motion.retarget import (
+        KIMODOSOMAToSMPLRetargeter,
+        SOMAToSMPLIKConfig,
+        SMPLSOMARetargeter,
+    )
 
     samples = load_eval_samples(
         args.data_file, args.motion_data_dir, args.max_samples, require_caption=False)
