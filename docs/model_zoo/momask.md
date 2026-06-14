@@ -140,6 +140,27 @@ R-Prec 0.513 / 0.711 / 0.807, MM-Dist 2.932, Diversity 9.453.)
 > a generation-quality gap — the decode path is verified parity-equal to the
 > released MoMask inference (`momask_infer_h3d_test.py`).
 
+### MotionStreamer-272 evaluator (SMPL retarget path)
+
+For cross-model comparison with the MotionStreamer / HYMotion-M2M evaluator,
+native HumanML3D-263 predictions are retargeted through the validated MDM-style
+chain: HML263 -> SMPL `motion_135` (IK refine-80, 20 -> 30 fps) ->
+MotionStreamer-272 -> `MotionStreamer272Evaluator`.
+
+| Metric | hftrainer | MS-272 GT/Real |
+|---|---:|---:|
+| **FID** ↓ | **114.869** | 0.000 |
+| R-Precision Top-1 ↑ | **0.485** | 0.706 |
+| R-Precision Top-2 ↑ | **0.650** | 0.857 |
+| R-Precision Top-3 ↑ | **0.731** | 0.911 |
+| **MM-Dist** ↓ | **19.411** | 15.007 |
+| **Diversity** → | **25.427** | 27.281 |
+
+Run details: `n_repeats = 20`, `n_samples_used = 7392`,
+`skipped_no_pred = 0`, outputs under
+`outputs/evaluation/ms272_from263/momask_272`, metrics in
+`outputs/evaluation/ms272_from263/metrics_momask.json`.
+
 ---
 
 ## Implementation notes
