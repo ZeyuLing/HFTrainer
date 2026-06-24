@@ -1,0 +1,6 @@
+<mujoco model="g1_fk">
+    <include file="g1_holo_compat.xml" />
+    <worldbody>
+        <geom name="floor" type="plane" size="0 0 1" pos="0 0 0" contype="1" conaffinity="1" />
+    </worldbody>
+</mujoco>

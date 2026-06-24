@@ -15,18 +15,47 @@ online loop lives in a single process -- no IsaacGym required for the reward.
 
 from __future__ import annotations
 
+import json
+import multiprocessing as mp
 import os
+import queue
 import subprocess
-import sys
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-PROTOMOTIONS_ROOT = PROJECT_ROOT / "ref_repo" / "ProtoMotions"
-_SCRIPTS = PROJECT_ROOT / "scripts" / "embodied"
-for _p in (str(PROJECT_ROOT), str(PROTOMOTIONS_ROOT), str(_SCRIPTS)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+from hftrainer.models.motion.physflow.trackers.paths import PROTOMOTIONS_ROOT
+
+
+def _simulate_motion_worker(payload: Dict[str, object], result_queue) -> None:
+    """Run one MuJoCo rollout in a killable child process.
+
+    This is only used when ``PHYSFLOW_PROTO_SIM_SUBPROCESS`` is enabled. The
+    direct in-process path stays the default for existing evaluators.
+    """
+    try:
+        from scripts.embodied.run_g1_rl_tracker_export import (
+            parse_body_mesh_mapping,
+            simulate_and_export,
+        )
+
+        mjcf_path = str(payload["mjcf_path"])
+        stats = simulate_and_export(
+            onnx_path=str(payload["onnx_path"]),
+            motion_file=str(payload["motion_file"]),
+            output_json_path=str(payload["output_json_path"]),
+            mjcf_path=mjcf_path,
+            body_mesh_mapping=parse_body_mesh_mapping(Path(mjcf_path)),
+            subsample_factor=int(payload["subsample_factor"]),
+        )
+        result_queue.put({"status": "ok", "stats": stats})
+    except Exception as exc:  # noqa: BLE001
+        result_queue.put({
+            "status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
+        })
 
 
 class PhysicsJudgeReward:
@@ -90,6 +119,13 @@ class PhysicsJudgeReward:
         self.convert_python = convert_python or os.environ.get(
             "PHYSFLOW_CONVERT_PYTHON", "/root/physflow_isaacgym_py38_cu118/bin/python"
         )
+        self.convert_timeout_s = float(os.environ.get("PHYSFLOW_CONVERT_TIMEOUT", "600"))
+        self.simulate_timeout_s = float(os.environ.get("PHYSFLOW_PROTO_SIM_TIMEOUT", "0"))
+        self.simulate_subprocess = _env_flag(
+            "PHYSFLOW_PROTO_SIM_SUBPROCESS",
+            default=self.simulate_timeout_s > 0,
+        )
+        self.simulate_mp_context = os.environ.get("PHYSFLOW_PROTO_MP_CONTEXT", "fork")
 
         from scripts.embodied.physflow_g1_scoring import (
             DEFAULT_G1_SCORE_CONFIG,
@@ -143,14 +179,14 @@ class PhysicsJudgeReward:
         env = _os_environ()
         env["MUJOCO_GL"] = "disable"
         # The convert script imports the ``protomotions`` package, so the
-        # subprocess needs PROTOMOTIONS_ROOT on PYTHONPATH (we only have it on
-        # this process's sys.path, which children don't inherit).
+        # subprocess needs PROTOMOTIONS_ROOT on PYTHONPATH.
         extra_paths = [str(PROTOMOTIONS_ROOT), str(PROJECT_ROOT)]
         env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
         log_path = proto_dir.parent / "convert.log"
         with open(log_path, "w") as lf:
             subprocess.run(cmd, cwd=str(PROTOMOTIONS_ROOT), env=env, check=True,
-                           stdout=lf, stderr=subprocess.STDOUT)
+                           stdout=lf, stderr=subprocess.STDOUT,
+                           timeout=self.convert_timeout_s if self.convert_timeout_s > 0 else None)
 
     def _expected_frames(self, motion_path: Path) -> int:
         import yaml
@@ -179,23 +215,12 @@ class PhysicsJudgeReward:
         falls: List[bool] = []
         joint_errs: List[float] = []
         traj_errs: List[float] = []
-        traj_final_errs: List[float] = []
-        disp_ref: List[float] = []
-        disp_track: List[float] = []
         disp_errs: List[float] = []
-        root_metrics_available = False
         for ji, j in enumerate(self._judges):
             jout = out_json if len(self._judges) == 1 else out_json.with_name(
                 f"{out_json.stem}__{j['name']}{out_json.suffix}"
             )
-            stats = self._simulate(
-                onnx_path=j["onnx"],
-                motion_file=str(motion_path),
-                output_json_path=str(jout),
-                mjcf_path=j["mjcf"],
-                body_mesh_mapping=self._mesh_mapping_for(j["mjcf"]),
-                subsample_factor=self.robot_json_subsample,
-            )
+            stats = self._simulate_judge(j, motion_path, jout)
             completion = float(stats["total_steps"] / max(total_frames, 1))
             s = float(self._compute_score(
                 completion=completion,
@@ -212,15 +237,7 @@ class PhysicsJudgeReward:
             falls.append(bool(stats.get("fall_detected", False)))
             joint_errs.append(float(stats.get("max_joint_error_rad", 0.0)))
             traj_errs.append(float(stats.get("root_trajectory_error_mean_m", 0.0)))
-            traj_final_errs.append(float(stats.get("root_trajectory_error_final_m", 0.0)))
-            disp_ref.append(float(stats.get("root_displacement_ref_m", 0.0)))
-            disp_track.append(float(stats.get("root_displacement_track_m", 0.0)))
             disp_errs.append(float(stats.get("root_displacement_error_m", 0.0)))
-            root_metrics_available = root_metrics_available or (
-                "root_trajectory_error_mean_m" in stats
-                or "root_displacement_error_m" in stats
-                or "root_displacement_track_m" in stats
-            )
             per_judge[j["name"]] = {"score": s, "completion": completion,
                                     "fall_detected": falls[-1]}
         result = {
@@ -229,15 +246,56 @@ class PhysicsJudgeReward:
             "max_joint_error_rad": float(max(joint_errs)),
             "fall_detected": bool(any(falls)),
             "root_trajectory_error_mean_m": float(max(traj_errs)),
-            "root_trajectory_error_final_m": float(max(traj_final_errs)),
-            "root_displacement_ref_m": float(max(disp_ref)),
-            "root_displacement_track_m": float(max(disp_track)),
             "root_displacement_error_m": float(max(disp_errs)),
-            "root_metrics_available": bool(root_metrics_available),
         }
         if len(self._judges) > 1:
             result["per_judge"] = per_judge
         return result
+
+    def _simulate_judge(self, judge: Dict[str, object], motion_path: Path, out_json: Path) -> Dict[str, float]:
+        if not self.simulate_subprocess:
+            return self._simulate(
+                onnx_path=judge["onnx"],
+                motion_file=str(motion_path),
+                output_json_path=str(out_json),
+                mjcf_path=judge["mjcf"],
+                body_mesh_mapping=self._mesh_mapping_for(judge["mjcf"]),
+                subsample_factor=self.robot_json_subsample,
+            )
+
+        payload = {
+            "onnx_path": judge["onnx"],
+            "motion_file": str(motion_path),
+            "output_json_path": str(out_json),
+            "mjcf_path": judge["mjcf"],
+            "subsample_factor": self.robot_json_subsample,
+        }
+        ctx = mp.get_context(self.simulate_mp_context)
+        result_queue = ctx.Queue()
+        proc = ctx.Process(target=_simulate_motion_worker, args=(payload, result_queue))
+        proc.start()
+        timeout = self.simulate_timeout_s if self.simulate_timeout_s > 0 else None
+        proc.join(timeout)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(10)
+            raise TimeoutError(
+                f"simulate timeout after {self.simulate_timeout_s:.1f}s: "
+                f"{Path(str(motion_path)).name} judge={judge.get('name', 'judge')}"
+            )
+        try:
+            message = result_queue.get_nowait()
+        except queue.Empty as exc:
+            raise RuntimeError(
+                f"simulate subprocess exited with code {proc.exitcode} and no result: "
+                f"{Path(str(motion_path)).name}"
+            ) from exc
+        if message.get("status") != "ok":
+            raise RuntimeError(
+                f"simulate subprocess failed: {message.get('error')}\n"
+                f"{message.get('traceback', '')}"
+            )
+        return message["stats"]
 
     def score_csv_dir(self, csv_dir: Path, work_dir: Path) -> Dict[str, Dict[str, float]]:
         """Convert all CSVs in ``csv_dir`` and score each. Returns {stem: metrics}.
@@ -270,6 +328,16 @@ class PhysicsJudgeReward:
                 results[stem] = self.score_motion_file(motions[0], json_dir / f"{stem}.json")
             except Exception as exc:
                 results[stem] = {"score": self.error_penalty, "error": str(exc)}
+                if os.environ.get("PHYSFLOW_PROTO_DEBUG_ERRORS"):
+                    try:
+                        debug_path = work_dir / f"{stem}_proto_error.json"
+                        debug_path.write_text(json.dumps({
+                            "stem": stem,
+                            "motion": str(motions[0]),
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }, indent=2))
+                    except Exception:
+                        pass
         return results
 
 
@@ -277,3 +345,10 @@ def _os_environ() -> Dict[str, str]:
     import os
 
     return os.environ.copy()
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}

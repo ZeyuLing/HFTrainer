@@ -30,15 +30,6 @@ from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-_KIMODO_ROOT = os.path.join(_PROJECT_ROOT, "ref_repo", "KIMODO", "kimodo")
-
-
-def _ensure_kimodo_importable() -> None:
-    import sys
-
-    for p in (_PROJECT_ROOT, _KIMODO_ROOT):
-        if p not in sys.path:
-            sys.path.insert(0, p)
 
 
 @MODEL_BUNDLES.register_module()
@@ -58,7 +49,6 @@ class PhysFlowBundle(ModelBundle):
         **kwargs,
     ) -> None:
         super().__init__()
-        _ensure_kimodo_importable()
 
         self.cfg_weight = list(cfg_weight)
         self.cfg_type = cfg_type
@@ -77,8 +67,8 @@ class PhysFlowBundle(ModelBundle):
         if checkpoint_dir:
             os.environ.setdefault("CHECKPOINT_DIR", checkpoint_dir)
 
-        from kimodo.exports.mujoco import MujocoQposConverter
-        from kimodo.model.load_model import load_model
+        from hftrainer.models.motion.kimodo.network.exports.mujoco import MujocoQposConverter
+        from hftrainer.models.motion.kimodo.network.model.load_model import load_model
 
         dev = device if (device != "cuda" or torch.cuda.is_available()) else "cpu"
         kimodo = load_model(kimodo_model, device=dev, eval_mode=True)
@@ -145,7 +135,7 @@ class PhysFlowBundle(ModelBundle):
         lengths = lengths.to(device)
         max_frames = int(lengths.max().item())
 
-        from kimodo.motion_rep.feature_utils import length_to_mask
+        from hftrainer.models.motion.kimodo.network.motion_rep.feature_utils import length_to_mask
 
         pad_mask = length_to_mask(lengths).to(device)
         first_heading = torch.zeros(text_feat.shape[0], device=device)
@@ -219,7 +209,7 @@ class PhysFlowBundle(ModelBundle):
         noise = torch.randn_like(target)
         x_t = diffusion.q_sample(target, t, noise)
 
-        from kimodo.motion_rep.feature_utils import length_to_mask
+        from hftrainer.models.motion.kimodo.network.motion_rep.feature_utils import length_to_mask
 
         pad_mask = length_to_mask(lengths).to(device)
         first_heading = torch.zeros(B, device=device)

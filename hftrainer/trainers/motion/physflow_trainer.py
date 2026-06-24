@@ -18,6 +18,7 @@ Stage-2 extension on top of this loop.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from typing import Any, Dict, List, Optional
 
@@ -42,6 +43,16 @@ class PhysFlowTrainer(BaseTrainer):
         reward_temperature: float = 0.5,
         judge_onnx: Optional[str] = None,
         judge_mjcf: Optional[str] = None,
+        # ---- judge backend: "protomotions" (frozen ONNX+MuJoCo), "hgpt"
+        #      (Humanoid-GPT zero-shot tracker, scored in its own venv worker),
+        #      or "any2track" (OpenTrack/Any2Track MuJoCo ONNX evaluator). ----
+        judge_backend: str = "protomotions",
+        hgpt_python: Optional[str] = None,
+        hgpt_freq: int = 50,
+        hgpt_input_fps: int = 30,
+        any2track_config: Optional[str] = None,
+        any2track_input_fps: int = 30,
+        any2track_max_steps: Optional[int] = None,
         rollout_dir: Optional[str] = None,
         keep_rollouts: bool = False,
         enable_reward: bool = True,
@@ -49,7 +60,54 @@ class PhysFlowTrainer(BaseTrainer):
         accept_min_completion: float = 0.9,
         accept_require_no_fall: bool = True,
         accept_max_score: Optional[float] = None,
+        # Optional qpos-level robot-style cost.  When enabled, candidate score is
+        # ``physical_score + style_reward_weight * style_cost``.  Lower remains
+        # better, and the existing accept/selection logic is unchanged.
+        style_reward_bank: Optional[str] = None,
+        style_reward_weight: float = 0.0,
+        # Optional direct trackability caps. ``accept_max_score`` is useful as a
+        # blended scalar, but heldout validation can still regress on the exact
+        # metrics we care about. These caps let experiments require the SFT
+        # target itself to satisfy the final tracker-quality definition.
+        accept_max_joint_error_rad: Optional[float] = None,
+        accept_max_root_trajectory_error_mean_m: Optional[float] = None,
+        accept_max_root_displacement_error_m: Optional[float] = None,
+        accept_require_root_metrics: bool = False,
+        # Keep the hard accept gate as telemetry/final-quality accounting, but
+        # optionally continue SFT toward the best candidate when no candidate
+        # clears that gate. This avoids zero-gradient reward training at startup.
+        accept_soft_fallback: bool = False,
+        accept_soft_fallback_require_relative: bool = False,
+        # Optional relative-to-base filter. A candidate can be absolutely
+        # trackable yet still not improve over the frozen base generator. When
+        # enabled, reward-SFT targets must beat the same-noise frozen-base sample
+        # by explicit margins before being treated as useful improvement signal.
+        relative_to_base: bool = False,
+        relative_min_score_improvement: float = 0.0,
+        relative_min_joint_error_improvement: float = 0.0,
+        relative_min_root_trajectory_improvement: float = 0.0,
+        relative_min_root_displacement_improvement: float = 0.0,
+        relative_max_completion_drop: float = 0.02,
+        relative_require_no_fall_regression: bool = True,
+        relative_mode: str = "all_margins",
+        relative_min_advantage: float = 0.0,
+        relative_score_weight: float = 1.0,
+        relative_joint_weight: float = 1.0,
+        relative_root_trajectory_weight: float = 1.0,
+        relative_root_displacement_weight: float = 0.25,
+        relative_completion_weight: float = 1.0,
+        relative_fall_weight: float = 2.0,
+        relative_select_by_advantage: bool = False,
+        relative_weight_by_advantage: bool = False,
+        relative_advantage_weight_scale: float = 1.0,
+        relative_advantage_weight_max: float = 3.0,
         anchor_weight: float = 0.5,
+        # ---- GT mixing: supervised FM term toward real motion (anti-collapse,
+        #      cold-start signal when no candidate passes the accept gate). The
+        #      reward term keeps implicit weight 1.0; GT is a persistent
+        #      stabiliser at this (lower) weight so it never dominates the
+        #      self-generated trackable target once candidates start passing. ----
+        gt_weight: float = 0.0,
         # ---- anti-freeze: reject degenerate "frozen-pose glide" candidates ----
         # A static pose is trivially trackable (no fall, completion 1.0, ~0 joint
         # error), so a pure trackability reward has a degenerate optimum at "don't
@@ -61,9 +119,55 @@ class PhysFlowTrainer(BaseTrainer):
         accept_min_joint_std: float = 0.0,
         accept_max_root_disp_if_frozen: Optional[float] = None,
         accept_frozen_joint_std: float = 0.03,
+        # ---- LEARNABILITY-FRONTIER co-evolution (the real tracker-improvement
+        #      mechanism). The old loop exported the EASIEST-to-track motions to
+        #      the trainee pool, so the trainee only ever saw motions it already
+        #      solved -> zero learning signal. Here we DECOUPLE two judges:
+        #        Q (``quality_judge``, the strong FROZEN reference) certifies a
+        #          motion is physically valid / a competent robot CAN track it;
+        #        T (``trainee_judge``, the policy being improved) measures the
+        #          motion's CURRENT difficulty.
+        #      We export to the trainee pool only motions that are Q-valid AND on
+        #      T's learnability frontier (T struggles but does not catastrophically
+        #      fail), and (optionally) pull the generator's SFT target toward the
+        #      same regret-maximising frontier so it actively produces valid-but-
+        #      hard motions. This is the minimax co-evolution that can make the
+        #      tracker genuinely better. Off by default (preserves Stage-1). ----
+        frontier_mode: bool = False,
+        quality_judge: str = "frozen",
+        trainee_judge: str = "trainee",
+        frontier_t_low: float = 0.2,
+        frontier_t_high: float = 0.9,
+        sft_target: str = "easiest",  # "easiest" | "regret"
+        # kinematic validity (anti-artifact) gate, rad/s and m/s peak limits on the
+        # generated reference itself (independent of any tracker). Artifact motions
+        # with impossible velocities teach the trainee garbage even if a judge can
+        # momentarily track them. <=0 disables.
+        quality_max_joint_vel: float = 0.0,
+        quality_max_root_vel: float = 0.0,
         # ---- trainee co-training: export accepted motions to a growing pool ----
         tracker_pool_dir: Optional[str] = None,
+        # Optional qpos replay pool for tracker stacks whose native training data
+        # is qpos NPZ rather than ProtoMotions .motion, e.g. Any2Track/HGPT.
+        tracker_qpos_pool_dir: Optional[str] = None,
+        tracker_qpos_pool_fps: float = 30.0,
         pool_max_motions: int = 4000,
+        # ---- GT-as-special-candidate: also stream real GT motions into the
+        #      trainee pool (judge-scored + accept-filtered like a generated
+        #      candidate) so the tracker co-trains on a generator+GT MIX. This
+        #      is the anti-collapse "real-data mixing" the co-evolution review
+        #      flagged; GT does NOT optimise the generator (that is the separate
+        #      ``gt_weight`` supervised term). ``gt_pool_freq`` throttles cost:
+        #      score GT every Nth step (judge rollout is the bottleneck). ----
+        export_gt_to_pool: bool = False,
+        gt_pool_freq: int = 1,
+        # Real GT is a trusted reference source, so for tracker replay we must
+        # not require the frozen tracker Q to already solve it; otherwise the very
+        # hard clips we want the trainee to learn are filtered out. Generated
+        # motions still use Q-valid frontier gating. Modes:
+        #   "valid"      legacy: Q-valid + kinematic gate.
+        #   "kinematic"  real GT only: kinematic gate, no Q completion/fall gate.
+        gt_pool_accept_mode: str = "valid",
         **kwargs,
     ) -> None:
         super().__init__(bundle)
@@ -75,21 +179,84 @@ class PhysFlowTrainer(BaseTrainer):
         self.reward_temperature = float(reward_temperature)
         self.judge_onnx = judge_onnx
         self.judge_mjcf = judge_mjcf
+        self.judge_backend = str(judge_backend)
+        self.hgpt_python = hgpt_python
+        self.hgpt_freq = int(hgpt_freq)
+        self.hgpt_input_fps = int(hgpt_input_fps)
+        self.any2track_config = any2track_config
+        self.any2track_input_fps = int(any2track_input_fps)
+        self.any2track_max_steps = any2track_max_steps
         self.rollout_dir = rollout_dir
         self.keep_rollouts = bool(keep_rollouts)
         self.enable_reward = bool(enable_reward)
         self.accept_min_completion = float(accept_min_completion)
         self.accept_require_no_fall = bool(accept_require_no_fall)
         self.accept_max_score = accept_max_score
+        self.style_reward_bank = style_reward_bank
+        self.style_reward_weight = float(style_reward_weight)
+        self._style_bank = None
+        if self.style_reward_bank and self.style_reward_weight > 0.0:
+            from hftrainer.models.motion.physflow.g1_style_reward import G1StyleBank
+
+            self._style_bank = G1StyleBank.load(self.style_reward_bank)
+        self.accept_max_joint_error_rad = accept_max_joint_error_rad
+        self.accept_max_root_trajectory_error_mean_m = accept_max_root_trajectory_error_mean_m
+        self.accept_max_root_displacement_error_m = accept_max_root_displacement_error_m
+        self.accept_require_root_metrics = bool(accept_require_root_metrics)
+        self.accept_soft_fallback = bool(accept_soft_fallback)
+        self.accept_soft_fallback_require_relative = bool(accept_soft_fallback_require_relative)
+        self.relative_to_base = bool(relative_to_base)
+        self.relative_min_score_improvement = float(relative_min_score_improvement)
+        self.relative_min_joint_error_improvement = float(relative_min_joint_error_improvement)
+        self.relative_min_root_trajectory_improvement = float(relative_min_root_trajectory_improvement)
+        self.relative_min_root_displacement_improvement = float(relative_min_root_displacement_improvement)
+        self.relative_max_completion_drop = float(relative_max_completion_drop)
+        self.relative_require_no_fall_regression = bool(relative_require_no_fall_regression)
+        self.relative_mode = str(relative_mode)
+        self.relative_min_advantage = float(relative_min_advantage)
+        self.relative_score_weight = float(relative_score_weight)
+        self.relative_joint_weight = float(relative_joint_weight)
+        self.relative_root_trajectory_weight = float(relative_root_trajectory_weight)
+        self.relative_root_displacement_weight = float(relative_root_displacement_weight)
+        self.relative_completion_weight = float(relative_completion_weight)
+        self.relative_fall_weight = float(relative_fall_weight)
+        self.relative_select_by_advantage = bool(relative_select_by_advantage)
+        self.relative_weight_by_advantage = bool(relative_weight_by_advantage)
+        self.relative_advantage_weight_scale = float(relative_advantage_weight_scale)
+        self.relative_advantage_weight_max = float(relative_advantage_weight_max)
         self.anchor_weight = float(anchor_weight)
+        self.gt_weight = float(gt_weight)
         self.accept_min_joint_std = float(accept_min_joint_std)
         self.accept_max_root_disp_if_frozen = accept_max_root_disp_if_frozen
         self.accept_frozen_joint_std = float(accept_frozen_joint_std)
+        self.frontier_mode = bool(frontier_mode)
+        self.quality_judge = str(quality_judge)
+        self.trainee_judge = str(trainee_judge)
+        self.frontier_t_low = float(frontier_t_low)
+        self.frontier_t_high = float(frontier_t_high)
+        self.sft_target = str(sft_target)
+        self.quality_max_joint_vel = float(quality_max_joint_vel)
+        self.quality_max_root_vel = float(quality_max_root_vel)
         self.tracker_pool_dir = tracker_pool_dir
+        self.tracker_qpos_pool_dir = tracker_qpos_pool_dir
+        self.tracker_qpos_pool_fps = float(tracker_qpos_pool_fps)
         self.pool_max_motions = int(pool_max_motions)
+        self.export_gt_to_pool = bool(export_gt_to_pool)
+        self.gt_pool_freq = max(1, int(gt_pool_freq))
+        self.gt_pool_accept_mode = str(gt_pool_accept_mode)
         self._reward = None
+        if self.rollout_dir:
+            os.makedirs(self.rollout_dir, exist_ok=True)
         if self.tracker_pool_dir:
             os.makedirs(self.tracker_pool_dir, exist_ok=True)
+        if self.tracker_qpos_pool_dir:
+            os.makedirs(self.tracker_qpos_pool_dir, exist_ok=True)
+
+    @staticmethod
+    def _safe_pool_token(value: Any) -> str:
+        text = str(value) if value is not None else ""
+        text = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_")
+        return text[:120] or "item"
 
     def _export_to_pool(self, proto_dir: str, selected: List[tuple], prompt_ids: List[str]) -> int:
         """Copy accepted (trackable) ``.motion`` files into the shared tracker
@@ -127,6 +294,52 @@ class PhysFlowTrainer(BaseTrainer):
             pass
         return n
 
+    def _export_qpos_to_pool(
+        self,
+        qpos: Any,
+        lengths: List[int],
+        selected: List[tuple],
+        prompt_ids: List[str],
+    ) -> int:
+        """Save accepted qpos references as NPZ for non-Proto tracker trainers."""
+        if not self.tracker_qpos_pool_dir:
+            return 0
+        import glob
+        import numpy as np
+
+        os.makedirs(self.tracker_qpos_pool_dir, exist_ok=True)
+        step = self._global_step()
+        arr = np.asarray(qpos)
+        n = 0
+        for b, best_local in selected:
+            flat = b * self.num_samples + best_local
+            if flat < 0 or flat >= arr.shape[0]:
+                continue
+            length = int(lengths[b]) if b < len(lengths) else arr.shape[1]
+            sample = np.asarray(arr[flat])[:length].astype(np.float32)
+            if sample.ndim != 2 or sample.shape[1] < 7:
+                continue
+            stem = f"p{b:03d}_s{best_local:02d}"
+            pid = self._safe_pool_token(
+                prompt_ids[b] if b < len(prompt_ids) and prompt_ids[b] else f"b{b}"
+            )
+            dst = os.path.join(self.tracker_qpos_pool_dir, f"it{step:06d}_{pid}_{stem}.npz")
+            try:
+                np.savez(dst, qpos=sample, frequency=np.float32(self.tracker_qpos_pool_fps))
+                n += 1
+            except Exception:
+                pass
+        try:
+            allm = sorted(
+                glob.glob(os.path.join(self.tracker_qpos_pool_dir, "*.npz")),
+                key=lambda p: os.path.getmtime(p),
+            )
+            for old in allm[: max(0, len(allm) - self.pool_max_motions)]:
+                os.remove(old)
+        except Exception:
+            pass
+        return n
+
     @staticmethod
     def _motion_dynamics(qpos: "np.ndarray", length: int) -> Dict[str, float]:
         """Per-candidate articulation/translation stats from generated qpos.
@@ -144,7 +357,165 @@ class PhysFlowTrainer(BaseTrainer):
         joints = a[:, 7:] if a.shape[1] > 7 else a
         joint_std = float(np.std(joints, axis=0).mean()) if a.shape[0] > 1 else 0.0
         root_disp = float(np.linalg.norm(a[-1, :3] - a[0, :3])) if a.shape[1] >= 3 else 0.0
-        return {"joint_std": joint_std, "root_disp": root_disp}
+        # peak kinematic rates (per-frame finite diff at fps=30) -- artifact
+        # detector independent of any tracker: impossible joint/root velocities
+        # mark a reference as unusable training data even if a judge tracks it.
+        fps = 30.0
+        if a.shape[0] > 1:
+            jvel = np.abs(np.diff(joints, axis=0)) * fps
+            max_joint_vel = float(jvel.max()) if jvel.size else 0.0
+            rvel = np.linalg.norm(np.diff(a[:, :3], axis=0), axis=-1) * fps
+            max_root_vel = float(rvel.max()) if rvel.size else 0.0
+        else:
+            max_joint_vel = 0.0
+            max_root_vel = 0.0
+        return {"joint_std": joint_std, "root_disp": root_disp,
+                "max_joint_vel": max_joint_vel, "max_root_vel": max_root_vel}
+
+    def _add_style_costs(
+        self,
+        metrics: List[Dict[str, float]],
+        qpos: "np.ndarray",
+        num_frames: List[int],
+        group_size: int,
+        captions: Optional[List[str]] = None,
+    ) -> None:
+        if self._style_bank is None or self.style_reward_weight <= 0.0:
+            return
+        from hftrainer.models.motion.physflow.g1_style_reward import categorize_style_text
+
+        for flat_idx, record in enumerate(metrics):
+            b = flat_idx // group_size
+            label_source = captions[b] if captions and b < len(captions) else ""
+            category = categorize_style_text(label_source)
+            cost = self._style_bank.style_cost(
+                qpos[flat_idx],
+                length=int(num_frames[b]),
+                category=category,
+            )
+            record["physical_score"] = float(record.get("score", 0.0))
+            record["style_cost"] = float(cost)
+            record["style_category"] = category
+            record["score"] = float(record["physical_score"] + self.style_reward_weight * cost)
+
+    # ----------------------------------------------- Q/T frontier helpers (B)
+    def _qt(self, m: Dict[str, float]):
+        """Split a candidate's metrics into Q (strong frozen quality certifier)
+        and T (current trainee difficulty) sub-metrics using the per-judge
+        breakdown the ensemble reward writes. Falls back to the combined metrics
+        for Q when no per-judge breakdown exists (single-judge / round 0), and
+        returns ``t=None`` when the trainee judge is not in the ensemble yet."""
+        pj = m.get("per_judge") or {}
+        q = pj.get(self.quality_judge)
+        if q is None:
+            q = {"completion": m.get("completion"), "fall_detected": m.get("fall_detected"),
+                 "score": m.get("score")}
+        t = pj.get(self.trainee_judge)
+        return q, t
+
+    def _is_kinematically_valid(self, m: Dict[str, float]) -> bool:
+        """Tracker-independent artifact gate: reject references with impossible
+        joint/root velocities or a degenerate frozen pose."""
+        js = m.get("joint_std")
+        if js is not None and self.accept_min_joint_std > 0.0 and float(js) < self.accept_min_joint_std:
+            return False
+        if (self.accept_max_root_disp_if_frozen is not None and js is not None
+                and float(js) < self.accept_frozen_joint_std
+                and float(m.get("root_disp", 0.0)) > self.accept_max_root_disp_if_frozen):
+            return False
+        if self.quality_max_joint_vel > 0.0 and float(m.get("max_joint_vel", 0.0)) > self.quality_max_joint_vel:
+            return False
+        if self.quality_max_root_vel > 0.0 and float(m.get("max_root_vel", 0.0)) > self.quality_max_root_vel:
+            return False
+        return True
+
+    def _passes_trackability_caps(self, m: Dict[str, float]) -> bool:
+        return self._trackability_reject_reason(m) is None
+
+    def _trackability_reject_reason(self, m: Dict[str, float]) -> Optional[str]:
+        if self.accept_require_root_metrics and not (
+            "root_trajectory_error_mean_m" in m or "root_displacement_error_m" in m
+        ):
+            return "track_missing_root"
+        if (
+            self.accept_max_joint_error_rad is not None
+            and float(m.get("max_joint_error_rad", 1e9)) > float(self.accept_max_joint_error_rad)
+        ):
+            return "track_joint_error"
+        if (
+            self.accept_max_root_trajectory_error_mean_m is not None
+            and float(m.get("root_trajectory_error_mean_m", 1e9))
+            > float(self.accept_max_root_trajectory_error_mean_m)
+        ):
+            return "track_root_trajectory"
+        if (
+            self.accept_max_root_displacement_error_m is not None
+            and float(m.get("root_displacement_error_m", 1e9))
+            > float(self.accept_max_root_displacement_error_m)
+        ):
+            return "track_root_displacement"
+        return None
+
+    def _is_valid(self, m: Dict[str, float]) -> bool:
+        """A motion is a VALID reference iff the strong frozen judge Q can execute
+        it (physical-validity / correctness certificate) AND it passes the
+        tracker-independent kinematic gate. Difficulty for the trainee is NOT a
+        validity criterion here -- that is the whole point of decoupling Q and T."""
+        if not self.enable_reward:
+            return True
+        if "error" in m:
+            return False
+        q, _ = self._qt(m)
+        if self.accept_require_no_fall and bool(q.get("fall_detected", True)):
+            return False
+        if float(q.get("completion", 0.0)) < self.accept_min_completion:
+            return False
+        if not self._passes_trackability_caps(m):
+            return False
+        return self._is_kinematically_valid(m)
+
+    def _valid_reject_reason(self, m: Dict[str, float]) -> Optional[str]:
+        """Return the first Q/kinematic gate that rejects a generated candidate.
+
+        This is telemetry-only; it mirrors ``_is_valid`` so generator frontier
+        yield can be debugged without changing accept/reject behavior.
+        """
+        if not self.enable_reward:
+            return None
+        if "error" in m:
+            return "error"
+        q, _ = self._qt(m)
+        if self.accept_require_no_fall and bool(q.get("fall_detected", True)):
+            return "q_fall"
+        if float(q.get("completion", 0.0)) < self.accept_min_completion:
+            return "q_low_completion"
+        track_reason = self._trackability_reject_reason(m)
+        if track_reason is not None:
+            return track_reason
+        if not self._is_kinematically_valid(m):
+            return "kinematic"
+        return None
+
+    def _is_frontier(self, m: Dict[str, float]) -> bool:
+        """Learnability frontier for the trainee pool: Q-valid AND the current
+        trainee T struggles (completion in (low, high)) -- not already solved,
+        not catastrophically unlearnable. When T is absent (round 0) nothing is
+        on the frontier yet, so we fall back to exporting valid motions."""
+        if not self._is_valid(m):
+            return False
+        _, t = self._qt(m)
+        if t is None:
+            return True  # no trainee yet: any valid motion seeds the pool
+        ct = float(t.get("completion", 0.0))
+        return (self.frontier_t_low <= ct < self.frontier_t_high)
+
+    def _trainee_completion(self, m: Dict[str, float], default: float = 1.0) -> float:
+        """Current trainee completion for a candidate (higher == trainee already
+        tracks it). Returns ``default`` when the trainee judge is absent."""
+        _, t = self._qt(m)
+        if t is None:
+            return float(default)
+        return float(t.get("completion", default))
 
     def _is_acceptable(self, m: Dict[str, float]) -> bool:
         """A candidate is an acceptable SFT target only if the robot can actually
@@ -155,37 +526,168 @@ class PhysFlowTrainer(BaseTrainer):
         rejecting frozen-pose glides stops collapse onto the opposite degenerate
         mode -- a static pose that is trivially trackable but is not the motion the
         prompt asked for (legs frozen while the root slides across the floor)."""
+        return self._acceptable_reject_reason(m) is None
+
+    def _acceptable_reject_reason(self, m: Dict[str, float]) -> Optional[str]:
+        """Return the first hard-accept gate that rejects a candidate."""
         if not self.enable_reward:
-            return True
+            return None
         if "error" in m:
-            return False
+            return "error"
         if self.accept_require_no_fall and bool(m.get("fall_detected", True)):
-            return False
+            return "fall"
         if float(m.get("completion", 0.0)) < self.accept_min_completion:
-            return False
+            return "low_completion"
         if self.accept_max_score is not None and float(m.get("score", 1e9)) > self.accept_max_score:
-            return False
-        # anti-freeze: reject candidates whose joints barely move.
-        js = m.get("joint_std")
-        if js is not None:
-            if self.accept_min_joint_std > 0.0 and float(js) < self.accept_min_joint_std:
-                return False
-            # reject pure-translation slides (root travels far on near-frozen legs).
-            if (self.accept_max_root_disp_if_frozen is not None
-                    and float(js) < self.accept_frozen_joint_std
-                    and float(m.get("root_disp", 0.0)) > self.accept_max_root_disp_if_frozen):
-                return False
-        return True
+            return "score"
+        track_reason = self._trackability_reject_reason(m)
+        if track_reason is not None:
+            return track_reason
+        if not self._is_kinematically_valid(m):
+            return "kinematic"
+        return None
+
+    def _relative_reject_reason(
+        self,
+        cand: Dict[str, float],
+        base: Optional[Dict[str, float]],
+    ) -> Optional[str]:
+        """Return why ``cand`` is not a useful improvement over same-noise base."""
+        if not self.relative_to_base:
+            return None
+        if base is None:
+            return "relative_missing_base"
+        if "error" in base:
+            return None
+        if (
+            self.relative_require_no_fall_regression
+            and not bool(base.get("fall_detected", False))
+            and bool(cand.get("fall_detected", False))
+        ):
+            return "relative_fall_regression"
+        if (
+            float(cand.get("completion", 0.0))
+            + self.relative_max_completion_drop
+            < float(base.get("completion", 0.0))
+        ):
+            return "relative_completion_drop"
+        if self.relative_mode in {"advantage", "net_advantage", "weighted_advantage"}:
+            adv = self._relative_advantage(cand, base)
+            if adv is None:
+                return None
+            if adv < self.relative_min_advantage:
+                return "relative_advantage_margin"
+            return None
+        if (
+            float(base.get("score", 1e9)) - float(cand.get("score", 1e9))
+            < self.relative_min_score_improvement
+        ):
+            return "relative_score_margin"
+        if (
+            float(base.get("max_joint_error_rad", 1e9))
+            - float(cand.get("max_joint_error_rad", 1e9))
+            < self.relative_min_joint_error_improvement
+        ):
+            return "relative_joint_margin"
+        if (
+            float(base.get("root_trajectory_error_mean_m", 1e9))
+            - float(cand.get("root_trajectory_error_mean_m", 1e9))
+            < self.relative_min_root_trajectory_improvement
+        ):
+            return "relative_root_trajectory_margin"
+        if (
+            float(base.get("root_displacement_error_m", 1e9))
+            - float(cand.get("root_displacement_error_m", 1e9))
+            < self.relative_min_root_displacement_improvement
+        ):
+            return "relative_root_displacement_margin"
+        return None
+
+    def _relative_advantage(
+        self,
+        cand: Dict[str, float],
+        base: Optional[Dict[str, float]],
+    ) -> Optional[float]:
+        """Weighted same-noise improvement score; positive means cand is better."""
+        if base is None or "error" in base:
+            return None
+        score_gain = float(base.get("score", 0.0)) - float(cand.get("score", 0.0))
+        joint_gain = (
+            float(base.get("max_joint_error_rad", 0.0))
+            - float(cand.get("max_joint_error_rad", 0.0))
+        )
+        root_gain = (
+            float(base.get("root_trajectory_error_mean_m", 0.0))
+            - float(cand.get("root_trajectory_error_mean_m", 0.0))
+        )
+        root_disp_gain = (
+            float(base.get("root_displacement_error_m", 0.0))
+            - float(cand.get("root_displacement_error_m", 0.0))
+        )
+        completion_gain = float(cand.get("completion", 0.0)) - float(base.get("completion", 0.0))
+        fall_gain = float(bool(base.get("fall_detected", False))) - float(
+            bool(cand.get("fall_detected", False))
+        )
+        return (
+            self.relative_score_weight * score_gain
+            + self.relative_joint_weight * joint_gain
+            + self.relative_root_trajectory_weight * root_gain
+            + self.relative_root_displacement_weight * root_disp_gain
+            + self.relative_completion_weight * completion_gain
+            + self.relative_fall_weight * fall_gain
+        )
 
     # ----------------------------------------------------------- reward (lazy)
     @property
     def reward(self):
+        # NOTE: this trainer is an nn.Module, whose __getattr__ MASKS any
+        # AttributeError raised *inside* this property getter into a misleading
+        # "object has no attribute 'reward'". Re-raise such internal failures as
+        # RuntimeError so the true cause (e.g. a failed judge import/build) is
+        # visible in the traceback instead of being swallowed.
+        try:
+            return self._build_reward()
+        except AttributeError as e:
+            import traceback
+            raise RuntimeError(
+                "PhysFlowTrainer.reward getter failed (real cause below):\n"
+                + traceback.format_exc()
+            ) from e
+
+    def _build_reward(self):
         # The co-evolution orchestrator hot-swaps the judge between outer rounds
         # by writing a JSON judge spec and pointing PHYSFLOW_JUDGE_SPEC at it
         # (frozen / latest-trainee / blended). We rebuild the reward whenever the
         # spec file changes so a relaunched-per-round generator always scores
         # against the *current* judge ensemble. Falls back to the single frozen
         # judge_onnx when no spec is set (the original Stage-1 behaviour).
+        # Humanoid-GPT judge runs in its own venv worker (jax/mujoco-mjx); it does
+        # not use the ProtoMotions ONNX-ensemble spec mechanism.
+        if self.judge_backend == "hgpt":
+            from hftrainer.models.motion.physflow.hgpt_reward import HgptJudgeReward
+
+            if self._reward is None:
+                self._reward = HgptJudgeReward(
+                    onnx_path=self.judge_onnx,
+                    hgpt_python=self.hgpt_python,
+                    freq=self.hgpt_freq,
+                    input_fps=self.hgpt_input_fps,
+                )
+            return self._reward
+
+        if self.judge_backend in {"any2track", "opentrack"}:
+            from hftrainer.models.motion.physflow.any2track_reward import Any2TrackJudgeReward
+
+            if self._reward is None:
+                self._reward = Any2TrackJudgeReward(
+                    onnx_path=self.judge_onnx,
+                    mjcf_path=self.judge_mjcf,
+                    config_path=self.any2track_config,
+                    input_fps=self.any2track_input_fps,
+                    max_steps=self.any2track_max_steps,
+                )
+            return self._reward
+
         from hftrainer.models.motion.physflow.reward import PhysicsJudgeReward
 
         spec = os.environ.get("PHYSFLOW_JUDGE_SPEC")
@@ -305,14 +807,24 @@ class PhysFlowTrainer(BaseTrainer):
 
             # export accepted motions to the shared trainee pool (closed loop)
             n_pooled = 0
+            n_qpos_pooled = 0
             if self.tracker_pool_dir and selected_good:
                 n_pooled = self._export_to_pool(
                     os.path.join(ctx.name, "proto"),
                     selected_good,
                     list(batch.get("prompt_id", [])),
                 )
+            if self.tracker_qpos_pool_dir and selected_good:
+                n_qpos_pooled = self._export_qpos_to_pool(
+                    qpos, num_frames, selected_good, list(batch.get("prompt_id", [])),
+                )
         finally:
-            if not self.keep_rollouts:
+            if self.keep_rollouts:
+                try:
+                    ctx._finalizer.detach()
+                except Exception:
+                    pass
+            else:
                 ctx.cleanup()
 
         # 4) reward-filtered + anchored x0 step toward the accepted motions
@@ -326,6 +838,8 @@ class PhysFlowTrainer(BaseTrainer):
         result["n_good"] = out.get("n_good", torch.tensor(float(sum(good_flags))))
         if self.tracker_pool_dir:
             result["n_pooled"] = torch.tensor(float(n_pooled))
+        if self.tracker_qpos_pool_dir:
+            result["n_qpos_pooled"] = torch.tensor(float(n_qpos_pooled))
         if "anchor_mse" in out:
             result["loss_anchor"] = out["anchor_mse"]
         result["reward_best_mean"] = torch.tensor(sum(best_scores) / max(B, 1))

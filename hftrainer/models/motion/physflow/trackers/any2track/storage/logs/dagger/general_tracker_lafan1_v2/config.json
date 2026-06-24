@@ -1,0 +1,578 @@
+{
+    "env_config": {
+        "terrain_type": "flat_terrain",
+        "ctrl_dt": 0.02,
+        "sim_dt": 0.002,
+        "episode_length": 1000,
+        "action_repeat": 1,
+        "action_scale": 1.0,
+        "recalculate_vel_in_reward": true,
+        "recalculate_vel_in_reference_motion": true,
+        "history_len": 0,
+        "soft_joint_pos_limit_factor": 0.95,
+        "student_use_residual_action": true,
+        "dagger_horizon": 1,
+        "dagger_learning_epochs": 10,
+        "reference_traj_config": {
+            "name": {
+                "lafan1": [
+                    "dance1_subject2",
+                    "dance1_subject3",
+                    "dance2_subject1",
+                    "dance2_subject2",
+                    "dance2_subject3",
+                    "dance2_subject4",
+                    "dance2_subject5",
+                    "fallAndGetUp1_subject1",
+                    "fallAndGetUp1_subject4",
+                    "fallAndGetUp1_subject5",
+                    "fallAndGetUp2_subject2",
+                    "fallAndGetUp2_subject3",
+                    "fallAndGetUp3_subject1",
+                    "fight1_subject2",
+                    "fight1_subject3",
+                    "fight1_subject5",
+                    "fightAndSports1_subject1",
+                    "fightAndSports1_subject4",
+                    "jumps1_subject1",
+                    "jumps1_subject5",
+                    "run1_subject2",
+                    "run1_subject5",
+                    "run2_subject1",
+                    "run2_subject4",
+                    "sprint1_subject2",
+                    "sprint1_subject4",
+                    "walk1_subject1",
+                    "walk1_subject2",
+                    "walk1_subject5",
+                    "walk2_subject1",
+                    "walk2_subject4",
+                    "walk3_subject2",
+                    "walk3_subject5",
+                    "walk4_subject1",
+                    "walk2_subject3",
+                    "walk3_subject1",
+                    "walk3_subject3",
+                    "walk3_subject4",
+                    "dance1_subject1",
+                    "jumps1_subject2"
+                ]
+            },
+            "random_start": true,
+            "fixed_start_frame": 0
+        },
+        "termination_config": {
+            "root_height_threshold": 0.3,
+            "rigid_body_dif_threshold": 0.5,
+            "diff_gvec_threshold": 1.0
+        },
+        "noise_config": {
+            "level": 1.0,
+            "scales": {
+                "joint_pos": 0.03,
+                "joint_vel": 1.5,
+                "gravity": 0.05,
+                "gyro": 0.2,
+                "root_pos": 0.0,
+                "root_rot": 0.0,
+                "root_linvel": 0.0,
+                "root_angvel": 0.0,
+                "torso_pos": 0.0,
+                "torso_rot": 0.0,
+                "root_xy_reset": 0.1,
+                "root_yaw_reset": 0.27
+            }
+        },
+        "reward_config": {
+            "scales": {
+                "rigid_body_pos_tracking_upper": 1.0,
+                "rigid_body_pos_tracking_lower": 0.5,
+                "rigid_body_rot_tracking": 0.5,
+                "rigid_body_linvel_tracking": 0.5,
+                "rigid_body_angvel_tracking": 0.5,
+                "joint_pos_tracking": 0.75,
+                "joint_vel_tracking": 0.5,
+                "roll_pitch_tracking": 1.0,
+                "gvec_tracking": 1.0,
+                "root_linvel_tracking": 1.0,
+                "root_angvel_tracking": 1.0,
+                "root_height_tracking": 1.0,
+                "feet_height_tracking": 1.0,
+                "feet_pos_tracking": 2.1,
+                "penalty_action_rate": -0.5,
+                "penalty_torque": -2e-05,
+                "smoothness_joint": -1e-06,
+                "dof_pos_limit": -10,
+                "dof_vel_limit": -5,
+                "collision": -10,
+                "termination": -200
+            },
+            "auxiliary": {
+                "upper_body_sigma": 1.0,
+                "lower_body_sigma": 1.0,
+                "feet_pos_sigma": 1.0,
+                "body_rot_sigma": 1.0,
+                "feet_rot_sigma": 1.0,
+                "body_linvel_sigma": 5.0,
+                "feet_linvel_sigma": 1.0,
+                "body_angvel_sigma": 50.0,
+                "feet_angvel_sigma": 1.0,
+                "joint_pos_sigma": 10.0,
+                "joint_vel_sigma": 1.0,
+                "root_pos_sigma": 0.5,
+                "root_rot_sigma": 1.0,
+                "root_linvel_sigma": 1.0,
+                "root_angvel_sigma": 10.0,
+                "roll_pitch_sigma": 0.2,
+                "gvec_sigma": 0.2,
+                "root_height_sigma": 0.1,
+                "feet_height_sigma": 0.1,
+                "global_feet_vel_threshold": 0.5,
+                "global_feet_height_threshold": 0.04,
+                "feet_linvel_threshold": 0.1,
+                "feet_angvel_threshold": 0.1,
+                "feet_slipping_sigma": 2.0
+            },
+            "penalize_collision_on": [
+                [
+                    "left_hand_collision",
+                    "left_thigh"
+                ],
+                [
+                    "right_hand_collision",
+                    "right_thigh"
+                ],
+                [
+                    "left_hand_collision",
+                    "right_hand_collision"
+                ],
+                [
+                    "left_hand_collision",
+                    "right_wrist_pitch_collision"
+                ],
+                [
+                    "right_hand_collision",
+                    "left_wrist_pitch_collision"
+                ]
+            ]
+        },
+        "push_config": {
+            "enable": true,
+            "interval_range": [
+                5.0,
+                10.0
+            ],
+            "magnitude_range": [
+                0.1,
+                1.0
+            ]
+        },
+        "obs_scales_config": {
+            "joint_vel": 0.05,
+            "dif_joint_vel": 0.05
+        },
+        "obs_keys": [
+            "dif_joint_pos",
+            "dif_joint_vel",
+            "gvec_pelvis",
+            "gyro_pelvis",
+            "joint_pos",
+            "joint_vel",
+            "last_motor_targets",
+            "ref_feet_height",
+            "ref_root_height"
+        ],
+        "auxiliary_obs_keys": [],
+        "privileged_obs_keys": [
+            "dif_joint_pos",
+            "dif_joint_vel",
+            "gvec_pelvis",
+            "gyro_pelvis",
+            "joint_pos",
+            "joint_vel",
+            "last_motor_targets",
+            "ref_feet_height",
+            "ref_root_height"
+        ],
+        "history_keys": [
+            "gyro_pelvis",
+            "gvec_pelvis",
+            "joint_pos",
+            "joint_vel"
+        ],
+        "dagger_config_path": "storage/training_configs/dagger/demo_v2.json",
+        "traj_cluster_sample_probs": [
+            0.125,
+            0.125,
+            0.125,
+            0.125,
+            0.125,
+            0.125,
+            0.125,
+            0.125
+        ],
+        "traj_sample_cluster_ids": [
+            [
+                "dance1_subject2",
+                0
+            ],
+            [
+                "dance1_subject3",
+                0
+            ],
+            [
+                "dance2_subject1",
+                0
+            ],
+            [
+                "dance2_subject2",
+                0
+            ],
+            [
+                "dance2_subject3",
+                0
+            ],
+            [
+                "dance2_subject4",
+                0
+            ],
+            [
+                "dance2_subject5",
+                0
+            ],
+            [
+                "fallAndGetUp1_subject1",
+                1
+            ],
+            [
+                "fallAndGetUp1_subject4",
+                1
+            ],
+            [
+                "fallAndGetUp1_subject5",
+                1
+            ],
+            [
+                "fallAndGetUp2_subject2",
+                1
+            ],
+            [
+                "fallAndGetUp2_subject3",
+                1
+            ],
+            [
+                "fallAndGetUp3_subject1",
+                1
+            ],
+            [
+                "fight1_subject2",
+                2
+            ],
+            [
+                "fight1_subject3",
+                2
+            ],
+            [
+                "fight1_subject5",
+                2
+            ],
+            [
+                "fightAndSports1_subject1",
+                2
+            ],
+            [
+                "fightAndSports1_subject4",
+                2
+            ],
+            [
+                "jumps1_subject1",
+                3
+            ],
+            [
+                "jumps1_subject5",
+                3
+            ],
+            [
+                "run1_subject2",
+                3
+            ],
+            [
+                "run1_subject5",
+                3
+            ],
+            [
+                "run2_subject1",
+                3
+            ],
+            [
+                "run2_subject4",
+                3
+            ],
+            [
+                "sprint1_subject2",
+                4
+            ],
+            [
+                "sprint1_subject4",
+                4
+            ],
+            [
+                "walk1_subject1",
+                4
+            ],
+            [
+                "walk1_subject2",
+                4
+            ],
+            [
+                "walk1_subject5",
+                4
+            ],
+            [
+                "walk2_subject1",
+                4
+            ],
+            [
+                "walk2_subject4",
+                4
+            ],
+            [
+                "walk3_subject2",
+                4
+            ],
+            [
+                "walk3_subject5",
+                4
+            ],
+            [
+                "walk4_subject1",
+                4
+            ],
+            [
+                "walk2_subject3",
+                5
+            ],
+            [
+                "walk3_subject1",
+                5
+            ],
+            [
+                "walk3_subject3",
+                5
+            ],
+            [
+                "walk3_subject4",
+                5
+            ],
+            [
+                "dance1_subject1",
+                6
+            ],
+            [
+                "jumps1_subject2",
+                7
+            ]
+        ],
+        "traj_sample_probs": [
+            [
+                "dance1_subject2",
+                0.01785714365541935
+            ],
+            [
+                "dance1_subject3",
+                0.01785714365541935
+            ],
+            [
+                "dance2_subject1",
+                0.01785714365541935
+            ],
+            [
+                "dance2_subject2",
+                0.01785714365541935
+            ],
+            [
+                "dance2_subject3",
+                0.01785714365541935
+            ],
+            [
+                "dance2_subject4",
+                0.01785714365541935
+            ],
+            [
+                "dance2_subject5",
+                0.01785714365541935
+            ],
+            [
+                "fallAndGetUp1_subject1",
+                0.02083333395421505
+            ],
+            [
+                "fallAndGetUp1_subject4",
+                0.02083333395421505
+            ],
+            [
+                "fallAndGetUp1_subject5",
+                0.02083333395421505
+            ],
+            [
+                "fallAndGetUp2_subject2",
+                0.02083333395421505
+            ],
+            [
+                "fallAndGetUp2_subject3",
+                0.02083333395421505
+            ],
+            [
+                "fallAndGetUp3_subject1",
+                0.02083333395421505
+            ],
+            [
+                "fight1_subject2",
+                0.02500000037252903
+            ],
+            [
+                "fight1_subject3",
+                0.02500000037252903
+            ],
+            [
+                "fight1_subject5",
+                0.02500000037252903
+            ],
+            [
+                "fightAndSports1_subject1",
+                0.02500000037252903
+            ],
+            [
+                "fightAndSports1_subject4",
+                0.02500000037252903
+            ],
+            [
+                "jumps1_subject1",
+                0.02083333395421505
+            ],
+            [
+                "jumps1_subject5",
+                0.02083333395421505
+            ],
+            [
+                "run1_subject2",
+                0.02083333395421505
+            ],
+            [
+                "run1_subject5",
+                0.02083333395421505
+            ],
+            [
+                "run2_subject1",
+                0.02083333395421505
+            ],
+            [
+                "run2_subject4",
+                0.02083333395421505
+            ],
+            [
+                "sprint1_subject2",
+                0.012500000186264515
+            ],
+            [
+                "sprint1_subject4",
+                0.012500000186264515
+            ],
+            [
+                "walk1_subject1",
+                0.012500000186264515
+            ],
+            [
+                "walk1_subject2",
+                0.012500000186264515
+            ],
+            [
+                "walk1_subject5",
+                0.012500000186264515
+            ],
+            [
+                "walk2_subject1",
+                0.012500000186264515
+            ],
+            [
+                "walk2_subject4",
+                0.012500000186264515
+            ],
+            [
+                "walk3_subject2",
+                0.012500000186264515
+            ],
+            [
+                "walk3_subject5",
+                0.012500000186264515
+            ],
+            [
+                "walk4_subject1",
+                0.012500000186264515
+            ],
+            [
+                "walk2_subject3",
+                0.03125
+            ],
+            [
+                "walk3_subject1",
+                0.03125
+            ],
+            [
+                "walk3_subject3",
+                0.03125
+            ],
+            [
+                "walk3_subject4",
+                0.03125
+            ],
+            [
+                "dance1_subject1",
+                0.125
+            ],
+            [
+                "jumps1_subject2",
+                0.125
+            ]
+        ],
+        "obs_frame": "local"
+    },
+    "policy_config": {
+        "num_envs": 16384,
+        "num_training_steps": 400000,
+        "debug": false,
+        "verbose": false,
+        "save_freq": 10000,
+        "log_freq": 100,
+        "lr": 0.0008,
+        "lr_scheduler": "cosine_annealing",
+        "weight_decay": 0.01,
+        "max_grad_norm": 1.0,
+        "use_test_set": false,
+        "save_dir": "/root/Projects/OpenTrack/storage/logs/dagger/05161746_G1TrackingGeneralDR_new_generalist_v2_middle/checkpoints",
+        "wrap_env": true,
+        "episode_length": 1000,
+        "action_repeat": 1,
+        "wrap_env_fn": null,
+        "randomization_fn": "function domain_randomize",
+        "policy_args": {
+            "policy_type": "mlp",
+            "obs_dim": 156,
+            "aux_obs_dim": 0,
+            "act_dim": 29,
+            "bf16": false,
+            "load_path": "",
+            "policy_obs_key": "state",
+            "policy_auxiliary_obs_key": "auxiliary_state",
+            "output_residual_action": true,
+            "mlp_hidden_dim": [
+                1024,
+                1024,
+                512,
+                512,
+                256
+            ],
+            "mlp_activate_final": false
+        }
+    }
+}
