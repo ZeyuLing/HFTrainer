@@ -591,6 +591,43 @@ motion_135 -> (global_orient, body_pose, transl)  axis-angle, no frame change
            -> MuJoCo FK (g1_holo_compat.xml) -> per-link world pos + quat (wxyz)
 ```
 
+### Prerequisites
+
+**GMR dependencies.** GMR is vendored under `ref_repo/GMR/` and is **not** pulled
+in by `pip install -e .`. Install it and its IK/body-model deps explicitly:
+
+```bash
+pip install -e ref_repo/GMR
+pip install mink daqp loop_rate_limiters smplx
+```
+
+SMPL-X body models must exist at `ref_repo/GMR/assets/body_models/smplx/`.
+On the cluster, `tools/taiji_retarget_g1.sh` installs these automatically.
+
+**SMPL-H input.** AMASS SMPL-H `poses (T, 156)` maps to the SMPL-X NPZ as
+`root_orient = poses[:, :3]`, `pose_body = poses[:, 3:66]` (the first 21 body
+joints are shared between SMPL-H and SMPL-X); reuse `trans`, `betas`, `gender`.
+
+**Headless rendering.** MuJoCo (G1 mesh) and pyrender (SMPL mesh) both need an
+offscreen GL backend; on a server without a display set one of:
+
+```bash
+# GPU node with NVIDIA EGL drivers:
+export MUJOCO_GL=egl PYOPENGL_PLATFORM=egl
+# CPU-only / no EGL libs available -> software rendering via OSMesa:
+dnf install -y mesa-libOSMesa            # (or: apt-get install libosmesa6)
+export MUJOCO_GL=osmesa PYOPENGL_PLATFORM=osmesa
+pip install pyrender imageio imageio-ffmpeg
+```
+
+**Ground alignment (avoid sinking through the floor).** GMR's per-frame
+`root_pos` is **not** floor-aligned for MuJoCo. After the Y-up -> Z-up conversion
+(undo the pelvis `rot_offset`), run one forward-kinematics pass over the clip and
+shift `root_pos[:, 2]` so the lowest foot geom rests at `z = 0` (the global mode
+of `scripts/embodied/gmr_to_protomotions.py::fk_ground_correction`). Skipping
+this leaves the lowest geom around `z = -0.15 m`, i.e. the robot's feet penetrate
+the ground plane.
+
 Reusable helpers: `scripts/embodied/smpl_g1_compare_demo.py`
 (`gmr_retarget_to_qpos`, `load_g1_model`, `qpos_to_robot_frames`). For the
 unified Y-up viewer the demo applies a final `Rx(-90)` world basis change

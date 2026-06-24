@@ -171,7 +171,16 @@ Canonical retargeting code lives in
 | `retarget_hml263_clip` / `hml263_to_motion135` | HumanML3D-263 predictions to SMPL motion_135 |
 | `SMPLSOMARetargeter` | SMPL motion_135 <-> SOMA30 rotation transfer |
 | `KIMODOSOMAToSMPLRetargeter` | KIMODO SOMA output to SMPL motion_135 |
-| `SMPLToG1Retargeter` | SMPL motion to Unitree G1 joint angles |
+| `SMPLToG1Retargeter` | Fast **analytic** SMPL -> Unitree G1 joint angles (smoke / quick use only) |
+
+> For G1 **visualization or deployment**, use **GMR** (General Motion
+> Retargeting, mink IK), not `SMPLToG1Retargeter` — the analytic operator is fast
+> but low quality. See
+> [`docs/motion/representations.md` §9](docs/motion/representations.md#9-smpl-motion_135---unitree-g1-gmr-retarget),
+> which documents the SMPL/SMPL-H -> G1 pipeline, the extra GMR dependencies
+> (GMR is vendored under `ref_repo/GMR/`, not in `pyproject.toml`), the headless
+> GL backend (OSMesa/EGL) needed for offscreen mesh rendering, and the
+> ground-alignment step that keeps the robot from sinking through the floor.
 
 For KIMODO mesh inspection, the correct path requires `global_rot_mats` in the
 KIMODO debug NPZ. Position-only IK is a degraded fallback and should not be used
