@@ -5,7 +5,7 @@ This script implements the full pipeline for driving a Unitree G1 humanoid
 robot from text descriptions:
 
   1. Text → SMPL Motion (HyMotion T2M-Lite)
-  2. SMPL Motion → G1 Joint Angles (retargeting)
+  2. SMPL Motion → G1 Joint Angles (GMR mink-IK retargeting)
   3. G1 Joint Angles → Isaac Gym Training (motion imitation)
   4. Trained Policy → Sim2Sim Evaluation (MuJoCo)
 
@@ -183,33 +183,31 @@ def load_motion_from_npz(path, motion_dim=None):
 
 
 def retarget_motion(motion, args):
-    """Step 2: Retarget SMPL motion to G1 joint angles."""
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
+    """Step 2: Retarget SMPL motion to G1 joint angles via GMR (mink IK)."""
+    from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
 
-    print(f'[Step 2] Retargeting SMPL motion to G1 {args.g1_dof}-DOF...')
+    print(f'[Step 2] Retargeting SMPL motion to G1 (29-DOF) via GMR mink IK...')
+    if args.g1_dof != 29:
+        print(f'  Note: GMR outputs 29 DOF; --g1-dof={args.g1_dof} is ignored.')
 
-    retargeter = SMPLToG1Retargeter(
-        apply_limits=not args.no_clamp,
-        rest_pose_calibration=not args.no_calibration,
-        g1_dof=args.g1_dof,
-    )
+    retargeter = GMRSMPLToG1Retargeter(clamp_limits=not args.no_clamp)
 
     motion_dim = motion.shape[-1]
     if motion_dim == 135:
-        result = retargeter.retarget_from_hymotion(motion)
+        motion_135 = motion
     elif motion_dim == 201:
-        result = retargeter.retarget_from_hymotion_201(motion)
+        motion_135 = motion[:, :135]  # [transl(3), rot6d(132)]
     else:
         raise ValueError(f'Unsupported motion dim: {motion_dim}. Expected 135 or 201.')
 
-    T = result['joint_angles'].shape[0]
-    print(f'  Retargeted: {T} frames, {result["dof"]} DOF')
-    print(f'  Root position range: {result["root_pos"].min(0)} to {result["root_pos"].max(0)}')
+    result = retargeter.retarget_from_motion135(motion_135)
 
-    # Print joint angle statistics
-    angles = result['joint_angles']
-    print(f'  Joint angle range: [{angles.min():.3f}, {angles.max():.3f}] rad')
-    print(f'  Joint angle std:   {angles.std(0).mean():.4f} rad (mean across joints)')
+    dof = result['dof_pos']
+    T = dof.shape[0]
+    print(f'  Retargeted: {T} frames, {dof.shape[1]} DOF')
+    print(f'  Root position range: {result["root_pos"].min(0)} to {result["root_pos"].max(0)}')
+    print(f'  Joint angle range: [{dof.min():.3f}, {dof.max():.3f}] rad')
+    print(f'  Joint angle std:   {dof.std(0).mean():.4f} rad (mean across joints)')
 
     return result, retargeter
 
@@ -227,10 +225,10 @@ def save_results(motion, retarget_result, retargeter, args):
     g1_path = os.path.join(args.output, 'g1_motion.npz')
     np.savez(
         g1_path,
-        joint_angles=retarget_result['joint_angles'],
+        dof_pos=retarget_result['dof_pos'],
         root_pos=retarget_result['root_pos'],
-        root_orient_quat=retarget_result['root_orient_quat'],
-        root_orient_euler=retarget_result['root_orient_euler'],
+        root_orient_quat=retarget_result['root_orient_quat'],  # wxyz
+        root_rot=retarget_result['root_rot'],                  # xyzw
         fps=retarget_result['fps'],
         joint_names=retarget_result['joint_names'],
     )
@@ -331,9 +329,12 @@ def visualize_motion(retarget_result, args):
             print(f'    {p}')
         return
 
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
-    retargeter = SMPLToG1Retargeter(g1_dof=args.g1_dof)
-    qpos_seq = retargeter.to_mujoco_qpos(retarget_result)
+    # MuJoCo qpos = [root_pos(3), root_quat_wxyz(4), dof(29)].
+    qpos_seq = np.concatenate([
+        np.asarray(retarget_result['root_pos'], dtype=np.float32),
+        np.asarray(retarget_result['root_orient_quat'], dtype=np.float32),  # wxyz
+        np.asarray(retarget_result['dof_pos'], dtype=np.float32),
+    ], axis=1)
 
     model = mujoco.MjModel.from_xml_path(model_path)
     data = mujoco.MjData(model)

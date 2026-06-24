@@ -6,8 +6,9 @@ visualization, and embodied-control bridges.
 ## Public APIs
 
 - `smpl_to_g1.py`
-  - `SMPLToG1Retargeter`
-  - Converts SMPL/HYMotion motions to Unitree G1 joint space.
+  - `GMRSMPLToG1Retargeter`
+  - Converts SMPL/SMPL-H/SMPL-X / HyMotion motions to Unitree G1 joint space via
+    GMR mink IK. (The old analytic `SMPLToG1Retargeter` was removed.)
 
 - `smpl_soma.py`
   - `SMPLSOMARetargeter`

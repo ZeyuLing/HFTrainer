@@ -171,16 +171,29 @@ Canonical retargeting code lives in
 | `retarget_hml263_clip` / `hml263_to_motion135` | HumanML3D-263 predictions to SMPL motion_135 |
 | `SMPLSOMARetargeter` | SMPL motion_135 <-> SOMA30 rotation transfer |
 | `KIMODOSOMAToSMPLRetargeter` | KIMODO SOMA output to SMPL motion_135 |
-| `SMPLToG1Retargeter` | Fast **analytic** SMPL -> Unitree G1 joint angles (smoke / quick use only) |
+| `GMRSMPLToG1Retargeter` | SMPL/SMPL-H/SMPL-X -> Unitree G1 via GMR mink IK (visualization / deployment) |
 
-> For G1 **visualization or deployment**, use **GMR** (General Motion
-> Retargeting, mink IK), not `SMPLToG1Retargeter` — the analytic operator is fast
-> but low quality. See
+> For SMPL -> Unitree G1, use **`GMRSMPLToG1Retargeter`** (General Motion
+> Retargeting, mink IK). (A previous fast analytic Euler-decomposition backend
+> was removed — it produced low-quality, broken poses.) It is a first-class
+> in-repo API that wraps a **minimal in-tree vendored GMR**
+> (`hftrainer/motion/retarget/_gmr/`, no `ref_repo` dependency) and returns a
+> ground-aligned, Z-up G1 motion (`dof_pos` + floating-base root) ready for
+> MuJoCo:
+>
+> ```python
+> from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
+> res = GMRSMPLToG1Retargeter().retarget_smplh(poses, trans, betas=betas, fps=30)
+> qpos = GMRSMPLToG1Retargeter().to_mujoco_qpos(res)   # (T, 36)
+> ```
+>
+> See
 > [`docs/motion/representations.md` §9](docs/motion/representations.md#9-smpl-motion_135---unitree-g1-gmr-retarget),
-> which documents the SMPL/SMPL-H -> G1 pipeline, the extra GMR dependencies
-> (GMR is vendored under `ref_repo/GMR/`, not in `pyproject.toml`), the headless
-> GL backend (OSMesa/EGL) needed for offscreen mesh rendering, and the
-> ground-alignment step that keeps the robot from sinking through the floor.
+> which documents all entrypoints, the lazy GMR runtime deps (`mink daqp smplx
+> mujoco`, vendored in-tree so not in `pyproject.toml`), the headless GL backend
+> (OSMesa/EGL) needed for offscreen mesh rendering, and the automatic
+> ground-alignment (excluding the mjcf floor plane) that keeps the robot's feet
+> on the ground instead of floating or sinking.
 
 For KIMODO mesh inspection, the correct path requires `global_rot_mats` in the
 KIMODO debug NPZ. Position-only IK is a degraded fallback and should not be used

@@ -1,61 +1,52 @@
-"""SMPL 22-joint humanoid → Unitree G1 29-DOF retargeting.
+"""SMPL / SMPL-H / SMPL-X 22-joint humanoid → Unitree G1 29-DOF retargeting.
+
+The single retargeting backend is ``GMRSMPLToG1Retargeter`` (high quality): it
+uses an in-tree vendored copy of General Motion Retargeting (GMR, mink-based
+inverse kinematics) at ``hftrainer/motion/retarget/_gmr`` — the library has
+**no dependency on ``ref_repo``**. It solves a per-frame IK problem that matches
+G1 link poses to SMPL-X body targets and post-processes the result into a
+ready-to-use, ground-aligned, Z-up G1 motion (``dof_pos`` + floating-base root).
+This is what you want for visualization, deployment, or physics tracking. GMR's
+extra deps (``mink``, ``daqp``, ``smplx``, ``mujoco``) are imported lazily, so
+importing this module never requires them — they are only needed when you
+actually call the retargeter.
 
 Overview
 --------
-HyMotion T2M-Lite generates 201-dim (or 135-dim) motion in SMPL format:
+HyMotion T2M generates 201-dim (or 135-dim) motion in SMPL format:
   - 22 joints × 6 (rotation_6d row-major) + 3 (translation)
 
-Unitree G1 has 29 DOF (or 23 DOF basic version):
+Unitree G1 has 29 DOF:
   - Legs: 2 × 6 DOF (hip_pitch/roll/yaw, knee, ankle_pitch/roll)
   - Waist: 3 DOF (yaw, roll, pitch)
   - Arms: 2 × 7 DOF (shoulder_pitch/roll/yaw, elbow, wrist_roll/pitch/yaw)
 
-This module implements per-frame retargeting:
-  1. SMPL rotation_6d → rotation matrices → axis-angle (per joint)
-  2. Map SMPL 3-DOF joints → G1 multi-DOF actuated joints
-  3. Decompose SMPL joint rotation matrices into G1 Euler angle DOFs
-  4. Clamp to G1 joint limits
-  5. Output: (T, 29) joint angle sequence for G1
-
-Joint Correspondence
---------------------
-SMPL uses a parent-child kinematic chain with compound 3D rotations.
-G1 uses individual 1-DOF revolute joints arranged in pitch/roll/yaw order.
-
-For each SMPL joint, we decompose the 3x3 rotation matrix into the
-corresponding Euler angles of the G1 joint group. The decomposition order
-matches the G1's kinematic chain (how the revolute joints are stacked).
-
-| SMPL Joint    | G1 Joints                          | Euler Order |
-|---------------|-------------------------------------|-------------|
-| L_Hip (1)     | l_hip_yaw, l_hip_roll, l_hip_pitch  | ZXY         |
-| R_Hip (2)     | r_hip_yaw, r_hip_roll, r_hip_pitch  | ZXY         |
-| L_Knee (4)    | l_knee                              | Y (pitch)   |
-| R_Knee (5)    | r_knee                              | Y (pitch)   |
-| L_Ankle (7)   | l_ankle_pitch, l_ankle_roll         | YX          |
-| R_Ankle (8)   | r_ankle_pitch, r_ankle_roll         | YX          |
-| Spine1 (3)    | waist_yaw, waist_roll, waist_pitch  | ZXY         |
-| L_Shoulder(16)| l_shoulder_pitch/roll/yaw           | YXZ         |
-| R_Shoulder(17)| r_shoulder_pitch/roll/yaw           | YXZ         |
-| L_Elbow (18)  | l_elbow                             | Y (pitch)   |
-| R_Elbow (19)  | r_elbow                             | Y (pitch)   |
-| L_Wrist (20)  | l_wrist_roll/pitch/yaw              | XYZ         |
-| R_Wrist (21)  | r_wrist_roll/pitch/yaw              | XYZ         |
+A previous fast analytic (per-frame Euler decomposition) backend was removed: it
+produced low-quality, visibly broken poses. Use GMR for everything.
 """
 
 from __future__ import annotations
 
+import os
+import pathlib
+import pickle
+import tempfile
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 
 from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
-    axis_angle_to_matrix,
     matrix_to_axis_angle,
-    matrix_to_euler,
     rotation_6d_to_matrix,
 )
+
+__all__ = [
+    'SMPL_JOINT_NAMES',
+    'G1_JOINT_NAMES',
+    'G1_JOINT_LIMITS',
+    'GMRSMPLToG1Retargeter',
+]
 
 
 # ============================================================================
@@ -166,393 +157,500 @@ G1_JOINT_LIMITS: Dict[str, Tuple[float, float]] = {
 }
 
 
-# SMPL joint index → G1 DOF mapping definition.
-# Each entry: (smpl_joint_idx, euler_order, g1_joint_indices, axis_selection)
-#   euler_order: Euler convention used to decompose the SMPL rotation matrix
-#   g1_joint_indices: which G1 DOF indices receive the decomposed angles
-#   axis_selection: which euler angles to use (None = all 3, or list of indices)
-#
-# The "axis calibration offset" handles the rest-pose difference between SMPL
-# and G1. SMPL's rest pose is T-pose; G1's rest pose has arms down, legs straight.
-# We apply a pre-rotation to align coordinate frames.
-
-_JOINT_MAP = [
-    # --- Left Leg ---
-    # SMPL L_Hip (1) → G1 left_hip_{pitch, roll, yaw} (indices 0,1,2)
-    # G1 hip stack: yaw(Z) → roll(X) → pitch(Y) from pelvis
-    # Euler decomposition: ZXY → [yaw, roll, pitch]
-    # G1 ordering: [pitch(0), roll(1), yaw(2)] so remap euler [2,1,0]
-    {
-        'smpl_idx': 1,
-        'euler_order': 'ZXY',
-        'g1_indices': [0, 1, 2],
-        'euler_remap': [2, 1, 0],  # pitch=euler[2], roll=euler[1], yaw=euler[0]
-    },
-    # SMPL L_Knee (4) → G1 left_knee (3), pitch only
-    {
-        'smpl_idx': 4,
-        'euler_order': 'XYZ',
-        'g1_indices': [3],
-        'euler_remap': [1],  # Y = pitch
-    },
-    # SMPL L_Ankle (7) → G1 left_ankle_{pitch, roll} (4, 5)
-    {
-        'smpl_idx': 7,
-        'euler_order': 'YXZ',
-        'g1_indices': [4, 5],
-        'euler_remap': [0, 1],  # pitch=Y(0), roll=X(1)
-    },
-    # --- Right Leg ---
-    {
-        'smpl_idx': 2,
-        'euler_order': 'ZXY',
-        'g1_indices': [6, 7, 8],
-        'euler_remap': [2, 1, 0],
-    },
-    {
-        'smpl_idx': 5,
-        'euler_order': 'XYZ',
-        'g1_indices': [9],
-        'euler_remap': [1],
-    },
-    {
-        'smpl_idx': 8,
-        'euler_order': 'YXZ',
-        'g1_indices': [10, 11],
-        'euler_remap': [0, 1],
-    },
-    # --- Waist ---
-    # SMPL Spine1 (3) → G1 waist_{yaw, roll, pitch} (12, 13, 14)
-    {
-        'smpl_idx': 3,
-        'euler_order': 'ZXY',
-        'g1_indices': [12, 13, 14],
-        'euler_remap': [0, 1, 2],  # yaw=Z(0), roll=X(1), pitch=Y(2)
-    },
-    # --- Left Arm ---
-    # SMPL L_Shoulder (16) → G1 left_shoulder_{pitch, roll, yaw} (15, 16, 17)
-    {
-        'smpl_idx': 16,
-        'euler_order': 'YXZ',
-        'g1_indices': [15, 16, 17],
-        'euler_remap': [0, 1, 2],  # pitch=Y(0), roll=X(1), yaw=Z(2)
-    },
-    {
-        'smpl_idx': 18,
-        'euler_order': 'XYZ',
-        'g1_indices': [18],
-        'euler_remap': [1],
-    },
-    # SMPL L_Wrist (20) → G1 left_wrist_{roll, pitch, yaw} (19, 20, 21)
-    {
-        'smpl_idx': 20,
-        'euler_order': 'XYZ',
-        'g1_indices': [19, 20, 21],
-        'euler_remap': [0, 1, 2],  # roll=X(0), pitch=Y(1), yaw=Z(2)
-    },
-    # --- Right Arm ---
-    {
-        'smpl_idx': 17,
-        'euler_order': 'YXZ',
-        'g1_indices': [22, 23, 24],
-        'euler_remap': [0, 1, 2],
-    },
-    {
-        'smpl_idx': 19,
-        'euler_order': 'XYZ',
-        'g1_indices': [25],
-        'euler_remap': [1],
-    },
-    {
-        'smpl_idx': 21,
-        'euler_order': 'XYZ',
-        'g1_indices': [26, 27, 28],
-        'euler_remap': [0, 1, 2],
-    },
-]
-
-
-# SMPL parent chain (standard 22-joint)
-SMPL_PARENTS = [
-    -1,  # 0: Pelvis (root)
-     0,  # 1: L_Hip -> Pelvis
-     0,  # 2: R_Hip -> Pelvis
-     0,  # 3: Spine1 -> Pelvis
-     1,  # 4: L_Knee -> L_Hip
-     2,  # 5: R_Knee -> R_Hip
-     3,  # 6: Spine2 -> Spine1
-     4,  # 7: L_Ankle -> L_Knee
-     5,  # 8: R_Ankle -> R_Knee
-     6,  # 9: Spine3 -> Spine2
-     7,  # 10: L_Foot -> L_Ankle
-     8,  # 11: R_Foot -> R_Ankle
-     9,  # 12: Neck -> Spine3
-     9,  # 13: L_Collar -> Spine3
-     9,  # 14: R_Collar -> Spine3
-    12,  # 15: Head -> Neck
-    13,  # 16: L_Shoulder -> L_Collar
-    14,  # 17: R_Shoulder -> R_Collar
-    16,  # 18: L_Elbow -> L_Shoulder
-    17,  # 19: R_Elbow -> R_Shoulder
-    18,  # 20: L_Wrist -> L_Elbow
-    19,  # 21: R_Wrist -> R_Elbow
-]
-
-
 # ============================================================================
-# Retargeter
+# GMR retargeter (high quality, mink inverse-kinematics)
 # ============================================================================
 
-class SMPLToG1Retargeter:
-    """Retarget SMPL 22-joint motion to Unitree G1 29-DOF joint angles.
+# Repo root: .../hf_trainer/hftrainer/motion/retarget/smpl_g1.py -> parents[3]
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
-    This class handles:
-      1. Converting HyMotion rot6d (row-major) to rotation matrices
-      2. Decomposing each SMPL joint rotation into G1 Euler-angle DOFs
-      3. Applying rest-pose calibration offsets
-      4. Clamping to G1 hardware joint limits
-      5. Extracting root (pelvis) position and orientation for the base
+# Vendored GMR lives in-tree (hftrainer/motion/retarget/_gmr) so the library has
+# ZERO dependency on ref_repo. Robot mjcf + IK configs ship inside the package;
+# only the SMPL-X body models are user data, resolved from the repo checkpoints.
+_VENDOR_DIR = pathlib.Path(__file__).resolve().parent / '_gmr'
+_DEFAULT_SMPLX_MODEL_DIR = _REPO_ROOT / 'checkpoints' / 'smpl_models'
 
-    Usage:
-        retargeter = SMPLToG1Retargeter()
-        g1_result = retargeter.retarget(rot6d, transl)
-        # g1_result['joint_angles']: (T, 29) in radians
-        # g1_result['root_pos']: (T, 3)
-        # g1_result['root_quat']: (T, 4) wxyz quaternion
+# Rotation (xyzw) that maps GMR's SMPL-X (Y-up, with the pelvis facing offset
+# baked into the IK config) world frame onto the standard MuJoCo / robot Z-up
+# frame. The retarget root pose is left-multiplied by its inverse. This exact
+# offset is what produces an upright, correctly-facing G1 in MuJoCo and was
+# validated against the rendered jog reference.
+_GMR_ZUP_ROT_OFFSET_XYZW = (-0.5, -0.5, -0.5, 0.5)
+
+# GMR robot key -> vendored MuJoCo XML (used both as GMR's retarget target model
+# and for the headless ground-alignment FK pass).
+_GMR_ROBOT_XML = {
+    'unitree_g1': _VENDOR_DIR / 'assets' / 'unitree_g1' / 'g1_mocap_29dof.xml',
+}
+
+# G1 mechanical joint limits matching GMR's g1 model (g1_bm.xml). These differ
+# slightly from the reference ``G1_JOINT_LIMITS`` above (e.g. knee/wrist ranges)
+# and are the correct bounds to clamp GMR IK output against.
+_GMR_G1_JOINT_LIMITS: Dict[str, Tuple[float, float]] = {
+    'left_hip_pitch_joint': (-2.5307, 2.8798),
+    'left_hip_roll_joint': (-0.5236, 2.9671),
+    'left_hip_yaw_joint': (-2.7576, 2.7576),
+    'left_knee_joint': (-0.087267, 2.8798),
+    'left_ankle_pitch_joint': (-0.87267, 0.5236),
+    'left_ankle_roll_joint': (-0.2618, 0.2618),
+    'right_hip_pitch_joint': (-2.5307, 2.8798),
+    'right_hip_roll_joint': (-2.9671, 0.5236),
+    'right_hip_yaw_joint': (-2.7576, 2.7576),
+    'right_knee_joint': (-0.087267, 2.8798),
+    'right_ankle_pitch_joint': (-0.87267, 0.5236),
+    'right_ankle_roll_joint': (-0.2618, 0.2618),
+    'waist_yaw_joint': (-2.618, 2.618),
+    'waist_roll_joint': (-0.52, 0.52),
+    'waist_pitch_joint': (-0.52, 0.52),
+    'left_shoulder_pitch_joint': (-3.0892, 2.6704),
+    'left_shoulder_roll_joint': (-1.5882, 2.2515),
+    'left_shoulder_yaw_joint': (-2.618, 2.618),
+    'left_elbow_joint': (-1.0472, 2.0944),
+    'left_wrist_roll_joint': (-1.97222, 1.97222),
+    'left_wrist_pitch_joint': (-1.61443, 1.61443),
+    'left_wrist_yaw_joint': (-1.61443, 1.61443),
+    'right_shoulder_pitch_joint': (-3.0892, 2.6704),
+    'right_shoulder_roll_joint': (-2.2515, 1.5882),
+    'right_shoulder_yaw_joint': (-2.618, 2.618),
+    'right_elbow_joint': (-1.0472, 2.0944),
+    'right_wrist_roll_joint': (-1.97222, 1.97222),
+    'right_wrist_pitch_joint': (-1.61443, 1.61443),
+    'right_wrist_yaw_joint': (-1.61443, 1.61443),
+}
+
+
+class GMRSMPLToG1Retargeter:
+    """High-quality SMPL/SMPL-H/SMPL-X → Unitree G1 retargeting via GMR (mink IK).
+
+    This wraps the in-tree vendored GMR (``hftrainer.motion.retarget._gmr``,
+    ``GeneralMotionRetargeting``) — no ``ref_repo`` dependency — and turns it into
+    a clean, in-repo library API. It solves a per-frame inverse-kinematics problem
+    that matches G1 link poses to SMPL-X body targets, then post-processes the
+    output into a deployment-ready G1 motion.
+
+    Pipeline (per call)::
+
+        SMPL-X (root_orient/pose_body/trans/betas)
+          -> GMR.load_smplx_file (FK + auto human-height)
+          -> GMR.get_smplx_data_offline_fast (fps alignment)
+          -> GeneralMotionRetargeting (mink IK, posture-cost temporal reg.)
+          -> per-frame ground offset (set_ground_offset)
+          -> qpos = [root_pos(3), root_quat_wxyz(4), dof(29)]
+          -> joint-limit clamp (soft) + Savitzky-Golay temporal smoothing
+          -> (optional) Y-up -> Z-up root transform
+          -> (optional) global ground alignment (lowest geom -> z=0)
+
+    Output dict (frame = Z-up MuJoCo/robot frame by default)::
+
+        {
+          'dof_pos':           (T, 29) float32,   # G1 joint positions (rad)
+          'root_pos':          (T, 3)  float32,   # floating-base translation (m)
+          'root_orient_quat':  (T, 4)  float32,   # wxyz (MuJoCo convention)
+          'root_rot':          (T, 4)  float32,   # xyzw (scipy/ProtoMotions)
+          'fps':               float,
+          'joint_names':       list[str],         # 29 G1 joint names
+          'dof':               29,
+        }
+
+    The result is directly consumable by :meth:`to_mujoco_qpos` (-> (T, 36)) and
+    :meth:`save_pkl` (GMR/ProtoMotions-style pkl with xyzw root).
 
     Notes:
-        - rot6d is in HyMotion row-major convention.
-          Must reorder [0,2,4,1,3,5] to column-major before using
-          rotation_6d_to_matrix (which expects column-major).
-        - The retargeter works in NumPy for broad compatibility.
-        - Limb length differences between SMPL and G1 are handled
-          implicitly: we only retarget joint angles (not positions).
-          The RL policy in Isaac Gym corrects for kinematic differences.
+        - GMR deps (``mink``, ``daqp``, ``smplx``, ``mujoco``) are imported lazily.
+          A clear ``ImportError`` is raised if they're missing.
+        - SMPL-X body models are user data, resolved from ``smplx_model_dir``
+          (default ``<repo>/checkpoints/smpl_models``; smplx looks under ``smplx/``).
+        - ``mujoco_zup=True`` + ``ground_align=True`` (defaults) make the output a
+          drop-in qpos for a standard Z-up G1 MuJoCo model. Set both False to get
+          GMR's raw solver frame (matches ``scripts/embodied/gmr_retarget_headless.py``).
     """
 
     def __init__(
         self,
-        apply_limits: bool = True,
-        rest_pose_calibration: bool = True,
-        g1_dof: int = 29,
+        robot: str = 'unitree_g1',
+        tgt_fps: int = 30,
+        posture_cost: float = 20.0,
+        actual_human_height: Optional[float] = None,
+        offset_to_ground: bool = False,
+        clamp_limits: bool = True,
+        soft_clamp: bool = True,
+        smooth: bool = True,
+        mujoco_zup: bool = True,
+        ground_align: bool = True,
+        ground_clearance: float = 0.0,
+        smplx_model_dir: Optional[Union[str, pathlib.Path]] = None,
+        robot_xml: Optional[Union[str, pathlib.Path]] = None,
     ):
-        self.apply_limits = apply_limits
-        self.rest_pose_calibration = rest_pose_calibration
-        self.g1_dof = g1_dof
-        self.joint_map = _JOINT_MAP
+        self.robot = robot
+        self.tgt_fps = int(tgt_fps)
+        self.posture_cost = float(posture_cost)
+        self.actual_human_height = actual_human_height
+        self.offset_to_ground = bool(offset_to_ground)
+        self.clamp_limits = bool(clamp_limits)
+        self.soft_clamp = bool(soft_clamp)
+        self.smooth = bool(smooth)
+        self.mujoco_zup = bool(mujoco_zup)
+        self.ground_align = bool(ground_align)
+        self.ground_clearance = float(ground_clearance)
 
-        # Build joint limit arrays
-        self._build_limit_arrays()
+        # SMPL-X body models are user data (smplx.create looks under <dir>/smplx).
+        self.smplx_model_dir = (
+            pathlib.Path(smplx_model_dir) if smplx_model_dir else _DEFAULT_SMPLX_MODEL_DIR
+        )
+        if robot_xml is not None:
+            self.robot_xml = pathlib.Path(robot_xml)
+        else:
+            self.robot_xml = _GMR_ROBOT_XML.get(robot)
 
-        # Precompute rest-pose offset rotations.
-        # SMPL T-pose → G1 rest pose:
-        #   - Shoulders: SMPL T-pose has arms horizontal (90° abduction).
-        #     G1 rest pose has arms roughly down. We subtract ~90° from shoulder roll.
-        #   - Legs: both roughly aligned in rest pose, minimal offset needed.
-        self._shoulder_offset_l = np.array([0.0, -np.pi/2, 0.0])  # pitch, roll, yaw
-        self._shoulder_offset_r = np.array([0.0,  np.pi/2, 0.0])
+        self._gmr_loaded = False
 
-    def _build_limit_arrays(self):
-        """Build (29,) arrays of lower/upper limits."""
-        self.lower_limits = np.zeros(self.g1_dof)
-        self.upper_limits = np.zeros(self.g1_dof)
-        for i, name in enumerate(G1_JOINT_NAMES[:self.g1_dof]):
-            lo, hi = G1_JOINT_LIMITS.get(name, (-np.pi, np.pi))
-            self.lower_limits[i] = lo
-            self.upper_limits[i] = hi
+    # ------------------------------------------------------------------ deps
+    def _ensure_gmr(self):
+        """Lazily import the in-tree vendored GMR (and its runtime deps).
 
-    def retarget(
+        Imports from ``hftrainer.motion.retarget._gmr`` — there is no ref_repo
+        path manipulation. Only the heavy runtime deps (mink/daqp/mujoco/smplx)
+        are optional and produce a clear error if missing.
+        """
+        if self._gmr_loaded:
+            return
+        try:
+            from hftrainer.motion.retarget._gmr import (  # noqa
+                GeneralMotionRetargeting,
+                load_smplx_file,
+                get_smplx_data_offline_fast,
+            )
+        except Exception as e:  # pragma: no cover - environment dependent
+            raise ImportError(
+                'Failed to import the vendored GMR backend. It needs extra deps '
+                'not in pyproject.toml: install them with\n'
+                '  python3 -m pip install mink daqp smplx mujoco scipy\n'
+                f'(underlying error: {e})'
+            ) from e
+        self._GMR = GeneralMotionRetargeting
+        self._load_smplx_file = load_smplx_file
+        self._get_smplx_data_offline_fast = get_smplx_data_offline_fast
+        self._gmr_loaded = True
+
+    # ------------------------------------------------------------- entrypoints
+    def retarget_smplx_file(self, smplx_file: Union[str, pathlib.Path]) -> Dict[str, np.ndarray]:
+        """Retarget from an SMPL-X NPZ file.
+
+        The NPZ must contain ``root_orient`` (T,3), ``pose_body`` (T,63),
+        ``trans`` (T,3), ``betas`` (>=10,), and ``gender``.
+        """
+        return self._run(str(smplx_file))
+
+    def retarget_smplx(
         self,
-        rot6d: np.ndarray,
-        transl: np.ndarray,
+        root_orient: np.ndarray,
+        pose_body: np.ndarray,
+        trans: np.ndarray,
+        betas: Optional[np.ndarray] = None,
+        gender: str = 'neutral',
         fps: float = 30.0,
     ) -> Dict[str, np.ndarray]:
-        """Retarget SMPL motion to G1 joint angles.
+        """Retarget from in-memory SMPL-X arrays.
 
         Args:
-            rot6d: (T, 22, 6) rotation 6D in HyMotion row-major convention.
-                   Or (T, 132) which will be reshaped.
-            transl: (T, 3) root translation in meters.
-            fps: frames per second of the motion.
-
-        Returns:
-            Dict with keys:
-                joint_angles: (T, 29) G1 joint angles in radians
-                root_pos: (T, 3) root position (meters)
-                root_orient_quat: (T, 4) root orientation (wxyz quaternion)
-                root_orient_euler: (T, 3) root orientation (XYZ Euler radians)
-                fps: float
-                joint_names: list of G1 joint names
+            root_orient: (T, 3) global orientation axis-angle.
+            pose_body:   (T, 63) body pose axis-angle (21 joints).
+            trans:       (T, 3) root translation (m).
+            betas:       (>=10,) shape params (default zeros(16)).
+            gender:      'neutral' | 'male' | 'female'.
+            fps:         source frame rate.
         """
-        if rot6d.ndim == 2 and rot6d.shape[-1] == 132:
-            rot6d = rot6d.reshape(-1, 22, 6)
-        assert rot6d.ndim == 3 and rot6d.shape[1] == 22 and rot6d.shape[2] == 6
-
-        T = rot6d.shape[0]
-
-        # Step 1: Convert row-major rot6d to rotation matrices.
-        # HyMotion row-major: [R00,R01,R10,R11,R20,R21]
-        # rotation_convert column-major: [R00,R10,R20,R01,R11,R21]
-        # Reorder: row[0,2,4,1,3,5] → column
-        rot6d_col = rot6d[..., [0, 2, 4, 1, 3, 5]]
-        # (T, 22, 6) -> (T, 22, 3, 3) rotation matrices
-        rotmats = rotation_6d_to_matrix(rot6d_col.reshape(-1, 6)).reshape(T, 22, 3, 3)
-
-        # Step 2: Extract root orientation
-        root_rotmat = rotmats[:, 0]  # (T, 3, 3)
-        from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
-            matrix_to_quaternion,
-        )
-        root_quat = matrix_to_quaternion(root_rotmat)  # (T, 4) wxyz
-        root_euler = matrix_to_euler(root_rotmat, order='XYZ', deg=False)
-
-        # Step 3: Decompose each mapped joint's rotation matrix to G1 DOFs
-        joint_angles = np.zeros((T, self.g1_dof), dtype=np.float64)
-
-        for mapping in self.joint_map:
-            smpl_idx = mapping['smpl_idx']
-            euler_order = mapping['euler_order']
-            g1_indices = mapping['g1_indices']
-            euler_remap = mapping['euler_remap']
-
-            # Get local rotation matrix for this SMPL joint
-            local_rot = rotmats[:, smpl_idx]  # (T, 3, 3)
-
-            # Decompose to Euler angles
-            euler_angles = matrix_to_euler(local_rot, order=euler_order, deg=False)
-            # euler_angles: (T, 3)
-
-            # Apply rest-pose calibration for shoulders
-            if self.rest_pose_calibration:
-                if smpl_idx == 16:  # L_Shoulder
-                    euler_angles = euler_angles - self._shoulder_offset_l
-                elif smpl_idx == 17:  # R_Shoulder
-                    euler_angles = euler_angles - self._shoulder_offset_r
-
-            # Map selected euler angles to G1 DOFs
-            # Skip joints beyond the configured DOF count (e.g., wrist joints for 23-DOF)
-            for i, g1_idx in enumerate(g1_indices):
-                if g1_idx >= self.g1_dof:
-                    continue
-                euler_component = euler_remap[i]
-                joint_angles[:, g1_idx] = euler_angles[:, euler_component]
-
-        # Step 4: Clamp to joint limits
-        if self.apply_limits:
-            joint_angles = np.clip(joint_angles, self.lower_limits, self.upper_limits)
-
-        return {
-            'joint_angles': joint_angles.astype(np.float32),
-            'root_pos': transl.astype(np.float32),
-            'root_orient_quat': root_quat.astype(np.float32),
-            'root_orient_euler': root_euler.astype(np.float32),
-            'fps': fps,
-            'joint_names': G1_JOINT_NAMES[:self.g1_dof],
-            'dof': self.g1_dof,
+        root_orient = np.asarray(root_orient, np.float32).reshape(-1, 3)
+        pose_body = np.asarray(pose_body, np.float32).reshape(root_orient.shape[0], -1)
+        assert pose_body.shape[1] == 63, f'pose_body must be (T,63), got {pose_body.shape}'
+        trans = np.asarray(trans, np.float32).reshape(-1, 3)
+        if betas is None:
+            betas = np.zeros(16, np.float32)
+        betas = np.asarray(betas, np.float32).reshape(-1)
+        npz = {
+            'root_orient': root_orient,
+            'pose_body': pose_body,
+            'trans': trans,
+            'betas': betas,
+            'gender': str(gender),
+            'mocap_frame_rate': np.int64(round(fps)),
         }
+        return self._run_from_arrays(npz)
 
-    def retarget_from_hymotion(
+    def retarget_smplh(
+        self,
+        poses: np.ndarray,
+        trans: np.ndarray,
+        betas: Optional[np.ndarray] = None,
+        gender: str = 'neutral',
+        fps: float = 30.0,
+    ) -> Dict[str, np.ndarray]:
+        """Retarget from SMPL-H / SMPL pose parameters.
+
+        Args:
+            poses: (T, >=66) axis-angle pose. The first 3 dims are the global
+                   orientation and the next 63 are the 21-joint body pose; any
+                   trailing hand/face dims (e.g. SMPL-H 156, SMPL 72) are ignored.
+            trans: (T, 3) root translation (m).
+            betas: shape params (default zeros(16)). Accepts (16,) or (1,16).
+            gender: 'neutral' | 'male' | 'female'.
+            fps: source frame rate.
+        """
+        poses = np.asarray(poses, np.float32)
+        assert poses.ndim == 2 and poses.shape[1] >= 66, (
+            f'poses must be (T,>=66) axis-angle, got {poses.shape}'
+        )
+        root_orient = poses[:, 0:3]
+        pose_body = poses[:, 3:66]
+        if betas is not None:
+            betas = np.asarray(betas, np.float32).reshape(-1)
+        return self.retarget_smplx(
+            root_orient, pose_body, trans, betas=betas, gender=gender, fps=fps
+        )
+
+    def retarget_from_motion135(
         self,
         motion_135: np.ndarray,
         fps: float = 30.0,
+        betas: Optional[np.ndarray] = None,
+        gender: str = 'neutral',
     ) -> Dict[str, np.ndarray]:
-        """Retarget from HyMotion 135-dim format directly.
+        """Retarget from HyMotion 135-dim SMPL motion ([transl(3), rot6d(132)]).
 
-        Args:
-            motion_135: (T, 135) raw HyMotion output.
-                dims [0:3] = translation, dims [3:135] = 22 joints × 6 rot6d.
+        rot6d is converted (row-major -> column-major -> matrix -> axis-angle)
+        into SMPL-X global_orient/body_pose before running GMR.
 
-        Returns:
-            Same as retarget().
+        Note: this assumes the motion is already in SMPL canonical (Y-up) frame,
+        matching what GMR's SMPL-X loader expects.
         """
-        assert motion_135.ndim == 2 and motion_135.shape[-1] == 135
+        motion_135 = np.asarray(motion_135, np.float32)
+        assert motion_135.ndim == 2 and motion_135.shape[1] == 135, (
+            f'motion_135 must be (T,135), got {motion_135.shape}'
+        )
+        T = motion_135.shape[0]
         transl = motion_135[:, 0:3]
-        rot6d = motion_135[:, 3:135].reshape(-1, 22, 6)
-        return self.retarget(rot6d, transl, fps=fps)
+        rot6d = motion_135[:, 3:135].reshape(T, 22, 6)
+        # HyMotion row-major -> column-major expected by rotation_6d_to_matrix.
+        rot6d_col = rot6d[..., [0, 2, 4, 1, 3, 5]]
+        mats = rotation_6d_to_matrix(
+            torch.from_numpy(rot6d_col.reshape(-1, 6).astype(np.float32))
+        ).reshape(T, 22, 3, 3)
+        aa = matrix_to_axis_angle(mats).reshape(T, 22, 3).cpu().numpy()
+        root_orient = aa[:, 0]
+        pose_body = aa[:, 1:22].reshape(T, 63)
+        return self.retarget_smplx(
+            root_orient, pose_body, transl, betas=betas, gender=gender, fps=fps
+        )
 
-    def retarget_from_hymotion_201(
-        self,
-        motion_201: np.ndarray,
-        fps: float = 30.0,
-    ) -> Dict[str, np.ndarray]:
-        """Retarget from HyMotion T2M 201-dim format.
+    # --------------------------------------------------------------- internals
+    def _run_from_arrays(self, npz: Dict) -> Dict[str, np.ndarray]:
+        """Write a temp SMPL-X NPZ then delegate to GMR's file loader.
 
-        Args:
-            motion_201: (T, 201) = [transl(3), rot6d(132), joint_pos(66)]
-                We only use transl and rot6d, not joint_pos.
-
-        Returns:
-            Same as retarget().
+        Using GMR's own ``load_smplx_file`` keeps the FK-based human-height
+        estimation identical to the reference pipeline.
         """
-        assert motion_201.ndim == 2 and motion_201.shape[-1] == 201
-        transl = motion_201[:, 0:3]
-        rot6d = motion_201[:, 3:135].reshape(-1, 22, 6)
-        return self.retarget(rot6d, transl, fps=fps)
+        tmp_dir = _REPO_ROOT / 'outputs' / 'tmp' / 'gmr_retarget'
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, path = tempfile.mkstemp(suffix='.npz', dir=str(tmp_dir))
+        os.close(fd)
+        try:
+            np.savez(path, **npz)
+            return self._run(path)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
-    def to_asap_pkl(
-        self,
-        retarget_result: Dict[str, np.ndarray],
-        output_path: str,
-    ) -> str:
-        """Save retargeted motion in ASAP-compatible pickle format.
+    def _run(self, smplx_file: str) -> Dict[str, np.ndarray]:
+        self._ensure_gmr()
 
-        The ASAP/HumanoidVerse framework expects motion data as a dict
-        containing robot joint positions (q) and root state.
+        smplx_data, body_model, smplx_output, auto_h = self._load_smplx_file(
+            smplx_file, str(self.smplx_model_dir)
+        )
+        height = self.actual_human_height if self.actual_human_height is not None else auto_h
 
-        Args:
-            retarget_result: output of retarget() or retarget_from_hymotion()
-            output_path: path to save .pkl file
+        frames, aligned_fps = self._get_smplx_data_offline_fast(
+            smplx_data, body_model, smplx_output, tgt_fps=self.tgt_fps
+        )
 
-        Returns:
-            output_path
-        """
-        import pickle
+        retarget = self._GMR(
+            actual_human_height=height,
+            src_human='smplx',
+            tgt_robot=self.robot,
+            posture_cost=self.posture_cost,
+        )
+        ground_offset = self._compute_ground_offset(retarget, frames)
+        retarget.set_ground_offset(ground_offset)
 
-        motion_data = {
-            'fps': retarget_result['fps'],
-            'joint_names': retarget_result['joint_names'],
-            'dof': retarget_result['dof'],
-            # Robot joint angles per frame
-            'dof_pos': retarget_result['joint_angles'],   # (T, 29)
-            # Root state
-            'root_pos': retarget_result['root_pos'],       # (T, 3)
-            'root_orient_quat': retarget_result['root_orient_quat'],  # (T, 4) wxyz
-            'root_orient_euler': retarget_result['root_orient_euler'],
-            # Velocities (finite difference, needed by ASAP)
-            'dof_vel': np.gradient(
-                retarget_result['joint_angles'],
-                1.0 / retarget_result['fps'],
-                axis=0,
-            ).astype(np.float32),
-            'root_vel': np.gradient(
-                retarget_result['root_pos'],
-                1.0 / retarget_result['fps'],
-                axis=0,
-            ).astype(np.float32),
+        qpos_list = [
+            retarget.retarget(fd, offset_to_ground=self.offset_to_ground)
+            for fd in frames
+        ]
+        qpos = np.asarray(qpos_list, dtype=np.float64)
+        root_pos = qpos[:, 0:3]
+        root_wxyz = qpos[:, 3:7]
+        dof = qpos[:, 7:]
+
+        if self.clamp_limits:
+            dof, _ = self._clamp_joint_limits(dof, soft=self.soft_clamp)
+        if self.smooth:
+            dof = self._smooth(dof)
+
+        if self.mujoco_zup:
+            root_pos, root_wxyz = self._yup_to_zup(root_pos, root_wxyz)
+        if self.ground_align:
+            root_pos = self._ground_align(root_pos, root_wxyz, dof)
+
+        root_xyzw = root_wxyz[:, [1, 2, 3, 0]]
+        return {
+            'dof_pos': dof.astype(np.float32),
+            'root_pos': root_pos.astype(np.float32),
+            'root_orient_quat': root_wxyz.astype(np.float32),  # wxyz (MuJoCo)
+            'root_rot': root_xyzw.astype(np.float32),          # xyzw (scipy)
+            'fps': float(aligned_fps),
+            'joint_names': list(G1_JOINT_NAMES),
+            'dof': dof.shape[1],
         }
 
-        import os
+    @staticmethod
+    def _compute_ground_offset(retarget, frames) -> float:
+        """Lowest body Z across all frames (mirrors GMR fbx_offline grounding)."""
+        offset = np.inf
+        for frame_data in frames:
+            human_data = retarget.to_numpy(frame_data)
+            human_data = retarget.scale_human_data(
+                human_data, retarget.human_root_name, retarget.human_scale_table
+            )
+            human_data = retarget.offset_human_data(
+                human_data, retarget.pos_offsets1, retarget.rot_offsets1
+            )
+            for _, (pos, _quat) in human_data.items():
+                if pos[2] < offset:
+                    offset = float(pos[2])
+        return offset
+
+    @staticmethod
+    def _clamp_joint_limits(dof_pos, soft=True):
+        clamped = dof_pos.copy()
+        num_clamped = 0
+        for i, name in enumerate(G1_JOINT_NAMES):
+            if name not in _GMR_G1_JOINT_LIMITS:
+                continue
+            lo, hi = _GMR_G1_JOINT_LIMITS[name]
+            below = clamped[:, i] < lo
+            above = clamped[:, i] > hi
+            if soft:
+                mid = (lo + hi) / 2.0
+                half = (hi - lo) / 2.0
+                scale = 0.9
+                clamped[:, i] = mid + half * np.tanh((clamped[:, i] - mid) / (half * scale))
+            else:
+                clamped[:, i] = np.clip(clamped[:, i], lo, hi)
+            num_clamped += int(np.sum(below) + np.sum(above))
+        return clamped, num_clamped
+
+    @staticmethod
+    def _smooth(dof_pos):
+        try:
+            from scipy.signal import savgol_filter
+        except Exception:
+            return dof_pos
+        T = dof_pos.shape[0]
+        win = min(7, T if T % 2 == 1 else T - 1)
+        if win >= 5:
+            return savgol_filter(dof_pos, window_length=win, polyorder=3, axis=0)
+        return dof_pos
+
+    @staticmethod
+    def _yup_to_zup(root_pos, root_wxyz):
+        from scipy.spatial.transform import Rotation as R
+
+        rot_offset = R.from_quat(list(_GMR_ZUP_ROT_OFFSET_XYZW))  # xyzw
+        root_xyzw = root_wxyz[:, [1, 2, 3, 0]]
+        pos = rot_offset.inv().apply(root_pos)
+        xyzw = (rot_offset.inv() * R.from_quat(root_xyzw)).as_quat()
+        wxyz = xyzw[:, [3, 0, 1, 2]]
+        return pos, wxyz
+
+    def _ground_align(self, root_pos, root_wxyz, dof):
+        """Shift the whole clip vertically so the lowest *robot* geom rests on z=0.
+
+        The mjcf ships a world-attached ground ``plane`` geom (always at z=0); it
+        must be excluded or it pins the per-frame minimum to 0 and the robot is
+        never pulled down to its real feet (i.e. it floats). We only consider
+        geoms owned by an actual robot body (``geom_bodyid != 0``).
+        """
+        if self.robot_xml is None or not os.path.isfile(str(self.robot_xml)):
+            return root_pos
+        try:
+            import mujoco
+        except Exception:
+            return root_pos
+        m = mujoco.MjModel.from_xml_path(str(self.robot_xml))
+        d = mujoco.MjData(m)
+        robot_geoms = np.where(np.asarray(m.geom_bodyid) != 0)[0]
+        if robot_geoms.size == 0:
+            robot_geoms = np.arange(m.ngeom)
+        T = root_pos.shape[0]
+        gmin = np.inf
+        for t in range(T):
+            d.qpos[:3] = root_pos[t]
+            d.qpos[3:7] = root_wxyz[t]
+            d.qpos[7:] = dof[t]
+            d.qvel[:] = 0
+            mujoco.mj_forward(m, d)
+            gmin = min(gmin, float(d.geom_xpos[robot_geoms, 2].min()))
+        root_pos = root_pos.copy()
+        root_pos[:, 2] -= (gmin - self.ground_clearance)
+        return root_pos
+
+    # ----------------------------------------------------------------- outputs
+    def to_mujoco_qpos(self, result: Dict[str, np.ndarray]) -> np.ndarray:
+        """[root_pos(3), root_quat_wxyz(4), dof(29)] -> (T, 36) MuJoCo qpos."""
+        dof = result['dof_pos']
+        T, n = dof.shape
+        qpos = np.zeros((T, 7 + n), dtype=np.float32)
+        qpos[:, 0:3] = result['root_pos']
+        qpos[:, 3:7] = result['root_orient_quat']
+        qpos[:, 7:] = dof
+        return qpos
+
+    def save_pkl(self, result: Dict[str, np.ndarray], output_path: str) -> str:
+        """Save GMR/ProtoMotions-style pkl (root_rot is xyzw)."""
+        motion_data = {
+            'fps': result['fps'],
+            'root_pos': np.asarray(result['root_pos']),
+            'root_rot': np.asarray(result['root_rot']),  # xyzw
+            'dof_pos': np.asarray(result['dof_pos']),
+            'local_body_pos': None,
+            'link_body_list': None,
+        }
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         with open(output_path, 'wb') as f:
             pickle.dump(motion_data, f)
-
         return output_path
 
-    def to_mujoco_qpos(
-        self,
-        retarget_result: Dict[str, np.ndarray],
-    ) -> np.ndarray:
-        """Convert retargeted motion to MuJoCo qpos format.
+    @staticmethod
+    def to_asap_pkl(result: Dict[str, np.ndarray], output_path: str) -> str:
+        """Save an ASAP/HumanoidVerse-compatible pkl from a GMR result.
 
-        MuJoCo qpos for a floating-base humanoid:
-          [root_pos(3), root_quat(4 wxyz), joint_angles(29)] = 36 dims
-
-        Returns:
-            (T, 36) qpos array.
+        Includes finite-difference ``dof_vel`` / ``root_vel`` expected by ASAP.
         """
-        T = retarget_result['joint_angles'].shape[0]
-        qpos = np.zeros((T, 3 + 4 + self.g1_dof), dtype=np.float32)
-        qpos[:, 0:3] = retarget_result['root_pos']
-        qpos[:, 3:7] = retarget_result['root_orient_quat']
-        qpos[:, 7:7 + self.g1_dof] = retarget_result['joint_angles']
-        return qpos
+        fps = float(result['fps'])
+        dof = np.asarray(result['dof_pos'])
+        root_pos = np.asarray(result['root_pos'])
+        motion_data = {
+            'fps': fps,
+            'joint_names': list(result.get('joint_names') or G1_JOINT_NAMES),
+            'dof': int(result.get('dof') or dof.shape[1]),
+            'dof_pos': dof,                                       # (T, 29)
+            'root_pos': root_pos,                                 # (T, 3)
+            'root_orient_quat': np.asarray(result['root_orient_quat']),  # wxyz
+            'dof_vel': np.gradient(dof, 1.0 / fps, axis=0).astype(np.float32),
+            'root_vel': np.gradient(root_pos, 1.0 / fps, axis=0).astype(np.float32),
+        }
+        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+        with open(output_path, 'wb') as f:
+            pickle.dump(motion_data, f)
+        return output_path

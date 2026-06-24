@@ -5,8 +5,8 @@ This module provides wrappers to interface HyMotion-generated motions
 reinforcement learning framework for motion imitation.
 
 Pipeline overview:
-  1. HyMotion T2M-Lite generates SMPL motion from text
-  2. SMPLToG1Retargeter converts to G1 29-DOF joint angles
+  1. HyMotion T2M generates SMPL motion from text
+  2. GMRSMPLToG1Retargeter converts to G1 29-DOF joint angles (mink IK)
   3. This module creates Isaac Gym compatible configs and reference motions
   4. ASAP's PPO-based motion tracking trains a policy in simulation
   5. Policy can be deployed to sim2sim (MuJoCo) or sim2real
@@ -39,7 +39,7 @@ import numpy as np
 class ASAPConfigGenerator:
     """Generate ASAP/HumanoidVerse configs for G1 motion tracking.
 
-    Given a retargeted motion file (from SMPLToG1Retargeter.to_asap_pkl),
+    Given a retargeted motion file (from GMRSMPLToG1Retargeter.to_asap_pkl),
     this class generates the full set of configs and launch commands needed
     to train a motion tracking policy in Isaac Gym.
     """
@@ -212,25 +212,25 @@ class ReferenceMotionManager:
         """Add a retargeted motion to the collection.
 
         Args:
-            retarget_result: Output from SMPLToG1Retargeter.retarget()
+            retarget_result: Output from ``GMRSMPLToG1Retargeter`` (uses ``dof_pos``).
             name: Unique name for this motion clip
             text_prompt: Original text prompt used for generation
             difficulty: Estimated difficulty 0-1 for curriculum learning
         """
-        from hftrainer.motion.retarget import SMPLToG1Retargeter
+        from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
 
-        retargeter = SMPLToG1Retargeter()
         pkl_path = os.path.join(self.output_dir, f'{name}.pkl')
-        retargeter.to_asap_pkl(retarget_result, pkl_path)
+        GMRSMPLToG1Retargeter.to_asap_pkl(retarget_result, pkl_path)
 
+        n_frames = retarget_result['dof_pos'].shape[0]
         self.motions.append({
             'name': name,
             'path': pkl_path,
             'text_prompt': text_prompt,
             'difficulty': difficulty,
-            'num_frames': retarget_result['joint_angles'].shape[0],
+            'num_frames': n_frames,
             'fps': retarget_result['fps'],
-            'duration': retarget_result['joint_angles'].shape[0] / retarget_result['fps'],
+            'duration': n_frames / retarget_result['fps'],
         })
 
     def save_manifest(self) -> str:

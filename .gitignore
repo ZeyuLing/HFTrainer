@@ -225,6 +225,11 @@ hftrainer/models/motion/physflow/trackers/**/*.npy
 *.motion
 **/.asset_hash
 
+# Exception: the vendored GMR Unitree G1 robot model is part of the library's
+# in-tree SMPL->G1 retargeter (no ref_repo dependency), so its mesh assets MUST
+# be tracked even though the generic mesh rules above ignore them.
+!hftrainer/motion/retarget/_gmr/assets/**
+
 # Local research scratch and large web-viewer data dumps.
 literature-surveys/
 web_viz/motionfix/data.json

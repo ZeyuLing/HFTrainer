@@ -577,32 +577,65 @@ bootstrap and the `skin_standard` LBS) lives in
 ## 9. SMPL `motion_135` -> Unitree G1 (GMR retarget)
 
 The correct human->G1 retarget is **GMR** (General Motion Retargeting, mink IK),
-vendored at `ref_repo/GMR/`. The old analytic/MuJoCo-Euler decomposition
-(`SMPLToG1Retargeter`) is fast but low quality and should not be used for
-visualization.
+now a first-class library API at
+[`hftrainer/motion/retarget/smpl_g1.py`](../../hftrainer/motion/retarget/smpl_g1.py)::`GMRSMPLToG1Retargeter`.
+It wraps a **minimal in-tree vendored GMR** under
+[`hftrainer/motion/retarget/_gmr/`](../../hftrainer/motion/retarget/_gmr) (core
+`motion_retarget.py` + `smpl.py`, the `unitree_g1` mjcf/meshes and the
+`smplx_to_g1` IK config) — there is **no `ref_repo/GMR` dependency** anymore — and
+does all the pre/post processing (SMPL-X build, mink IK, joint-limit clamp,
+temporal smoothing, Y-up -> Z-up, ground alignment) internally. The old
+analytic/MuJoCo-Euler decomposition backend (`SMPLToG1Retargeter`) was
+**removed** — it was fast but produced low-quality, broken poses.
+
+### Library API (recommended)
+
+```python
+from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
+
+rt = GMRSMPLToG1Retargeter()                 # mujoco_zup=True, ground_align=True
+# any one of:
+res = rt.retarget_smplh(poses, trans, betas=betas, gender="neutral", fps=30)  # SMPL-H/SMPL (poses[:, :66])
+res = rt.retarget_smplx(root_orient, pose_body, trans, betas=betas, fps=30)   # SMPL-X arrays
+res = rt.retarget_smplx_file("clip_smplx.npz")                                # SMPL-X NPZ
+res = rt.retarget_from_motion135(motion_135, fps=30)                          # HyMotion 135-dim
+
+# res: dof_pos (T,29), root_pos (T,3), root_orient_quat (T,4 wxyz),
+#      root_rot (T,4 xyzw), fps, joint_names, dof
+qpos = rt.to_mujoco_qpos(res)                # (T,36) ready for a Z-up G1 MuJoCo model
+rt.save_pkl(res, "clip_g1.pkl")              # GMR/ProtoMotions-style pkl (xyzw root)
+```
+
+`scripts/embodied/gmr_retarget_headless.py` is kept as a thin CLI over the same
+GMR pipeline (it emits the *raw* solver frame — equivalent to constructing the
+class with `mujoco_zup=False, ground_align=False`).
 
 Pipeline (`SMPL motion_135` already in the SMPL Y-up canonical frame):
 
 ```
 motion_135 -> (global_orient, body_pose, transl)  axis-angle, no frame change
-           -> SMPL-X NPZ {pose_body(63), root_orient(3), trans, betas, gender}
-           -> scripts/embodied/gmr_retarget_headless.py  (GMR mink IK, per frame)
-           -> qpos[T,36] (Z-up, undo GMR pelvis rot_offset, ground align)
-           -> MuJoCo FK (g1_holo_compat.xml) -> per-link world pos + quat (wxyz)
+           -> SMPL-X {pose_body(63), root_orient(3), trans, betas, gender}
+           -> GeneralMotionRetargeting (GMR mink IK, per frame, posture-cost reg)
+           -> qpos[T,36] (clamp + smooth; Z-up via undo GMR pelvis rot_offset;
+              global ground align so lowest geom rests at z=0)
+           -> MuJoCo FK -> per-link world pos + quat (wxyz)
 ```
 
 ### Prerequisites
 
-**GMR dependencies.** GMR is vendored under `ref_repo/GMR/` and is **not** pulled
-in by `pip install -e .`. Install it and its IK/body-model deps explicitly:
+**GMR dependencies.** The GMR core/assets are vendored in-tree under
+`hftrainer/motion/retarget/_gmr/`, so there is nothing to `pip install -e` from
+`ref_repo`. The runtime deps it imports are **lazy** (only needed when you call
+the retargeter) and are intentionally **not** in `pyproject.toml`:
 
 ```bash
-pip install -e ref_repo/GMR
-pip install mink daqp loop_rate_limiters smplx
+pip install mink daqp smplx mujoco scipy
 ```
 
-SMPL-X body models must exist at `ref_repo/GMR/assets/body_models/smplx/`.
-On the cluster, `tools/taiji_retarget_g1.sh` installs these automatically.
+SMPL-X body models are loaded from the repo's `checkpoints/smpl_models/smplx/`
+(`GMRSMPLToG1Retargeter(smplx_model_dir=...)` to override). The vendored
+`unitree_g1` mjcf + meshes ship in the package, so no robot asset download is
+needed.
 
 **SMPL-H input.** AMASS SMPL-H `poses (T, 156)` maps to the SMPL-X NPZ as
 `root_orient = poses[:, :3]`, `pose_body = poses[:, 3:66]` (the first 21 body
@@ -621,14 +654,17 @@ pip install pyrender imageio imageio-ffmpeg
 ```
 
 **Ground alignment (avoid sinking through the floor).** GMR's per-frame
-`root_pos` is **not** floor-aligned for MuJoCo. After the Y-up -> Z-up conversion
-(undo the pelvis `rot_offset`), run one forward-kinematics pass over the clip and
-shift `root_pos[:, 2]` so the lowest foot geom rests at `z = 0` (the global mode
-of `scripts/embodied/gmr_to_protomotions.py::fk_ground_correction`). Skipping
-this leaves the lowest geom around `z = -0.15 m`, i.e. the robot's feet penetrate
-the ground plane.
+`root_pos` is **not** floor-aligned for MuJoCo. `GMRSMPLToG1Retargeter` handles
+this for you (`ground_align=True`): after the Y-up -> Z-up conversion (undo the
+pelvis `rot_offset`), it runs one forward-kinematics pass over the clip and
+shifts `root_pos[:, 2]` so the lowest **robot** geom rests at `z = 0`. The mjcf
+ships a world-attached ground `plane` geom (always at `z = 0`); it is **excluded**
+from the minimum (`geom_bodyid != 0`), otherwise it pins the per-frame minimum to
+0 and the robot is never pulled down to its real feet — i.e. it visibly *floats*.
+Skipping the step entirely (`ground_align=False` or the raw headless CLI) leaves
+the feet around `z = -0.15 m`, i.e. penetrating the floor.
 
-Reusable helpers: `scripts/embodied/smpl_g1_compare_demo.py`
+Other reusable helpers: `scripts/embodied/smpl_g1_compare_demo.py`
 (`gmr_retarget_to_qpos`, `load_g1_model`, `qpos_to_robot_frames`). For the
 unified Y-up viewer the demo applies a final `Rx(-90)` world basis change
 (Z-up -> Y-up) to the link poses; the per-link STL meshes are served unchanged.

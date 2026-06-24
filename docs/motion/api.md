@@ -985,58 +985,67 @@ kimodo_soma_to_smpl_motion135(positions22, soma77=None, **kwargs)
 
 # `retarget.smpl_g1`
 
-> **Warning:** Use **GMR** for any visualization or deployment. The class below
-> (`SMPLToG1Retargeter`, analytic per-frame Euler decomposition) is fast but
-> low-quality and is kept only for legacy/quick-look use. The correct
-> SMPL → Unitree-G1 path is **GMR** (General Motion Retargeting, mink IK),
-> vendored at `ref_repo/GMR/` and driven by
-> `scripts/embodied/gmr_retarget_headless.py` and
+> The only SMPL → Unitree-G1 backend is **`GMRSMPLToG1Retargeter`** (General
+> Motion Retargeting, mink IK), a first-class in-repo API backed by a minimal
+> in-tree vendored GMR under `hftrainer/motion/retarget/_gmr/` (no `ref_repo`
+> dependency). The previous fast analytic Euler-decomposition class
+> (`SMPLToG1Retargeter`) was **removed** — it produced low-quality, broken poses.
+> The thin CLI `scripts/embodied/gmr_retarget_headless.py` and
 > `scripts/embodied/smpl_g1_compare_demo.py`
-> (`gmr_retarget_to_qpos`, `load_g1_model`, `qpos_to_robot_frames`). See
-> [`representations.md`](representations.md) for the
+> (`gmr_retarget_to_qpos`, `load_g1_model`, `qpos_to_robot_frames`) drive the same
+> pipeline. See [`representations.md`](representations.md) §9 for the
 > `motion_135 → SMPL-X axis-angle → GMR mink IK → qpos → MuJoCo FK` pipeline, and
 > `scripts/demo/hml263_multi_repr_demo.py:G1GMR` for the runnable version used by
 > the web viewer.
 
-Maps SMPL 22-joint motion to Unitree G1 29-DOF joint angles (per-frame Euler
-decomposition + hardware limits). One-way (angles, not a body model); render via
-MuJoCo FK on `g1.xml`.
+Solves a per-frame inverse-kinematics problem matching G1 link poses to SMPL-X
+body targets, then post-processes into a ground-aligned, Z-up G1 motion.
 
 ```python
 SMPL_JOINT_NAMES: list[str]                  # 22
 G1_JOINT_NAMES: list[str]                    # 29 (leg×12, waist×3, arm×14), g1.xml order
-G1_JOINT_LIMITS: dict[str, tuple[float, float]]   # radians, from URDF
+G1_JOINT_LIMITS: dict[str, tuple[float, float]]   # radians, from URDF (reference)
 ```
 
-### `SMPLToG1Retargeter`
+### `GMRSMPLToG1Retargeter`
 
 ```python
-class SMPLToG1Retargeter(apply_limits=True, rest_pose_calibration=True, g1_dof=29)
+class GMRSMPLToG1Retargeter(robot='unitree_g1', tgt_fps=30, posture_cost=20.0,
+                            clamp_limits=True, soft_clamp=True, smooth=True,
+                            mujoco_zup=True, ground_align=True, ground_clearance=0.0,
+                            smplx_model_dir=None, robot_xml=None)
 ```
 
-**Parameters:**
+**Key parameters:**
 
-- **apply_limits** (*bool*, optional) – clamp DOF to `G1_JOINT_LIMITS`. Default: `True`.
-- **rest_pose_calibration** (*bool*, optional) – subtract the rest-pose offset.
-  Default: `True`.
-- **g1_dof** (*int*, optional) – number of actuated DOF. Default: `29`.
+- **clamp_limits / soft_clamp** (*bool*) – clamp IK output to the GMR G1 limits.
+- **mujoco_zup** (*bool*) – emit a MuJoCo Z-up root (default `True`).
+- **ground_align** (*bool*) – shift the clip so the lowest **robot** geom rests
+  on `z=0` (the mjcf floor plane geom is excluded so the robot never floats).
+- **smplx_model_dir** (*path*, optional) – SMPL-X body models (default
+  `checkpoints/smpl_models`; `smplx.create` reads `<dir>/smplx`).
+
+GMR runtime deps (`mink`, `daqp`, `smplx`, `mujoco`) are imported **lazily** —
+importing the module never requires them.
 
 **Methods:**
 
-- **retarget(rot6d, transl, fps=30.0)** – `rot6d` is `(T, 22, 6)` ROW or `(T, 132)`.
-- **retarget_from_hymotion(motion_135, fps=30.0)**.
-- **retarget_from_hymotion_201(motion_201, fps=30.0)**.
+- **retarget_smplh(poses, trans, betas=None, fps=30.0, gender='neutral')** –
+  SMPL-H axis-angle (`poses (T, ≥66)`).
+- **retarget_smplx(root_orient, pose_body, trans, betas=None, gender='neutral', fps=30.0)**.
+- **retarget_from_motion135(motion_135, fps=30.0, betas=None, gender='neutral')** –
+  HyMotion `motion_135` (`[transl(3), rot6d(132)]`); for `motion_201`, slice
+  `[:, :135]`.
+- **retarget_smplx_file(smplx_file)**.
 - **to_mujoco_qpos(result)** → *ndarray* `(T, 36)` = `[root_pos(3),
   root_quat_wxyz(4), dof(29)]`.
-- **to_asap_pkl(result, output_path)** → path.
+- **save_pkl(result, output_path)** → GMR/ProtoMotions-style pkl (`root_rot` xyzw).
+- **to_asap_pkl(result, output_path)** (staticmethod) → ASAP/HumanoidVerse pkl
+  with finite-difference `dof_vel` / `root_vel`.
 
-All `retarget*` methods return a *dict* with keys: `joint_angles (T, 29)`,
-`root_pos (T, 3)`, `root_orient_quat (T, 4 wxyz)`, `root_orient_euler (T, 3)`,
-`fps`, `joint_names`, `dof`.
-
-> **Note:** MuJoCo is **Z-up** while the SMPL root is Y-up; pre-rotate the root
-> by `Rx(+90°)` before FK, then map link positions back `Z-up → Y-up`. See
-> `scripts/demo/hml263_multi_repr_demo.py:G1MujocoFK` for the full loop.
+All `retarget*` methods return a *dict* with keys: `dof_pos (T, 29)`,
+`root_pos (T, 3)`, `root_orient_quat (T, 4 wxyz)`, `root_rot (T, 4 xyzw)`, `fps`,
+`joint_names`, `dof`.
 
 ---
 
@@ -1047,13 +1056,13 @@ All `retarget*` methods return a *dict* with keys: `joint_angles (T, 29)`,
 >>> import numpy as np
 >>> from hftrainer.motion.representation import convert
 >>> from hftrainer.motion.retarget import smpl_soma30_roundtrip
->>> from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+>>> from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
 >>>
 >>> feats = np.load("ref_repo/CondMDI/dataset/HumanML3D/new_joint_vecs/000000.npy")  # (T, 263)
 >>> hml_joints = convert.hml263_to_joints(feats)                  # (T, 22, 3)
 >>> m135       = convert.hml263_to_motion135(feats, device="cuda")  # (T', 135) ROW
 >>> soma       = smpl_soma30_roundtrip(m135)                      # SOMA30 + SMPL round trip
->>> g1         = SMPLToG1Retargeter().retarget_from_hymotion(m135)  # legacy quick-look; use GMR for real G1
+>>> g1         = GMRSMPLToG1Retargeter().retarget_from_motion135(m135)  # GMR mink IK -> dof_pos
 ```
 
 See the runnable demo + web viewer: `scripts/demo/hml263_multi_repr_demo.py` and

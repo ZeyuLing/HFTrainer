@@ -8,9 +8,10 @@ payloads consumed by motion_annot_web/embodied_viz:
                   (axis-angle, smplh; rendered by /viewer load_smpl.js)
   * G1 side    -> {type:"robot_frames", ...}  rendered by /robot_viewer
 
-The G1 side is produced fully kinematically (no IsaacGym / no ONNX policy):
-  AMASS axis-angle poses -> rot6d -> SMPLToG1Retargeter.retarget
-  -> qpos[T,36] -> Y-up->Z-up fix -> ground align -> MuJoCo mj_forward FK
+The G1 side is produced fully kinematically (no IsaacGym / no ONNX policy) via
+GMR (mink IK):
+  AMASS axis-angle poses -> SMPL-X npz -> GMR (gmr_retarget_headless.py)
+  -> qpos[T,36] (Z-up, grounded) -> MuJoCo mj_forward FK
   -> per-body world xpos/xquat (wxyz).
 
 It also writes a manifest.json consumed by the new /smpl_vs_g1 compare page.
@@ -46,25 +47,6 @@ DIVERSE_KEYWORDS = [
 ]
 
 
-def rx90_quat() -> np.ndarray:
-    """wxyz quaternion of a +90 deg rotation about X (maps Y-up -> Z-up)."""
-    c = np.cos(np.pi / 4.0)
-    s = np.sin(np.pi / 4.0)
-    return np.array([c, s, 0.0, 0.0], dtype=np.float64)
-
-
-def quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
-    """Hamilton product of wxyz quaternions (q1 applied after q2)."""
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    return np.array([
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-    ], dtype=np.float64)
-
-
 def build_smpl_json(poses: np.ndarray, trans: np.ndarray, betas: np.ndarray,
                     fps: int, gender: str) -> dict:
     """AMASS axis-angle (smplh, poses[T,156]) -> SMPL-mesh viewer JSON."""
@@ -88,38 +70,6 @@ def build_smpl_json(poses: np.ndarray, trans: np.ndarray, betas: np.ndarray,
             "mocap_framerate": fps,
         }])
     return {"type": "frames", "fps": fps, "frames": frames}
-
-
-def retarget_to_qpos(poses: np.ndarray, trans: np.ndarray, fps: int):
-    """AMASS axis-angle -> G1 qpos[T,36] in MuJoCo Z-up frame, ground-aligned later."""
-    import torch
-    from hftrainer.motion.retarget.smpl_g1 import SMPLToG1Retargeter
-    from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
-        axis_angle_to_matrix,
-    )
-
-    T = poses.shape[0]
-    aa = torch.from_numpy(poses[:, :66].reshape(T, 22, 3).astype(np.float32))
-    rotmats = axis_angle_to_matrix(aa)  # (T,22,3,3)
-    # Row-major rot6d expected by the retargeter == first two columns flattened.
-    rot6d_row = rotmats[..., :2].reshape(T, 22, 6).numpy()
-    ret = SMPLToG1Retargeter()
-    res = ret.retarget(rot6d_row, trans.astype(np.float32), fps=float(fps))
-    qpos = ret.to_mujoco_qpos(res).astype(np.float64)  # (T,36)
-
-    # Y-up (SMPL/AMASS) -> Z-up (MuJoCo) is a world basis change (R_x +90deg).
-    # Positions transform as vectors: p' = R_fix @ p  =>  (x,y,z) -> (x,-z,y).
-    # Root orientation transforms by SIMILARITY (conjugation): q' = qfix * q * qfix^-1.
-    # Conjugation keeps identity -> identity, so an upright SMPL pose (q~=I) maps to
-    # an upright G1 base (q~=I) instead of being tipped over 90deg.
-    qfix = rx90_quat()
-    qfix_inv = np.array([qfix[0], -qfix[1], -qfix[2], -qfix[3]], dtype=np.float64)
-    pos = qpos[:, 0:3]
-    pos_z = np.stack([pos[:, 0], -pos[:, 2], pos[:, 1]], axis=1)
-    qpos[:, 0:3] = pos_z
-    for t in range(T):
-        qpos[t, 3:7] = quat_mul(quat_mul(qfix, qpos[t, 3:7]), qfix_inv)
-    return qpos
 
 
 def _patch_mjcf_xml(xml_path: Path) -> str:
@@ -386,8 +336,6 @@ def main():
     ap.add_argument("--mjcf", type=str, default=str(DEFAULT_MJCF))
     ap.add_argument("--out-dir", type=str, default=str(DEFAULT_OUT))
     ap.add_argument("--num", type=int, default=8)
-    ap.add_argument("--method", type=str, default="analytic", choices=["analytic", "gmr"],
-                    help="analytic = fast Euler decomposition; gmr = mink IK (high quality).")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--target-fps", type=int, default=30)
     ap.add_argument("--max-frames", type=int, default=300)
@@ -436,14 +384,11 @@ def main():
 
         stem = f"{idx:02d}_" + Path(rel).stem
         smpl_json = build_smpl_json(poses, trans, betas, out_fps, gender)
-        if args.method == "gmr":
-            try:
-                qpos = gmr_retarget_to_qpos(poses, trans, betas, gender, out_fps, g1_dir, stem)
-            except Exception as e:
-                print(f"[gmr-fail] {stem}: {e}")
-                continue
-        else:
-            qpos = retarget_to_qpos(poses, trans, out_fps)
+        try:
+            qpos = gmr_retarget_to_qpos(poses, trans, betas, gender, out_fps, g1_dir, stem)
+        except Exception as e:
+            print(f"[gmr-fail] {stem}: {e}")
+            continue
         g1_json = qpos_to_robot_frames(model, bodies, qpos, out_fps)
 
         smpl_path = (smpl_dir / f"{stem}.json").resolve()

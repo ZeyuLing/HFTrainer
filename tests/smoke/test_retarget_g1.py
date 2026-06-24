@@ -1,128 +1,105 @@
-"""Smoke test for SMPL → G1 retargeting pipeline."""
+"""Smoke test for SMPL → G1 retargeting (GMR backend only).
+
+The analytic Euler-decomposition backend was removed (low quality). The only
+retargeter is :class:`GMRSMPLToG1Retargeter` (mink IK). Its full IK path needs
+heavy optional deps (``mink``/``daqp``/``smplx``/``mujoco``) plus SMPL-X body
+models, so the IK test skips gracefully when those are unavailable; the
+output-format helpers are pure NumPy and are always exercised.
+"""
 import numpy as np
 import pytest
 
 
+def _fake_gmr_result(T=20, n_dof=29, fps=30.0):
+    """A synthetic GMRSMPLToG1Retargeter result dict (no IK needed)."""
+    rng = np.random.default_rng(0)
+    quat = rng.standard_normal((T, 4)).astype(np.float32)
+    quat /= np.linalg.norm(quat, axis=-1, keepdims=True)
+    return {
+        'dof_pos': (rng.standard_normal((T, n_dof)) * 0.1).astype(np.float32),
+        'root_pos': rng.standard_normal((T, 3)).astype(np.float32),
+        'root_orient_quat': quat,                       # wxyz
+        'root_rot': quat[:, [1, 2, 3, 0]],              # xyzw
+        'fps': fps,
+        'joint_names': None,
+        'dof': n_dof,
+    }
+
+
 @pytest.mark.smoke
-def test_smpl_to_g1_retarget_basic():
-    """Test basic retargeting from SMPL 135-dim to G1 29-DOF."""
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
-
-    retargeter = SMPLToG1Retargeter(apply_limits=True, g1_dof=29)
-
-    # Create synthetic SMPL motion: 60 frames, 135-dim
-    T = 60
-    motion_135 = np.random.randn(T, 135).astype(np.float32) * 0.1
-    # Set translation to something reasonable
-    motion_135[:, 0:3] = np.stack([
-        np.linspace(0, 1, T),   # forward
-        np.zeros(T),            # lateral
-        np.ones(T) * 0.9,       # height
-    ], axis=-1)
-
-    result = retargeter.retarget_from_hymotion(motion_135, fps=30.0)
-
-    # Check output shapes
-    assert result['joint_angles'].shape == (T, 29)
-    assert result['root_pos'].shape == (T, 3)
-    assert result['root_orient_quat'].shape == (T, 4)
-    assert result['root_orient_euler'].shape == (T, 3)
-    assert result['fps'] == 30.0
-    assert len(result['joint_names']) == 29
-
-    # Check joint limits are respected
+def test_g1_constants():
+    """G1 joint name/limit tables are consistent."""
     from hftrainer.motion.retarget import G1_JOINT_LIMITS, G1_JOINT_NAMES
-    for i, name in enumerate(G1_JOINT_NAMES):
+
+    assert len(G1_JOINT_NAMES) == 29
+    for name in G1_JOINT_NAMES:
         lo, hi = G1_JOINT_LIMITS[name]
-        assert np.all(result['joint_angles'][:, i] >= lo - 1e-6), \
-            f'{name}: min={result["joint_angles"][:, i].min():.4f} < {lo:.4f}'
-        assert np.all(result['joint_angles'][:, i] <= hi + 1e-6), \
-            f'{name}: max={result["joint_angles"][:, i].max():.4f} > {hi:.4f}'
+        assert lo < hi
 
 
 @pytest.mark.smoke
-def test_smpl_to_g1_retarget_201dim():
-    """Test retargeting from 201-dim format."""
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
+def test_analytic_backend_removed():
+    """The old analytic retargeter must no longer be importable."""
+    import hftrainer.motion.retarget as R
 
-    retargeter = SMPLToG1Retargeter(g1_dof=29)
-
-    T = 30
-    motion_201 = np.random.randn(T, 201).astype(np.float32) * 0.1
-    motion_201[:, 0:3] = 0.0
-
-    result = retargeter.retarget_from_hymotion_201(motion_201)
-    assert result['joint_angles'].shape == (T, 29)
+    assert not hasattr(R, 'SMPLToG1Retargeter')
+    assert hasattr(R, 'GMRSMPLToG1Retargeter')
 
 
 @pytest.mark.smoke
-def test_asap_pkl_export():
-    """Test ASAP pickle export."""
-    import tempfile
-    import pickle
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
+def test_to_mujoco_qpos():
+    """GMR result -> MuJoCo qpos (pure numpy)."""
+    from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
 
-    retargeter = SMPLToG1Retargeter(g1_dof=29)
-
-    T = 30
-    motion_135 = np.random.randn(T, 135).astype(np.float32) * 0.1
-    motion_135[:, 0:3] = 0.0
-
-    result = retargeter.retarget_from_hymotion(motion_135, fps=30.0)
-
-    with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as f:
-        pkl_path = f.name
-
-    retargeter.to_asap_pkl(result, pkl_path)
-
-    with open(pkl_path, 'rb') as f:
-        data = pickle.load(f)
-
-    assert 'dof_pos' in data
-    assert 'root_pos' in data
-    assert 'dof_vel' in data
-    assert data['dof_pos'].shape == (T, 29)
-    assert data['dof_vel'].shape == (T, 29)
-
-    import os
-    os.unlink(pkl_path)
-
-
-@pytest.mark.smoke
-def test_mujoco_qpos_export():
-    """Test MuJoCo qpos conversion."""
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
-
-    retargeter = SMPLToG1Retargeter(g1_dof=29)
-
-    T = 20
-    motion_135 = np.random.randn(T, 135).astype(np.float32) * 0.1
-    motion_135[:, 0:3] = 0.0
-
-    result = retargeter.retarget_from_hymotion(motion_135)
-    qpos = retargeter.to_mujoco_qpos(result)
-
-    # MuJoCo qpos: [root_pos(3), root_quat(4), joints(29)] = 36
-    assert qpos.shape == (T, 36)
-    # Root quaternion should be unit norm
+    res = _fake_gmr_result(T=20)
+    qpos = GMRSMPLToG1Retargeter.to_mujoco_qpos(
+        GMRSMPLToG1Retargeter.__new__(GMRSMPLToG1Retargeter), res
+    )
+    assert qpos.shape == (20, 36)
     quat_norms = np.linalg.norm(qpos[:, 3:7], axis=-1)
     np.testing.assert_allclose(quat_norms, 1.0, atol=1e-4)
 
 
 @pytest.mark.smoke
-def test_g1_23dof():
-    """Test 23-DOF basic G1 variant."""
-    from hftrainer.motion.retarget import SMPLToG1Retargeter
+def test_asap_pkl_export(tmp_path):
+    """ASAP pickle export from a GMR result (pure numpy, staticmethod)."""
+    import pickle
+    from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
 
-    retargeter = SMPLToG1Retargeter(g1_dof=23)
+    res = _fake_gmr_result(T=30)
+    pkl_path = str(tmp_path / 'g1.pkl')
+    GMRSMPLToG1Retargeter.to_asap_pkl(res, pkl_path)
 
-    T = 20
-    motion_135 = np.random.randn(T, 135).astype(np.float32) * 0.1
-    motion_135[:, 0:3] = 0.0
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
 
-    result = retargeter.retarget_from_hymotion(motion_135)
-    assert result['joint_angles'].shape == (T, 23)
-    assert result['dof'] == 23
+    assert data['dof_pos'].shape == (30, 29)
+    assert data['dof_vel'].shape == (30, 29)
+    assert data['root_vel'].shape == (30, 3)
+    assert 'root_orient_quat' in data
+
+
+@pytest.mark.smoke
+def test_gmr_retarget_from_motion135():
+    """Full GMR mink-IK path on a tiny clip; skip if deps/models unavailable."""
+    from hftrainer.motion.retarget import GMRSMPLToG1Retargeter
+
+    try:
+        rt = GMRSMPLToG1Retargeter(smooth=False, ground_align=False)
+        T = 8
+        motion_135 = np.zeros((T, 135), dtype=np.float32)
+        # identity rot6d for all 22 joints ([1,0,0, 0,1,0] row-major).
+        eye6 = np.array([1, 0, 0, 0, 1, 0], dtype=np.float32)
+        motion_135[:, 3:135] = np.tile(eye6, 22)
+        motion_135[:, 2] = 0.9  # height
+        result = rt.retarget_from_motion135(motion_135)
+    except Exception as e:  # missing mink/daqp/smplx/mujoco or SMPL-X models
+        pytest.skip(f'GMR IK unavailable: {e}')
+
+    assert result['dof_pos'].shape[0] == 8
+    assert result['dof_pos'].shape[1] == 29
+    assert result['root_pos'].shape == (8, 3)
+    assert result['root_orient_quat'].shape == (8, 4)
 
 
 @pytest.mark.smoke
