@@ -12,7 +12,7 @@ from hftrainer.models.motion.prism.autoencoder_kl_2d import AutoencoderKLPrism2D
 from hftrainer.models.motion.prism.gaussian_distribution import (
     DiagonalGaussianDistributionNd,
 )
-from hftrainer.models.motion.components.motion_processor.smpl_processor import SMPLPoseProcessor
+from hftrainer.motion.processing.smpl_processor import SMPLPoseProcessor
 from hftrainer.models.motion.prism.network import PrismTransformerMotionModel
 from diffusers.schedulers import (
     FlowMatchEulerDiscreteScheduler,
@@ -280,11 +280,18 @@ class PrismARPipeline(DiffusionPipeline):
             .to(device=device, dtype=dtype)
         )
 
-        # [B, T, D] -> [B, T, J, 6]
-        # NOTE: encode_motion will handle motion normalization to maintain
-        # training-inference consistency. Normalizing here would cause VAE to
-        # receive different (pre-normalized) motion than during training.
+        # Normalize the raw motion vector to the VAE's training distribution.
+        # PrismBundle.encode_motion (training) applies smpl_pose_processor.normalize
+        # before VAE.encode, so the VAE operates in *normalized* motion space.
+        # The pipeline's encode_motion does NOT normalize (it is also reused for the
+        # already-normalized last-frame in autoregressive chaining), so the raw GT
+        # prefix must be normalized HERE to stay train/inference consistent. Skipping
+        # this makes the condition latents out-of-distribution, so the prefix/first
+        # frame condition does not take effect (jitter + condition frames diverge
+        # from the input).
+        motion = self.smpl_processor.normalize(motion)
 
+        # [B, T, D] -> [B, T, J, 6]
         motion = rearrange(motion, "b t (j d) -> b t j d", d=6)
 
         if motion.shape[1] != condition_num_frames:
@@ -298,18 +305,27 @@ class PrismARPipeline(DiffusionPipeline):
         # Return in VAE expected format: [B, T, J, C]
         return motion.to(device=device, dtype=dtype)
 
-    def extract_last_frame_motion(self, motion_vec: torch.Tensor) -> torch.Tensor:
-        """Extract the last frame from decoded motion for autoregressive conditioning.
+    def extract_last_frame_motion(self, motion_vec: torch.Tensor,
+                                  num_frames: int = 1) -> torch.Tensor:
+        """Extract the trailing frames from decoded motion for autoregressive
+        conditioning.
+
+        Conditioning the next segment on a single frame only pins position, so the
+        model is free to pick an arbitrary starting velocity at the junction (a
+        visible jerk between segments). Carrying several trailing frames conveys
+        velocity/trajectory and matches the multi-frame prefix the model was
+        trained with (TP2M cond 5/9), yielding a continuous transition.
 
         Args:
             motion_vec: Decoded motion tensor of shape [B, T, J, C] from VAE.
+            num_frames: Number of trailing frames to carry over.
 
         Returns:
-            Last frame motion tensor of shape [B, 1, J, C] ready for VAE encoding.
+            Trailing motion tensor of shape [B, num_frames, J, C] ready for VAE
+            encoding.
         """
-        # motion_vec is [B, T, J, C], extract last frame
-        last_frame = motion_vec[:, -1:, :, :]  # [B, 1, J, C]
-        return last_frame
+        num_frames = max(1, min(int(num_frames), motion_vec.shape[1]))
+        return motion_vec[:, -num_frames:, :, :]  # [B, k, J, C]
 
     @torch.no_grad()
     def encode_motion(
@@ -532,6 +548,8 @@ class PrismARPipeline(DiffusionPipeline):
         max_sequence_length: int = 256,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         overlap_frames: int = 1,
+        ar_condition_frames: int = 5,
+        use_rollout_trans: bool = True,
     ) -> Dict:
         """Generate long motion autoregressively from multiple prompts.
 
@@ -597,6 +615,12 @@ class PrismARPipeline(DiffusionPipeline):
                 condition_num_frames=condition_num_frames,
             )
 
+        # Number of trailing frames carried across the autoregressive boundary.
+        # Snap to scale*n+1 so the VAE encode/decode of the carried clip is exact
+        # (the conditioned region in the next segment is then exactly k frames).
+        k_carry = max(1, int(ar_condition_frames))
+        k_carry = ((k_carry - 1) // scale) * scale + 1
+
         # Store all motion segments
         all_motion_segments = []
 
@@ -621,15 +645,18 @@ class PrismARPipeline(DiffusionPipeline):
                     attention_kwargs=attention_kwargs,
                 )
 
-                # Store segment (excluding first frame if not first segment to avoid duplication)
+                # Store segment. For seg>0 the first k_carry frames reproduce the
+                # carried tail of the previous segment (the prefix condition), so
+                # drop them to avoid duplication.
                 if seg_idx == 0:
                     all_motion_segments.append(motion_vec)
                 else:
-                    # Skip the first frame to avoid duplication with previous segment's last frame
-                    all_motion_segments.append(motion_vec[:, overlap_frames:])
+                    skip = min(k_carry, motion_vec.shape[1] - 1)
+                    all_motion_segments.append(motion_vec[:, skip:])
 
-                # Extract last frame as condition for next segment
-                first_frame_motion = self.extract_last_frame_motion(motion_vec)
+                # Carry the trailing k_carry frames as the prefix condition for the
+                # next segment (conveys position + velocity -> smooth junction).
+                first_frame_motion = self.extract_last_frame_motion(motion_vec, k_carry)
 
                 progress_bar.update()
 
@@ -689,6 +716,7 @@ class PrismARPipeline(DiffusionPipeline):
             normalize=normalize,
             mocap_framerate=mocap_framerate,
             gender=gender,
+            use_rollout_trans=use_rollout_trans,
         )
 
         return smplx_dict
@@ -718,6 +746,7 @@ class PrismARPipeline(DiffusionPipeline):
         normalize: bool = True,
         mocap_framerate: float = 30.0,
         gender: str = "neutral",
+        use_rollout_trans: bool = True,
     ) -> Dict:
         """Post-process decoded motion to SMPL-X format.
 
@@ -728,6 +757,9 @@ class PrismARPipeline(DiffusionPipeline):
             normalize: Whether to normalize facing direction and ground plane.
             mocap_framerate: Frame rate of the motion.
             gender: Gender for SMPL model.
+            use_rollout_trans: For ``abs_rel`` translation, reconstruct absolute
+                translation by cumulative relative deltas when true, otherwise
+                use the decoded absolute translation channels directly.
 
         Returns:
             Dictionary containing SMPL-X parameters.
@@ -735,7 +767,10 @@ class PrismARPipeline(DiffusionPipeline):
         x_dec = rearrange(x_dec, "b t j d -> b t (j d)")
         x_dec = self.smpl_processor.denormalize(x_dec)
         transl_abs_rel = x_dec[..., :6]
-        transl = self.smpl_processor.inv_convert_transl(transl_abs_rel)
+        transl = self.smpl_processor.inv_convert_transl(
+            transl_abs_rel,
+            use_rollout=use_rollout_trans,
+        )
         pred_poses = x_dec[..., 6:]
 
         pred_poses = rearrange(pred_poses, "b t (j d)-> (b t) j d", d=6)

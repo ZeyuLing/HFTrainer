@@ -10,6 +10,61 @@ from hftrainer.registry import TRANSFORMS
 
 
 @TRANSFORMS.register_module(force=True)
+class HeadCropMotion(BaseTransform):
+    """Deterministically keep the first ``clip_len`` frames of motion tensors."""
+
+    def __init__(
+        self,
+        keys: Union[str, List[str]] = "motion",
+        num_person_key: str = "num_person",
+        clip_len: int = 300,
+        start_frame_key: str = "start_frame",
+    ):
+        if not isinstance(keys, list):
+            keys = [keys]
+        self.keys = keys
+        self.num_person_key = num_person_key
+        self.clip_len = int(clip_len)
+        self.start_frame_key = start_frame_key
+
+    @staticmethod
+    def _crop_tensor(data: torch.Tensor, clip_len: int) -> torch.Tensor:
+        if data.shape[-2] <= clip_len:
+            return data
+        return data[..., :clip_len, :]
+
+    def transform(self, results: Dict):
+        fps = results.get("fps")
+        max_frames = 0
+        for key in self.keys:
+            if key not in results:
+                continue
+            data = results[key]
+            if isinstance(data, (list, tuple)):
+                cropped = [self._crop_tensor(item, self.clip_len) for item in data]
+                results[key] = cropped
+                if cropped:
+                    max_frames = max(max_frames, max(int(item.shape[-2]) for item in cropped))
+            else:
+                cropped = self._crop_tensor(data, self.clip_len)
+                results[key] = cropped
+                max_frames = max(max_frames, int(cropped.shape[-2]))
+            results[f"{key}_num_frames"] = max_frames
+
+        if max_frames > 0:
+            results["num_frames"] = max_frames
+            if fps:
+                results["duration"] = max_frames / float(fps)
+            if "per_person_num_frames" in results:
+                results["per_person_num_frames"] = np.asarray(
+                    [min(int(t), self.clip_len) for t in results["per_person_num_frames"]],
+                    dtype=np.int64,
+                )
+            results[self.start_frame_key] = 0
+        return results
+
+
+@TRANSFORMS.register_module(force=True)
 class RandomCropPadding(BaseTransform):
     def __init__(
         self,

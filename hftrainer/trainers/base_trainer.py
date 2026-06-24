@@ -215,6 +215,31 @@ class BaseTrainer(nn.Module, ABC):
         """Return the ModelBundle held by this trainer."""
         return self.bundle
 
+    @staticmethod
+    def sum_train_losses(losses: Dict[str, Any]):
+        """Sum differentiable training losses while leaving diagnostics out.
+
+        Some loss modules return detached per-component scalars for logging
+        next to the actual optimization terms.  Including those detached
+        diagnostics in ``result['loss']`` inflates the reported loss scale
+        without changing gradients, which makes training curves misleading.
+        """
+        train_losses = [
+            v for v in losses.values()
+            if getattr(v, 'requires_grad', False)
+        ]
+        if not train_losses:
+            keys = ', '.join(losses.keys()) or '<empty>'
+            raise ValueError(
+                'No differentiable training losses found. '
+                f'Available loss keys: {keys}'
+            )
+
+        total = train_losses[0]
+        for value in train_losses[1:]:
+            total = total + value
+        return total
+
     def forward(self, *args, **kwargs):
         """Redirect forward() to train_step() for compatibility."""
         return self.train_step(*args, **kwargs)

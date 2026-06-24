@@ -34,10 +34,38 @@ class HyMotionT2MPipeline:
         bundle,
         num_steps: int = 50,
         text_guidance_scale: float = 5.0,
+        should_apply_smoothing: bool = True,
     ):
         self.bundle = bundle
         self.num_steps = num_steps
         self.text_guidance_scale = text_guidance_scale
+        self.should_apply_smoothing = should_apply_smoothing
+
+    @classmethod
+    def from_config(cls, cfg: Optional[dict] = None, **kwargs):
+        """Build a HYMotion T2M pipeline from a bundle config."""
+        from hftrainer.models.motion.hymotion_t2m import HyMotionT2MBundle
+
+        pipeline_kwargs = {
+            key: kwargs.pop(key)
+            for key in ("num_steps", "text_guidance_scale", "should_apply_smoothing")
+            if key in kwargs
+        }
+        bundle = HyMotionT2MBundle.from_config(cfg, **kwargs)
+        return cls(bundle, **pipeline_kwargs)
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):
+        """Build a HYMotion T2M pipeline from an hftrainer artifact."""
+        from hftrainer.models.motion.hymotion_t2m import HyMotionT2MBundle
+
+        pipeline_kwargs = {
+            key: kwargs.pop(key)
+            for key in ("num_steps", "text_guidance_scale", "should_apply_smoothing")
+            if key in kwargs
+        }
+        bundle = HyMotionT2MBundle.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        return cls(bundle, **pipeline_kwargs)
 
     @torch.no_grad()
     def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
@@ -103,15 +131,20 @@ class HyMotionT2MPipeline:
 
         do_cfg = self.text_guidance_scale > 1.0
 
-        # For CFG: prepare null text embeddings
-        # Official HY-Motion: only null the sentence-level embedding (vtxt),
-        # keep real token-level context (ctxt) and its mask for the unconditional branch.
-        # This matches the official enable_ctxt_null_feat=False default.
+        # For CFG: prepare null text embeddings.
+        # Official HY-Motion uses enable_ctxt_null_feat=True: the unconditional
+        # branch nulls BOTH the sentence-level (vtxt) AND the token-level context
+        # (ctxt), matching bundle.mask_text_cond(force_mask=True) which replaces
+        # ctxt with null_ctxt_input.expand(*ctxt.shape). Keeping the real ctxt for
+        # the unconditional branch (the old behaviour) gives a wrong CFG direction
+        # that, at guidance=5.0, amplifies high-frequency root-translation noise.
         if do_cfg:
             null_vtxt = self.bundle.null_vtxt_feat.expand_as(vtxt_input)
+            null_ctxt = self.bundle.null_ctxt_input.expand_as(ctxt_input)
             # Stack: [unconditional, conditional]
             vtxt_cfg = torch.cat([null_vtxt, vtxt_input], dim=0)
-            ctxt_cfg = torch.cat([ctxt_input, ctxt_input], dim=0)  # keep real ctxt for both
+            ctxt_cfg = torch.cat([null_ctxt, ctxt_input], dim=0)
+            # ctxt mask is shared (same length); null ctxt fills every token slot.
             ctxt_mask_cfg = torch.cat([ctxt_mask_temporal, ctxt_mask_temporal], dim=0)
 
         # ODE function
@@ -176,7 +209,15 @@ class HyMotionT2MPipeline:
         # only the first L frames contain the actual motion.
         sampled = sampled[:, :L, :]
 
-        # Decode to motion
-        result = self.bundle.decode_motion_from_latent(sampled)
+        # Decode to motion. The official inference path applies temporal
+        # smoothing, but keeping this switch makes raw-vs-smooth diagnostics
+        # possible without forking the sampler.
+        should_apply_smoothing = batch.get(
+            'should_apply_smoothing', self.should_apply_smoothing
+        )
+        result = self.bundle.decode_motion_from_latent(
+            sampled,
+            should_apply_smoothing=bool(should_apply_smoothing),
+        )
         result['latent'] = sampled
         return result

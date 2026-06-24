@@ -6,7 +6,17 @@ from mmcv.transforms import BaseTransform
 import torch
 
 from hftrainer.datasets.motion.motionhub.common import hm3d_pattern, read_json, read_txt
+from pathlib import Path
+
 from hftrainer.registry import TRANSFORMS
+
+
+def _motionhub_qwen3_root() -> str:
+    env_root = os.environ.get('HFTRAINER_MOTIONHUB_QWEN3_ROOT')
+    if env_root:
+        return env_root
+    # load_text.py -> transforms -> motionhub -> motion -> datasets -> hftrainer -> repo
+    return str(Path(__file__).resolve().parents[5] / 'data' / 'motionhub_qwen3')
 
 
 # ---------------------------------------------------------------------------
@@ -17,9 +27,9 @@ from hftrainer.registry import TRANSFORMS
 # ---------------------------------------------------------------------------
 CAPTION_TO_QWEN3_DIR = {
     # Academic / AcademicRetarget / Game / Taobao (and their mirror variants)
-    'human_checked_augmented_caption': 'qwen3_augmented',
-    'human_checked_augmented_caption_deprecated_mirror_251215': 'qwen3_augmented',
-    'human_checked_augmented_caption_mirror': 'qwen3_augmented',
+    'human_checked_augmented_caption': 'qwen3_human_checked_short',
+    'human_checked_augmented_caption_deprecated_mirror_251215': 'qwen3_human_checked_short',
+    'human_checked_augmented_caption_mirror': 'qwen3_human_checked_short',
     'human_checked_caption': 'qwen3_human_checked_short',
     'human_checked_caption_deprecated_mirror_251215': 'qwen3_human_checked_short',
     'human_checked_caption_mirror': 'qwen3_human_checked_short',
@@ -33,6 +43,8 @@ CAPTION_TO_QWEN3_DIR = {
     'augmented_caption_deprecated_250926': 'qwen3_augmented',
     # PerMo editing instructions (Neutral→Emotion style transfer)
     'editing_caption': 'qwen3_editing',
+    # MotionHub high-quality captions (macro/meso/micro hierarchy).
+    'hierarchical_caption': 'qwen3_hierarchical',
 }
 
 
@@ -60,8 +72,23 @@ def _caption_path_to_embedding_path(caption_path: str) -> Optional[str]:
     for i, part in enumerate(parts):
         if part in CAPTION_TO_QWEN3_DIR:
             qwen3_dir = CAPTION_TO_QWEN3_DIR[part]
-            new_parts = parts[:i] + [qwen3_dir] + parts[i + 1:]
-            pt_path = '/'.join(new_parts)
+            if part == 'hierarchical_caption':
+                # MotionHub features are stored outside the source MotionHub tree:
+                # data/motionhub/<subset>/hierarchical_caption/x.json
+                #   -> data/motionhub_qwen3/<subset>/qwen3_hierarchical/x.pt
+                try:
+                    motionhub_idx = parts.index('motionhub')
+                    rel_parts = parts[motionhub_idx + 1:]
+                except ValueError:
+                    rel_parts = parts[i - 1:] if i > 0 else parts[i:]
+                for j, rel_part in enumerate(rel_parts):
+                    if rel_part == part:
+                        rel_parts[j] = qwen3_dir
+                        break
+                pt_path = os.path.join(_motionhub_qwen3_root(), *rel_parts)
+            else:
+                new_parts = parts[:i] + [qwen3_dir] + parts[i + 1:]
+                pt_path = '/'.join(new_parts)
             # Replace .json → .pt
             if pt_path.endswith('.json'):
                 pt_path = pt_path[:-5] + '.pt'

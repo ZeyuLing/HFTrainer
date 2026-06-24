@@ -266,7 +266,7 @@ class HyMotionUMOTrainer(BaseTrainer):
         else:
             raise ValueError(f'Unsupported pred_type: {self.bundle.pred_type}')
 
-        loss = sum(losses.values())
+        loss = self.sum_train_losses(losses)
         result = {'loss': loss}
         for k, v in losses.items():
             result[f'loss_{k}'] = v.detach()

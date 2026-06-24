@@ -5,7 +5,22 @@ Imports all motion sub-modules to trigger registry registrations.
 Non-motion task stacks (classification / GAN / LLM / SD15 / Wan / DMD)
 have been removed from this branch; the corresponding loaders live
 on the main branch.
+
+Import-light escape hatch
+-------------------------
+By default, importing ``hftrainer`` eagerly imports the full motion training
+stack (DeepSpeed, transformers, every bundle/trainer/pipeline) to populate the
+registries. This is expensive. The public motion library
+(``hftrainer.motion.*``) does NOT need any of that.
+
+Set ``HFTRAINER_SKIP_AUTOREGISTER=1`` to skip auto-registration so that
+``import hftrainer.motion.representation.rotation`` (etc.) stays cheap. Training
+and inference entry points (``tools/train.py`` / ``tools/infer.py``) should call
+``hftrainer.register_all_modules()`` explicitly when this is set. Default
+behavior is unchanged.
 """
+
+import os as _os
 
 # Core infrastructure
 from hftrainer.registry import (
@@ -13,9 +28,10 @@ from hftrainer.registry import (
     DATASETS, TRANSFORMS, HOOKS, EVALUATORS, VISUALIZERS,
     build_hf_model_from_cfg,
 )
-from hftrainer.models.base_model_bundle import ModelBundle
-from hftrainer.trainers.base_trainer import BaseTrainer
-from hftrainer.runner.accelerate_runner import AccelerateRunner
+
+_SKIP_AUTOREGISTER = _os.environ.get("HFTRAINER_SKIP_AUTOREGISTER", "").lower() in (
+    "1", "true", "yes", "on",
+)
 
 # ── Register HF model classes in HF_MODELS registry ──
 # (These are loaded on-demand via _import_hf_class, but explicit registration
@@ -65,8 +81,6 @@ def _register_hf_classes():
             HF_MODELS.register_module(name=name, module=cls)
 
 
-_register_hf_classes()
-
 # ── Import motion task modules to trigger @register_module decorators ──
 def _import_task_modules():
     import importlib, warnings
@@ -95,8 +109,8 @@ def _import_task_modules():
         'hftrainer.models.motion.vermo.fs_quantizer',
         'hftrainer.models.motion.prism.network.transformer_prism',
         'hftrainer.models.motion.prism.network.transformer_prism_notext',
-        'hftrainer.models.motion.components.body_models.smplx_lite',
-        'hftrainer.models.motion.components.motion_processor.smpl_processor',
+        'hftrainer.motion.body_models.smplx_lite',
+        'hftrainer.motion.processing.smpl_processor',
         'hftrainer.models.motion.vermo.wavtokenizer.wavtokenizer',
         'hftrainer.models.motion.vermo.llama',
         'hftrainer.models.motion.vermo.qwen3',
@@ -128,15 +142,45 @@ def _import_task_modules():
         'hftrainer.datasets.motion.hymotion_t2m_dataset',
         'hftrainer.datasets.motion.motionhub.transforms',
         'hftrainer.datasets.motion.motionhub',
+        # HyMotion-V2M (video/feature -> motion; vendored self-contained source)
+        'hftrainer.models.motion.hymotion_v2m.bundle',
+        'hftrainer.pipelines.motion.hymotion_v2m_pipeline',
+        'hftrainer.datasets.motion.hymotion_v2m_dataset',
         # MotionCLIP evaluator
         'hftrainer.models.motion.motion_clip',
         'hftrainer.trainers.motion.motion_clip_trainer',
         'hftrainer.pipelines.motion.motion_clip_pipeline',
         'hftrainer.datasets.motion.motionclip_synthetic_dataset',
-        # PhysFlow (KIMODO-G1 online adversarial)
+        # PhysFlow (KIMODO-G1 / HyMotion-G1 online adversarial)
         'hftrainer.models.motion.physflow.bundle',
         'hftrainer.models.motion.physflow.dataset',
+        'hftrainer.models.motion.physflow.g1_dataset',
         'hftrainer.trainers.motion.physflow_trainer',
+        'hftrainer.trainers.motion.physflow_g1_trainer',
+        # MDM (open-source T2M baseline; vendored, ref_repo-independent)
+        'hftrainer.models.motion.mdm.bundle',
+        'hftrainer.pipelines.mdm.pipeline',
+        # MotionStreamer (open-source T2M baseline; vendored, ref_repo-independent)
+        'hftrainer.models.motion.motionstreamer.bundle',
+        'hftrainer.pipelines.motionstreamer.pipeline',
+        # MotionMillion / "Go to Zero" (open-source T2M baseline; vendored)
+        'hftrainer.models.motion.motionmillion.bundle',
+        'hftrainer.pipelines.motionmillion.pipeline',
+        # T2M-GPT (VQ-VAE + GPT; open-source T2M baseline; vendored, ref_repo-free)
+        'hftrainer.models.motion.t2mgpt.bundle',
+        'hftrainer.pipelines.t2mgpt.pipeline',
+        # MoMask (RVQ + masked/residual transformer; vendored, ref_repo-independent)
+        'hftrainer.models.motion.momask.bundle',
+        'hftrainer.pipelines.momask.pipeline',
+        # MoGenTS (dual spatial-temporal RVQ + masked/residual transformers)
+        'hftrainer.models.motion.mogents.bundle',
+        'hftrainer.pipelines.mogents.pipeline',
+        # MotionLCM (latent consistency model; vendored, ref_repo-independent)
+        'hftrainer.models.motion.motionlcm.bundle',
+        'hftrainer.pipelines.motionlcm.pipeline',
+        # KIMODO (official NVIDIA runtime wrapper; self-contained hftrainer artifacts)
+        'hftrainer.models.motion.kimodo.bundle',
+        'hftrainer.pipelines.motion.kimodo_pipeline',
     ]
 
     for mod_name in modules_to_import:
@@ -152,7 +196,33 @@ def _import_task_modules():
             pass
 
 
-_import_task_modules()
+def register_all_modules():
+    """Eagerly import the full motion stack to populate all registries.
+
+    Call this explicitly when ``HFTRAINER_SKIP_AUTOREGISTER`` is set (e.g. at the
+    top of training/inference entry points). It also binds the core classes
+    (``ModelBundle`` / ``BaseTrainer`` / ``AccelerateRunner``) onto this module.
+    Idempotent and cheap to call more than once (Python import caching).
+    """
+    global ModelBundle, BaseTrainer, AccelerateRunner
+    from hftrainer.models.base_model_bundle import ModelBundle  # noqa: F401
+    from hftrainer.trainers.base_trainer import BaseTrainer  # noqa: F401
+    from hftrainer.runner.accelerate_runner import AccelerateRunner  # noqa: F401
+    _register_hf_classes()
+    _import_task_modules()
+
+
+if not _SKIP_AUTOREGISTER:
+    register_all_modules()
+else:
+    # Import-light mode: provide lazy access to the core classes so that
+    # ``from hftrainer import ModelBundle`` still works on demand.
+    def __getattr__(name):  # PEP 562
+        if name in ("ModelBundle", "BaseTrainer", "AccelerateRunner"):
+            register_all_modules()
+            return globals()[name]
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __version__ = '0.1.0'
 
@@ -163,4 +233,5 @@ __all__ = [
     'ModelBundle',
     'BaseTrainer',
     'AccelerateRunner',
+    'register_all_modules',
 ]

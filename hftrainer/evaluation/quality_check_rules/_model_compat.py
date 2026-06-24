@@ -5,7 +5,7 @@ All imports come from hftrainer. No fallback — import errors surface immediate
 
 from __future__ import annotations
 
-from hftrainer.models.motion.components.body_models.smplx_lite import (
+from hftrainer.motion.body_models.smplx_lite import (
     SmplxLiteJ24,
     batch_rigid_transform_v2,
 )

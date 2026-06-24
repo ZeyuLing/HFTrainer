@@ -583,6 +583,40 @@ def sample_mask_rank_k(
     return mask
 
 
+def _sample_trajectory_control_mask(T: int, rng: np.random.RandomState) -> np.ndarray:
+    """Dedicated PURE trajectory-control mask: lock ONLY translation channels
+    (dims 0/1/2) on dense or (more often) sparse periodic frames; all other
+    195 dims stay free. Boosts the heavily under-represented E5 pattern (pure
+    sparse XYZ waypoints), which was only ~0.58% under the default Rank-K prior
+    -> the model under-learned smooth sparse-waypoint interpolation and snapped
+    (per-frame spikes -> jitter). See docs/temp/traj_jitter_autodebug. 2026-06-22.
+    """
+    lock = np.zeros((T, MOTION_DIM), dtype=np.uint8)
+    # Time: bias to sparse periodic (matches eval sparse-30) + some dense.
+    t_vec, _ = sample_temporal(T, rng, primitive_weights={
+        'all': 1.5, 'empty': 0.0, 'interval': 1.0,
+        'periodic': 4.0, 'renewal': 1.0, 'markov': 0.5,
+    })
+    if t_vec.sum() == 0:
+        t_vec = _t_all(T, rng)
+    # Eval always keeps the last frame as a waypoint; mirror that.
+    t_vec = t_vec.copy()
+    t_vec[-1] = 1
+    # XYZ subset biased toward FULL xyz (E5_E was the most under-covered),
+    # while keeping XZ (E5_B) and single-axis variants reachable.
+    _xyz_opts = ((1, 1, 1, 5.0), (1, 0, 1, 3.0), (0, 1, 1, 1.0),
+                 (1, 1, 0, 1.0), (1, 0, 0, 0.5), (0, 0, 1, 0.5))
+    _w = np.array([o[3] for o in _xyz_opts], dtype=np.float64)
+    _w = _w / _w.sum()
+    tx, ty, tz, _ = _xyz_opts[int(rng.choice(len(_xyz_opts), p=_w))]
+    if not (tx or tz):
+        tx = True
+    for d, on in ((0, tx), (1, ty), (2, tz)):
+        if on:
+            lock[:, d] = t_vec
+    return (1 - lock).astype(np.float32)
+
+
 def sample_condition_v3(
     T: int,
     rng: np.random.RandomState,
@@ -590,6 +624,7 @@ def sample_condition_v3(
     k_weights: Sequence[float] = DEFAULT_K_WEIGHTS,
     temporal_weights: Optional[Dict[str, float]] = None,
     kind_weights: Optional[Dict[str, float]] = None,
+    traj_control_prob: float = 0.0,
 ) -> Tuple[np.ndarray, bool]:
     """Drop-in replacement for ``condition_sampler_v2.sample_condition``.
 
@@ -602,6 +637,12 @@ def sample_condition_v3(
     The ``edit_mode`` is sampled **independently** of the Rank-K mask
     (see design doc §7).
     """
+    # Dedicated pure-trajectory-control branch. Default prob 0.0 keeps the
+    # distribution unchanged (and keeps T2M-only configs pure); set >0 to boost
+    # the under-represented E5 sparse-XYZ trajectory pattern (2026-06-22).
+    if traj_control_prob > 0.0 and rng.random() < traj_control_prob:
+        return _sample_trajectory_control_mask(T, rng), False
+
     mask = sample_mask_rank_k(
         T, rng,
         k_weights=k_weights,

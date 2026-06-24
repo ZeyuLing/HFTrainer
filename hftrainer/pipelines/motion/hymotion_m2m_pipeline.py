@@ -31,17 +31,59 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
 from hftrainer.registry import PIPELINES
+from hftrainer.pipelines.motion.repair_utils import (
+    compute_ada_keep_mask,
+    compute_strict_adaptive_mask,
+    joint_mask_to_dim_mask,
+)
 
 
 def _length_to_mask(lengths: Tensor, max_len: int) -> Tensor:
     if lengths.ndim == 1:
         lengths = lengths.unsqueeze(1)
     return torch.arange(max_len, device=lengths.device).expand(len(lengths), max_len) < lengths
+
+
+def _gaussian_temporal_smooth(
+    x: Tensor,
+    sigma: float,
+    protect_mask: Optional[Tensor] = None,
+) -> Tensor:
+    """1-D Gaussian temporal smoothing along axis 1 of a (B, T, D) tensor.
+
+    Ported from ``scripts/eval/eval_m2m_v2_all_tasks._gaussian_temporal_smooth``.
+    Used to pre-smooth the LQ ``clean_motion`` (the *kept* region the model
+    conditions on, and which is copied back into the output) before masked
+    imputation. Because partial regeneration keeps the jittery LQ on unmasked
+    cells, smoothing there both lowers the residual jitter in the output and
+    gives the regenerated region a smooth boundary to blend against.
+
+    Where ``protect_mask > 0.5`` (the *generate* region) values pass through
+    unchanged -- smoothing there is pointless (overwritten by the model) and
+    would bleed bad values across defect boundaries.
+    """
+    if sigma <= 0.0:
+        return x
+    T = x.shape[1]
+    radius = max(1, int(round(3.0 * sigma)))
+    offsets = torch.arange(-radius, radius + 1, dtype=x.dtype, device=x.device)
+    kernel = torch.exp(-(offsets ** 2) / (2.0 * sigma * sigma))
+    kernel = kernel / kernel.sum()
+    B, _, D = x.shape
+    x_flat = x.permute(0, 2, 1).reshape(B * D, 1, T)
+    w = kernel.view(1, 1, -1)
+    x_pad = F.pad(x_flat, (radius, radius), mode='replicate')
+    y_flat = F.conv1d(x_pad, w)
+    y = y_flat.reshape(B, D, T).permute(0, 2, 1).contiguous()
+    if protect_mask is not None:
+        y = torch.where(protect_mask > 0.5, x, y)
+    return y
 
 
 @PIPELINES.register_module()
@@ -500,4 +542,382 @@ class HyMotionM2MPipeline:
         result = self.bundle.decode_motion_from_latent(sampled)
         result['latent'] = sampled
         result['rotation_space'] = getattr(self.bundle, 'rotation_space', 'local')
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Motion repair (E9): defect detection + masked regeneration.        #
+    # ------------------------------------------------------------------ #
+    T_PAD_REPAIR = 360  # the context length the model was trained with
+
+    def _repair_forward(
+        self,
+        motion_norm: Tensor,     # (1, T_pad, D) normalized LQ, zero-padded
+        mask135: Tensor,         # (1, T_pad, D) 1=generate, 0=keep
+        clean_motion: Tensor,    # (1, T_pad, D) normalized full LQ (no zeroing)
+        valid_len: int,
+        replacement_guidance: str,
+        sdedit_tau: float,
+        text_fields: Optional[Dict[str, Any]] = None,
+    ) -> Tensor:
+        """One masked-imputation forward pass. Returns normalized latent
+        ``(1, T_pad, D)``. Temporarily overrides the instance replacement /
+        SDEdit settings so a single pipeline object can serve every repair
+        configuration without re-construction."""
+        prev_repl, prev_tau = self.replacement_guidance, self.sdedit_tau
+        self.replacement_guidance = replacement_guidance
+        self.sdedit_tau = float(sdedit_tau)
+        try:
+            src_motion = motion_norm * (1.0 - mask135)  # inpaint: zero masked
+            batch = {
+                'src_motion': src_motion,
+                'src_mask': mask135,
+                'src_length': [valid_len],
+                'tgt_length': [valid_len],
+                'clean_motion': clean_motion,
+            }
+            if text_fields is not None:
+                batch.update(text_fields)
+            out = self._inference(batch)
+        finally:
+            self.replacement_guidance, self.sdedit_tau = prev_repl, prev_tau
+        return out['latent']
+
+    @torch.no_grad()
+    def _self_denoise_joint_change(self, mn: Tensor, stage1: Tensor):
+        """Physical per-joint change for self-denoise detection.
+
+        Returns ``(jchg, tchg)`` where ``jchg`` is the (T, 22) geodesic angle
+        (radians) between the LQ and stage-1 *local* joint rotations and
+        ``tchg`` is the (T,) translation L2 change (meters). Measuring in a
+        physical space (angle/meters) -- instead of the z-scored channel |Δ|
+        used by ``compute_ada_keep_mask`` -- gives the threshold a real meaning
+        and avoids the below-noise-floor saturation; magnitude aggregation
+        (one scalar per joint) replaces the coverage-amplifying 6-channel OR.
+        """
+        from hftrainer.models.motion.hymotion_m2m.network.geometry import (
+            rot6d_to_rotation_matrix,
+        )
+        raw_lq = self.bundle.denormalize_motion(mn)        # (1, T, D)
+        raw_s1 = self.bundle.denormalize_motion(stage1)
+        T = raw_lq.shape[1]
+        r6_lq = raw_lq[0, :, 3:135].reshape(T, 22, 6)
+        r6_s1 = raw_s1[0, :, 3:135].reshape(T, 22, 6)
+        if getattr(self.bundle, 'rotation_space', 'local') == 'global':
+            # Compare *local* joint rotations (isolates each joint's own
+            # defect; global angles would propagate parent error down the
+            # kinematic chain and inflate coverage).
+            from hftrainer.datasets.motion.motionhub.transforms.fk_utils import (
+                global_to_local_rot6d_torch,
+            )
+            r6_lq = global_to_local_rot6d_torch(r6_lq.unsqueeze(0))[0]
+            r6_s1 = global_to_local_rot6d_torch(r6_s1.unsqueeze(0))[0]
+        R_lq = rot6d_to_rotation_matrix(r6_lq.reshape(-1, 6)).reshape(T, 22, 3, 3)
+        R_s1 = rot6d_to_rotation_matrix(r6_s1.reshape(-1, 6)).reshape(T, 22, 3, 3)
+        R_rel = torch.matmul(R_lq.transpose(-1, -2), R_s1)
+        tr = R_rel[..., 0, 0] + R_rel[..., 1, 1] + R_rel[..., 2, 2]
+        cos = ((tr - 1.0) * 0.5).clamp(-1.0 + 1e-6, 1.0 - 1e-6)
+        jchg = torch.arccos(cos)                            # (T, 22) radians
+        tchg = torch.linalg.norm(
+            raw_lq[0, :, :3] - raw_s1[0, :, :3], dim=-1)    # (T,) meters
+        return jchg.cpu().numpy(), tchg.cpu().numpy()
+
+    @staticmethod
+    def _joint_change_to_raw_mask(jchg, tchg, model_dim, joint_thr, trans_thr):
+        """Threshold the physical per-joint angle / translation change into a
+        ``(T, model_dim)`` raw generate-mask (1=defect). Flags a joint's rot6d
+        (and FK-position) channels when its angle change exceeds ``joint_thr``
+        (rad); flags translation when ``tchg`` exceeds ``trans_thr`` (m)."""
+        T = jchg.shape[0]
+        out = np.zeros((T, model_dim), dtype=np.float32)
+        jflag = jchg > float(joint_thr)        # (T, 22)
+        tflag = tchg > float(trans_thr)        # (T,)
+        out[tflag, :3] = 1.0
+        for j in range(22):
+            out[jflag[:, j], 3 + j * 6: 3 + (j + 1) * 6] = 1.0
+            if model_dim >= 198 and j >= 1:
+                out[jflag[:, j], 135 + (j - 1) * 3: 135 + j * 3] = 1.0
+        return out
+
+    @torch.no_grad()
+    def infer_repair(
+        self,
+        motion: Tensor,
+        lengths: Optional[List[int]] = None,
+        *,
+        # mask source (axis 2)
+        mask_source: str = 'self_denoise',     # 'self_denoise' | 'provided'
+        adaptive_mask: Optional[Tensor] = None,  # (B,T,22) or (B,T,D), 1=defect
+        detect_tau: float = 0.3,                # SDEdit tau for stage-1 projection
+        detect_metric: str = 'angle',           # 'angle' (MoGenDIT-style) | 'abs'
+        detect_joint_thr_rad: float = 0.15,      # per-joint geodesic angle (rad)
+        detect_trans_thr_m: float = 0.05,        # translation change (meters)
+        detect_threshold_mode: str = 'abs',     # 'abs' | 'topk_pct' (metric='abs')
+        detect_threshold: float = 0.1,
+        # mask tightening
+        strict_tighten: bool = True,
+        strict_dilate: int = 2,
+        strict_min_blob: int = 3,
+        # the 4 configurable axes
+        translation_mode: str = 'lock',         # axis 1: 'lock'|'detected'|'all'
+        mask_granularity: str = 'joint',        # axis 4: 'joint'|'frame'
+        sdedit_tau: float = 0.5,                 # axis 3: 0=from-scratch, >0=partial
+        replacement_guidance: str = 'skip_last',
+        presmooth_sigma: float = 0.0,            # Gaussian temporal pre-smooth of kept LQ
+        text_fields: Optional[Dict[str, Any]] = None,
+        return_mask: bool = True,
+    ) -> Dict[str, Any]:
+        """Repair defective motion with masked regeneration.
+
+        This is the single canonical entry point for HyMotion-M2M motion
+        repair -- call this instead of hand-assembling a batch, so the repair
+        recipe lives in one discoverable place.
+
+        The four configurable axes
+        --------------------------
+        translation_mode : axis 1 -- how the global root translation is treated.
+            ``'lock'`` never regenerates translation (M7 convention; keeps the
+            global trajectory locked to the input -- recommended, avoids root
+            drift). ``'detected'`` regenerates translation only on frames where
+            the pelvis is flagged defective. ``'all'`` regenerates translation
+            on every valid frame.
+        mask_source : axis 2 -- where the defect mask comes from.
+            ``'self_denoise'`` (ours): run a stage-1 SDEdit-from-LQ projection
+            with this model and threshold ``|LQ - projection|`` (MoGenDIT-style
+            ada_denoise but with *our* model). ``'provided'``: use the mask in
+            ``adaptive_mask`` (e.g. a MoGenDIT-computed or QC mask). Keeping the
+            external mask as a passed-in argument avoids coupling this pipeline
+            to other methods' models.
+        sdedit_tau : axis 3 -- regeneration strength for masked cells.
+            ``0`` starts the masked region from pure noise (full regeneration
+            from scratch). ``>0`` starts from ``tau*noise + (1-tau)*LQ`` and only
+            runs the last ``tau`` of the ODE (partial re-noise; stays close to
+            the input -- gentle cleanup).
+        mask_granularity : axis 4 -- spatial extent of regeneration.
+            ``'joint'`` regenerates only the flagged joints' channels.
+            ``'frame'`` regenerates every joint of any frame that has at least
+            one flagged joint (whole-frame regeneration). ``'channel'``
+            regenerates only the individual flagged channels (no per-joint OR,
+            no strict tightening) -- the MoGenDIT-faithful per-element scheme;
+            requires ``mask_source='self_denoise'``.
+
+        Parameters
+        ----------
+        motion : (B, T, D) or (T, D) tensor
+            Raw (un-normalized) LQ motion in the model's representation
+            (135-dim, local rotation). Must already be at the model fps.
+        lengths : optional list[int]
+            Valid frame count per sample (defaults to full T).
+
+        Returns
+        -------
+        dict with ``motion`` (B,T,135 repaired: transl + rot6d), and when
+        ``return_mask``: ``joint_mask`` (B,T,22 bool) and ``mask``
+        (B,T,model_dim generate-mask).
+        """
+        if mask_source not in ('self_denoise', 'provided'):
+            raise ValueError(f'mask_source must be self_denoise|provided, got {mask_source!r}')
+        if mask_source == 'provided' and adaptive_mask is None:
+            raise ValueError("mask_source='provided' requires adaptive_mask")
+
+        device = next(self.bundle.motion_transformer.parameters()).device
+        if motion.ndim == 2:
+            motion = motion.unsqueeze(0)
+        motion = motion.float().to(device)
+        B, T, D = motion.shape
+        T_PAD = self.T_PAD_REPAIR
+        if T > T_PAD:
+            raise NotImplementedError(
+                f'infer_repair supports motions up to {T_PAD} frames (got {T}). '
+                'For longer sequences, chunk into <=360-frame windows and stitch, '
+                'or use the windowed eval path in eval_m2m_v2_all_tasks.py.'
+            )
+        if lengths is None:
+            lengths = [T] * B
+
+        # The model operates on its native motion_dim (198 = 3 transl + 132
+        # rot6d + 63 FK joint positions). The caller passes 135-dim (transl +
+        # rot6d). We FK-expand 135->198 with the bundle's bone offsets, mirroring
+        # the trainer/eval (eval_m2m_v2_all_tasks.motion_135_to_198) so mean/std
+        # and the per-channel layout match training. Output is decoded back to
+        # 135 (transl + rot6d) which is the canonical caller representation.
+        from hftrainer.pipelines.motion.repair_utils import motion_135_to_198
+        rot_space = getattr(self.bundle, 'rotation_space', 'local')
+        # The model dim is the normalizer width (mean/std), not necessarily a
+        # `motion_dim` attribute (which may be unset on some bundles).
+        model_dim = int(self.bundle.mean.shape[-1])
+        bone_offsets_np = None
+        if model_dim >= 198:
+            bone_offsets_np = self.bundle.get_bone_offsets().cpu().numpy()  # (22,3)
+
+        local_to_global = None
+        if rot_space == 'global':
+            from hftrainer.datasets.motion.motionhub.transforms.fk_utils import (
+                local_to_global_rot6d_torch as local_to_global,
+            )
+
+        repaired = motion.clone()
+        joint_masks = np.zeros((B, T, 22), dtype=bool)
+        mask_dim_out = np.zeros((B, T, model_dim), dtype=np.float32)
+
+        for b in range(B):
+            L = int(lengths[b])
+            m135 = motion[b].detach().cpu().numpy()              # (T,135) local
+
+            # 135 -> model_dim raw (append FK positions for 198-dim models).
+            if model_dim >= 198:
+                raw = motion_135_to_198(m135, bone_offsets_np)   # (T,198) local
+            else:
+                raw = m135.astype(np.float32).copy()
+            # local -> global rot6d if the model trains in world frame.
+            if local_to_global is not None:
+                rl = torch.from_numpy(
+                    raw[:, 3:135].reshape(T, 22, 6)).float()
+                raw = raw.copy()
+                raw[:, 3:135] = local_to_global(rl).reshape(T, 132).numpy()
+
+            mn = self.bundle.normalize_motion(
+                torch.from_numpy(raw).float().unsqueeze(0).to(device))  # (1,T,model_dim)
+            clean = mn.clone()
+            if T < T_PAD:
+                # Replicate the last valid frame into the pad region (static
+                # hold) rather than zero-padding. Zeros == the normalized MEAN
+                # pose, and because pad frames free-evolve under the ODE the
+                # last *valid* frame gets pulled toward that mean pose -> a
+                # systematic last-frame teleport (jumpLast ~20x the normal
+                # per-frame step on ~all clips). A replicated static hold is
+                # in-distribution (many training clips end static) and keeps
+                # the boundary continuous.
+                n_pad = T_PAD - T
+                mn = torch.cat([mn, mn[:, -1:].expand(-1, n_pad, -1)], dim=1)
+                clean = torch.cat([clean, clean[:, -1:].expand(-1, n_pad, -1)], dim=1)
+
+            # Step A: base defect mask (model_dim, 1=generate).
+            if mask_source == 'self_denoise':
+                ones = torch.ones_like(mn)
+                ones[:, 0, 0] = 0.0  # one keep cell so SDEdit branch activates
+                stage1 = self._repair_forward(
+                    mn, ones, clean, valid_len=L,
+                    replacement_guidance='skip_last', sdedit_tau=detect_tau,
+                    text_fields=None,
+                )
+                if mask_granularity == 'channel':
+                    # MoGenDIT-faithful: pure per-channel keep/regenerate in the
+                    # normalized space (high_change = |LQ - projection| > thr),
+                    # with NO per-joint OR aggregation. Each of the model_dim
+                    # channels is decided independently, exactly like MoGenDIT's
+                    # official ada_denoise (change_threshold on the 201-dim rep).
+                    ch_change = np.abs(
+                        mn[0].cpu().numpy() - stage1[0].cpu().numpy())
+                    raw_mask = (ch_change > float(detect_threshold)).astype(
+                        np.float32)  # (T_PAD, model_dim)
+                elif detect_metric == 'angle':
+                    # MoGenDIT-style: compare in a *physical* space (per-joint
+                    # geodesic angle in radians + translation in meters) so the
+                    # threshold has meaning and is not buried under the z-scored
+                    # reconstruction noise floor; aggregate by magnitude (one
+                    # scalar/joint), not a 6-channel OR.
+                    jchg, tchg = self._self_denoise_joint_change(mn, stage1)
+                    raw_mask = self._joint_change_to_raw_mask(
+                        jchg, tchg, model_dim,
+                        joint_thr=detect_joint_thr_rad,
+                        trans_thr=detect_trans_thr_m,
+                    )
+                elif detect_metric == 'abs':
+                    raw_mask = compute_ada_keep_mask(
+                        mn[0].cpu().numpy(), stage1[0].cpu().numpy(),
+                        threshold_mode=detect_threshold_mode,
+                        threshold=detect_threshold,
+                    )  # (T_PAD, model_dim)
+                else:
+                    raise ValueError(
+                        f'detect_metric must be angle|abs, got {detect_metric!r}')
+            else:
+                am = adaptive_mask[b]
+                am = am.cpu().numpy() if isinstance(am, Tensor) else np.asarray(am)
+                raw_mask = np.zeros((T_PAD, model_dim), dtype=np.float32)
+                if am.ndim == 2 and am.shape[-1] == 22:
+                    jm = am[:T].astype(np.float32)
+                    raw_mask[:T, :3] = jm[:, 0:1]
+                    for j in range(22):
+                        raw_mask[:T, 3 + j * 6:3 + (j + 1) * 6] = jm[:, j:j + 1]
+                    if model_dim >= 198:
+                        for j in range(1, 22):
+                            raw_mask[:T, 135 + (j - 1) * 3:135 + j * 3] = jm[:, j:j + 1]
+                else:  # already (T,D-ish): copy what fits
+                    cd = min(am.shape[-1], model_dim)
+                    raw_mask[:min(am.shape[0], T_PAD), :cd] = \
+                        am[:T_PAD, :cd].astype(np.float32)
+
+            if mask_granularity == 'channel':
+                # MoGenDIT-faithful path: no joint aggregation, no strict
+                # tightening -- the per-channel mask IS the dim mask. Only apply
+                # the translation policy and the valid-length guard.
+                dim_mask = raw_mask.astype(np.float32).copy()
+                dim_mask[L:] = 0.0
+                if translation_mode == 'lock':
+                    dim_mask[:, :3] = 0.0
+                elif translation_mode == 'all':
+                    dim_mask[:L, :3] = 1.0
+                # 'detected' keeps the per-channel translation decision as-is.
+                jflag = (dim_mask[:, 3:135].reshape(T_PAD, 22, 6) >= 0.5).any(-1)
+                jflag[L:] = False
+            else:
+                # Step B: tighten (strict) -> per-joint flag.
+                if strict_tighten:
+                    tight = compute_strict_adaptive_mask(
+                        raw_mask, dilate=strict_dilate, min_blob=strict_min_blob,
+                        motion_dim=model_dim,
+                        lock_trans=(translation_mode == 'lock'),
+                    )
+                else:
+                    tight = raw_mask
+                jflag = (tight[:, 3:135].reshape(T_PAD, 22, 6) >= 0.5).any(-1)
+                jflag[L:] = False  # pad frames are always known
+
+                # Step C: granularity (axis 4).
+                if mask_granularity == 'frame':
+                    frame_hit = jflag.any(axis=-1, keepdims=True)
+                    jflag = np.broadcast_to(frame_hit, jflag.shape).copy()
+                    jflag[L:] = False
+                elif mask_granularity != 'joint':
+                    raise ValueError(
+                        f'mask_granularity must be joint|frame|channel, '
+                        f'got {mask_granularity!r}')
+
+                # Step D: expand to dim mask with translation policy (axis 1).
+                dim_mask = joint_mask_to_dim_mask(
+                    jflag, motion_dim=model_dim,
+                    translation_mode=translation_mode, valid_len=L,
+                )
+            mask_t = torch.from_numpy(dim_mask).float().unsqueeze(0).to(device)
+
+            # Step D.5: pre-smooth the kept (unmasked) LQ. Partial regeneration
+            # keeps jittery LQ on unmasked cells -- both as the conditioning the
+            # model sees and as the values copied back into the output -- so the
+            # residual corruption jitter survives and seams appear at mask
+            # boundaries. A light Gaussian temporal smooth of the kept region
+            # lowers that jitter (protect_mask = generate region, left intact).
+            mn_e, clean_e = mn, clean
+            if presmooth_sigma > 0.0:
+                mn_e = _gaussian_temporal_smooth(mn, presmooth_sigma, protect_mask=mask_t)
+                clean_e = _gaussian_temporal_smooth(clean, presmooth_sigma, protect_mask=mask_t)
+
+            # Step E: masked regeneration (axis 3 = sdedit_tau).
+            latent = self._repair_forward(
+                mn_e, mask_t, clean_e, valid_len=L,
+                replacement_guidance=replacement_guidance, sdedit_tau=sdedit_tau,
+                text_fields=text_fields,
+            )
+            dec = self.bundle.decode_motion_from_latent(latent)   # local rot6d
+            transl = dec['transl'][0, :T]                          # (T,3)
+            rot6d = dec['rot6d'][0, :T].reshape(T, 132)            # (T,132) local
+            repaired[b] = torch.cat([transl, rot6d], dim=-1)
+
+            joint_masks[b] = jflag[:T]
+            mask_dim_out[b] = dim_mask[:T]
+
+        result: Dict[str, Any] = {'motion': repaired}
+        if return_mask:
+            result['joint_mask'] = torch.from_numpy(joint_masks)
+            result['mask'] = torch.from_numpy(mask_dim_out)
         return result

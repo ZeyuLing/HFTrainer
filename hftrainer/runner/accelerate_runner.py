@@ -535,6 +535,7 @@ class AccelerateRunner:
         # Handle checkpoint loading (skipped if pre-prepare load already handled it)
         if not _pre_loaded_model:
             runner._handle_load()
+        runner._apply_resume_lr_override()
 
         return runner
 
@@ -1130,6 +1131,35 @@ class AccelerateRunner:
             # a pretrained T2M checkpoint has the correct values.
             self._patch_zero_null_embeddings_from_pretrained()
 
+    def _apply_resume_lr_override(self):
+        """Optionally override optimizer LR after loading checkpoint state.
+
+        Full resumes restore optimizer param groups from the checkpoint, which
+        intentionally ignores the config optimizer LR.  Experiments sometimes
+        need to keep Adam moments while testing a new LR; ``resume_lr_override``
+        makes that explicit and visible in logs.
+        """
+        lr = getattr(self.cfg, 'resume_lr_override', None)
+        if lr is None:
+            return
+        lr = float(lr)
+        for opt_name, optimizer in self.optimizers.items():
+            for group_idx, group in enumerate(optimizer.param_groups):
+                old_lr = group.get('lr', None)
+                group['lr'] = lr
+                logger.info(
+                    "resume_lr_override: optimizer=%s group=%d lr %s -> %.6g",
+                    opt_name,
+                    group_idx,
+                    old_lr,
+                    lr,
+                )
+        if self.lr_schedulers:
+            logger.warning(
+                "resume_lr_override was applied with lr_schedulers present; "
+                "verify scheduler state is compatible with the overridden LR."
+            )
+
     def _load(self, path: str, load_scope: str = 'model',
               exclude_bundle_keys=None, skip_frozen: bool = False):
         """
@@ -1198,7 +1228,15 @@ class AccelerateRunner:
                 logger.info("Optimizer and training state reset to initial.")
                 logger.info(sep)
             except FileNotFoundError:
-                logger.warning(f"No model checkpoint found at {path}, skipping model load")
+                # An EXPLICIT load_from warm-start that points to a missing path
+                # must NOT silently fall through to random init: that footgun
+                # silently trained an entire co-evolution run from scratch.
+                raise FileNotFoundError(
+                    f"load_from(load_scope='model') points to a missing checkpoint: "
+                    f"{path}. Refusing to start training from random init. Fix the "
+                    f"`load_from.path` in the config (or create the warm-start "
+                    f"checkpoint) before launching."
+                )
         else:
             raise ValueError(f"Unknown load_scope: {load_scope}. Expected 'model' or 'full'.")
 
@@ -1267,7 +1305,11 @@ class AccelerateRunner:
 
         import glob, shutil
         pattern = os.path.join(self.work_dir, 'checkpoint-*')
-        candidates = [c for c in glob.glob(pattern) if os.path.isdir(c)]
+        candidates = [
+            c for c in glob.glob(pattern)
+            if os.path.isdir(c) and not os.path.islink(c)
+            and self._extract_ckpt_order(c) >= 0
+        ]
         ckpts = sorted(candidates, key=self._extract_ckpt_order)
         while len(ckpts) > max_keep:
             oldest = ckpts.pop(0)

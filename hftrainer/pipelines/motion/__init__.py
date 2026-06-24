@@ -4,6 +4,7 @@ from hftrainer.pipelines.motion.prism_pipeline import PrismPipeline
 from hftrainer.pipelines.motion.vermo_pipeline import VermoPipeline
 from hftrainer.pipelines.motion.hymotion_m2m_pipeline import HyMotionM2MPipeline
 from hftrainer.pipelines.motion.hymotion_t2m_pipeline import HyMotionT2MPipeline
+from hftrainer.pipelines.motion.kimodo_pipeline import KIMODOPipeline
 from hftrainer.pipelines.motion.mogendit_pipeline import MoGenDITRepairPipeline
 from hftrainer.pipelines.motion.motion_clip_pipeline import MotionCLIPPipeline
 
@@ -12,6 +13,7 @@ __all__ = [
     'VermoPipeline',
     'HyMotionM2MPipeline',
     'HyMotionT2MPipeline',
+    'KIMODOPipeline',
     'MoGenDITRepairPipeline',
     'MotionCLIPPipeline',
 ]

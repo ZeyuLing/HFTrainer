@@ -300,6 +300,63 @@ def compute_pa_mpjpe(
     return {'pa_mpjpe_mean': float(np.mean(errs))}
 
 
+def _rot6d_to_matrix_np(d6: np.ndarray) -> np.ndarray:
+    """(..., 6) rot6d (column convention) -> (..., 3, 3) rotation matrices.
+
+    A final SVD orthonormalization projects the Gram-Schmidt result onto SO(3).
+    This guarantees a *proper* rotation even when the two input vectors are
+    near-parallel/degenerate; without it the trace-based geodesic below can
+    report a spurious non-zero angle for two *identical* (but non-orthonormal)
+    reconstructions.
+    """
+    a1 = d6[..., 0:3]
+    a2 = d6[..., 3:6]
+    b1 = a1 / (np.linalg.norm(a1, axis=-1, keepdims=True) + 1e-8)
+    a2p = a2 - (np.sum(b1 * a2, axis=-1, keepdims=True)) * b1
+    b2 = a2p / (np.linalg.norm(a2p, axis=-1, keepdims=True) + 1e-8)
+    b3 = np.cross(b1, b2)
+    R = np.stack([b1, b2, b3], axis=-1)  # columns
+    # Project to nearest rotation (handles degenerate / non-orthonormal cases).
+    U, _, Vt = np.linalg.svd(R)
+    Rp = np.matmul(U, Vt)
+    det = np.linalg.det(Rp)
+    # Flip last column where det<0 to keep a right-handed (proper) rotation.
+    flip = det < 0
+    if np.any(flip):
+        U[flip, :, -1] *= -1.0
+        Rp = np.matmul(U, Vt)
+    return Rp
+
+
+def compute_rotation_ctrl_error(
+    pred_motion: np.ndarray,
+    gt_motion: np.ndarray,
+    mask: np.ndarray,
+) -> Dict[str, float]:
+    """Mean geodesic rotation error (degrees) on the *observed* joint rotations
+    of a part-control task (E10). The 135 layout is transl(3) + 22*rot6d(6); a
+    joint is "observed" when its 6 rot channels are all preserved (mask==0).
+
+    For replacement-guidance methods this is ~0 (the observed rotations are held
+    to the source); soft-conditioning baselines leak and score higher.
+    """
+    T = min(pred_motion.shape[0], gt_motion.shape[0], mask.shape[0])
+    if T < 1 or pred_motion.shape[-1] < 135:
+        return {}
+    pj = pred_motion[:T, 3:135].reshape(T, 22, 6)
+    gj = gt_motion[:T, 3:135].reshape(T, 22, 6)
+    mj = mask[:T, 3:135].reshape(T, 22, 6)
+    observed = mj.max(axis=-1) < 0.5  # (T, 22) preserved rotation joints
+    if not observed.any():
+        return {}
+    Rp = _rot6d_to_matrix_np(pj[observed])
+    Rg = _rot6d_to_matrix_np(gj[observed])
+    rel = np.matmul(np.swapaxes(Rp, -1, -2), Rg)
+    trace = rel[..., 0, 0] + rel[..., 1, 1] + rel[..., 2, 2]
+    ang = np.arccos(np.clip((trace - 1.0) / 2.0, -1.0, 1.0))
+    return {'rot_ctrl_err_deg': float(np.degrees(ang).mean())}
+
+
 # =====================================================================
 # Jitter (position-based)
 # =====================================================================
@@ -435,10 +492,33 @@ def compute_trajectory_metrics(
     # FDE: error at last frame
     fde = float(np.linalg.norm(pred_root_xz[-1] - gt_root_xz[-1]))
 
-    return {
+    out = {
         'trajectory_ade': ade,
         'trajectory_fde': fde,
     }
+
+    # --- Trajectory adherence: Traj.Err + Fail@k on the *controlled* (observed)
+    # translation axes, evaluated only at the *control* frames where those axes
+    # are actually given. The control signal is the translation channels with
+    # mask==0 (preserved); the metric measures how closely the generated pelvis
+    # follows the supplied waypoints/path. For dense control every frame is a
+    # control frame; for sparse waypoints only the supplied frames count.
+    # Replacement-guidance methods score ~0; soft-conditioning baselines drift.
+    if mask is not None and mask.shape[-1] >= 3:
+        T_align = min(mask.shape[0], pred_motion.shape[0], gt_motion.shape[0])
+        tm = mask[:T_align, :3]                      # (T,3) translation mask
+        col_obs = (tm < 0.5).any(axis=0)             # axes ever controlled
+        axes = [i for i in range(3) if col_obs[i]]
+        if axes:
+            frame_ctrl = (tm[:, axes] < 0.5).all(axis=1)  # control frames
+            if frame_ctrl.any():
+                pa = pred_motion[:T_align, axes][frame_ctrl]
+                ga = gt_motion[:T_align, axes][frame_ctrl]
+                per_frame = np.linalg.norm(pa - ga, axis=-1)
+                out['trajectory_err_m'] = float(per_frame.mean())
+                out['trajectory_fail@20cm'] = float((per_frame > 0.20).mean())
+                out['trajectory_fail@50cm'] = float((per_frame > 0.50).mean())
+    return out
 
 
 def compute_heading_error(
@@ -893,6 +973,23 @@ def compute_all_metrics(
                 metrics['mpjpe_unmasked'] = mpjpe_unmasked['mpjpe_mean']
                 metrics['p_mpjpe'] = mpjpe_unmasked['mpjpe_mean']
 
+                # --- Keyframe (KPS) adherence: KPS Err = mean joint error at the
+                # observed (preserved) keyframes; Fail@k = fraction of keyframes
+                # whose mean joint error exceeds k. Mirrors the keyframe-
+                # interpolation protocol (CondMDI/GMD); for replacement-guidance
+                # methods this is ~0. p_mpjpe above already gives KPS Err in the
+                # same units as MPJPE.
+                obs_frame = mask.max(axis=-1) < 0.5  # fully-preserved frames
+                Tm = min(obs_frame.shape[0], pred_pos.shape[0], gt_pos.shape[0])
+                obs_frame = obs_frame[:Tm]
+                if obs_frame.any():
+                    per_joint = np.linalg.norm(
+                        pred_pos[:Tm] - gt_pos[:Tm], axis=-1)  # (T,22) metres
+                    per_kf = per_joint[obs_frame].mean(axis=-1)  # (n_kf,)
+                    metrics['kps_err'] = float(per_kf.mean())
+                    metrics['kps_fail@20cm'] = float((per_kf > 0.20).mean())
+                    metrics['kps_fail@50cm'] = float((per_kf > 0.50).mean())
+
                 # Procrustes-aligned MPJPE on the generated region — kept as an
                 # optional pose-fidelity diagnostic (global drift removed). This
                 # is NOT a UMO metric; do not report it as "[P]-MPJPE".
@@ -903,6 +1000,9 @@ def compute_all_metrics(
         bnd = compute_boundary_smoothness(
             pred_motion, mask, bone_offsets if compute_fk else None, fps=fps)
         metrics.update(bnd)
+        if gt_motion is not None:
+            metrics.update(
+                compute_rotation_ctrl_error(pred_motion, gt_motion, mask))
 
     return metrics
 

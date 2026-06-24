@@ -507,7 +507,7 @@ class HyMotionM2MTrainer(BaseTrainer):
         ctx = self._prepare_and_forward(batch)
 
         losses = self._compute_base_loss(ctx)
-        loss = sum(losses.values())
+        loss = self.sum_train_losses(losses)
         result = {'loss': loss}
         for k, v in losses.items():
             result[f'loss_{k}'] = v.detach()

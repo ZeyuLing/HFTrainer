@@ -6,19 +6,22 @@ MotionStreamer ``humanml3d_272`` clip (30 fps) into the official HumanML3D
 
 Why a dedicated module
 ----------------------
-The naive route -- decode the 272 *stored joint positions* and feed them to
-MoMask ``process_file`` -- lands ~30 mm (rigid-invariant) away from the joints
-the official HumanML3D pipeline uses, because the 272 positions come from
-MotionStreamer's own SMPL-X / face-z pipeline. The official HumanML3D features
-are built from **SMPL-H forward-kinematics** joints. Replicating that exactly
-closed the entire GT metric gap (R@3 0.78 -> 0.795, MM-Dist 3.10 -> 2.95,
-Diversity 9.24 -> 9.52, matching published "Real" rows).
+MS272 stores heading-removed joint positions directly, and it also stores enough
+velocity/heading/rotation channels to recover an SMPL-like root trajectory and
+local rotations. These two views are related but not guaranteed to be identical:
+the released 272 feature does not store subject betas/shape, so FK with a
+neutral body can differ from the stored positions.
 
-The validated recipe (this module implements it):
+For historical HML263 cross-evaluation, this module defaults to an SMPL-H FK
+bridge before feeding joints to MoMask ``process_file``. Use
+``joints_from="positions"`` when the goal is to inspect the native MS272 stored
+joint positions instead.
+
+The historical FK-bridge recipe (this module implements it):
 
     272 [rot block 140:272] = SMPL local rotations (SMPL pose, 6D)
-        -> recover SMPL params (axis-angle) + world root translation
-        -> SMPL-H forward kinematics -> 22 joints (30 fps)
+        -> recover local rotation matrices + world root translation
+        -> neutral SMPL-H forward kinematics -> 22 joints (30 fps)
         -> linear resample 30 -> 20 fps
         -> MoMask ``process_file`` (uniform_skeleton to the OFFICIAL canonical
            000021 skeleton + IK) -> 263 feature
@@ -212,8 +215,12 @@ def recover_272_to_smplh_joints(m272: np.ndarray,
                                 smplh_model: Optional[Path] = None) -> np.ndarray:
     """``humanml3d_272`` clip -> SMPL-H FK global joint positions ``(T, 22, 3)``.
 
-    Recommended joint source for building HumanML3D-263 features (matches the
-    official joint source far better than the 272 stored positions).
+    Historical bridge used by ``humanml272_to_humanml263(...,
+    joints_from="smpl_fk")``. This decodes the recoverable MS272 local rotations
+    and root translation, then runs them on a neutral SMPL-H rest skeleton. It is
+    useful for FK-based diagnostics, but it is not the native stored-position
+    decode and can differ from official GT272 positions because MS272 does not
+    store subject betas.
     """
     rot, root = recover_local_rotations_and_root(m272)
     return fk_smplh_joints(rot, root, smplh_model)
@@ -222,8 +229,10 @@ def recover_272_to_smplh_joints(m272: np.ndarray,
 def recover_272_stored_positions(m272: np.ndarray) -> np.ndarray:
     """Decode the 272 *stored* joint positions to world frame ``(T, 22, 3)``.
 
-    Legacy joint source (~30 mm off the official SMPL-H FK joints). Kept for
-    A/B comparison; prefer :func:`recover_272_to_smplh_joints`.
+    This is the native MS272 position decode for the ``[8:74]`` block. It
+    restores heading and root xz translation but does not run any body-model FK.
+    Use it when checking the stored joint-position distribution; use
+    :func:`recover_272_to_smplh_joints` only when an FK-based bridge is intended.
     """
     m272 = np.asarray(m272, dtype=np.float64)
     nfrm = m272.shape[0]
@@ -318,6 +327,77 @@ def joints_to_humanml263(joints: np.ndarray, *, feet_thre: float = 0.002,
     return m263.astype(np.float32), rec.squeeze(0).numpy().astype(np.float32)
 
 
+def humanml263_process_metadata(joints: np.ndarray, *,
+                                paths: HumanMLReprPaths = DEFAULT_PATHS,
+                                ensure_globals: bool = True) -> dict[str, np.ndarray]:
+    """Return the canonicalization metadata that MoMask ``process_file`` drops.
+
+    ``process_file`` is intentionally canonical: it retargets to the official
+    HumanML3D skeleton, floors the motion, removes the first-frame root XZ, and
+    rotates the first-frame body to face +Z. HML263 stores the canonicalized
+    trajectory, not the inverse transform. This sidecar is therefore required
+    when a controlled SMPL -> HML263 -> SMPL round trip must recover the original
+    world root translation.
+    """
+    mod = _import_motion_process(paths.resolve("momask_root"))
+    if ensure_globals and not _PROCESS_GLOBALS_READY:
+        setup_process_globals(paths=paths)
+    mp = mod["mp"]
+    positions = np.asarray(joints, dtype=np.float32)
+    if positions.ndim != 3 or positions.shape[1:] != (_NJOINT, 3):
+        raise ValueError(f"expected joints shape (T,{_NJOINT},3), got {positions.shape}")
+
+    src_skel = mod["Skeleton"](mp.n_raw_offsets, mp.kinematic_chain, "cpu")
+    src_offset = src_skel.get_offsets_joints(torch.from_numpy(positions[0]).float()).numpy()
+    tgt_offset = mp.tgt_offsets.numpy()
+    src_leg_len = np.abs(src_offset[mp.l_idx1]).max() + np.abs(src_offset[mp.l_idx2]).max()
+    tgt_leg_len = np.abs(tgt_offset[mp.l_idx1]).max() + np.abs(tgt_offset[mp.l_idx2]).max()
+    scale_rt = float(tgt_leg_len / src_leg_len)
+
+    uniform = mp.uniform_skeleton(positions.copy(), mp.tgt_offsets)
+    floor_height = float(uniform.min(axis=0).min(axis=0)[1])
+    floored = uniform.copy()
+    floored[:, :, 1] -= floor_height
+    root_pos_init = floored[0].copy()
+    root_pose_init_xz = (root_pos_init[0] * np.array([1.0, 0.0, 1.0], dtype=np.float32)).astype(np.float32)
+
+    r_hip, l_hip, sdr_r, sdr_l = mp.face_joint_indx
+    across1 = root_pos_init[r_hip] - root_pos_init[l_hip]
+    across2 = root_pos_init[sdr_r] - root_pos_init[sdr_l]
+    across = across1 + across2
+    across = across / np.sqrt((across ** 2).sum(axis=-1))[..., np.newaxis]
+    forward_init = np.cross(np.array([[0.0, 1.0, 0.0]], dtype=np.float32), across[None], axis=-1)
+    forward_init = forward_init / np.sqrt((forward_init ** 2).sum(axis=-1))[..., np.newaxis]
+    root_quat_init = mp.qbetween_np(forward_init, np.array([[0.0, 0.0, 1.0]], dtype=np.float32))[0]
+
+    return {
+        "scale_rt": np.array(scale_rt, dtype=np.float32),
+        "src_leg_len": np.array(src_leg_len, dtype=np.float32),
+        "tgt_leg_len": np.array(tgt_leg_len, dtype=np.float32),
+        "floor_height": np.array(floor_height, dtype=np.float32),
+        "root_pose_init_xz": root_pose_init_xz.astype(np.float32),
+        "root_pos_init": root_pos_init.astype(np.float32),
+        "root_quat_init": root_quat_init.astype(np.float32),
+        "root_quat_inv": (root_quat_init * np.array([1.0, -1.0, -1.0, -1.0], dtype=np.float32)).astype(np.float32),
+    }
+
+
+def joints_to_humanml263_with_metadata(
+    joints: np.ndarray, *, feet_thre: float = 0.002,
+    paths: HumanMLReprPaths = DEFAULT_PATHS,
+    ensure_globals: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+    """Run ``process_file`` and return the dropped canonicalization metadata."""
+    meta = humanml263_process_metadata(joints, paths=paths, ensure_globals=ensure_globals)
+    m263, rec = joints_to_humanml263(
+        joints,
+        feet_thre=feet_thre,
+        paths=paths,
+        ensure_globals=False,
+    )
+    return m263, rec, meta
+
+
 # ============================================================================
 # Top-level: 272 -> 263
 # ============================================================================
@@ -332,8 +412,8 @@ def humanml272_to_humanml263(m272: np.ndarray, *, src_fps: float = 30.0,
 
     Args:
         m272: ``(T, 272)`` MotionStreamer representation (30 fps).
-        joints_from: ``"smpl_fk"`` (recommended -- SMPL-H FK joints matching the
-            official source) or ``"positions"`` (legacy 272 stored positions).
+        joints_from: ``"smpl_fk"`` (historical FK bridge through neutral SMPL-H)
+            or ``"positions"`` (native MS272 stored-position decode).
         paths: external asset locations (defaults point at ``ref_repo``).
         ensure_globals: auto-configure ``process_file`` with the official
             canonical skeleton on first call.
@@ -434,3 +514,40 @@ def motion198_to_humanml263(motion_denorm, *,
     joints20 = linear_resample_positions(joints30, src_fps, dst_fps)
     return joints_to_humanml263(joints20, feet_thre=feet_thre, paths=paths,
                                 ensure_globals=ensure_globals)
+
+
+def motion198_to_humanml263_with_metadata(motion_denorm, *,
+                                          rotation_space: str = "local",
+                                          src_fps: float = 30.0,
+                                          dst_fps: float = 20.0,
+                                          feet_thre: float = 0.002,
+                                          bone_offsets=None,
+                                          paths: HumanMLReprPaths = DEFAULT_PATHS,
+                                          ensure_globals: bool = True):
+    """Convert ``motion_135`` to HML263 and return process-file sidecar metadata."""
+    import torch  # local: keep module import cheap
+    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+
+    arr = np.asarray(motion_denorm, dtype=np.float32)
+    m135 = torch.from_numpy(arr[:, :135]).float()
+    if bone_offsets is None:
+        bo = torch.from_numpy(_smplh_bone_offsets(paths.resolve("smplh_model"))).float()
+    else:
+        bo = torch.as_tensor(bone_offsets).float()
+    world_pos, _, _, _ = motion135_to_fk(m135, bo, rotation_space=rotation_space)
+    joints30 = world_pos.detach().cpu().numpy().astype(np.float64)
+    joints20 = linear_resample_positions(joints30, src_fps, dst_fps)
+    m263, rec, meta = joints_to_humanml263_with_metadata(
+        joints20,
+        feet_thre=feet_thre,
+        paths=paths,
+        ensure_globals=ensure_globals,
+    )
+    meta.update({
+        "src_fps": np.array(src_fps, dtype=np.float32),
+        "dst_fps": np.array(dst_fps, dtype=np.float32),
+        "source_num_frames": np.array(len(arr), dtype=np.int32),
+        "resampled_num_frames": np.array(len(joints20), dtype=np.int32),
+        "hml_num_frames": np.array(len(m263), dtype=np.int32),
+    })
+    return m263, rec, meta
