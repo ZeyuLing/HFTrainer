@@ -200,13 +200,31 @@ third_party/
 *.zip
 
 # Final override for PhysFlow bundled tracker baselines after all generic large
-# file rules. Keep the bundle addable; keep generated local environments out.
+# file rules. Keep the bundle SOURCE addable; keep heavy artifacts/envs out.
 !hftrainer/models/motion/physflow/trackers/
 !hftrainer/models/motion/physflow/trackers/**
-!hftrainer/models/motion/physflow/trackers/**/*.pt
-!hftrainer/models/motion/physflow/trackers/**/*.ckpt
-!hftrainer/models/motion/physflow/trackers/**/*.onnx
-!hftrainer/models/motion/physflow/trackers/**/*.npz
 hftrainer/models/motion/physflow/trackers/**/__pycache__/
 hftrainer/models/motion/physflow/trackers/humanoid_gpt/.venv311/
 hftrainer/models/motion/physflow/trackers/humanoid_gpt/physflow_hgpt_judge_server.log
+
+# Keep heavy PhysFlow tracker artifacts OUT of git: training outputs, lightning
+# logs, tensorboard events and large checkpoints are runtime artifacts, not source.
+hftrainer/models/motion/physflow/trackers/**/vendor/results/
+hftrainer/models/motion/physflow/trackers/**/*.pt
+hftrainer/models/motion/physflow/trackers/**/*.ckpt
+hftrainer/models/motion/physflow/trackers/**/*.onnx
+hftrainer/models/motion/physflow/trackers/**/*.npz
+hftrainer/models/motion/physflow/trackers/**/*.npy
+
+# Bulky binary mesh/asset formats: commit source/config, not the heavy binaries.
+*.stl
+*.STL
+*.usd
+*.usda
+*.obj
+*.motion
+**/.asset_hash
+
+# Local research scratch and large web-viewer data dumps.
+literature-surveys/
+web_viz/motionfix/data.json
