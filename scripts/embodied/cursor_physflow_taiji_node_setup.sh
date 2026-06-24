@@ -42,19 +42,6 @@ if ! /usr/bin/python3.8 -c "import encodings" >/dev/null 2>&1; then
   ldconfig 2>/dev/null || true
 fi
 
-# IsaacGym's gymtorch JIT extension includes <Python.h>. Fresh Taiji images may
-# have the py3.8 runtime restored but not the development headers.
-if [[ ! -f /usr/include/python3.8/Python.h ]]; then
-  echo "[setup] python3.8 headers missing -> installing python38-devel"
-  yum install -y python38-devel >/dev/null 2>&1 || yum install -y python3-devel >/dev/null 2>&1 || \
-    echo "[setup] WARN python devel package install failed"
-fi
-if [[ ! -f /usr/include/python3.8/Python.h && -f "$VENV_SRC/include/python3.8/Python.h" ]]; then
-  echo "[setup] restoring python3.8 headers from staged venv include"
-  mkdir -p /usr/include/python3.8
-  rsync -a "$VENV_SRC/include/python3.8/" /usr/include/python3.8/
-fi
-
 # --- Provision py3.10 KIMODO scoring deps if missing (not in vermo:latest) ---
 # mujoco/onnxruntime are needed by the runner's import chain (G1 tracker scoring).
 # KIMODO uses its own VENDORED llm2vec wrapper, so the pip llm2vec is NOT needed.
@@ -90,8 +77,8 @@ else
   echo "PHYSFLOW_NODE_DEGRADED isaac=$ISAAC_OK kimodo=$KIMODO_OK" | tee "$MARKER"
 fi
 
-if [[ "${PHYSFLOW_NODE_SETUP_ONLY:-0}" == "1" ]]; then
-  echo "[setup] setup-only requested; exiting after verification"
+if [ "${PHYSFLOW_NODE_SETUP_ONLY:-0}" = "1" ]; then
+  echo "[setup] setup-only complete"
   exit 0
 fi
 

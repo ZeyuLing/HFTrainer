@@ -22,6 +22,7 @@ from mmengine import Config
 
 # Add repo root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from physflow_tracker_bundle_paths import PROTOMOTIONS_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def verify_environment():
 def check_protomotions():
     """Check ProtoMotions availability."""
     try:
-        sys.path.insert(0, 'ref_repo/ProtoMotions')
+        sys.path.insert(0, str(PROTOMOTIONS_ROOT))
         from protomotions.components.motion_lib import MotionLib
         return True
     except:

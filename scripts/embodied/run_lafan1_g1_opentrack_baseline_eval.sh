@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# Evaluate the released OpenTrack/Any2Track LAFAN1 generalist on LAFAN1-G1.
+# Evaluate the released Any2Track LAFAN1 generalist on LAFAN1-G1.
 #
 # This runner uses the lightweight MuJoCo+ONNX evaluator in this repository and
 # shards the 40 public LAFAN1-G1 motions across CPU worker processes.
 set -eo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
-LAFAN_ROOT="${LAFAN_ROOT:-${PROJECT_ROOT}/ref_repo/OpenTrack/storage/data/mocap/lafan1/UnitreeG1}"
+ANY2TRACK_ROOT="${ANY2TRACK_ROOT:-${PROJECT_ROOT}/hftrainer/models/motion/physflow/trackers/any2track}"
+LAFAN_ROOT="${LAFAN_ROOT:-${PROJECT_ROOT}/data/LAFAN1_Retargeted_for_G1/UnitreeG1}"
 OUT_ROOT="${OUT_ROOT:-${PROJECT_ROOT}/output/opentrack_lafan1_g1/$(date +%Y%m%d_%H%M%S)}"
 NUM_SHARDS="${NUM_SHARDS:-8}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAX_MOTIONS="${MAX_MOTIONS:-}"
 MAX_STEPS="${MAX_STEPS:-}"
-XML_PATH="${XML_PATH:-${PROJECT_ROOT}/ref_repo/OpenTrack/storage/assets/unitree_g1/scene_mjx_flat_terrain.xml}"
-CONFIG_PATH="${CONFIG_PATH:-${PROJECT_ROOT}/ref_repo/OpenTrack/storage/logs/dagger/general_tracker_lafan1_v2/checkpoints/config.json}"
-ONNX_PATH="${ONNX_PATH:-${PROJECT_ROOT}/ref_repo/OpenTrack/storage/logs/dagger/general_tracker_lafan1_v2/checkpoints/model.onnx}"
+XML_PATH="${XML_PATH:-${ANY2TRACK_ROOT}/storage/assets/unitree_g1/scene_mjx_flat_terrain.xml}"
+CONFIG_PATH="${CONFIG_PATH:-${ANY2TRACK_ROOT}/storage/logs/dagger/general_tracker_lafan1_v2/config.json}"
+ONNX_PATH="${ONNX_PATH:-${ANY2TRACK_ROOT}/storage/logs/dagger/general_tracker_lafan1_v2/checkpoints/model.onnx}"
 
 cd "${PROJECT_ROOT}"
 mkdir -p "${OUT_ROOT}"
@@ -131,7 +132,7 @@ summary = {
     "min_height": mean("min_height"),
 }
 (out_root / "summary.json").write_text(json.dumps({"summary": summary, "motions": rows, "missing": missing}, indent=2) + "\n")
-lines = ["# OpenTrack LAFAN1-G1 Evaluation", ""]
+lines = ["# Any2Track LAFAN1-G1 Evaluation", ""]
 for key, value in summary.items():
     if isinstance(value, float):
         lines.append(f"- {key}: {value:.6f}")

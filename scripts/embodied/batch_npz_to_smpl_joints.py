@@ -25,7 +25,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from hftrainer.models.motion.components.body_models.smplx_lite import SmplxLite
+from hftrainer.motion.body_models.smplx_lite import SmplxLite
 
 
 # SMPL-X 22 joint names

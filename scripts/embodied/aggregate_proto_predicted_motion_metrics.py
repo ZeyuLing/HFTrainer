@@ -75,9 +75,23 @@ def _motion_slice(lib: dict[str, Any], starts: np.ndarray, lens: np.ndarray, mot
 
 def _local_pos(pos: np.ndarray, rot: np.ndarray) -> np.ndarray:
     root = pos[:, :1, :]
-    root_rot = _quat_to_mat_wxyz(rot[:, 0, :])
+    # ProtoMotions MotionLib stores rigid-body rotations as XYZW.  Convert the
+    # root quaternion before building the root-relative frame used by MPJPE.
+    root_rot = _quat_to_mat_wxyz(rot[:, 0, [3, 0, 1, 2]])
     rel = pos - root
     return np.einsum("tbc,tcd->tbd", rel, root_rot)
+
+
+def _align_xy_to_reference(pred_pos: np.ndarray, ref_pos: np.ndarray) -> np.ndarray:
+    """Remove IsaacGym/VectorEnv XY grid offsets before global MPJPE.
+
+    ProtoMotions saved rollouts can be translated to per-environment grid
+    origins.  That offset is not tracking error, but height/root drift should
+    still count, so only the initial XY difference is stripped.
+    """
+    aligned = pred_pos.copy()
+    aligned[..., :2] -= aligned[0, 0, :2] - ref_pos[0, 0, :2]
+    return aligned
 
 
 def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[str, float]]:
@@ -102,18 +116,21 @@ def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[
 
         ref_pos = ref_pos_all[ref_slice][:frames]
         pred_pos = pred_pos_all[pred_slice][:frames]
+        pred_pos_aligned = _align_xy_to_reference(pred_pos, ref_pos)
         ref_rot = ref_rot_all[ref_slice][:frames]
         pred_rot = pred_rot_all[pred_slice][:frames]
 
         ref_local = _local_pos(ref_pos, ref_rot)
         pred_local = _local_pos(pred_pos, pred_rot)
 
-        global_mpjpe_m = float(np.linalg.norm(pred_pos - ref_pos, axis=-1).mean())
+        raw_global_mpjpe_m = float(np.linalg.norm(pred_pos - ref_pos, axis=-1).mean())
+        aligned_global_mpjpe_m = float(np.linalg.norm(pred_pos_aligned - ref_pos, axis=-1).mean())
         local_mpjpe_m = float(np.linalg.norm(pred_local - ref_local, axis=-1).mean())
+        root_err = np.linalg.norm(pred_pos_aligned[:, 0, :] - ref_pos[:, 0, :], axis=-1)
         root_height_err_m = float(np.abs(pred_pos[:, 0, 2] - ref_pos[:, 0, 2]).mean())
 
         global_step_vel_err_m = float(
-            np.linalg.norm(np.diff(pred_pos, axis=0) - np.diff(ref_pos, axis=0), axis=-1).mean()
+            np.linalg.norm(np.diff(pred_pos_aligned, axis=0) - np.diff(ref_pos, axis=0), axis=-1).mean()
         )
         local_step_vel_err_m = float(
             np.linalg.norm(
@@ -149,7 +166,9 @@ def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[
                 "motion_id": float(motion_id),
                 "frames": float(frames),
                 "success": float(not paper_failed),
-                "mpjpe_mm": global_mpjpe_m * 1000.0,
+                "mpjpe_mm": aligned_global_mpjpe_m * 1000.0,
+                "aligned_global_mpjpe_mm": aligned_global_mpjpe_m * 1000.0,
+                "raw_global_mpjpe_mm": raw_global_mpjpe_m * 1000.0,
                 "local_mpjpe_mm": local_mpjpe_m * 1000.0,
                 "mpjve_mm_per_frame": global_step_vel_err_m * 1000.0,
                 "local_mpjve_mm_per_frame": local_step_vel_err_m * 1000.0,
@@ -159,6 +178,8 @@ def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[
                 "local_mpjae_mm_per_frame2": local_step_acc_err_m * 1000.0,
                 "mpjae_mps2": global_acc_mps2,
                 "local_mpjae_mps2": local_acc_mps2,
+                "root_err_m": float(root_err.mean()),
+                "root_err_max_m": float(root_err.max()),
                 "root_height_err_m": root_height_err_m,
             }
         )
@@ -191,13 +212,33 @@ def main() -> None:
         "--shard-file-template",
         default="amass_g1_full_shard_{shard}.pt",
     )
+    parser.add_argument(
+        "--methods",
+        default="",
+        help="Optional comma-separated eval method names to aggregate, e.g. protomotions_g1_bones.",
+    )
+    parser.add_argument(
+        "--output-json",
+        type=Path,
+        default=None,
+        help="Optional output JSON path. Defaults to <eval-root>/predicted_metrics.json.",
+    )
+    parser.add_argument(
+        "--output-md",
+        type=Path,
+        default=None,
+        help="Optional output Markdown path. Defaults to <eval-root>/predicted_metrics.md.",
+    )
     args = parser.parse_args()
 
     all_results: dict[str, dict[str, Any]] = {}
     missing: dict[str, list[str]] = {}
+    method_filter = {m.strip() for m in args.methods.split(",") if m.strip()}
 
     for eval_dir in sorted(args.eval_root.glob("eval_*")):
         name = eval_dir.name[len("eval_") :]
+        if method_filter and name not in method_filter:
+            continue
         rows: list[dict[str, float]] = []
         missing_paths: list[str] = []
         for shard in range(args.num_shards):
@@ -218,13 +259,17 @@ def main() -> None:
             missing[name] = missing_paths
 
     payload = {"results": all_results, "missing_predicted_motion_libs": missing}
-    (args.eval_root / "predicted_metrics.json").write_text(
+    output_json = args.output_json or (args.eval_root / "predicted_metrics.json")
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    output_json.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n"
     )
 
     metric_order = [
         "num_motions",
         "success_rate",
+        "aligned_global_mpjpe_mm",
+        "raw_global_mpjpe_mm",
         "local_mpjpe_mm",
         "local_mpjve_mm_per_frame",
         "mpjpe_mm",
@@ -245,7 +290,9 @@ def main() -> None:
         for name, paths in sorted(missing.items()):
             lines.append(f"- {name}: {len(paths)} shard(s)")
 
-    (args.eval_root / "predicted_metrics.md").write_text("\n".join(lines) + "\n")
+    output_md = args.output_md or (args.eval_root / "predicted_metrics.md")
+    output_md.parent.mkdir(parents=True, exist_ok=True)
+    output_md.write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 

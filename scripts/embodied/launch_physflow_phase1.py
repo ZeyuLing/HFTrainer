@@ -42,6 +42,7 @@ from mmengine import Config
 
 # Add repo root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from physflow_tracker_bundle_paths import PROTOMOTIONS_G1_ONNX
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,7 @@ def check_t2m_model():
 def check_onnx_policy():
     """Check ONNX RL policy availability."""
     try:
-        onnx_path = Path("ref_repo/ProtoMotions/data/pretrained_models/motion_tracker/smpl/compiled_models/unified_pipeline.onnx")
-        return onnx_path.exists()
+        return PROTOMOTIONS_G1_ONNX.exists()
     except:
         return False
 

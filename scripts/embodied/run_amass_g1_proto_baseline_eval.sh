@@ -10,11 +10,14 @@
 set -eo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
+PROTO_ROOT="${PROTO_ROOT:-${PROJECT_ROOT}/hftrainer/models/motion/physflow/trackers/protomotions/vendor}"
+ENVDIR="${ENVDIR:-/apdcephfs_cq11/share_1467498/home/zeyuling/physflow_env}"
 AMASS_ROOT="${AMASS_ROOT:-${PROJECT_ROOT}/data/AMASS_Retarged_for_G1/g1}"
 OUT_ROOT="${OUT_ROOT:-${PROJECT_ROOT}/output/amass_g1_proto_baseline_eval/$(date +%Y%m%d_%H%M%S)}"
 NUM_SHARDS="${NUM_SHARDS:-8}"
 NUM_ENVS="${NUM_ENVS:-256}"
 MAX_EVAL_STEPS="${MAX_EVAL_STEPS:-600}"
+GPU_OFFSET="${GPU_OFFSET:-0}"
 OUTPUT_FPS="${OUTPUT_FPS:-30}"
 QUAT_ORDER="${QUAT_ORDER:-wxyz}"
 FORCE_CONVERT="${FORCE_CONVERT:-0}"
@@ -35,7 +38,7 @@ echo "[amass-g1-eval] host=$(hostname)"
 echo "[amass-g1-eval] project=${PROJECT_ROOT}"
 echo "[amass-g1-eval] amass=${AMASS_ROOT}"
 echo "[amass-g1-eval] out=${OUT_ROOT}"
-echo "[amass-g1-eval] shards=${NUM_SHARDS} envs_per_gpu=${NUM_ENVS} max_eval_steps=${MAX_EVAL_STEPS}"
+echo "[amass-g1-eval] shards=${NUM_SHARDS} envs_per_gpu=${NUM_ENVS} max_eval_steps=${MAX_EVAL_STEPS} gpu_offset=${GPU_OFFSET}"
 echo "[amass-g1-eval] output_fps=${OUTPUT_FPS} quat_order=${QUAT_ORDER}"
 echo "[amass-g1-eval] checkpoints=${CHECKPOINT_SPECS}"
 echo "[amass-g1-eval] save_predicted_motion_lib=${SAVE_PREDICTED_MOTION_LIB} every=${PREDICTED_MOTION_LIB_EVERY}"
@@ -47,6 +50,17 @@ fi
 
 if [[ "${RUN_NODE_SETUP:-1}" == "1" ]]; then
     PHYSFLOW_NODE_SETUP_ONLY=1 bash scripts/embodied/cursor_physflow_taiji_node_setup.sh
+fi
+
+PY38RT="${ENVDIR}/py38_runtime"
+if [[ ! -f /usr/include/python3.8/Python.h && -d "${PY38RT}/include/python3.8" ]]; then
+    echo "[amass-g1-eval] restoring python3.8 headers from ${PY38RT}/include/python3.8"
+    mkdir -p /usr/include
+    rsync -a "${PY38RT}/include/python3.8" /usr/include/
+fi
+if [[ ! -f /usr/include/python3.8/Python.h ]]; then
+    echo "[amass-g1-eval] ERROR: missing /usr/include/python3.8/Python.h; gymtorch cannot build" >&2
+    exit 43
 fi
 
 wait_for_background() {
@@ -73,7 +87,7 @@ else
     TRACKER_PY=(python3)
 fi
 
-cd "${PROJECT_ROOT}/ref_repo/ProtoMotions"
+cd "${PROTO_ROOT}"
 export PYTHONPATH="${PWD}:${PROJECT_ROOT}:${PYTHONPATH:-}"
 export ACCEPT_EULA="${ACCEPT_EULA:-Y}"
 export OMNI_KIT_ACCEPT_EULA="${OMNI_KIT_ACCEPT_EULA:-YES}"
@@ -197,7 +211,7 @@ for spec in "${CKPT_ARRAY[@]}"; do
     ckpt="${spec#*=}"
     ckpt="${ckpt#./}"
     if [[ "${ckpt}" != /* ]]; then
-        ckpt="${PROJECT_ROOT}/ref_repo/ProtoMotions/${ckpt}"
+        ckpt="${PROTO_ROOT}/${ckpt}"
     fi
     if [[ ! -f "${ckpt}" ]]; then
         echo "[amass-g1-eval] ERROR: checkpoint missing for ${name}: ${ckpt}" >&2
@@ -221,7 +235,7 @@ for spec in "${CKPT_ARRAY[@]}"; do
             continue
         fi
         (
-            export CUDA_VISIBLE_DEVICES="${shard}"
+            export CUDA_VISIBLE_DEVICES="$((GPU_OFFSET + shard))"
             save_override="agent.evaluator.save_predicted_motion_lib_every=None"
             root_args=()
             if [[ "${SAVE_PREDICTED_MOTION_LIB}" == "1" ]]; then

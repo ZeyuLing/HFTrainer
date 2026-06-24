@@ -9,7 +9,9 @@
 set -eo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
-LAFAN_ROOT="${LAFAN_ROOT:-${PROJECT_ROOT}/ref_repo/OpenTrack/storage/data/mocap/lafan1/UnitreeG1}"
+PROTO_ROOT="${PROTO_ROOT:-${PROJECT_ROOT}/hftrainer/models/motion/physflow/trackers/protomotions/vendor}"
+ENVDIR="${ENVDIR:-/apdcephfs_cq11/share_1467498/home/zeyuling/physflow_env}"
+LAFAN_ROOT="${LAFAN_ROOT:-${PROJECT_ROOT}/data/LAFAN1_Retargeted_for_G1/UnitreeG1}"
 OUT_ROOT="${OUT_ROOT:-${PROJECT_ROOT}/output/lafan1_g1_proto_baseline_eval/$(date +%Y%m%d_%H%M%S)}"
 NUM_SHARDS="${NUM_SHARDS:-8}"
 NUM_ENVS="${NUM_ENVS:-64}"
@@ -67,6 +69,17 @@ if [[ "${RUN_NODE_SETUP:-1}" == "1" ]]; then
     PHYSFLOW_NODE_SETUP_ONLY=1 bash scripts/embodied/cursor_physflow_taiji_node_setup.sh
 fi
 
+PY38RT="${ENVDIR}/py38_runtime"
+if [[ ! -f /usr/include/python3.8/Python.h && -d "${PY38RT}/include/python3.8" ]]; then
+    echo "[lafan1-g1-proto] restoring python3.8 headers from ${PY38RT}/include/python3.8"
+    mkdir -p /usr/include
+    rsync -a "${PY38RT}/include/python3.8" /usr/include/
+fi
+if [[ ! -f /usr/include/python3.8/Python.h ]]; then
+    echo "[lafan1-g1-proto] ERROR: missing /usr/include/python3.8/Python.h; gymtorch cannot build" >&2
+    exit 43
+fi
+
 if [[ -n "${PHYSFLOW_TRACKER_PYTHON_CMD:-}" ]]; then
     read -r -a TRACKER_PY <<< "${PHYSFLOW_TRACKER_PYTHON_CMD}"
 elif [[ -x /root/physflow_isaacgym_py38_cu118/bin/python ]]; then
@@ -75,7 +88,7 @@ else
     TRACKER_PY=(python3)
 fi
 
-cd "${PROJECT_ROOT}/ref_repo/ProtoMotions"
+cd "${PROTO_ROOT}"
 export PYTHONPATH="${PWD}:${PROJECT_ROOT}:${PYTHONPATH:-}"
 export ACCEPT_EULA="${ACCEPT_EULA:-Y}"
 export OMNI_KIT_ACCEPT_EULA="${OMNI_KIT_ACCEPT_EULA:-YES}"
@@ -186,7 +199,7 @@ for spec in "${CKPT_ARRAY[@]}"; do
     ckpt="${spec#*=}"
     ckpt="${ckpt#./}"
     if [[ "${ckpt}" != /* ]]; then
-        ckpt="${PROJECT_ROOT}/ref_repo/ProtoMotions/${ckpt}"
+        ckpt="${PROTO_ROOT}/${ckpt}"
     fi
     if [[ ! -f "${ckpt}" ]]; then
         echo "[lafan1-g1-proto] ERROR: checkpoint missing for ${name}: ${ckpt}" >&2

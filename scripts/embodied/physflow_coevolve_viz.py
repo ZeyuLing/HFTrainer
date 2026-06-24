@@ -48,8 +48,6 @@ def main():
     ap.add_argument("--num-prompts", type=int, default=12)
     ap.add_argument("--diffusion-steps", type=int, default=20)
     ap.add_argument("--gen-batch", type=int, default=6)
-    ap.add_argument("--seed", type=int, default=None,
-                    help="optional KIMODO sampling seed for reproducible visualization")
     ap.add_argument("--out-dir", required=True, help="run dir (motions + tracker json + summary)")
     ap.add_argument("--manifest-dir", required=True, help="viewer manifest dir")
     ap.add_argument("--iteration", type=int, default=0)
@@ -82,14 +80,7 @@ def main():
     pids = [ds[i].get("prompt_id", f"p{i:03d}") for i in range(len(ds))]
 
     t0 = time.time()
-    qpos = _generate_qpos(
-        bundle,
-        feats,
-        lengths,
-        args.diffusion_steps,
-        args.gen_batch,
-        seed=args.seed,
-    )
+    qpos = _generate_qpos(bundle, feats, lengths, args.diffusion_steps, args.gen_batch)
     print(f"[viz] generated {len(qpos)} motions in {time.time()-t0:.0f}s", flush=True)
 
     run_dir = Path(args.out_dir)
@@ -135,11 +126,6 @@ def main():
             "max_joint_error_rad": m.get("max_joint_error_rad"),
             "fall_detected": m.get("fall_detected"),
             "root_trajectory_error_mean_m": m.get("root_trajectory_error_mean_m"),
-            "root_trajectory_error_final_m": m.get("root_trajectory_error_final_m"),
-            "root_displacement_ref_m": m.get("root_displacement_ref_m"),
-            "root_displacement_track_m": m.get("root_displacement_track_m"),
-            "root_displacement_error_m": m.get("root_displacement_error_m"),
-            "root_metrics_available": m.get("root_metrics_available"),
             # --- simulation-free kinematic artifacts (foot slip / penetration / ...) ---
             "kinematic": {k: round(float(v), 4) for k, v in kin.items() if k != "error"},
         })

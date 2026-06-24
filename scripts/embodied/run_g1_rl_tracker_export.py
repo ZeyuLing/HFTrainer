@@ -62,7 +62,22 @@ import yaml
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
-PROTOMOTIONS_ROOT = PROJECT_ROOT / "ref_repo" / "ProtoMotions"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    from .physflow_tracker_bundle_paths import (
+        PROTOMOTIONS_G1_MJCF,
+        PROTOMOTIONS_G1_ONNX,
+        PROTOMOTIONS_G1_URDF,
+        PROTOMOTIONS_ROOT,
+    )
+except ImportError:
+    from physflow_tracker_bundle_paths import (
+        PROTOMOTIONS_G1_MJCF,
+        PROTOMOTIONS_G1_ONNX,
+        PROTOMOTIONS_G1_URDF,
+        PROTOMOTIONS_ROOT,
+    )
 
 # Add ProtoMotions to path for deployment utilities
 _PROTO_ROOT = str(PROTOMOTIONS_ROOT)
@@ -78,10 +93,10 @@ from deployment.state_utils import (
 from deployment.motion_utils import MotionPlayer
 
 # Default paths
-DEFAULT_ONNX = PROTOMOTIONS_ROOT / "data" / "pretrained_models" / "motion_tracker" / "g1-bones-deploy" / "compiled_models" / "unified_pipeline.onnx"
-DEFAULT_MJCF = PROTOMOTIONS_ROOT / "protomotions" / "data" / "assets" / "mjcf" / "g1_holo_compat.xml"
+DEFAULT_ONNX = PROTOMOTIONS_G1_ONNX
+DEFAULT_MJCF = PROTOMOTIONS_G1_MJCF
 DEFAULT_SMPL_MODEL = PROJECT_ROOT / "checkpoints" / "smpl_models"
-DEFAULT_URDF = PROTOMOTIONS_ROOT / "protomotions" / "data" / "assets" / "urdf" / "for_retargeting" / "g1.urdf"
+DEFAULT_URDF = PROTOMOTIONS_G1_URDF
 
 # Retargeting scripts
 PIPELINE_SCRIPT = SCRIPT_DIR / "pipeline_motion_to_robot.py"

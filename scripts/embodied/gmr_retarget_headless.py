@@ -156,12 +156,21 @@ def main():
     parser.add_argument("--robot", default="unitree_g1", help="Target robot type")
     parser.add_argument("--save_path", required=True, help="Output PKL file")
     parser.add_argument("--tgt_fps", type=int, default=30, help="Target FPS")
-    parser.add_argument("--offset-to-ground", action="store_true", default=True,
-                        help="Enable per-frame foot grounding (default: True)")
+    parser.add_argument("--offset-to-ground", action="store_true", default=False,
+                        help="Enable GMR per-frame foot grounding. WARNING: GMR's "
+                             "offset_human_data_to_ground treats Z (horizontal in its "
+                             "Y-up frame) as the ground axis and collapses the Z "
+                             "translation (turns curved paths into back-and-forth lines). "
+                             "Keep this OFF; vertical placement is handled by the global "
+                             "set_ground_offset. (default: False)")
     parser.add_argument("--no-offset-to-ground", dest="offset_to_ground", action="store_false",
-                        help="Disable per-frame foot grounding")
+                        help="Disable per-frame foot grounding (default behavior)")
     parser.add_argument("--actual-human-height", type=float, default=None,
                         help="Override auto-detected human height (default: 1.66+0.1*betas[0])")
+    parser.add_argument("--posture-cost", type=float, default=20.0,
+                        help="IK temporal-consistency regularizer (posture target = "
+                             "previous frame). ~57%% less joint-accel jitter, trajectory "
+                             "preserved. 0 disables. (default: 20.0)")
     args = parser.parse_args()
 
     SMPLX_FOLDER = GMR_ROOT / "assets" / "body_models"
@@ -188,6 +197,7 @@ def main():
         actual_human_height=actual_human_height,
         src_human="smplx",
         tgt_robot=args.robot,
+        posture_cost=args.posture_cost,
     )
     print(f"  Retargeting to: {args.robot}")
 

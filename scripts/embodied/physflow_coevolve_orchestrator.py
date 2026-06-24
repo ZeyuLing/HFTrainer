@@ -46,7 +46,11 @@ import time
 from pathlib import Path
 
 HFT = Path(__file__).resolve().parents[2]
-PROTO = HFT / "ref_repo" / "ProtoMotions"
+if str(HFT) not in sys.path:
+    sys.path.insert(0, str(HFT))
+from physflow_tracker_bundle_paths import PROTOMOTIONS_ROOT
+
+PROTO = PROTOMOTIONS_ROOT
 FROZEN_ONNX = (
     PROTO / "data" / "pretrained_models" / "motion_tracker"
     / "g1-bones-deploy" / "compiled_models" / "unified_pipeline.onnx"
@@ -101,6 +105,37 @@ def build_judge_spec(mode: str, alpha: float, trainee_onnx, spec_path: Path):
     return judges
 
 
+def parse_round_cfg_options(spec: str):
+    """Parse ``round:cfg,cfg;round:cfg`` generator override fragments."""
+    out = {}
+    for chunk in (spec or "").split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if ":" not in chunk:
+            raise ValueError(
+                "bad --gen-cfg-options-by-round entry "
+                f"{chunk!r}; expected ROUND:KEY=VALUE[,KEY=VALUE]"
+            )
+        round_s, opts_s = chunk.split(":", 1)
+        r = int(round_s.strip())
+        opts = [x.strip() for x in opts_s.split(",") if x.strip()]
+        out.setdefault(r, []).extend(opts)
+    return out
+
+
+def copy_motion_dir(src: Path, dst: Path, prefix: str = "") -> int:
+    """Copy ``*.motion`` from ``src`` into ``dst`` with optional stable prefix."""
+    copied = 0
+    if not src.is_dir():
+        return copied
+    for m in sorted(src.glob("*.motion")):
+        out_name = f"{prefix}{m.name}" if prefix else m.name
+        shutil.copy2(m, dst / out_name)
+        copied += 1
+    return copied
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm-name", required=True)
@@ -114,11 +149,48 @@ def main():
     ap.add_argument("--gpu", type=int, default=0)
     ap.add_argument("--num-envs", type=int, default=1024)
     ap.add_argument("--batch-size", type=int, default=8192)
+    ap.add_argument(
+        "--trainee-overrides",
+        default="",
+        help=("Extra ProtoMotions --overrides entries, comma-separated. "
+              "Example: agent.model.actor_optimizer.lr=2e-6,agent.num_mini_epochs=1"),
+    )
     ap.add_argument("--gen-config", default="configs/physflow/physflow_online_adv_v2.py")
+    ap.add_argument(
+        "--gen-cfg-options",
+        default="",
+        help=("Extra MMEngine --cfg-options entries for the generator, comma-separated. "
+              "Example: trainer.frontier_t_high=0.98,trainer.num_samples=8"),
+    )
+    ap.add_argument(
+        "--gen-cfg-options-by-round",
+        default="",
+        help=("Per-round MMEngine cfg-options fragments. Format: "
+              "'1:trainer.num_samples=8;2:trainer.num_samples=8,trainer.frontier_t_high=0.98'."),
+    )
     ap.add_argument("--gen-init-ckpt",
                     default="work_dirs/physflow_online_adv_v2/checkpoint-iter_3000")
     ap.add_argument("--trainee-init-ckpt",
-                    default="ref_repo/ProtoMotions/results/physflow_online_g1_trainee_gpu2/last.ckpt")
+                    default=str(PROTO / "results" / "physflow_online_g1_trainee_gpu2" / "last.ckpt"))
+    ap.add_argument("--trainee-restart-each-round", action="store_true",
+                    help="Start every trainee round from --trainee-init-ckpt instead of previous round.")
+    ap.add_argument("--trainee-snapshot-mode", default="cumulative",
+                    choices=["cumulative", "base-plus-latest", "latest-only"],
+                    help=("Which pool subset to train the tracker on. cumulative copies the full "
+                          "pool; base-plus-latest copies r0_snap plus motions added since the "
+                          "previous round snapshot, preventing unbounded hard-pool growth; "
+                          "latest-only copies only motions added since the previous round snapshot."))
+    ap.add_argument(
+        "--trainee-extra-motion-dir",
+        default="",
+        help=("Optional deterministic replay bank of .motion files injected into every "
+              "trainee snapshot after the normal snapshot is built."),
+    )
+    ap.add_argument(
+        "--trainee-extra-motion-prefix",
+        default="extra_",
+        help="Prefix used when copying --trainee-extra-motion-dir files into snapshots.",
+    )
     ap.add_argument("--trainee-exp",
                     default="examples/experiments/mimic/physflow_g1_xy_offset.py")
     ap.add_argument("--root", default="work_dirs/physflow_coevolve")
@@ -135,6 +207,8 @@ def main():
 
     args.gen_init_ckpt = str(_abs(args.gen_init_ckpt))
     args.trainee_init_ckpt = str(_abs(args.trainee_init_ckpt))
+    extra_motion_dir = _abs(args.trainee_extra_motion_dir) if args.trainee_extra_motion_dir else None
+    round_cfg_options = parse_round_cfg_options(args.gen_cfg_options_by_round)
     root = _abs(args.root)
     arm = root / args.arm_name
     pool = arm / "pool"
@@ -155,7 +229,11 @@ def main():
 
     log(state, "orchestrator_start", arm=args.arm_name, mode=args.judge_mode,
         alpha=args.anchor_alpha, rounds=args.num_rounds, gen_iters=args.gen_iters,
-        trainee_epochs=args.trainee_epochs, gpu=args.gpu)
+        trainee_epochs=args.trainee_epochs, gpu=args.gpu,
+        trainee_restart_each_round=args.trainee_restart_each_round,
+        trainee_snapshot_mode=args.trainee_snapshot_mode,
+        trainee_extra_motion_dir=str(extra_motion_dir) if extra_motion_dir else None,
+        gen_cfg_options_by_round=round_cfg_options)
 
     # resume: discover the most recent exported trainee onnx (for judge sync)
     trainee_onnx = None
@@ -196,24 +274,83 @@ def main():
             f"default_hooks.checkpoint.interval={args.gen_iters}",
             "default_hooks.checkpoint.max_keep_ckpts=2",
         ]
-        log(state, "gen_launch", round=r, load_from=str(load_from))
-        rc = run(gen_cmd, gen_env, gen_work / "gen.log", cwd=str(HFT))
-        if rc != 0:
-            log(state, "gen_failed", round=r, rc=rc)
-            sys.exit(2)
-        pool_n = len(list(pool.glob("*.motion")))
-        log(state, "gen_done", round=r, rc=rc, pool=pool_n)
+        gen_opts = []
+        if args.gen_cfg_options.strip():
+            gen_opts.extend(x.strip() for x in args.gen_cfg_options.split(",") if x.strip())
+        gen_opts.extend(round_cfg_options.get(r, []))
+        if gen_opts:
+            gen_cmd.extend(gen_opts)
+            log(state, "gen_cfg_options", round=r, options=gen_opts)
+        # Resume guard: if this round's generator already finished (checkpoint
+        # present) skip re-running the ~1h generator phase -- the pool is already
+        # populated. Lets a trainee-only restart (e.g. after an IsaacGym crash)
+        # avoid wasting the completed generator work.
+        existing_gen = newest_ckpt_dir(gen_work)
+        if existing_gen is not None:
+            log(state, "gen_skip", round=r, ckpt=str(existing_gen),
+                pool=len(list(pool.glob("*.motion"))))
+        else:
+            log(state, "gen_launch", round=r, load_from=str(load_from))
+            rc = run(gen_cmd, gen_env, gen_work / "gen.log", cwd=str(HFT))
+            if rc != 0:
+                log(state, "gen_failed", round=r, rc=rc)
+                sys.exit(2)
+            pool_n = len(list(pool.glob("*.motion")))
+            log(state, "gen_done", round=r, rc=rc, pool=pool_n)
 
         # ------------------------------------------------------------ TRAINEE
         snap = arm / "trainee" / f"r{r}_snap"
         if snap.exists():
             shutil.rmtree(snap)
         snap.mkdir(parents=True, exist_ok=True)
-        for m in pool.glob("*.motion"):
-            shutil.copy2(m, snap / m.name)
+        if args.trainee_snapshot_mode == "cumulative" or r == 0:
+            copied = 0
+            for m in pool.glob("*.motion"):
+                shutil.copy2(m, snap / m.name)
+                copied += 1
+            log(state, "snapshot_built", round=r, mode=args.trainee_snapshot_mode,
+                motions=copied)
+        elif args.trainee_snapshot_mode in ("base-plus-latest", "latest-only"):
+            base_snap = arm / "trainee" / "r0_snap"
+            prev_snap = arm / "trainee" / f"r{r-1}_snap"
+            if (args.trainee_snapshot_mode == "base-plus-latest" and not base_snap.is_dir()) or not prev_snap.is_dir():
+                log(state, "snapshot_failed", round=r, mode=args.trainee_snapshot_mode,
+                    base_exists=base_snap.is_dir(), prev_exists=prev_snap.is_dir())
+                sys.exit(5)
+            pool_files = {m.name: m for m in pool.glob("*.motion")}
+            prev_names = {m.name for m in prev_snap.glob("*.motion")}
+            copied_names = set()
+            base_count = 0
+            latest_count = 0
+            if args.trainee_snapshot_mode == "base-plus-latest":
+                for m in base_snap.glob("*.motion"):
+                    shutil.copy2(m, snap / m.name)
+                    copied_names.add(m.name)
+                    base_count += 1
+            for name in sorted(set(pool_files) - prev_names):
+                if name in copied_names:
+                    continue
+                shutil.copy2(pool_files[name], snap / name)
+                copied_names.add(name)
+                latest_count += 1
+            log(state, "snapshot_built", round=r, mode=args.trainee_snapshot_mode,
+                base=base_count, latest=latest_count, motions=len(copied_names))
+        else:
+            raise ValueError(f"bad snapshot mode {args.trainee_snapshot_mode}")
 
-        prev_trainee = (Path(args.trainee_init_ckpt) if r == 0
-                        else PROTO / "results" / f"{args.arm_name}_co_r{r-1}" / "last.ckpt")
+        if extra_motion_dir is not None:
+            extra_count = copy_motion_dir(
+                extra_motion_dir, snap, prefix=args.trainee_extra_motion_prefix
+            )
+            log(state, "snapshot_extra_injected", round=r,
+                source=str(extra_motion_dir), prefix=args.trainee_extra_motion_prefix,
+                extra=extra_count, motions=len(list(snap.glob("*.motion"))))
+
+        prev_trainee = (
+            Path(args.trainee_init_ckpt)
+            if r == 0 or args.trainee_restart_each_round
+            else PROTO / "results" / f"{args.arm_name}_co_r{r-1}" / "last.ckpt"
+        )
         E = ckpt_epoch(prev_trainee)
         max_steps = (E + args.trainee_epochs) * args.num_envs * NUM_STEPS_PER_EPOCH
         exp = f"{args.arm_name}_co_r{r}"
@@ -222,6 +359,11 @@ def main():
         tr_env.update({
             "PYTHONPATH": str(PROTO) + ":" + os.environ.get("PYTHONPATH", ""),
             "ACCEPT_EULA": "Y", "CUDA_VISIBLE_DEVICES": str(args.gpu),
+            # dm_control (imported by pose_lib) inits a GL backend at import; the
+            # generator needs MUJOCO_GL=egl for its native-mujoco rollout, but
+            # dm_control's pyopengl-EGL path fails headless here. The headless
+            # IsaacGym trainee never renders dm_control, so disable its GL.
+            "MUJOCO_GL": "disable",
         })
         tr_cmd = [
             args.py38, "protomotions/train_agent.py",
@@ -232,9 +374,23 @@ def main():
             "--checkpoint", str(prev_trainee),
             "--num-envs", str(args.num_envs), "--batch-size", str(args.batch_size),
             "--training-max-steps", str(max_steps),
-            "--headless", "True", "--skip-initial-eval",
-            "--overrides", "agent.save_last_checkpoint_every=50",
+            "--headless", "True",
         ]
+        # ProtoMotions defines --overrides with nargs="*": pass the flag once,
+        # followed by all key=value entries. Repeating the flag keeps only the
+        # final occurrence, while comma-joining entries turns them into one bad
+        # key=value token.
+        # Co-evolution rounds are short fine-tuning bursts (often 5-20 epochs).
+        # Saving every 50 epochs can finish a round without producing last.ckpt,
+        # which makes the orchestrator treat a successful run as failed.
+        override_entries = ["agent.save_last_checkpoint_every=1"]
+        if args.trainee_overrides.strip():
+            override_entries.extend(
+                x.strip() for x in args.trainee_overrides.split(",") if x.strip()
+            )
+        if override_entries:
+            tr_cmd.append("--overrides")
+            tr_cmd.extend(override_entries)
         log(state, "trainee_launch", round=r, exp=exp, warm_epoch=E,
             target_epoch=E + args.trainee_epochs, motions=len(list(snap.glob("*.motion"))))
         rc = run(tr_cmd, tr_env, arm / "trainee" / f"r{r}.log", cwd=str(PROTO))
@@ -253,6 +409,7 @@ def main():
             exp_env.update({
                 "PYTHONPATH": str(PROTO) + ":" + os.environ.get("PYTHONPATH", ""),
                 "ACCEPT_EULA": "Y", "CUDA_VISIBLE_DEVICES": str(args.gpu),
+                "MUJOCO_GL": "disable",
             })
             exp_cmd = [
                 args.py38, "deployment/export_bm_tracker_onnx.py",

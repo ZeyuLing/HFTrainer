@@ -32,6 +32,7 @@ import argparse
 import glob
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -39,11 +40,30 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROTOMOTIONS_ROOT = PROJECT_ROOT / "ref_repo" / "ProtoMotions"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from physflow_tracker_bundle_paths import PROTOMOTIONS_ROOT
 
 DEFAULT_EXPERIMENT = PROTOMOTIONS_ROOT / "examples" / "experiments" / "mimic" / "physflow_g1_xy_offset.py"
 DEFAULT_WARMSTART = PROJECT_ROOT / "output" / "physflow_kimodo_g1" / "checkpoints" / "g1_xyvel_partial_warmstart.ckpt"
 DEFAULT_TRACKER_PYTHON = "/root/physflow_isaacgym_py38_cu118/bin/python"
+NUM_STEPS_PER_EPOCH = 32  # ProtoMotions PPO rollout horizon (base_agent num_steps)
+
+
+def _ckpt_epoch(path: str) -> int:
+    """Best-effort read of the PPO epoch already trained in a warm-start ckpt.
+
+    ProtoMotions' ``--training-max-steps`` is a GLOBAL cap and a warm-started run
+    continues from its own epoch, so each round must target a CUMULATIVE budget
+    (prev_epoch + epochs_per_round); a flat per-round value would make every
+    round after the first stop immediately.
+    """
+    try:
+        import torch
+        ck = torch.load(str(path), map_location="cpu", weights_only=False)
+        return int(ck.get("epoch", 0))
+    except Exception:
+        return 0
 
 
 def _tracker_env() -> dict:
@@ -70,21 +90,47 @@ def _pool_motions(pool_dir: Path) -> list:
     return sorted(glob.glob(str(pool_dir / "*.motion")))
 
 
-def _snapshot_pool(pool_dir: Path, round_dir: Path) -> Path:
+def _snapshot_pool(pool_dir: Path, round_dir: Path,
+                   sample: int = 0, recent_frac: float = 0.5,
+                   seed: int = 0) -> Path:
+    """Snapshot (a subset of) the live pool into the round dir via symlinks.
+
+    Re-loading the FULL, ever-growing pool every round makes each round
+    increasingly I/O-bound (thousands of tiny .motion files) while only a tiny
+    fraction of compute goes to PPO. When ``sample>0`` and the pool is larger,
+    we take a RECENCY-BIASED subset: the newest ``recent_frac`` (the current
+    generator/GT frontier) plus a random draw from the rest (anti-forgetting /
+    diversity). Symlinks avoid duplicating I/O.
+    """
     snap = round_dir / "pool"
     if snap.exists():
         shutil.rmtree(snap)
     snap.mkdir(parents=True, exist_ok=True)
     motions = _pool_motions(pool_dir)
+    if sample and len(motions) > sample:
+        motions.sort(key=lambda p: os.path.getmtime(p), reverse=True)  # newest first
+        n_recent = min(len(motions), int(sample * recent_frac))
+        recent = motions[:n_recent]
+        rest_pool = motions[n_recent:]
+        rng = random.Random(seed)
+        k_rest = min(len(rest_pool), sample - n_recent)
+        rest = rng.sample(rest_pool, k_rest) if k_rest > 0 else []
+        motions = recent + rest
     for m in motions:
+        dst = snap / Path(m).name
         try:
-            shutil.copy2(m, snap / Path(m).name)
-        except Exception:
+            os.symlink(os.path.abspath(m), dst)
+        except FileExistsError:
             pass
+        except Exception:
+            try:
+                shutil.copy2(m, dst)
+            except Exception:
+                pass
     return snap
 
 
-def _build_train_cmd(args, snap_dir: Path, warm_ckpt: str, exp_name: str) -> list:
+def _build_train_cmd(args, snap_dir: Path, warm_ckpt: str, exp_name: str, max_steps: int) -> list:
     cmd = [
         args.tracker_python,
         str(PROTOMOTIONS_ROOT / "protomotions" / "train_agent.py"),
@@ -96,7 +142,7 @@ def _build_train_cmd(args, snap_dir: Path, warm_ckpt: str, exp_name: str) -> lis
         "--checkpoint", str(warm_ckpt),
         "--num-envs", str(args.num_envs),
         "--batch-size", str(args.batch_size),
-        "--training-max-steps", str(args.steps_per_round),
+        "--training-max-steps", str(max_steps),
         "--headless", "True",
         "--skip-initial-eval",
         "--overrides", f"agent.save_last_checkpoint_every={args.save_every}",
@@ -114,13 +160,35 @@ def main() -> None:
     ap.add_argument("--simulator", default="isaacgym")
     ap.add_argument("--num-envs", type=int, default=32)
     ap.add_argument("--batch-size", type=int, default=512)
-    ap.add_argument("--steps-per-round", type=int, default=1500)
+    # Warm-start (--checkpoint) RESETS ProtoMotions' step_count to 0 each round
+    # (verified: round-N ckpts save epoch=0/step_count=0), so --training-max-steps
+    # is effectively a per-round budget. 1 PPO epoch = num_envs * NUM_STEPS_PER_EPOCH
+    # env steps, so the old 1500-9000 values were <1 epoch => the tracker barely
+    # trained. Budget a meaningful number of epochs PER ROUND instead.
+    ap.add_argument("--epochs-per-round", type=int, default=30,
+                    help="PPO epochs to train each round (flat; counter resets on warm-start)")
+    ap.add_argument("--steps-per-round", type=int, default=0,
+                    help="explicit per-round env-step budget; overrides --epochs-per-round if >0")
+    # Pool subsampling: cap per-round motion-loading cost and train on the fresh
+    # frontier + a diversity sample (anti-forgetting).
+    ap.add_argument("--pool-sample", type=int, default=800,
+                    help="max motions loaded per round (0 = full pool)")
+    ap.add_argument("--recent-frac", type=float, default=0.5,
+                    help="fraction of the per-round sample taken as NEWEST motions")
     ap.add_argument("--save-every", type=int, default=1)
     ap.add_argument("--min-motions", type=int, default=24, help="pool size required for round 0")
     ap.add_argument("--min-new", type=int, default=16, help="new motions required between rounds")
     ap.add_argument("--max-rounds", type=int, default=40)
     ap.add_argument("--poll-sec", type=int, default=60)
     ap.add_argument("--start-round", type=int, default=0)
+    # CRITICAL: ProtoMotions AUTO-RESUMES results/<experiment-name> if it exists and
+    # then IGNORES all CLI overrides (--motion-file/--num-envs/--checkpoint). A fixed
+    # name like physflow_online_g1_trainee_rNN collides with prior runs' result dirs,
+    # silently training on stale data/configs. Tagging the experiment name per launch
+    # guarantees a fresh dir so our pool + warm-start chain are actually used. Pin
+    # --run-tag on relaunch only if you intend to resume the SAME results dirs.
+    ap.add_argument("--run-tag", default=time.strftime("%Y%m%d_%H%M%S"),
+                    help="unique tag for experiment-name to avoid stale auto-resume")
     args = ap.parse_args()
 
     pool_dir = (PROJECT_ROOT / args.pool_dir) if not os.path.isabs(args.pool_dir) else Path(args.pool_dir)
@@ -155,11 +223,18 @@ def main() -> None:
 
         round_dir = out_root / f"r{rnd:02d}"
         round_dir.mkdir(parents=True, exist_ok=True)
-        snap = _snapshot_pool(pool_dir, round_dir)
+        snap = _snapshot_pool(pool_dir, round_dir, sample=args.pool_sample,
+                              recent_frac=args.recent_frac, seed=rnd)
         n_motions = len(_pool_motions(snap))
-        exp_name = f"physflow_online_g1_trainee_r{rnd:02d}"
-        cmd = _build_train_cmd(args, snap, warm, exp_name)
+        exp_name = f"physflow_g1coevo_{args.run_tag}_r{rnd:02d}"
+        # flat per-round budget (warm-start resets the step counter each round)
+        if args.steps_per_round > 0:
+            max_steps = args.steps_per_round
+        else:
+            max_steps = args.epochs_per_round * args.num_envs * NUM_STEPS_PER_EPOCH
+        cmd = _build_train_cmd(args, snap, warm, exp_name, max_steps)
         logj({"event": "round_start", "round": rnd, "n_motions": n_motions,
+              "pool_total": len(_pool_motions(pool_dir)), "max_steps": max_steps,
               "warmstart": warm, "experiment_name": exp_name, "cmd": cmd})
 
         t0 = time.time()
@@ -170,6 +245,24 @@ def main() -> None:
         dt = time.time() - t0
 
         ckpt = PROTOMOTIONS_ROOT / "results" / exp_name / "last.ckpt"
+        # Guard against the silent stale-resume failure mode: if ProtoMotions
+        # resumed a pre-existing results/<exp_name> it prints this warning and
+        # ignores our --motion-file/--num-envs/--checkpoint. Treat as fatal.
+        stale_resume = False
+        try:
+            with open(round_log, "r", errors="ignore") as lf:
+                head = lf.read(20000)
+            if "overrides provided during RESUME will be IGNORED" in head \
+               or str(snap.resolve()) not in head:
+                stale_resume = True
+        except Exception:
+            pass
+        if stale_resume:
+            logj({"event": "fatal", "round": rnd,
+                  "msg": "ProtoMotions resumed a stale results dir and ignored CLI "
+                         "(wrong pool/num_envs). experiment-name collision; aborting.",
+                  "experiment_name": exp_name, "log": str(round_log)})
+            sys.exit(2)
         ok = (ret == 0 and ckpt.is_file())
         logj({"event": "round_done", "round": rnd, "returncode": ret,
               "elapsed_sec": round(dt, 1), "ckpt": str(ckpt), "ckpt_exists": ckpt.is_file(),

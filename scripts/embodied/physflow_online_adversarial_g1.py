@@ -37,7 +37,8 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-PROTOMOTIONS_ROOT = PROJECT_ROOT / "ref_repo" / "ProtoMotions"
+from physflow_tracker_bundle_paths import PROTOMOTIONS_ROOT
+
 DEFAULT_TRACKER_EXPERIMENT = (
     PROTOMOTIONS_ROOT / "examples" / "experiments" / "mimic" / "physflow_g1_xy_offset.py"
 )

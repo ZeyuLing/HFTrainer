@@ -74,9 +74,10 @@ def remove_gmr_root_offset(root_rot_xyzw):
     into the output quaternion. ProtoMotions expects near-identity pelvis rotation
     for a standing robot (only yaw varies).
 
-    Fix: right-multiply by rot_offset.inv() to undo the frame conversion.
-    Since GMR applies: q_out = q_smplx * rot_offset
-    We undo:           q_corrected = q_out * rot_offset.inv()
+    Fix: this is a WORLD-frame (Y-up -> Z-up) basis change, so it must be applied
+    as a LEFT-multiply. A right-multiply (q_out * rot_offset.inv()) is a body-frame
+    operation that leaves the pelvis up-axis horizontal and flips it (~45% of
+    frames) for any clip whose facing changes (walking/jogging/turning).
 
     Args:
         root_rot_xyzw: (T, 4) root rotation quaternions in xyzw format
@@ -86,7 +87,7 @@ def remove_gmr_root_offset(root_rot_xyzw):
     """
     rot_offset = _get_gmr_rot_offset()
     root_rots = R.from_quat(root_rot_xyzw)
-    corrected = root_rots * rot_offset.inv()
+    corrected = rot_offset.inv() * root_rots
     return corrected.as_quat().astype(root_rot_xyzw.dtype)
 
 

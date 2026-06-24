@@ -458,7 +458,10 @@ class OpenTrackRollout:
                 source_jnt_type = np.array([mujoco.mjtJoint.mjJNT_FREE] + [mujoco.mjtJoint.mjJNT_HINGE] * (len(source_joint_names) - 1))
             src_qpos_slices, src_qvel_slices = _qpos_qvel_slices(source_joint_names, source_jnt_type)
 
-            qpos = np.tile(DEFAULT_QPOS[None], (qpos_src.shape[0], 1)).astype(np.float32)
+            # Match OpenTrack's TrajectoryHandler.filter_and_extend behavior:
+            # joints missing from a source trajectory are appended with qpos=0/qvel=0,
+            # not with the policy's standing DEFAULT_QPOS.
+            qpos = np.zeros((qpos_src.shape[0], self.model.nq), dtype=np.float32)
             qvel = np.zeros((qpos_src.shape[0], self.model.nv), dtype=np.float32)
             for name in self.model_joint_names:
                 if name not in src_qpos_slices:
@@ -524,14 +527,21 @@ class OpenTrackRollout:
 
         root_err = []
         body_err = []
+        xy_aligned_body_err = []
         local_body_err = []
         body_vel_err = []
         local_body_vel_err = []
+        body_acc_err = []
+        local_body_acc_err = []
         joint_err = []
         max_joint_err = []
         root_height_err = []
         height = []
         finite = True
+        prev_body_vel = None
+        prev_ref_body_vel = None
+        prev_local_body_vel = None
+        prev_ref_local_body_vel = None
         for i in range(1, n_steps + 1):
             obs = self._obs(qpos[i], qvel[i], last_motor_targets)
             action = self.sess.run([self.output_name], {"obs": obs.reshape(1, -1)})[0][0]
@@ -556,6 +566,9 @@ class OpenTrackRollout:
             joint_err.append(float(np.mean(joint_abs)))
             max_joint_err.append(float(np.max(joint_abs)))
             current_body_pos = self.data.xpos[self.valid_body_ids].copy()
+            self.ref_data.qpos[:] = qpos[i]
+            self.ref_data.qvel[:] = qvel[i]
+            mujoco.mj_forward(self.model, self.ref_data)
             ref_body_pos = self.ref_data.xpos[self.valid_body_ids].copy()
             current_root_mat = quat_to_mat(self.data.qpos[3:7])
             ref_root_mat = quat_to_mat(qpos[i, 3:7])
@@ -572,6 +585,11 @@ class OpenTrackRollout:
                         )
                     )
                 )
+            )
+            ref_body_xy_aligned = ref_body_pos.copy()
+            ref_body_xy_aligned[:, :2] += self.data.qpos[:2][None] - qpos[i, :2][None]
+            xy_aligned_body_err.append(
+                float(np.mean(np.linalg.norm(current_body_pos - ref_body_xy_aligned, axis=-1)))
             )
             local_body_err.append(
                 float(np.mean(np.linalg.norm(current_body_local - ref_body_local, axis=-1)))
@@ -590,6 +608,19 @@ class OpenTrackRollout:
             local_body_vel_err.append(
                 float(np.mean(np.linalg.norm(local_body_vel - ref_local_body_vel, axis=-1)))
             )
+            if prev_body_vel is not None:
+                body_acc = (body_vel - prev_body_vel) / self.dt
+                ref_body_acc = (ref_body_vel - prev_ref_body_vel) / self.dt
+                local_body_acc = (local_body_vel - prev_local_body_vel) / self.dt
+                ref_local_body_acc = (ref_local_body_vel - prev_ref_local_body_vel) / self.dt
+                body_acc_err.append(float(np.mean(np.linalg.norm(body_acc - ref_body_acc, axis=-1))))
+                local_body_acc_err.append(
+                    float(np.mean(np.linalg.norm(local_body_acc - ref_local_body_acc, axis=-1)))
+                )
+            prev_body_vel = body_vel
+            prev_ref_body_vel = ref_body_vel
+            prev_local_body_vel = local_body_vel
+            prev_ref_local_body_vel = ref_local_body_vel
             prev_body_pos = current_body_pos
             prev_ref_body_pos = ref_body_pos
             height.append(float(self.data.qpos[2]))
@@ -599,18 +630,28 @@ class OpenTrackRollout:
         if not root_err:
             root_err = [float("inf")]
             body_err = [float("inf")]
+            xy_aligned_body_err = [float("inf")]
             local_body_err = [float("inf")]
             body_vel_err = [float("inf")]
             local_body_vel_err = [float("inf")]
+            body_acc_err = [float("inf")]
+            local_body_acc_err = [float("inf")]
             joint_err = [float("inf")]
             max_joint_err = [float("inf")]
             root_height_err = [float("inf")]
             height = [float("-inf")]
 
-        mpjpe_m = float(np.mean(body_err))
+        raw_global_mpjpe_m = float(np.mean(body_err))
+        xy_aligned_mpjpe_m = float(np.mean(xy_aligned_body_err))
         local_mpjpe_m = float(np.mean(local_body_err))
+        root_err_m = float(np.mean(root_err))
         root_height_err_m = float(np.mean(root_height_err))
         paper_failed = (not finite) or local_mpjpe_m > 0.2 or root_height_err_m > 0.2
+        strict_failed = (
+            paper_failed
+            or root_err_m > 1.0
+            or float(np.max(max_joint_err)) > 0.7
+        )
         failed = (
             (not finite)
             or max(local_body_err) > 0.75
@@ -621,27 +662,40 @@ class OpenTrackRollout:
             "motion": path.stem,
             "steps": int(len(root_err)),
             "success": bool(not failed),
-            "root_err_mean": float(np.mean(root_err)),
+            "root_err_mean": root_err_m,
             "root_err_max": float(np.max(root_err)),
             "root_height_err_mean": root_height_err_m,
             "root_height_err_max": float(np.max(root_height_err)),
-            "body_err_mean": float(np.mean(body_err)),
-            "body_err_max": float(np.max(body_err)),
+            "raw_body_err_mean": raw_global_mpjpe_m,
+            "raw_body_err_max": float(np.max(body_err)),
+            "body_err_mean": xy_aligned_mpjpe_m,
+            "body_err_max": float(np.max(xy_aligned_body_err)),
+            "xy_aligned_body_err_mean": xy_aligned_mpjpe_m,
+            "xy_aligned_body_err_max": float(np.max(xy_aligned_body_err)),
             "local_body_err_mean": local_mpjpe_m,
             "local_body_err_max": float(np.max(local_body_err)),
             "body_vel_err_mean": float(np.mean(body_vel_err)),
             "local_body_vel_err_mean": float(np.mean(local_body_vel_err)),
-            "mpjpe_m": mpjpe_m,
-            "mpjpe_mm": mpjpe_m * 1000.0,
+            "body_acc_err_mean": float(np.mean(body_acc_err)) if body_acc_err else float("nan"),
+            "local_body_acc_err_mean": float(np.mean(local_body_acc_err)) if local_body_acc_err else float("nan"),
+            "raw_global_mpjpe_m": raw_global_mpjpe_m,
+            "raw_global_mpjpe_mm": raw_global_mpjpe_m * 1000.0,
+            "xy_aligned_mpjpe_m": xy_aligned_mpjpe_m,
+            "xy_aligned_mpjpe_mm": xy_aligned_mpjpe_m * 1000.0,
+            "mpjpe_m": xy_aligned_mpjpe_m,
+            "mpjpe_mm": xy_aligned_mpjpe_m * 1000.0,
             "local_mpjpe_m": local_mpjpe_m,
             "local_mpjpe_mm": local_mpjpe_m * 1000.0,
             "mpjve_mps": float(np.mean(body_vel_err)),
             "local_mpjve_mps": float(np.mean(local_body_vel_err)),
+            "mpjae_mps2": float(np.mean(body_acc_err)) if body_acc_err else float("nan"),
+            "local_mpjae_mps2": float(np.mean(local_body_acc_err)) if local_body_acc_err else float("nan"),
             "joint_err_mean": float(np.mean(joint_err)),
             "max_joint_err_mean": float(np.mean(max_joint_err)),
             "max_joint_err_max": float(np.max(max_joint_err)),
             "min_height": float(np.min(height)),
             "paper_success": bool(not paper_failed),
+            "strict_success": bool(not strict_failed),
         }
         if capture_frames:
             result["_robot_frames"] = self._robot_frames_payload(rollout_frames, frame_stride)
@@ -681,7 +735,7 @@ def main() -> None:
     if args.frames_dir is not None:
         (args.frames_dir / "reference").mkdir(parents=True, exist_ok=True)
         (args.frames_dir / "opentrack").mkdir(parents=True, exist_ok=True)
-    for path in tqdm(paths, desc="OpenTrack eval"):
+    for path in tqdm(paths, desc="Any2Track eval"):
         row = runner.evaluate_motion(
             path,
             max_steps=args.max_steps,
@@ -723,7 +777,7 @@ def main() -> None:
                         },
                         "opentrack": {
                             "status": "ready",
-                            "title": "OpenTrack / Any2Track",
+                            "title": "Any2Track",
                             "path": str(rollout_path),
                             "metrics": metrics,
                         },
@@ -745,13 +799,18 @@ def main() -> None:
         "local_body_err_max_mean": _mean(rows, "local_body_err_max"),
         "body_vel_err_mean": _mean(rows, "body_vel_err_mean"),
         "local_body_vel_err_mean": _mean(rows, "local_body_vel_err_mean"),
+        "body_acc_err_mean": _mean(rows, "body_acc_err_mean"),
+        "local_body_acc_err_mean": _mean(rows, "local_body_acc_err_mean"),
         "mpjpe_m": _mean(rows, "mpjpe_m"),
         "mpjpe_mm": _mean(rows, "mpjpe_mm"),
         "local_mpjpe_m": _mean(rows, "local_mpjpe_m"),
         "local_mpjpe_mm": _mean(rows, "local_mpjpe_mm"),
         "mpjve_mps": _mean(rows, "mpjve_mps"),
         "local_mpjve_mps": _mean(rows, "local_mpjve_mps"),
+        "mpjae_mps2": _mean(rows, "mpjae_mps2"),
+        "local_mpjae_mps2": _mean(rows, "local_mpjae_mps2"),
         "paper_success_rate": _mean(rows, "paper_success"),
+        "strict_success_rate": _mean(rows, "strict_success"),
         "joint_err_mean": _mean(rows, "joint_err_mean"),
         "max_joint_err_mean": _mean(rows, "max_joint_err_mean"),
         "max_joint_err_max_mean": _mean(rows, "max_joint_err_max"),
@@ -768,7 +827,7 @@ def main() -> None:
         args.frames_manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest = {
             "schema_version": 1,
-            "project": "OpenTrack / Any2Track LAFAN1-G1 Visualization",
+            "project": "Any2Track LAFAN1-G1 Visualization",
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "generated_from": {
                 "motion_dir": str(args.motion_dir),
@@ -781,7 +840,7 @@ def main() -> None:
             "group_label": "case",
             "column_order": [
                 {"key": "reference", "title": "LAFAN1-G1 reference", "color": "raw"},
-                {"key": "opentrack", "title": "OpenTrack / Any2Track", "color": "track"},
+                {"key": "opentrack", "title": "Any2Track", "color": "track"},
             ],
             "rows": viz_rows,
         }

@@ -150,11 +150,14 @@ def _aggregate(metrics: List[Dict[str, float]], jumps: List[float]) -> Dict[str,
     }
 
 
-def evaluate_checkpoint(bundle, reward, dataset, ckpt_dir: Path, iter_num: int,
+def evaluate_checkpoint(bundle, reward, dataset, ckpt_dir: Optional[Path], iter_num: int,
                         diffusion_steps: int, gen_batch: int,
                         rollout_dir: Optional[str],
                         seed: Optional[int]) -> Dict[str, float]:
-    _load_checkpoint(bundle, ckpt_dir)
+    # ckpt_dir=None -> evaluate the freshly-built (base, pre-RAFT) generator, so
+    # we can pair base vs optimized under the SAME judge / prompts / seed.
+    if ckpt_dir is not None:
+        _load_checkpoint(bundle, ckpt_dir)
     bundle.denoiser.eval()
 
     feats = [dataset[i]["text_feat"] for i in range(len(dataset))]
@@ -180,7 +183,7 @@ def evaluate_checkpoint(bundle, reward, dataset, ckpt_dir: Path, iter_num: int,
 
     agg = _aggregate(metrics, jumps)
     agg["iter"] = iter_num
-    agg["ckpt"] = str(ckpt_dir)
+    agg["ckpt"] = str(ckpt_dir) if ckpt_dir is not None else "base"
     agg["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     agg["prompts_sample"] = prompts[:3]
     return agg
@@ -221,6 +224,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=None,
                     help="optional KIMODO sampling seed for reproducible eval")
     ap.add_argument("--ckpt", default=None, help="evaluate a single checkpoint dir and exit")
+    ap.add_argument("--base", action="store_true",
+                    help="evaluate the base (pre-RAFT) generator with no checkpoint and exit")
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--poll-sec", type=int, default=90)
     ap.add_argument("--rollout-dir", default=None)
@@ -235,7 +240,6 @@ def main() -> None:
     work_dir.mkdir(parents=True, exist_ok=True)
 
     from hftrainer.models.motion.physflow.dataset import PhysFlowPromptDataset
-    from hftrainer.models.motion.physflow.reward import PhysicsJudgeReward
 
     dataset = PhysFlowPromptDataset(
         corpus_file=args.eval_corpus, feature_dir=feature_dir, split=args.split,
@@ -245,7 +249,35 @@ def main() -> None:
     _log(f"held-out eval prompts: {len(dataset)} (split={args.split})")
 
     bundle = _build_bundle(cfg)
-    reward = PhysicsJudgeReward()
+
+    # Pick the SAME judge backend the config trains against, so the eval scores
+    # base vs optimized under the in-loop judge (HGPT) rather than always the
+    # ProtoMotions ONNX tracker. Keeps the eval general across judges.
+    tr = dict(cfg.get("trainer", {}) or {})
+    backend = tr.get("judge_backend", "protomotions")
+    if backend == "hgpt":
+        from hftrainer.models.motion.physflow.hgpt_reward import HgptJudgeReward
+        reward = HgptJudgeReward(
+            onnx_path=tr.get("judge_onnx"),
+            hgpt_python=tr.get("hgpt_python"),
+            freq=int(tr.get("hgpt_freq", 50)),
+            input_fps=int(tr.get("hgpt_input_fps", 30)),
+        )
+        _log("eval judge backend: HGPT (Humanoid-GPT)")
+    elif backend in {"any2track", "opentrack"}:
+        from hftrainer.models.motion.physflow.any2track_reward import Any2TrackJudgeReward
+        reward = Any2TrackJudgeReward(
+            onnx_path=tr.get("judge_onnx"),
+            mjcf_path=tr.get("judge_mjcf"),
+            config_path=tr.get("any2track_config"),
+            input_fps=int(tr.get("any2track_input_fps", 30)),
+            max_steps=tr.get("any2track_max_steps"),
+        )
+        _log("eval judge backend: Any2Track")
+    else:
+        from hftrainer.models.motion.physflow.reward import PhysicsJudgeReward
+        reward = PhysicsJudgeReward()
+        _log("eval judge backend: protomotions")
 
     def _run_one(iter_num: int, ckpt_dir: Path) -> None:
         t0 = time.time()
@@ -266,6 +298,10 @@ def main() -> None:
             f"jump={agg['A_qpos_jump_mean']:.4f} "
             f"({time.time()-t0:.0f}s)"
         )
+
+    if args.base:
+        _run_one(0, None)
+        return
 
     if args.ckpt:
         m = _ITER_RE.search(Path(args.ckpt).name)
