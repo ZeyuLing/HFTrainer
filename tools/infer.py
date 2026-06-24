@@ -38,6 +38,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Ensure all registries are populated even when the import-light escape hatch
+# (HFTRAINER_SKIP_AUTOREGISTER) is set. Idempotent / cheap when already done.
+import hftrainer  # noqa: E402
+hftrainer.register_all_modules()
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run inference with hftrainer pipeline')
@@ -329,6 +334,100 @@ def infer_hymotion_t2m(bundle, args):
     print(f'Saved motion to: {output_path}')
 
 
+def infer_hymotion_v2m(bundle, args):
+    """Run HyMotion-V2M (pre-extracted feature -> motion) inference.
+
+    ``--input`` may be a ``.pt`` or ``.npz`` carrying ``feature`` (T, D) and
+    optionally ``camera_RT`` (T, 4, 4) / ``camera_K`` (T, 3, 3).  When omitted, a
+    random feature stream (for smoke / sanity) is generated.
+    """
+    import torch
+    import numpy as np
+    from hftrainer.pipelines.motion.hymotion_v2m_pipeline import HyMotionV2MPipeline
+
+    pipeline = HyMotionV2MPipeline(bundle=bundle)
+
+    # End-to-end branch: --input is a raw video -> run stage-2 preprocessing
+    # (ffmpeg + YOLOX/ByteTrack + SAM-3D-Body) then feature->motion.
+    _VIDEO_EXT = ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v')
+    if args.input and args.input.lower().endswith(_VIDEO_EXT):
+        if not os.path.exists(args.input):
+            raise FileNotFoundError(f'Video not found: {args.input}')
+        print(f'End-to-end V2M from video: {args.input}')
+        output = pipeline.infer_v2m(
+            args.input,
+            max_frames=args.num_frames or None,
+            seeds=[0],
+            cfg_scale=args.guidance_scale or 1.0,
+        )
+        output_path = args.output or 'outputs/inference/hymotion_v2m/output.npz'
+        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+        save_dict = {
+            k: v.cpu().numpy() for k, v in output.items() if isinstance(v, torch.Tensor)
+        }
+        np.savez(output_path, **save_dict)
+        print(f'Saved motion to: {output_path}')
+        return
+
+    feature = None
+    camera_RT = None
+    camera_K = None
+    # camera_is_static: None -> auto (static when no real camera given).  When a
+    # camera is provided, the model needs to know whether it moves so it can
+    # disentangle camera vs body motion (movement_type == "static").
+    movement_type = None
+    if args.input and os.path.exists(args.input):
+        if args.input.endswith('.pt'):
+            data = torch.load(args.input, map_location='cpu')
+        else:
+            data = dict(np.load(args.input, allow_pickle=True))
+        if isinstance(data, dict):
+            feat = data.get('feature', data.get('feat'))
+            feature = torch.as_tensor(feat, dtype=torch.float32)
+            if data.get('camera_RT') is not None:
+                camera_RT = torch.as_tensor(data['camera_RT'], dtype=torch.float32)
+            if data.get('camera_K') is not None:
+                camera_K = torch.as_tensor(data['camera_K'], dtype=torch.float32)
+            if data.get('movement_type') is not None:
+                movement_type = str(np.asarray(data['movement_type']).item()) \
+                    if np.asarray(data['movement_type']).ndim == 0 \
+                    else str(data['movement_type'])
+        else:
+            feature = torch.as_tensor(data, dtype=torch.float32)
+        print(f'Loaded feature {tuple(feature.shape)} from {args.input}')
+    else:
+        L = args.num_frames or 60
+        D = bundle.feature_dim
+        feature = torch.randn(L, D)
+        print(f'No --input given; using random feature {(L, D)} for sanity run.')
+
+    if movement_type is not None:
+        camera_is_static = (movement_type == 'static')
+    else:
+        # static only when we fall back to identity extrinsics
+        camera_is_static = camera_RT is None
+    print(f'camera provided={camera_RT is not None} movement_type={movement_type} '
+          f'camera_is_static={camera_is_static}')
+
+    output = pipeline.infer_from_feature(
+        feature=feature,
+        camera_RT=camera_RT,
+        camera_K=camera_K,
+        seeds=[0],
+        cfg_scale=args.guidance_scale or 1.0,
+        camera_is_static=camera_is_static,
+    )
+
+    output_path = args.output or 'outputs/inference/hymotion_v2m/output.npz'
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+    save_dict = {}
+    for key, value in output.items():
+        if isinstance(value, torch.Tensor):
+            save_dict[key] = value.cpu().numpy()
+    np.savez(output_path, **save_dict)
+    print(f'Saved motion to: {output_path}')
+
+
 def main():
     args = parse_args()
 
@@ -342,10 +441,17 @@ def main():
     cfg = Config.fromfile(args.config)
 
     # Determine task type from config
-    trainer_cfg = getattr(cfg, 'trainer', {})
+    trainer_cfg = getattr(cfg, 'trainer', {}) or {}
     if hasattr(trainer_cfg, 'to_dict'):
         trainer_cfg = trainer_cfg.to_dict()
     trainer_type = trainer_cfg.get('type', '')
+
+    # Some inference-only stacks (e.g. HyMotion-V2M stage 1) have no trainer; in
+    # that case dispatch on the bundle type instead.
+    model_cfg = getattr(cfg, 'model', {}) or {}
+    if hasattr(model_cfg, 'to_dict'):
+        model_cfg = model_cfg.to_dict()
+    model_type = model_cfg.get('type', '') if isinstance(model_cfg, dict) else ''
 
     # Import modules
     import hftrainer  # noqa: trigger auto-imports
@@ -366,9 +472,11 @@ def main():
         infer_hymotion_m2m(bundle, args)
     elif 'HyMotionT2M' in trainer_type:
         infer_hymotion_t2m(bundle, args)
+    elif 'HyMotionV2M' in trainer_type or 'HyMotionV2M' in model_type:
+        infer_hymotion_v2m(bundle, args)
     else:
         print(f'Unknown trainer type: {trainer_type}. Cannot auto-detect pipeline.')
-        print('Supported (motion only on this branch): PrismTrainer, PrismMCMTrainer, VermoTrainer, HyMotionM2MTrainer, HyMotionT2MTrainer')
+        print('Supported (motion only on this branch): PrismTrainer, PrismMCMTrainer, VermoTrainer, HyMotionM2MTrainer, HyMotionT2MTrainer, HyMotionV2MBundle')
 
 
 if __name__ == '__main__':

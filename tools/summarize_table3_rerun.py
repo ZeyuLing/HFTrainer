@@ -32,6 +32,7 @@ METRIC_KEYS = {
 
 
 POSE_BODY_GLOBS = [
+    "mbench_results_posebody_*/*eval_results.json",
     "mbench_results_pose_full/*eval_results.json",
     "mbench_results_body_full/*eval_results.json",
     "mbench_results_pose_debug2/*eval_results.json",
@@ -63,7 +64,14 @@ METHODS = [
         "extra_result_globs": POSE_BODY_GLOBS,
         "status_if_done": "remeasured_official_276d_retarget",
     },
-    {"name": "HYMotion", "status": "pending_adapter_or_outputs"},
+    {
+        "name": "HYMotion",
+        "dir": "hymotion_lite",
+        "result_glob": "mbench_results_5phys_local/*eval_results.json",
+        "extra_result_globs": POSE_BODY_GLOBS,
+        "status_if_done": "remeasured_hymotion_lite",
+        "status": "pending_results",
+    },
     {
         "name": "T2M-GPT",
         "dir": "t2mgpt",
@@ -87,7 +95,14 @@ METHODS = [
         "extra_result_globs": POSE_BODY_GLOBS,
     },
     {"name": "Go-To-Zero", "status": "missing_adapter_or_checkpoint"},
-    {"name": "MotionStreamer", "status": "pending_adapter"},
+    {
+        "name": "MotionStreamer",
+        "dir": "motionstreamer_fixed",
+        "result_glob": "mbench_results_5phys_local/*eval_results.json",
+        "extra_result_globs": POSE_BODY_GLOBS,
+        "status_if_done": "remeasured_official_272_recover",
+        "status": "pending_results",
+    },
     {
         "name": "VerMo",
         "dir": "vermo_ckpt25000_full",
@@ -133,12 +148,23 @@ def is_empty_eval_result(data: dict[str, Any]) -> bool:
 
 
 def latest_non_empty(pattern: str) -> Path | None:
+    paths = non_empty_paths(pattern)
+    return paths[0] if paths else None
+
+
+def non_empty_paths(pattern: str) -> list[Path]:
     paths = sorted((Path(p) for p in glob.glob(pattern)), key=lambda p: p.stat().st_mtime, reverse=True)
+    out: list[Path] = []
     for path in paths:
+        # Sharded pose/body runs write per-shard evaluator JSONs under
+        # ``..._s0``, ``..._s1``, etc.  Only the post-aggregation directory is
+        # a full-method result, so never let a single shard into the table.
+        if path.parent.name.rsplit("_s", 1)[-1].isdigit() and "_s" in path.parent.name:
+            continue
         data = load_json(path)
         if not is_empty_eval_result(data):
-            return path
-    return None
+            out.append(path)
+    return out
 
 
 def metric_summary(data: dict[str, Any]) -> dict[str, Any]:
@@ -194,15 +220,17 @@ def collect_method(spec: dict[str, Any]) -> dict[str, Any]:
     base = ROOT / method_dir
     result_files: list[Path] = []
     for pattern in [spec["result_glob"], *spec.get("extra_result_globs", [])]:
-        path = latest_non_empty(str(base / pattern))
-        if path:
-            result_files.append(path)
+        result_files.extend(non_empty_paths(str(base / pattern)))
 
     metrics: dict[str, Any] = {}
     for path in result_files:
         data = load_json(path)
         for short, item in metric_summary(data).items():
-            metrics[short] = item
+            old = metrics.get(short)
+            if "error" in item:
+                metrics.setdefault(short, item)
+            elif old is None or "error" in old:
+                metrics[short] = item
 
     if metrics:
         record["status"] = spec.get("status_if_done", "remeasured")

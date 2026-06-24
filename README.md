@@ -1,90 +1,248 @@
 # HF-Trainer
 
-A unified, config-driven training framework built on the HuggingFace ecosystem. Combines MMEngine's declarative config system with Accelerate-native distributed training, and uses a `ModelBundle` abstraction to share forward logic between training and inference.
+HF-Trainer is a motion-generation model zoo and reproducibility toolkit built
+around HuggingFace-style model bundles, validated motion representations,
+retargeting operators, and persisted evaluators.
 
-## Features
+It is intentionally more than a trainer wrapper. The repository provides the
+infrastructure needed to reproduce and compare text-to-motion and
+kinematic-control methods end to end:
 
-- **Config-Driven, Registry-Based** -- `.py` config files with `_base_` inheritance (MMEngine style)
-- **Accelerate-Native** -- DDP, FSDP, DeepSpeed, mixed precision, gradient accumulation via HuggingFace Accelerate
-- **ModelBundle = Shared Core** -- Trainer and Pipeline share the same forward functions, written once
-- **Per-Module Control** -- Each sub-module independently controls `trainable`, `save_ckpt`, and LoRA via config
-- **HuggingFace-First** -- Directly uses `diffusers`, `transformers`, and `peft` with no extra wrappers
-- **Unified Checkpoint** -- Single `load_from` + `load_scope` API; `auto_resume=True` for cluster preemption recovery
+- self-contained `from_pretrained` / `save_pretrained` artifacts for reproduced
+  motion models;
+- a public motion-domain library under `hftrainer.motion` for representations,
+  skeletons, retargeting, and processing;
+- persisted HumanML3D-263 and MotionStreamer-272 evaluators;
+- paper-facing scripts for generation, conversion, metric collection, and mesh
+  inspection.
+
+[Install](#installation) |
+[Model Zoo](#model-zoo) |
+[Supported Tasks](#supported-tasks) |
+[Motion Library](#motion-library) |
+[Evaluators](#evaluators) |
+[Architecture](#architecture)
+
+---
 
 ## Installation
 
 ```bash
-git clone <repo-url> && cd hf_trainer
+git clone <repo-url> hf_trainer
+cd hf_trainer
 pip install -e .
 ```
 
-## Quick Start
+For import-light use in scripts and notebooks:
 
 ```bash
-# ViT classification smoke test (no GPU required)
-python tools/train.py configs/classification/vit_base_demo.py
-
-# Distributed training with 8 GPUs
-bash tools/dist_train.sh configs/text2video/wan_demo.py 8
+export HFTRAINER_SKIP_AUTOREGISTER=1
 ```
+
+Many model cards also require pretrained assets under `checkpoints/` or a
+downloaded HuggingFace snapshot. See each card in
+[`docs/model_zoo`](docs/model_zoo/README.md).
+
+## Quick Start
+
+Load a reproduced text-to-motion baseline:
+
+```python
+from hftrainer.pipelines.momask import MoMaskPipeline
+
+pipe = MoMaskPipeline.from_pretrained("ZeyuLing/hftrainer-momask-humanml3d", device="cuda")
+motions = pipe.infer_t2m(["a person walks forward then sits down"], [120])
+```
+
+Convert motion between evaluator spaces:
+
+```python
+from hftrainer.motion.representation import convert
+
+m135 = convert.hml263_to_motion135(m263, device="cuda")  # HML263 -> SMPL motion_135
+m272 = convert.motion135_to_motion272(m135)              # SMPL motion_135 -> MS272
+```
+
+Retarget KIMODO/SOMA output to SMPL mesh motion:
+
+```python
+from hftrainer.motion.retarget import KIMODOSOMAToSMPLRetargeter
+
+retargeter = KIMODOSOMAToSMPLRetargeter(device="cuda")
+smpl = retargeter.retarget_file("kimodo_debug_npz/000000.npz")
+motion_135 = smpl["motion_135"]
+```
+
+Score a prediction directory:
+
+```bash
+python3 scripts/eval/verify_evaluators.py \
+  --which hml263 \
+  --hml263-pred outputs/evaluation/momask_h3d263_official/momask_263
+```
+
+## Model Zoo
+
+Model-Zoo entries expose hftrainer-native bundles and, where available,
+self-contained artifacts. Reproduced baselines vendor the model code needed for
+inference instead of importing the original repository at runtime.
+
+| Model | Primary task | Native representation | Bundle / Pipeline | Processed Hugging Face artifact |
+|---|---|---|---|---|
+| [MDM](docs/model_zoo/mdm.md) | Text-to-motion | HumanML3D-263 | `MDMBundle` / `MDMPipeline` | [`ZeyuLing/hftrainer-mdm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mdm-humanml3d) |
+| [T2M-GPT](docs/model_zoo/t2mgpt.md) | Text-to-motion | HumanML3D-263 | `T2MGPTBundle` / `T2MGPTPipeline` | [`ZeyuLing/hftrainer-t2mgpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-t2mgpt-humanml3d) |
+| [MoMask](docs/model_zoo/momask.md) | Text-to-motion | HumanML3D-263 | `MoMaskBundle` / `MoMaskPipeline` | [`ZeyuLing/hftrainer-momask-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-momask-humanml3d) |
+| [MoGenTS](docs/model_zoo/mogents.md) | Text-to-motion | HumanML3D-263 | `MoGenTSBundle` / `MoGenTSPipeline` | [`ZeyuLing/hftrainer-mogents-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mogents-humanml3d) |
+| [MotionLCM](docs/model_zoo/motionlcm.md) | Text-to-motion | HumanML3D latent / 263 bridge | `MotionLCMBundle` / `MotionLCMPipeline` | [`ZeyuLing/hftrainer-motionlcm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlcm-humanml3d) |
+| [MotionStreamer](docs/model_zoo/motionstreamer.md) | Streaming text-to-motion | MotionStreamer-272 | `MotionStreamerBundle` / `MotionStreamerPipeline` | [`ZeyuLing/hftrainer-motionstreamer-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-motionstreamer-humanml272) |
+| [Go to Zero / MotionMillion](docs/model_zoo/gotozero.md) | Zero-shot text-to-motion | MotionStreamer-272 | `MotionMillionBundle` / `MotionMillionPipeline` | [`ZeyuLing/hftrainer-gotozero-7b-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-humanml272) |
+| [HY-Motion T2M 1.0](docs/model_zoo/hymotion_t2m.md) | Text-to-motion | HY-Motion 201 / SMPL motion_135 | `HyMotionT2MBundle` / `HyMotionT2MPipeline` | [`full`](https://huggingface.co/ZeyuLing/hftrainer-hymotion-t2m-1.0), [`lite`](https://huggingface.co/ZeyuLing/hftrainer-hymotion-t2m-1.0-lite) |
+| [KIMODO](docs/model_zoo/kimodo.md) | Text + kinematic control | SOMA / G1 / SMPL-X | `KIMODOBundle` / `KIMODOPipeline` | [`ZeyuLing/hftrainer-kimodo-soma-rp`](https://huggingface.co/ZeyuLing/hftrainer-kimodo-soma-rp) (private / license review) |
+
+Research stacks in the repository:
+
+| Stack | Scope | Public entry point |
+|---|---|---|
+| PRISM / PRISM-MCM | audio/text motion generation and control | `PrismBundle`, `PrismMCMBundle`, `hftrainer.pipelines.motion.prism_*` |
+| VerMo | VQ/AR motion generation components | `VermoBundle`, `VermoProcessor` |
+| HY-Motion-M2M | motion-to-motion editing / control research pipeline | `HyMotionM2MBundle`, `HyMotionM2MPipeline` |
+| HY-Motion-UMO | temporal fusion on HunyuanMotion MMDiT | `HyMotionUMOBundle`, `HyMotionUMOPipeline` |
+| MotionCLIP | motion-text contrastive model | `MotionCLIPBundle` |
+| PhysFlow | KIMODO-G1 generation with physics reward tooling | `PhysFlowBundle`, `PhysFlowG1Bundle` |
+
+The complete index is in [`docs/model_zoo/README.md`](docs/model_zoo/README.md).
+Each card should state the artifact layout, representation, exact evaluator
+protocol, metric JSON path, and original paper/code links.
+The canonical calling method for each model lives in
+`docs/model_zoo/<method>.md` under the loading / pipeline sections; the root
+README keeps only cross-model quick starts. Uploaded Hugging Face artifacts
+mirror the corresponding `docs/model_zoo` card. Keep them synchronized with
+`python3 tools/sync_model_zoo_cards.py --write-local` and, after logging in to
+Hugging Face, `python3 tools/sync_model_zoo_cards.py --push`.
 
 ## Supported Tasks
 
-| Task | ModelBundle | Trainer | Pipeline | Example Models |
-|---|---|---|---|---|
-| Classification | `ViTBundle` | `ClassificationTrainer` | `ClassificationPipeline` | ViT, DeiT, Swin |
-| Text-to-Image | `SD15Bundle` | `SD15Trainer` | `SD15Pipeline` | SD1.5, SDXL |
-| LLM SFT | `CausalLMBundle` | `CausalLMTrainer` | `CausalLMPipeline` | TinyLlama, LLaMA, Qwen |
-| Text-to-Video | `WanBundle` | `WanTrainer` | `WanPipeline` | WAN 1.3B/14B |
+HF-Trainer exposes task-specific motion APIs instead of collapsing motion work
+into a generic training-task checklist.
 
-## Motion Representations & Conversions
+| Task family | What is supported | Representative APIs |
+|---|---|---|
+| Text-to-motion | Prompt-conditioned generation on HumanML3D-263, MS272, HY-Motion 201, or SMPL motion_135 output spaces | `infer_t2m`, `text_to_motion`, model-specific pipelines |
+| Length-conditioned T2M | Fixed-frame generation for evaluator parity | `infer_t2m(texts, lengths)` |
+| Streaming / autoregressive T2M | token-by-token or segment-wise generation | `MotionStreamerPipeline`, `MotionMillionPipeline` |
+| Text + kinematic control | KIMODO prompt generation with multi-prompt stitching, full-body keyframes, end-effectors, root-2D paths, and saved constraint JSON | `KIMODOPipeline.multi_prompt`, `fullbody_keyframe_constraint`, `end_effector_constraint`, `root2d_constraint` |
+| Motion representation conversion | HML263, MS272, SMPL `motion_135`, HY-Motion 201, SOMA30/77, InterHuman-262 bridges | `hftrainer.motion.representation.convert` |
+| Retargeting | HML263 -> SMPL, SMPL <-> SOMA, KIMODO/SOMA -> SMPL, SMPL -> Unitree G1 | `hftrainer.motion.retarget` |
+| Evaluation | persisted retrieval metrics, cross-representation scoring, physical quality checks | `HumanML263Evaluator`, `MotionStreamer272Evaluator`, `hftrainer.evaluation.motion.mbench_physics`, `hftrainer.evaluation.quality_check_rules` |
+| Visualization | reusable motion visualization protocols/operators plus viewer consumers with explicit reference / condition-marker / generated roles | `hftrainer.motion.visualization`, `docs/visualization.md` |
+| Training / fine-tuning | config-driven training for research stacks and reusable modules | `tools/train.py`, `tools/dist_train.sh`, MMEngine-style configs |
 
-`hftrainer.motion` is the standalone motion-domain library (no `ref_repo`
-dependency for the core chain). It defines the motion representations we use
-(`HML263`, `MS272`, SMPL `motion_135/138/198/…`, KIMODO SOMA, Unitree G1) and the
-validated conversions between them — HumanML3D-263 ↔ SMPL ↔ SOMA ↔ G1 ↔
-MotionStreamer-272, with skeleton/mesh/robot visualization.
+## Motion Library
 
-> **Always convert through `hftrainer.motion.representation.convert`** — never
-> hand-pick a low-level helper. The rot6d **COLUMN vs ROW** convention is the #1
-> source of silent bugs.
+Reusable motion code lives under [`hftrainer.motion`](hftrainer/motion/README.md).
+Model bundles live under `hftrainer.models.motion`; domain logic should not be
+hidden behind model-zoo paths.
 
-```python
-import os; os.environ["HFTRAINER_SKIP_AUTOREGISTER"] = "1"   # import-light
-from hftrainer.motion.representation import convert
+### Representations
 
-joints = convert.hml263_to_joints(m263)                       # 263 -> (T,22,3)
-m135   = convert.hml263_to_motion135(m263, device="cuda")     # 263 -> SMPL motion_135 (ROW, IK)
-m272   = convert.hml263_to_motion272(m263)                    # full chain -> MS272 evaluator space
-```
+The repository currently uses these motion spaces:
 
-See the detailed motion docs:
+| Representation | FPS | Shape | Used by |
+|---|---:|---|---|
+| HumanML3D-263 | 20 | `(T, 263)` | MDM, T2M-GPT, MoMask, MotionLCM, HumanML evaluator |
+| MotionStreamer-272 | 30 | `(T, 272)` | MotionStreamer, Go to Zero, MS272 evaluator |
+| SMPL `motion_135` | usually 30 | root translation + 22 row-major rot6d joints | mesh rendering, HY-Motion scoring bridge, retargeting |
+| HY-Motion 201 | 30 | SMPL 135 + joint-position features | HY-Motion T2M |
+| SOMA30 / SOMA77 | model dependent | KIMODO skeleton rotations and joints | KIMODO |
+| Unitree G1 | model dependent | 29-DOF robot qpos/qpos-like output | embodied retargeting |
 
-- [`docs/motion/representations.md`](docs/motion/representations.md) — representation table, conversion map, the rot6d-convention trap, and pre-rendered before/after-retarget clips
-- [`docs/motion/api.md`](docs/motion/api.md) — API-level reference (every public function/class, signatures + conventions)
-- [`hftrainer/motion/README.md`](hftrainer/motion/README.md) — library overview; specs in [`representation/specs.py`](hftrainer/motion/representation/specs.py)
-- Browser demo: `scripts/demo/hml263_multi_repr_demo.py` + `motion_annot_web/repr_convert_demo/app.py`
+Always use [`hftrainer.motion.representation.convert`](hftrainer/motion/representation/convert.py)
+for cross-representation conversions. The API reference is
+[`docs/motion/api.md`](docs/motion/api.md), and the representation guide is
+[`docs/motion/representations.md`](docs/motion/representations.md).
+
+### Retargeting
+
+Canonical retargeting code lives in
+[`hftrainer.motion.retarget`](hftrainer/motion/retarget):
+
+| Operator | Use case |
+|---|---|
+| `retarget_hml263_clip` / `hml263_to_motion135` | HumanML3D-263 predictions to SMPL motion_135 |
+| `SMPLSOMARetargeter` | SMPL motion_135 <-> SOMA30 rotation transfer |
+| `KIMODOSOMAToSMPLRetargeter` | KIMODO SOMA output to SMPL motion_135 |
+| `SMPLToG1Retargeter` | SMPL motion to Unitree G1 joint angles |
+
+For KIMODO mesh inspection, the correct path requires `global_rot_mats` in the
+KIMODO debug NPZ. Position-only IK is a degraded fallback and should not be used
+as a mesh-quality signal.
+
+## Evaluators
+
+The text-to-motion evaluator stack is persisted under
+[`hftrainer.evaluation.evaluators`](hftrainer/evaluation/evaluators).
+
+| Evaluator | Input | Metrics |
+|---|---|---|
+| `HumanML263Evaluator` | unnormalized HML263 `(T,263)` at 20 fps | FID, R-Precision, Matching Score, Diversity |
+| `MotionStreamer272Evaluator` | unnormalized MS272 `(T,272)` at 30 fps | FID, R-Precision, Matching Score, Diversity |
+
+Use [`docs/motion/evaluators.md`](docs/motion/evaluators.md) for the operating
+contract: prediction layouts, conversion paths, required GT rows, and failure
+checklist. Model-card numbers should be copied from generated JSON files, not
+typed by hand.
+
+## Artifact Standard
+
+Published model-zoo artifacts should follow the same expectations:
+
+- `from_config`, `from_pretrained`, and `save_pretrained` are available on the
+  bundle;
+- trainable/generative weights are stored in the artifact, preferably as
+  `safetensors`;
+- frozen text encoders are included when storage/licensing permits;
+- normalization stats and representation metadata live next to the weights;
+- `model_index.json` or equivalent metadata identifies the bundle and pipeline;
+- conversion scripts provide `--verify` round-trip checks when practical.
+
+## Architecture
+
+The codebase separates three layers:
+
+| Layer | Location | Responsibility |
+|---|---|---|
+| Motion library | `hftrainer.motion` | representations, skeletons, retargeting, processing, reusable domain APIs |
+| Model zoo | `hftrainer.models.motion` + `hftrainer.pipelines` | model bundles, neural networks, samplers, inference APIs |
+| Evaluation | `hftrainer.evaluation` + `scripts/eval` | persisted evaluators, conversion jobs, metric collection, paper protocol scripts |
+
+`hftrainer.models.motion.components` is reserved for neural network blocks that
+are shared across model-zoo methods. Body models, retargeting, and motion
+processors belong to `hftrainer.motion`.
+
+Design notes:
+
+- [`docs/design/motion_library.md`](docs/design/motion_library.md)
+- [`docs/motion/api.md`](docs/motion/api.md)
+- [`docs/motion/evaluators.md`](docs/motion/evaluators.md)
+- [`docs/motion/physical_metrics.md`](docs/motion/physical_metrics.md)
 
 ## Documentation
 
-For full documentation, see the [docs/](docs/) directory:
-
-- [Installation](docs/installation.md) -- Install the package and download pretrained checkpoints
-- [Quick Start](docs/quickstart.md) -- Smoke tests and inference examples
-- [Distributed Training](docs/distributed.md) -- DDP, FSDP, DeepSpeed, single GPU
-- [Experiment Directory](docs/experiment_dir.md) -- Work directory layout, checkpoint management, auto-resume
-- [Architecture](docs/architecture.md) -- How the framework is structured
-- [Supported Tasks](docs/tasks.md) -- Task table and val output conventions
-- [Comparison](docs/comparison.md) -- Comparison with MMEngine and HuggingFace Trainer
-- [Design Docs](docs/design/index.md) -- In-depth design rationale (bilingual Chinese/English)
-
-To serve the docs locally with MkDocs:
-
-```bash
-pip install mkdocs-material
-mkdocs serve
-```
+| Guide | Description |
+|---|---|
+| [Model Zoo](docs/model_zoo/README.md) | reproduced baselines, artifacts, metrics, papers |
+| [Motion Representations](docs/motion/representations.md) | HML263/MS272/SMPL/SOMA/G1 layouts and conversion map |
+| [Motion API](docs/motion/api.md) | public motion library API reference |
+| [Evaluators](docs/motion/evaluators.md) | evaluator protocols and failure checklist |
+| [Physical Metrics](docs/motion/physical_metrics.md) | SMPL-22 MBench-style physical plausibility protocol |
+| [Visualization](docs/visualization.md) | mesh viewer schemas, KIMODO task protocols, recording workflow |
+| [KIMODO Retargeting](docs/kimodo_smpl_retargeting.md) | SOMA/SMPL retargeting contract |
+| [Architecture](docs/architecture.md) | training framework structure |
+| [Design Docs](docs/design/index.md) | deeper rationale and migration notes |
 
 ## License
 
-Apache 2.0
+Project code is intended to use the Apache 2.0 license. Third-party model
+weights, datasets, and vendored reference code keep their original licenses;
+check the corresponding model card and upstream repository before
+redistribution.

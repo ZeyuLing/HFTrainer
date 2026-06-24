@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MotionFix · 指令编辑可视化 (Three.js)</title>
+<style>
+  :root{
+    --bg:#0a0c12; --panel:#12151f; --line:#222838; --txt:#e8ecf4; --mut:#8b93a7;
+    --src:#9aa3b2; --ours:#ff8c42; --gt:#38c172; --accent:#5b8cff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;}
+  #app{display:flex;flex-direction:column;height:100vh}
+  header{padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .titlerow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.3px}
+  .sub{font-size:12px;color:var(--mut)}
+  select{background:#0e1119;color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:6px 10px;font-size:13px;max-width:520px}
+  .instr{margin-top:9px;font-size:18px;font-weight:600;line-height:1.35}
+  .instr .lab{color:var(--accent);font-size:12px;font-weight:600;margin-right:8px;
+    border:1px solid var(--accent);border-radius:6px;padding:2px 7px;vertical-align:middle}
+  .legend{display:flex;gap:18px;margin-top:8px;font-size:12.5px;color:var(--mut)}
+  .legend b{font-weight:600}
+  .dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  #stage{position:relative;flex:1;min-height:0}
+  canvas{display:block;width:100%;height:100%}
+  .col-labels{position:absolute;top:10px;left:0;right:0;display:flex;pointer-events:none}
+  .col-labels div{flex:1;text-align:center;font-size:13px;font-weight:600;letter-spacing:.5px;
+    text-shadow:0 1px 4px rgba(0,0,0,.7)}
+  footer{padding:11px 18px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  button{background:#1a2030;color:var(--txt);border:1px solid var(--line);border-radius:8px;
+    padding:7px 16px;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  input[type=range]{flex:1;min-width:160px;accent-color:var(--accent)}
+  .ctl{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut)}
+  #frame{font-variant-numeric:tabular-nums;color:var(--txt);min-width:78px;text-align:right}
+  label.chk{display:flex;align-items:center;gap:6px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="titlerow">
+      <h1>MotionFix · 指令编辑可视化</h1>
+      <span class="sub">HYMotion-M2M reactive-edit · ep1980 · CFG 2.5</span>
+      <select id="case"></select>
+    </div>
+    <div class="instr"><span class="lab">EDIT</span><span id="caption">—</span></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--src)"></span><b>Source</b> 编辑前</span>
+      <span><span class="dot" style="background:var(--ours)"></span><b>Ours (Edited)</b> 我们编辑后</span>
+      <span><span class="dot" style="background:var(--gt)"></span><b>Target (GT)</b> 标注目标</span>
+    </div>
+  </header>
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div class="col-labels">
+      <div style="color:var(--src)">SOURCE</div>
+      <div style="color:var(--ours)">OURS (EDITED)</div>
+      <div style="color:var(--gt)">TARGET (GT)</div>
+    </div>
+  </div>
+  <footer>
+    <button id="play" class="primary">⏸ 暂停</button>
+    <span id="frame">0 / 0</span>
+    <input type="range" id="seek" min="0" max="0" value="0" />
+    <div class="ctl">速度
+      <select id="speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="1.5">1.5×</option>
+        <option value="2">2×</option>
+      </select>
+    </div>
+    <label class="chk"><input type="checkbox" id="loop" checked> 循环</label>
+    <button id="resetview">重置视角</button>
+  </footer>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "./three/three.module.js",
+    "three/addons/": "./three/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const COLORS = { source:0x9aa3b2, ours:0xff8c42, gt:0x38c172 };
+const COLUMNS = [
+  { key:'source', x:-1.4 },
+  { key:'ours',   x: 0.0 },
+  { key:'gt',     x: 1.4 },
+];
+
+let DATA=null, PARENTS=[], FPS=30;
+let scene, camera, renderer, controls;
+let skeletons=[];           // [{key, joints:[Mesh], bones:[Mesh], color}]
+let curCase=null, nFrames=0, frame=0, playing=true, lastT=0, acc=0;
+
+const _up = new THREE.Vector3(0,1,0);
+const _dir = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _mid = new THREE.Vector3();
+
+function initThree(){
+  const canvas = document.getElementById('c');
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0c12);
+  scene.fog = new THREE.Fog(0x0a0c12, 9, 20);
+
+  camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+
+  controls = new OrbitControls(camera, canvas);
+  controls.target.set(0, 1.0, 0);
+  controls.enableDamping = true;
+  controls.addEventListener('start', () => { userMoved = true; });
+
+  scene.add(new THREE.HemisphereLight(0xbcd0ff, 0x202028, 1.05));
+  const key = new THREE.DirectionalLight(0xffffff, 1.1);
+  key.position.set(4, 8, 6); scene.add(key);
+
+  // ground grid
+  const grid = new THREE.GridHelper(40, 80, 0x2a3146, 0x1a1f2e);
+  grid.position.y = 0; scene.add(grid);
+
+  window.addEventListener('resize', onResize);
+  onResize();
+}
+
+// horizontal/vertical half-extent we want fully in view (covers 3 columns)
+const FIT = { halfW: 1.95, halfH: 1.25, cy: 0.95 };
+let userMoved = false;
+
+function fitCamera(){
+  const vfov = THREE.MathUtils.degToRad(camera.fov);
+  const distV = FIT.halfH / Math.tan(vfov / 2);
+  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  const distH = FIT.halfW / Math.tan(hfov / 2);
+  const dist = Math.max(distV, distH) * 1.1 + 0.6;
+  camera.position.set(0, FIT.cy + 0.7, dist);
+  controls.target.set(0, FIT.cy, 0);
+  controls.update();
+}
+
+function onResize(){
+  const s = document.getElementById('stage');
+  renderer.setSize(s.clientWidth, s.clientHeight, false);
+  camera.aspect = (s.clientWidth || 1) / (s.clientHeight || 1);
+  camera.updateProjectionMatrix();
+  if(!userMoved) fitCamera();
+}
+
+function clearSkeletons(){
+  for(const sk of skeletons){
+    for(const m of sk.joints) scene.remove(m);
+    for(const m of sk.bones) scene.remove(m);
+  }
+  skeletons = [];
+}
+
+function buildSkeletons(){
+  clearSkeletons();
+  const jointGeo = new THREE.SphereGeometry(0.028, 14, 12);
+  const boneGeo  = new THREE.CylinderGeometry(0.017, 0.017, 1, 10);
+  for(const col of COLUMNS){
+    const color = COLORS[col.key];
+    const jmat = new THREE.MeshStandardMaterial({ color, roughness:0.45, metalness:0.1 });
+    const bmat = new THREE.MeshStandardMaterial({ color, roughness:0.55, metalness:0.05 });
+    const joints=[], bones=[];
+    for(let j=0;j<PARENTS.length;j++){
+      const m = new THREE.Mesh(jointGeo, jmat); scene.add(m); joints.push(m);
+    }
+    for(let j=0;j<PARENTS.length;j++){
+      if(PARENTS[j] < 0){ bones.push(null); continue; }
+      const m = new THREE.Mesh(boneGeo, bmat); scene.add(m); bones.push(m);
+    }
+    skeletons.push({ key:col.key, x:col.x, joints, bones, color });
+  }
+}
+
+function setFrame(f){
+  frame = Math.max(0, Math.min(nFrames-1, f|0));
+  for(const sk of skeletons){
+    const pos = curCase[sk.key][frame];        // (22,3)
+    for(let j=0;j<pos.length;j++){
+      const x = pos[j][0] + sk.x, y = pos[j][1], z = pos[j][2];
+      sk.joints[j].position.set(x, y, z);
+    }
+    for(let j=0;j<PARENTS.length;j++){
+      const p = PARENTS[j];
+      if(p < 0) continue;
+      const a = sk.joints[p].position, b = sk.joints[j].position;
+      _dir.subVectors(b, a);
+      const len = _dir.length() || 1e-6;
+      _mid.addVectors(a, b).multiplyScalar(0.5);
+      _q.setFromUnitVectors(_up, _dir.clone().normalize());
+      const bone = sk.bones[j];
+      bone.position.copy(_mid);
+      bone.quaternion.copy(_q);
+      bone.scale.set(1, len, 1);
+    }
+  }
+  document.getElementById('frame').textContent = `${frame} / ${nFrames-1}`;
+  document.getElementById('seek').value = frame;
+}
+
+function loadCase(idx){
+  curCase = DATA.cases[idx];
+  nFrames = curCase.source.length;
+  document.getElementById('caption').textContent = curCase.caption || '—';
+  const seek = document.getElementById('seek');
+  seek.max = nFrames-1; seek.value = 0;
+  if(!skeletons.length) buildSkeletons();
+  frame = 0; acc = 0;
+  setFrame(0);
+}
+
+function animate(t){
+  requestAnimationFrame(animate);
+  const dt = (t - lastT)/1000; lastT = t;
+  if(playing && nFrames>1){
+    const speed = parseFloat(document.getElementById('speed').value);
+    acc += dt * FPS * speed;
+    while(acc >= 1){
+      acc -= 1;
+      let nf = frame + 1;
+      if(nf >= nFrames){
+        if(document.getElementById('loop').checked) nf = 0;
+        else { nf = nFrames-1; playing=false; updatePlayBtn(); }
+      }
+      setFrame(nf);
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function updatePlayBtn(){
+  document.getElementById('play').textContent = playing ? '⏸ 暂停' : '▶ 播放';
+}
+
+function wireUI(){
+  const sel = document.getElementById('case');
+  DATA.cases.forEach((c,i)=>{
+    const o = document.createElement('option');
+    o.value = i; o.textContent = `${c.id}  ·  ${c.caption}`;
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', e=> loadCase(parseInt(e.target.value,10)));
+  document.getElementById('play').addEventListener('click', ()=>{
+    playing = !playing; lastT = performance.now(); updatePlayBtn();
+  });
+  document.getElementById('seek').addEventListener('input', e=>{
+    playing=false; updatePlayBtn(); setFrame(parseInt(e.target.value,10));
+  });
+  document.getElementById('resetview').addEventListener('click', ()=>{
+    userMoved = false; fitCamera();
+  });
+}
+
+async function main(){
+  initThree();
+  const r = await fetch('./data.json');
+  DATA = await r.json();
+  PARENTS = DATA.parents; FPS = DATA.fps || 30;
+  wireUI();
+  loadCase(0);
+  lastT = performance.now();
+  requestAnimationFrame(animate);
+}
+main().catch(err=>{
+  document.body.innerHTML = '<pre style="color:#f88;padding:20px">加载失败: '+err+'</pre>';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "include": [
+    "hftrainer",
+    "scripts",
+    "tests",
+    "configs"
+  ],
+  "exclude": [
+    "**/.git",
+    "**/.venv*",
+    "**/venv*",
+    "**/envs",
+    "**/__pycache__",
+    "**/.cache",
+    "**/.pytest_cache",
+    "**/.mypy_cache",
+    "**/data",
+    "**/datasets",
+    "**/output",
+    "**/outputs",
+    "**/checkpoints",
+    "**/ckpts",
+    "**/work_dirs",
+    "**/logs",
+    "**/wandb",
+    "**/runs",
+    "**/archive",
+    "**/ref_repo",
+    "**/third_party",
+    "motion_annot_web",
+    "**/motion_annot_web/**/static",
+    "**/motion_annot_web/**/data"
+  ],
+  "typeCheckingMode": "off",
+  "useLibraryCodeForTypes": false,
+  "autoSearchPaths": false
+}

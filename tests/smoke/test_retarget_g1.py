@@ -6,7 +6,7 @@ import pytest
 @pytest.mark.smoke
 def test_smpl_to_g1_retarget_basic():
     """Test basic retargeting from SMPL 135-dim to G1 29-DOF."""
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
 
     retargeter = SMPLToG1Retargeter(apply_limits=True, g1_dof=29)
 
@@ -31,7 +31,7 @@ def test_smpl_to_g1_retarget_basic():
     assert len(result['joint_names']) == 29
 
     # Check joint limits are respected
-    from hftrainer.models.motion.components.retarget import G1_JOINT_LIMITS, G1_JOINT_NAMES
+    from hftrainer.motion.retarget import G1_JOINT_LIMITS, G1_JOINT_NAMES
     for i, name in enumerate(G1_JOINT_NAMES):
         lo, hi = G1_JOINT_LIMITS[name]
         assert np.all(result['joint_angles'][:, i] >= lo - 1e-6), \
@@ -43,7 +43,7 @@ def test_smpl_to_g1_retarget_basic():
 @pytest.mark.smoke
 def test_smpl_to_g1_retarget_201dim():
     """Test retargeting from 201-dim format."""
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
 
     retargeter = SMPLToG1Retargeter(g1_dof=29)
 
@@ -60,7 +60,7 @@ def test_asap_pkl_export():
     """Test ASAP pickle export."""
     import tempfile
     import pickle
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
 
     retargeter = SMPLToG1Retargeter(g1_dof=29)
 
@@ -91,7 +91,7 @@ def test_asap_pkl_export():
 @pytest.mark.smoke
 def test_mujoco_qpos_export():
     """Test MuJoCo qpos conversion."""
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
 
     retargeter = SMPLToG1Retargeter(g1_dof=29)
 
@@ -112,7 +112,7 @@ def test_mujoco_qpos_export():
 @pytest.mark.smoke
 def test_g1_23dof():
     """Test 23-DOF basic G1 variant."""
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
 
     retargeter = SMPLToG1Retargeter(g1_dof=23)
 
@@ -128,7 +128,7 @@ def test_g1_23dof():
 @pytest.mark.smoke
 def test_asap_config_generator():
     """Test ASAP config/command generation."""
-    from hftrainer.models.motion.components.retarget.isaac_gym_bridge import (
+    from hftrainer.motion.retarget.isaac_gym_bridge import (
         ASAPConfigGenerator,
     )
 

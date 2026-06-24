@@ -38,10 +38,12 @@ from common.quaternion import (  # noqa: E402
 )
 from utils.motion_process import (  # noqa: E402
     recover_from_ric,
+    recover_from_rot,
     recover_root_rot_pos,
 )
 
 _NJOINT = 22
+_FK_SKELETON = None
 
 
 # ============================ resampling ====================================
@@ -89,11 +91,50 @@ def slerp_rotations(R: np.ndarray, src_fps: float, dst_fps: float) -> np.ndarray
 
 # ============================ 263 -> pose ===================================
 
-def decode_263_to_pose(m263: np.ndarray):
+def _get_fk_skeleton(canonical_ref_joints: str | Path | None = None):
+    """Return a MoMask skeleton with official HumanML3D target offsets.
+
+    The HumanML3D 263 rotation block can recover joint positions through FK, but
+    FK needs the same target skeleton used by ``process_file``.  Prefer the
+    official 000021 joints so this diagnostic branch does not silently use the
+    MotionStreamer skeleton scale.
+    """
+    global _FK_SKELETON
+    if _FK_SKELETON is not None and canonical_ref_joints is None:
+        return _FK_SKELETON
+
+    from common.skeleton import Skeleton  # noqa: WPS433
+    from utils.paramUtil import t2m_kinematic_chain, t2m_raw_offsets  # noqa: WPS433
+
+    ref = Path(canonical_ref_joints) if canonical_ref_joints else (
+        _REPO_ROOT / "ref_repo" / "TeSMo" / "dataset" / "HumanML3D" / "000021.npy"
+    )
+    skel = Skeleton(torch.from_numpy(t2m_raw_offsets), t2m_kinematic_chain, "cpu")
+    if ref.exists():
+        joints = np.load(str(ref))[:, :_NJOINT, :].astype(np.float32)
+        skel.get_offsets_joints(torch.from_numpy(joints[0]).float())
+    else:
+        # Fallback keeps the branch usable for isolated tests, but the official
+        # reference should exist in this repository for real evaluations.
+        skel.set_offset(torch.from_numpy(t2m_raw_offsets).float())
+    if canonical_ref_joints is None:
+        _FK_SKELETON = skel
+    return skel
+
+
+def decode_263_to_pose(
+    m263: np.ndarray,
+    *,
+    position_source: str = "ric",
+    canonical_ref_joints: str | Path | None = None,
+):
     """Decode a HumanML3D-263 vector to global joint positions + local rotations.
 
     Args:
         m263: ``(T, 263)`` HumanML3D feature (un-normalized).
+        position_source: ``ric`` recovers positions from the RIC position block
+            (the historical bridge); ``rot_fk`` recovers positions from the 6D
+            rotation block with MoMask FK and official target skeleton offsets.
 
     Returns:
         positions: ``(T, 22, 3)`` global joint positions.
@@ -105,7 +146,14 @@ def decode_263_to_pose(m263: np.ndarray):
     m263 = np.asarray(m263, dtype=np.float32)
     data = torch.from_numpy(m263).float().unsqueeze(0)  # (1, T, 263)
 
-    positions = recover_from_ric(data, _NJOINT).squeeze(0).numpy()  # (T, 22, 3)
+    if position_source == "ric":
+        positions = recover_from_ric(data, _NJOINT).squeeze(0).numpy()  # (T, 22, 3)
+    elif position_source == "rot_fk":
+        skel = _get_fk_skeleton(canonical_ref_joints)
+        data_2d = torch.from_numpy(m263).float()
+        positions = recover_from_rot(data_2d, _NJOINT, skel).numpy()  # (T, 22, 3)
+    else:
+        raise ValueError(f"unknown position_source={position_source!r}")
 
     r_rot_quat, _ = recover_root_rot_pos(data)
     r_rot_quat = r_rot_quat.squeeze(0)  # (T, 4)  pure-yaw quaternion (w,x,y,z)

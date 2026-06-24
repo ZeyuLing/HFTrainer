@@ -1,17 +1,19 @@
 # T2M-GPT — Generating Human Motion from Textual Descriptions with Discrete Representations
 
 Text-to-motion baseline integrated into the hftrainer Model Zoo. Our
-reproduction is **fully self-contained and independent of `ref_repo`**: the
-VQ-VAE motion tokenizer (`HumanVQVAE`) and the GPT-style autoregressive
-generator (`Text2Motion_Transformer`) are vendored into
-`hftrainer.models.motion.t2mgpt`, preserving numerical parity with the released
-HumanML3D checkpoints. The CLIP ViT-B/32 text encoder is reloaded by name (not
-stored in the artifact).
+reproduction is **fully self-contained and independent of `ref_repo`** at
+runtime: the VQ-VAE motion tokenizer (`HumanVQVAE`) and the GPT-style
+autoregressive generator (`Text2Motion_Transformer`) live in the native
+`hftrainer.models.motion.t2mgpt.network` package, preserving numerical parity
+with the released HumanML3D checkpoints. New hftrainer artifacts include the frozen CLIP ViT-B/32
+text encoder as `clip.safetensors`; legacy lightweight artifacts still fall
+back to loading CLIP by name.
 
 | | |
 |---|---|
 | **Task** | Text-to-Motion (T2M) |
 | **Bundle / Pipeline** | `T2MGPTBundle` / `T2MGPTPipeline` |
+| **Processed HF artifact** | [`ZeyuLing/hftrainer-t2mgpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-t2mgpt-humanml3d) |
 | **Motion representation** | **HumanML3D-263** (263-dim, 20 fps, 22 joints) |
 | **Tokenizer** | `HumanVQVAE` (VQ-VAE, EMA-reset quantizer, codebook 512×512, `down_t=2`) |
 | **Generator** | `Text2Motion_Transformer` (GPT, 9 layers, 16 heads, embed 1024) |
@@ -25,14 +27,22 @@ stored in the artifact).
 
 Self-contained hftrainer artifact (diffusers-style `from_pretrained`):
 
-| Artifact | Contents |
-|---|---|
-| **HuggingFace**: [`ZeyuLing/t2mgpt-humanml3d`](https://huggingface.co/ZeyuLing/t2mgpt-humanml3d) | `vq.safetensors` + `gpt.safetensors` + `t2mgpt_config.json` + `Mean.npy` / `Std.npy` (no CLIP; reloaded by name) |
-| local: `checkpoints/t2mgpt/humanml3d` | same contents (mirror of the HF repo) |
+| Artifact | Location | Contents | Status |
+|---|---|---|---|
+| T2M-GPT HumanML3D | [`ZeyuLing/hftrainer-t2mgpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-t2mgpt-humanml3d) | `vq.safetensors` + `gpt.safetensors` + `clip.safetensors` + `t2mgpt_config.json` + `Mean.npy` / `Std.npy` | public Hub artifact |
+| local mirror | `checkpoints/t2mgpt/humanml3d` | same layout | optional local cache |
 
 ```python
-from huggingface_hub import snapshot_download
-path = snapshot_download("ZeyuLing/t2mgpt-humanml3d")  # -> T2MGPTBundle.from_pretrained(path)
+from hftrainer.pipelines.t2mgpt import T2MGPTPipeline
+
+pipe = T2MGPTPipeline.from_pretrained(
+    "ZeyuLing/hftrainer-t2mgpt-humanml3d",
+    device="cuda",
+)
+motions = pipe.infer_t2m(
+    ["a person walks forward then sits down"],
+    [120],
+)  # list of (T, 263)
 ```
 
 The artifact is produced from the released upstream `.pth` checkpoints (a VQ-VAE
@@ -52,19 +62,17 @@ python3 scripts/eval/convert_t2mgpt_checkpoint.py \
 **Use it:**
 
 ```python
-from hftrainer.models.motion.t2mgpt import T2MGPTBundle
 from hftrainer.pipelines.t2mgpt import T2MGPTPipeline
 
-bundle = T2MGPTBundle.from_pretrained("checkpoints/t2mgpt/humanml3d")
-pipe   = T2MGPTPipeline(bundle, device="cuda")
+pipe = T2MGPTPipeline.from_pretrained("checkpoints/t2mgpt/humanml3d", device="cuda")
 # let the GPT decide the length via its EOS token:
 motions = pipe.infer_t2m(["a person walks forward then sits down"])  # list of (T, 263)
 # or clip to a fixed length (frames @ 20 fps):
 motions = pipe.infer_t2m(["a person walks forward then sits down"], [120])
 ```
 
-You can also drive it directly from the released `.pth` weights, no conversion
-needed:
+Converter/debug code can also drive it directly from explicit released `.pth`
+weights, no default `ref_repo` lookup involved:
 
 ```python
 bundle = T2MGPTBundle(
@@ -98,7 +106,7 @@ discrete tokens drawn from a 512-entry codebook.
 
 ## Generation
 
-Two vendored stages (parity with the gold-standard `t2mgpt_infer_hml3d263.py`):
+Two runtime stages (parity with the gold-standard `t2mgpt_infer_hml3d263.py`):
 
 1. **`Text2Motion_Transformer` (GPT)** — autoregressively samples motion token
    indices conditioned on the CLIP ViT-B/32 text embedding. Unlike a diffusion
@@ -196,16 +204,16 @@ Run details: `n_repeats = 20`, `n_samples_used = 7328`,
 
 ## Implementation notes
 
-- **Vendored, ref_repo-independent**: `hftrainer/models/motion/t2mgpt/` holds
+- **hftrainer-native runtime**: `hftrainer/models/motion/t2mgpt/network/` holds
   the VQ-VAE and the GPT transformer with package-relative imports; the artifact
   loads with zero dependency on `ref_repo` or the original `.pth` format.
 - **Sub-modules**: `vqvae` (`HumanVQVAE`) + `gpt` (`Text2Motion_Transformer`),
   configured by `t2mgpt_config.json` (`vqvae`: `nb_code=512`, `code_dim=512`,
   `down_t=2`, `quantizer=ema_reset`; `gpt`: `embed_dim_gpt=1024`,
   `num_layers=9`, `n_head_gpt=16`, `block_size=51`).
-- **CLIP**: frozen ViT-B/32 is reloaded by name and excluded from the artifact
-  (`clip_model.*` are the only expected missing keys on load), exactly like CLIP
-  in MoMask / MDM.
+- **CLIP**: frozen ViT-B/32 is stored once as `clip.safetensors` in new
+  artifacts and restored by `T2MGPTBundle.from_pretrained`. Legacy lightweight
+  artifacts without `clip.safetensors` still fall back to `clip_name`.
 - **Normalization travels with the checkpoint**: `Mean.npy` / `Std.npy` are the
   263-dim training stats, embedded in the artifact (self-contained).
 - **Length**: the GPT emits an EOS token, so the model selects its own sequence

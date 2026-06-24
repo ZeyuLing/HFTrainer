@@ -27,6 +27,7 @@ parameter or the **Return type** says otherwise.
 | | `convert` | top-level cross-representation conversion API |
 | | `humanml` | HML263 decode (`recover_from_ric`) + 272↔263 bridges |
 | | `motion272` | MotionStreamer-272 encode/decode |
+| | `interhuman262` | InterHuman/InterGen-262 encode (SMPL-X → 262) + 2-person align + decode |
 | `skeleton` | `names` | SMPL-22 joint names / parents |
 | | `fk` | forward kinematics + rot6d row/global helpers |
 | | `body_models` | SMPL/-X/-H loaders + model-dir resolution |
@@ -50,8 +51,8 @@ in-memory orderings are in circulation; mixing them silently corrupts poses:
 
 | convention | layout | used by |
 |---|---|---|
-| `COLUMN` | `[R00, R10, R20, R01, R11, R21]` (first two **columns**) | math default; `HML263` rot block; MotionCLIP/MDM helpers |
-| `ROW` | `[R00, R01, R10, R11, R20, R21]` (first two **rows**) | data/model I/O; `motion_135/138/198` |
+| `COLUMN` | `[R00, R10, R20, R01, R11, R21]` (first two **columns**) | math default; `HML263` rot block; `motion_138`; MotionCLIP/MDM helpers |
+| `ROW` | `[R00, R01, R10, R11, R20, R21]` (first two **rows**) | HYMotion/model I/O; `motion_135/198/201`; `MS272`; `IH262` |
 
 ```python
 class Rot6DConvention:
@@ -125,9 +126,9 @@ rotation_6d_to_euler(d6, order="XYZ", convention="column")
 
 **Returns:** *(same type as input)* – the converted rotation.
 
-> **Warning:** the math default is `COLUMN`. Always pass `convention="row"`
-> explicitly when round-tripping `motion_135/138/198` data, otherwise the rot
-> block is silently transposed.
+> **Warning:** the math default is `COLUMN`. Always pass the convention from
+> `get_spec(...)`: `motion_135`/`motion_198`/`motion_201` are ROW, while
+> `motion_138` is COLUMN. The wrong choice silently transposes the rot block.
 
 ### `rot_convert`
 
@@ -228,8 +229,8 @@ Infer the representation from an unambiguous channel count.
 **Raises:** `KeyError` / `ValueError` – if no spec, or more than one, has `dim`.
 
 Registered names: `motion_135`, `motion_138`, `motion_198`, `motion_147`,
-`motion_151`, `motion_201`, `hml263`, `ms272`. `REGISTRY` (also exported as
-`MOTION_SPECS`) is the `dict` alias → `MotionRepr`.
+`motion_151`, `motion_201`, `hml263`, `ms272`, `interhuman_262`. `REGISTRY` (also
+exported as `MOTION_SPECS`) is the `dict` alias → `MotionRepr`.
 
 **Example:**
 
@@ -313,6 +314,48 @@ Convert SMPL `motion_135` to the MotionStreamer-272 evaluator space (canon-272 F
 
 **Returns:** *ndarray* – `(T, 272)`.
 
+### `smpl85_to_motion272`
+
+```python
+smpl85_to_motion272(smpl_85, *, smpl_model_dir=None, model_type="smplx",
+                    device="cpu", batch_size=256, apply_face_z=True)
+```
+
+Convert raw MotionStreamer-layout SMPL-85 to MS272 with the official
+MotionStreamer path: face-Z canonicalization, SMPL-X FK, then 272 encoding. Use
+this for native SMPL/SMPL-X predictions that have axis-angle rotations,
+translation, and betas. Do **not** use `motion135_to_motion272` for raw SMPL-85.
+
+**Parameters:**
+
+- **smpl_85** (*ndarray*) – `(T, 85)` laid out as
+  `[global_orient3, body_pose69, transl3, betas10]`.
+- **model_type** (*str*, optional) – `"smplx"` is the official default.
+  `"smpl"` is only for diagnostics / legacy converters.
+- **apply_face_z** (*bool*, optional) – set `False` only if the input has already
+  passed MotionStreamer's face-Z transform.
+
+**Returns:** *ndarray* – `(T, 272)`.
+
+### `smpl_params_to_motion272`
+
+```python
+smpl_params_to_motion272(global_orient, body_pose, transl, betas=None, **kwargs)
+```
+
+Pack raw SMPL arrays into SMPL-85 and call `smpl85_to_motion272`.
+
+**Parameters:**
+
+- **global_orient** (*ndarray*) – `(T, 3)` root axis-angle.
+- **body_pose** (*ndarray*) – `(T, 63+)` or `(T, 21+, 3)` body axis-angle. The
+  official SMPL-X path consumes the first 21 body joints.
+- **transl** (*ndarray*) – `(T, 3)` translation in metres, Y-up.
+- **betas** (*ndarray or None*) – `(10,)` or `(T,10)`, defaults to zeros.
+- **kwargs** – forwarded to `smpl85_to_motion272`.
+
+**Returns:** *ndarray* – `(T, 272)`.
+
 ### `motion272_to_hml263`
 
 ```python
@@ -367,6 +410,49 @@ Full `HML263 → motion_135 → MS272` chain in one call (no manual repack).
 (T', 272)
 ```
 
+### `smpl_to_interhuman262`
+
+```python
+smpl_to_interhuman262(joints_world, body_pose_aa, *, max_len=None)
+```
+
+Encode one SMPL-X person to InterHuman/InterGen-262 (see
+[`interhuman262.encode_smpl_to_interhuman262`](#encode_smpl_to_interhuman262)).
+
+**Parameters:**
+
+- **joints_world** (*ndarray*) – `(T, 22, 3)` Y-up SMPL-X joints.
+- **body_pose_aa** (*ndarray*) – `(T, 21, 3)` SMPL `body_pose` axis-angle.
+- **max_len** (*int or None*, optional) – crop both inputs first. Default: `None`.
+
+**Returns:** *(ndarray, ndarray, ndarray)* – `(motion (T-1,262), root_quat_init
+(1,4), root_pos_init_xz (1,3))`.
+
+### `smpl_to_interhuman262_pair`
+
+```python
+smpl_to_interhuman262_pair(joints1, body_pose1, joints2, body_pose2, *, max_len=300)
+```
+
+Encode two SMPL-X persons; person2 is rigid-aligned to person1's first-frame
+heading + xz (InterGen protocol).
+
+**Returns:** *(ndarray, ndarray, int)* – `(m1 (L,262), m2 (L,262), L)`.
+
+### `interhuman262_to_joints`
+
+```python
+interhuman262_to_joints(m262)
+```
+
+Recover canonical joints from the `[0:66]` position block (exact, no FK).
+
+**Parameters:**
+
+- **m262** (*ndarray*) – `(..., 262)`.
+
+**Returns:** *ndarray* – `(..., 22, 3)`.
+
 ---
 
 # `representation.humanml`
@@ -420,9 +506,13 @@ Lazily re-exported from `hftrainer.datasets.motion.representation.humanml_repr`
 
 # `representation.motion272`
 
-MotionStreamer-272 encode/decode. Uses the bundled GT-272 canonical skeleton
-(`hftrainer/motion/assets/bone_offsets_canon272.npy`), **not** the SMPL-H rest
-pose.
+MotionStreamer-272 encode/decode. There are two separate SMPL entry points:
+
+- Raw SMPL-85 / raw SMPL arrays: use `smpl85_to_272` or `smpl_params_to_272`.
+  This is the official MotionStreamer path and defaults to SMPL-X FK.
+- `motion_135` feature tensors: use `motion135_to_272`. This uses the bundled
+  GT-272 canonical skeleton (`hftrainer/motion/assets/bone_offsets_canon272.npy`),
+  **not** the SMPL-H rest pose and not the raw SMPL-X body model.
 
 ### `encode_smpl_to_272`
 
@@ -438,7 +528,45 @@ Encode world-space joints + SMPL local rotations into the 272 layout.
 - **local_rotmat** (*ndarray or Tensor*) – `(T, 22, 3, 3)` SMPL local rotations
   (the rot block is emitted **ROW-major**).
 
-**Returns:** *(same type as input)* – `(T, 272)`.
+**Returns:** *ndarray* – `(T, 272)`.
+
+### `pack_smpl85` / `face_z_transform_smpl85`
+
+```python
+pack_smpl85(global_orient, body_pose, transl, betas=None)
+face_z_transform_smpl85(smpl_85)
+```
+
+Pack raw SMPL arrays into MotionStreamer's SMPL-85 layout, then apply the
+official first-frame face-Z canonicalization. `pack_smpl85` accepts
+`body_pose` as `(T,63+)` or `(T,21+,3)`.
+
+### `smpl85_to_272`
+
+```python
+smpl85_to_272(smpl_85, *, smpl_model_dir=None, model_type="smplx",
+              device="cpu", batch_size=256, apply_face_z=True,
+              return_intermediates=False)
+```
+
+Canonical raw-SMPL to MS272 API:
+
+```text
+smpl_85 -> face_z_transform -> SMPL-X FK -> encode_smpl_to_272
+```
+
+The default `model_type="smplx"` matches MotionStreamer's official
+`infer_get_joints.py` generation path. On the bundled upstream examples
+`000000` and `M000000` (2574 frames total), this implementation matches official
+`Representation_272` with all-channel `max_abs=4.768e-7`.
+
+### `smpl_params_to_272`
+
+```python
+smpl_params_to_272(global_orient, body_pose, transl, betas=None, **kwargs)
+```
+
+Pack raw SMPL arrays with `pack_smpl85` and forward to `smpl85_to_272`.
 
 ### `motion135_to_272`
 
@@ -447,7 +575,7 @@ motion135_to_272(m135, *, rotation_space="local", skeleton="canon272", bone_offs
 ```
 
 Same as [`convert.motion135_to_motion272`](#motion135_to_motion272); see there
-for parameters.
+for parameters. This is only for `motion_135` feature tensors, not raw SMPL-85.
 
 **Returns:** *ndarray* – `(T, 272)`.
 
@@ -459,7 +587,8 @@ reencode_272_via_fk(m272, smplh_model=None)
 ```
 
 Re-encode a 272 clip from its stored positions, or by FK from its rotations
-(diagnostics for the FK skeleton).
+(diagnostics for the FK skeleton). The FK variant is not the native MS272
+stored-position decode and can differ when subject betas/shape are unavailable.
 
 **Parameters:**
 
@@ -468,6 +597,76 @@ Re-encode a 272 clip from its stored positions, or by FK from its rotations
   Default: `None`.
 
 **Returns:** *ndarray* – `(T, 272)`.
+
+---
+
+# `representation.interhuman262`
+
+InterHuman / InterGen-262 encode/decode (two-person T2M + InterCLIP space).
+Self-contained re-implementation of InterGen's `process_motion_np` +
+`rigid_transform`; no `third_party/intergen` import. The rot6d block is
+**ROW-major** (21 non-root SMPL `body_pose` joints). See
+[`representations.md` §6.2](representations.md) for the full pipeline and
+validation numbers.
+
+### `encode_smpl_to_interhuman262`
+
+```python
+encode_smpl_to_interhuman262(joints_world, body_pose_aa, *, max_len=None)
+```
+
+Encode one person to the 262 layout `[pos66, vel66, 21×rot6d, foot4]`. Internally
+maps Y-up joints to the z-up raw frame, canonicalises (floor=0, first-frame root
+xz at origin, face +Z) and drops the last frame.
+
+**Parameters:**
+
+- **joints_world** (*ndarray*) – `(T, 22, 3)` Y-up SMPL-X joints (e.g.
+  `smplx_dict_to_joints22`).
+- **body_pose_aa** (*ndarray*) – `(T, 21, 3)` SMPL `body_pose` axis-angle.
+- **max_len** (*int or None*, optional) – crop both inputs first. Default: `None`.
+
+**Returns:** *(ndarray, ndarray, ndarray)* – `(motion (T-1,262), root_quat_init
+(1,4), root_pos_init_xz (1,3))`.
+
+### `build_pair`
+
+```python
+build_pair(joints1, body_pose1, joints2, body_pose2, *, max_len=300)
+```
+
+Encode a two-person clip and rigid-align person2 to person1.
+
+**Returns:** *(ndarray, ndarray, int)* – `(m1 (L,262), m2 (L,262), L)` with
+`L = min(T1, T2, max_len) - 1`.
+
+### `interhuman262_to_joints` / `interhuman262_to_local_rotmat`
+
+```python
+interhuman262_to_joints(m262)          # (...,262) -> (...,22,3)   exact, from [0:66]
+interhuman262_to_local_rotmat(m262)    # (...,262) -> (...,21,3,3) from ROW rot6d [132:258]
+```
+
+### `body_pose_to_rot6d_row` / `rot6d_row_to_matrix`
+
+```python
+body_pose_to_rot6d_row(body_pose_aa)   # (...,21,3) axis-angle -> (...,21,6) ROW rot6d
+rot6d_row_to_matrix(rot6d_row)         # (...,21,6) ROW rot6d -> (...,21,3,3)
+```
+
+The exact packing stored in the 262 `body_rot6d` block (ROW-major /
+component-interleaved `[c0x,c1x,c0y,c1y,c0z,c1z]`).
+
+**Example:**
+
+```python
+>>> from hftrainer.motion.representation import convert
+>>> m1, m2, L = convert.smpl_to_interhuman262_pair(j1, bp1, j2, bp2)
+>>> m1.shape, L
+((L, 262), L)
+>>> convert.interhuman262_to_joints(m1).shape
+(L, 22, 3)
+```
 
 ---
 

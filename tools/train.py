@@ -21,6 +21,11 @@ try:
 except ImportError:
     pass
 
+# Ensure all registries are populated even when the import-light escape hatch
+# (HFTRAINER_SKIP_AUTOREGISTER) is set. Idempotent / cheap when already done.
+import hftrainer  # noqa: E402
+hftrainer.register_all_modules()
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a model with hftrainer')

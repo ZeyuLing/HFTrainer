@@ -1,0 +1,24 @@
+{"id": "hml_001", "prompt": "a person runs backwards, turns halfway then runs forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_003", "prompt": "a person takes four steps forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_006", "prompt": "a person walks froward from one side to the other.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_010", "prompt": "a man walks around in a circle clockwise.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_012", "prompt": "person walks very slow to front", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_017", "prompt": "a person walks forward several steps.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_018", "prompt": "a person walks forward with intent", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_027", "prompt": "a person paces from left to right and vice versa.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_030", "prompt": "person is jogging in place.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_033", "prompt": "a man walks forward and then turn to the right and keeps walking.,", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_039", "prompt": "a person walks forward while slightly favoring the left.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}
+{"id": "hml_041", "prompt": "a person cautiously walks backwards.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_048", "prompt": "a person slowly takes four steps forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "KIT", "tags": []}
+{"id": "hml_064", "prompt": "a person walking confidently.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_067", "prompt": "a person stands looking left and right.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_071", "prompt": "this person is jogging in place.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_072", "prompt": "a person slowly walked forward", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_076", "prompt": "a person walks backwards in a counterclockwise curve.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "Eyes_Japan_Dataset", "tags": []}
+{"id": "hml_077", "prompt": "the figure walks forward swiftly", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BioMotionLab_NTroje", "tags": []}
+{"id": "hml_080", "prompt": "running from side to side quickly.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_084", "prompt": "the man takes 5 steps forward.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "EKUT", "tags": []}
+{"id": "hml_086", "prompt": "a person is doing a side step.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "ACCAD", "tags": []}
+{"id": "hml_087", "prompt": "a person walks normally and comes to a stop.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "BMLmovi", "tags": []}
+{"id": "hml_092", "prompt": "the person was walking and stepping  over something.", "category": "humanml3d", "difficulty": 0, "duration_sec": 4.0, "split": "train", "source": "CMU", "tags": []}

@@ -1,17 +1,19 @@
 # MoMask — Generative Masked Modeling of 3D Human Motions
 
 Text-to-motion baseline integrated into the hftrainer Model Zoo. Our
-reproduction is **fully self-contained and independent of `ref_repo`**: the
-RVQ-VAE tokenizer, the masked generative transformer, the residual transformer
-and the length estimator are all vendored into
-`hftrainer.models.motion.momask._momask`, preserving numerical parity with the
+reproduction is **fully self-contained and independent of `ref_repo`** at
+runtime: the RVQ-VAE tokenizer, the masked generative transformer, the residual
+transformer and the length estimator live in
+`hftrainer.models.motion.momask.network`, preserving numerical parity with the
 released HumanML3D checkpoints. The CLIP ViT-B/32 text encoder is reloaded by
-name (not stored in the artifact).
+name only for legacy lightweight artifacts; new hftrainer artifacts include
+`clip.safetensors`.
 
 | | |
 |---|---|
 | **Task** | Text-to-Motion (T2M) |
 | **Bundle / Pipeline** | `MoMaskBundle` / `MoMaskPipeline` |
+| **Processed HF artifact** | [`ZeyuLing/hftrainer-momask-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-momask-humanml3d) |
 | **Motion representation** | **HumanML3D-263** (263-dim, 20 fps, 22 joints) |
 | **Tokenizer** | RVQ-VAE, **6 residual quantizers**, codebook 512×512 |
 | **Generator** | MaskTransformer (masked iterative decoding) + ResidualTransformer |
@@ -25,16 +27,24 @@ name (not stored in the artifact).
 
 Self-contained hftrainer artifact (diffusers-style `from_pretrained`):
 
-| Artifact | Contents |
-|---|---|
-| **HuggingFace**: [`ZeyuLing/momask-humanml3d`](https://huggingface.co/ZeyuLing/momask-humanml3d) | `vq.safetensors` + `t2m_trans.safetensors` + `res_trans.safetensors` + `length_est.safetensors` + `momask_config.json` + `Mean.npy` / `Std.npy` (no CLIP; reloaded by name) |
-| Local: `checkpoints/momask/humanml3d` | same layout (produced by `convert_momask_checkpoint.py`, see below) |
+| Artifact | Location | Contents | Status |
+|---|---|---|---|
+| MoMask HumanML3D | [`ZeyuLing/hftrainer-momask-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-momask-humanml3d) | `vq.safetensors` + `t2m_trans.safetensors` + `res_trans.safetensors` + `length_est.safetensors` + `clip.safetensors` + `momask_config.json` + `Mean.npy` / `Std.npy` | public Hub artifact |
+| local mirror | `checkpoints/momask/humanml3d` | same layout (produced by `convert_momask_checkpoint.py`, see below) | optional local cache |
 
-Pull the published artifact directly from the Hub:
+Use the published artifact directly from the Hub:
 
 ```python
-from huggingface_hub import snapshot_download
-path = snapshot_download("ZeyuLing/momask-humanml3d")  # -> MoMaskBundle.from_pretrained(path)
+from hftrainer.pipelines.momask import MoMaskPipeline
+
+pipe = MoMaskPipeline.from_pretrained(
+    "ZeyuLing/hftrainer-momask-humanml3d",
+    device="cuda",
+)
+motions = pipe.infer_t2m(
+    ["a person walks forward then sits down"],
+    [120],
+)  # list of (T, 263)
 ```
 
 The artifact is produced from the released upstream `.tar` checkpoints with
@@ -51,18 +61,16 @@ python3 scripts/eval/convert_momask_checkpoint.py \
 **Use it:**
 
 ```python
-from hftrainer.models.motion.momask import MoMaskBundle
 from hftrainer.pipelines.momask import MoMaskPipeline
 
-bundle = MoMaskBundle.from_pretrained("checkpoints/momask/humanml3d")
-pipe   = MoMaskPipeline(bundle, device="cuda")
+pipe = MoMaskPipeline.from_pretrained("checkpoints/momask/humanml3d", device="cuda")
 # fixed length (frames @ 20 fps):
 motions = pipe.infer_t2m(["a person walks forward then sits down"], [120])
 # or let the length estimator pick the length:
 motions = pipe.infer_t2m(["a person walks forward then sits down"])  # list of (T, 263)
 ```
 
-You can also drive it directly from the released weights, no conversion needed:
+Converter/debug code can also drive it directly from explicit released weights:
 
 ```python
 bundle = MoMaskBundle(weights_root="ref_repo/Momask/weights")
@@ -92,7 +100,7 @@ The RVQ-VAE tokenizes this with `unit_length = 4` (one token ≈ 4 frames), so a
 
 ## Generation
 
-Three vendored stages (parity with `scripts/eval/momask_infer_h3d_test.py`):
+Three runtime stages (parity with `scripts/eval/momask_infer_h3d_test.py`):
 
 1. **MaskTransformer** — confidence-based masked iterative decoding of the
    base (q=0) token map, classifier-free guidance `cond_scale≈4` over
@@ -165,16 +173,17 @@ Run details: `n_repeats = 20`, `n_samples_used = 7392`,
 
 ## Implementation notes
 
-- **Vendored, ref_repo-independent**: `hftrainer/models/motion/momask/_momask/`
+- **hftrainer-native runtime**: `hftrainer/models/motion/momask/network/`
   holds the RVQ-VAE (`vq/`), the masked / residual transformers
   (`mask_transformer/`) and the masked iterative decoding entry point
   (`inference.py`). Imports are package-relative; training-only code paths are
   not exercised.
 - **Sub-modules**: `vq_model` / `t2m_transformer` / `res_transformer` /
   `length_estimator` (the last is optional, `load_length_estimator=False`).
-- **CLIP**: frozen ViT-B/32 lives inside the two transformers and is reloaded
-  by name; it is excluded from the artifact (`clip_model.*` keys are the only
-  expected missing keys on load), exactly like CLIP in MDM.
+- **CLIP**: frozen ViT-B/32 lives inside the two transformers and is stored once
+  as `clip.safetensors` in new artifacts. `MoMaskBundle.from_pretrained` passes
+  that file path into both transformers; legacy lightweight artifacts still fall
+  back to `clip_version`.
 - **Normalization travels with the checkpoint**: `Mean.npy` / `Std.npy` are the
   RVQ-VAE training stats, embedded in the artifact.
 - **Guidance**: classifier-free, base `cond_scale=4`, residual `cond_scale=5`.

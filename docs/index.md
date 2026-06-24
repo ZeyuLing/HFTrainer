@@ -36,6 +36,9 @@ bash tools/dist_train.sh configs/text2video/wan_demo.py 8
 - [Quick Start](quickstart.md) -- Run smoke tests and inference examples
 - [Distributed Training](distributed.md) -- DDP, FSDP, DeepSpeed, single GPU
 - [Architecture](architecture.md) -- How the framework is structured
+- [KIMODO/SOMA and SMPL Retargeting](kimodo_smpl_retargeting.md) -- Reusable KIMODO/SOMA <-> SMPL `motion_135` conversion API
+- [HumanML3D-263 to SMPL Retargeting](hml263_to_smpl_retarget_pipeline.md) -- Baseline HML263 -> SMPL evaluation bridge
+- [Visualization Standard](visualization.md) -- Standard viewer schemas, T2M comparison inputs, and recording workflow
 
 ## Design Documentation
 
@@ -47,3 +50,4 @@ For in-depth design rationale (bilingual Chinese/English):
 - [Multi-Optimizer](design/multi_optimizer.md) -- GAN support
 - [Dataset](design/dataset.md) -- Dataset directory structure
 - [Evaluation](design/evaluation.md) -- Evaluator/Visualizer dict interface
+- [Motion Library](design/motion_library.md) -- Public motion-domain package design

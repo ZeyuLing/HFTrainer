@@ -73,3 +73,4 @@ HF-Trainer 的目标：保留 MMLab config-driven 的声明式设计范式，但
 - [Multi-Optimizer](multi_optimizer.md) -- GAN multi-optimizer support / GAN 多 optimizer 支持
 - [Dataset](dataset.md) -- Dataset directory structure / 数据集目录结构
 - [Evaluation](evaluation.md) -- Evaluator/Visualizer dict interface / Evaluator/Visualizer dict 接口
+- [Motion Library](motion_library.md) -- Public motion-domain package architecture / 动作公共库架构

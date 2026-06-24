@@ -79,6 +79,12 @@ train_dataloader = dict(
                 key='motion',
                 sampler_version='v3',
                 editing_prob=0.15,
+                # Boost the under-represented pure sparse-XYZ trajectory-control
+                # pattern (was ~0.58% of samples -> model under-learned smooth
+                # sparse-waypoint following -> jitter spikes). 0.12 lifts E5_E
+                # exact coverage to ~3% and pure-XYZ-traj to ~7%.
+                # See docs/temp/traj_jitter_autodebug. 2026-06-22.
+                v3_config=dict(traj_control_prob=0.12),
                 corruptor_names=[
                     'jitter', 'joint_jump', 'sliding',
                     'limb_candy_wrapper', 'wrist_candy_wrapper',

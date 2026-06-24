@@ -51,6 +51,27 @@ def motion135_row_to_column(motion135: np.ndarray) -> np.ndarray:
     return motion135
 
 
+def resample_linear(values: np.ndarray, new_len: int) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    old_len = values.shape[0]
+    new_len = int(new_len)
+    if old_len == new_len:
+        return values.astype(np.float32, copy=False)
+    if old_len <= 1 or new_len <= 1:
+        return np.repeat(values[:1], max(new_len, 1), axis=0).astype(np.float32, copy=False)
+    xs = np.linspace(0.0, old_len - 1, new_len, dtype=np.float32)
+    lo = np.floor(xs).astype(np.int64)
+    hi = np.minimum(lo + 1, old_len - 1)
+    w = (xs - lo).reshape(-1, *([1] * (values.ndim - 1))).astype(np.float32)
+    return (values[lo] * (1.0 - w) + values[hi] * w).astype(np.float32)
+
+
+def resampled_length(num_frames: int, source_fps: float, target_fps: float) -> int:
+    if abs(float(source_fps) - float(target_fps)) < 1e-6:
+        return int(num_frames)
+    return max(1, int(round(int(num_frames) * float(target_fps) / float(source_fps))))
+
+
 def load_eval_frame_map(path: Path) -> Dict[str, int]:
     if not path.exists():
         return {}
@@ -102,6 +123,9 @@ def motion_to_mbench_joints(
     input_convention: str,
     device: torch.device,
     chunk_size: int,
+    source_fps: float,
+    target_fps: float,
+    target_frames: Optional[int] = None,
 ) -> np.ndarray:
     if input_convention == "row":
         motion135 = motion135_row_to_column(motion135)
@@ -118,6 +142,10 @@ def motion_to_mbench_joints(
         joints_np = joints.detach().cpu().numpy().astype(np.float32)
         chunks.append(joints_np)
     joints = np.concatenate(chunks, axis=0)
+    if target_frames is not None:
+        joints = resample_linear(joints, int(target_frames))
+    elif abs(float(source_fps) - float(target_fps)) > 1e-6:
+        joints = resample_linear(joints, resampled_length(joints.shape[0], source_fps, target_fps))
     joints = np.einsum("ij,tvj->tvi", SMPL_YUP_TO_MBENCH_ZUP, joints).astype(np.float32)
     return joints
 
@@ -149,6 +177,13 @@ def main() -> None:
     )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--chunk-size", type=int, default=96)
+    parser.add_argument("--source-fps", type=float, default=20.0)
+    parser.add_argument("--target-fps", type=float, default=20.0)
+    parser.add_argument(
+        "--match-eval-frames",
+        action="store_true",
+        help="Resample FK joints to the exact frame count in --eval-info-json.",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -174,6 +209,9 @@ def main() -> None:
                 input_convention=args.input_convention,
                 device=device,
                 chunk_size=args.chunk_size,
+                source_fps=args.source_fps,
+                target_fps=args.target_fps,
+                target_frames=frame_map.get(path.stem) if args.match_eval_frames else None,
             )
             np.save(out_path, joints)
             expected = frame_map.get(path.stem)
@@ -201,6 +239,9 @@ def main() -> None:
     ]
     summary = {
         "num_records": len(records),
+        "source_fps": float(args.source_fps),
+        "target_fps": float(args.target_fps),
+        "match_eval_frames": bool(args.match_eval_frames),
         "statuses": dict(statuses),
         "ok": int(statuses.get("ok", 0)),
         "complete": int(statuses.get("ok", 0)) == 450,
