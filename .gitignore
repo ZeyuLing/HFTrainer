@@ -125,6 +125,19 @@ eval_dashboard.db
 papers/
 papers/
 
+# PhysFlow bundled tracker baselines. These are runtime dependencies, not
+# external ref_repo mirrors, so keep their source/assets/checkpoints addable
+# despite broad data/logs/ckpts/model-file ignores above.
+!hftrainer/models/motion/physflow/trackers/
+!hftrainer/models/motion/physflow/trackers/**
+!hftrainer/models/motion/physflow/trackers/**/*.pt
+!hftrainer/models/motion/physflow/trackers/**/*.ckpt
+!hftrainer/models/motion/physflow/trackers/**/*.onnx
+!hftrainer/models/motion/physflow/trackers/**/*.npz
+hftrainer/models/motion/physflow/trackers/**/__pycache__/
+hftrainer/models/motion/physflow/trackers/humanoid_gpt/.venv311/
+hftrainer/models/motion/physflow/trackers/humanoid_gpt/physflow_hgpt_judge_server.log
+
 # Temporary evaluation and research scripts (should go to docs/temp/research_scripts/)
 /scripts/run_*.sh
 /scripts/pick_*.py
@@ -145,3 +158,55 @@ papers/
 /GT_MOTION_*.md
 /README_E3_*.md
 /M2M_COMPREHENSIVE_*.md
+
+# Local editor/runtime state that is expensive for Git/Cursor to scan.
+.vscode/
+.idea/
+.venv*/
+venv*/
+envs/
+wandb/
+runs/
+tmp/
+temp/
+.trash/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.agents/
+.claude/
+.codex/
+.claude_autodebug_workspaces/
+archive/
+ref_repo/
+third_party/
+
+# Large generated media/arrays/archives commonly produced by evaluation tools.
+*.pth
+*.ckpt
+*.onnx
+*.gguf
+*.npz
+*.npy
+*.pkl
+*.h5
+*.hdf5
+*.mp4
+*.mov
+*.avi
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Final override for PhysFlow bundled tracker baselines after all generic large
+# file rules. Keep the bundle addable; keep generated local environments out.
+!hftrainer/models/motion/physflow/trackers/
+!hftrainer/models/motion/physflow/trackers/**
+!hftrainer/models/motion/physflow/trackers/**/*.pt
+!hftrainer/models/motion/physflow/trackers/**/*.ckpt
+!hftrainer/models/motion/physflow/trackers/**/*.onnx
+!hftrainer/models/motion/physflow/trackers/**/*.npz
+hftrainer/models/motion/physflow/trackers/**/__pycache__/
+hftrainer/models/motion/physflow/trackers/humanoid_gpt/.venv311/
+hftrainer/models/motion/physflow/trackers/humanoid_gpt/physflow_hgpt_judge_server.log
