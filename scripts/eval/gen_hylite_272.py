@@ -3,7 +3,7 @@
 export them as MotionStreamer 272-dim features for the (validated) TMR evaluator.
 
     HY-Lite (HunyuanMotionMMDiT, 201-dim, 30 fps)
-      -> latent_denorm[..., :135]   (trans3 + 22x6 rot6d, 30 fps)
+      -> decoded ``transl`` + ``rot6d`` (official smoothing / ground alignment)
       -> motion135_to_272           (canonical SMPL-X-272 skeleton FK -> 272)
       -> save <out>/<id>.npy        (272, 30 fps)
 
@@ -160,9 +160,13 @@ def main():
         lens = [L for _, _, L in chunk]
         batch = {"caption": caps, "tgt_length": lens}
         result = pipeline(batch)
-        denorm = result["latent_denorm"].float().cpu().numpy()  # (B, Lmax, 201)
+        transl = result["transl"].float().cpu().numpy()
+        rot6d = result["rot6d"].float().cpu().numpy()
         for k, (sid, _cap, L) in enumerate(chunk):
-            m135 = denorm[k, :L, :135].astype(np.float32)
+            m135 = np.concatenate(
+                [transl[k, :L], rot6d[k, :L].reshape(L, 132)],
+                axis=-1,
+            ).astype(np.float32)
             np.save(str(m135_dir / f"{sid}.npy"), m135)
             try:
                 m272 = motion135_to_272(m135, rotation_space=args.rotation_space)

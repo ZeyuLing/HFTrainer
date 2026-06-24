@@ -234,6 +234,61 @@ def _make_fullbody_with_rot_constraint_set():
 
     return FullBodyWithRotConstraintSet
 
+
+def _make_part_with_rot_constraint_set(kept_idx, anchor_root_xz, anchor_heading):
+    """Subset analog of FullBodyWithRotConstraintSet for E10 body-part control.
+
+    Pins ONLY ``kept_idx`` joints' global rotations (+ positions) over all
+    frames, optionally anchoring the root xz trajectory / heading. This is the
+    correct way to express \\ours-style fine-grained rotation control with
+    KIMODO: its ``EndEffectorConstraintSet`` only accepts the 5 end-effectors
+    (LeftFoot/RightFoot/LeftHand/RightHand/Hips), and ``FullBodyConstraintSet``
+    pins ALL joints -- neither can pin an arbitrary joint subset (spine_only,
+    single arm, no_feet, ...).
+    """
+    from kimodo.constraints import FullBodyConstraintSet, create_pairs
+    import torch as _t
+
+    _kept = _t.as_tensor(list(kept_idx), dtype=_t.long)
+    _aroot = bool(anchor_root_xz)
+    _ahead = bool(anchor_heading)
+
+    class PartBodyWithRotConstraintSet(FullBodyConstraintSet):
+        name = "partbody_rot"
+
+        def update_constraints(self, data_dict: dict, index_dict: dict) -> None:
+            ki = _kept.to(self.frame_indices.device)
+            pairs = create_pairs(self.frame_indices, ki)
+            # kept joints: global positions
+            data_dict["global_joints_positions"].append(
+                self.global_joints_positions[:, ki].reshape(-1, 3))
+            index_dict["global_joints_positions"].append(pairs)
+            # kept joints: global rotations (the rotation-control signal)
+            data_dict["global_joints_rots"].append(
+                self.global_joints_rots[:, ki].reshape(-1, 3, 3))
+            index_dict["global_joints_rots"].append(pairs)
+            # root anchoring: only when \ours keeps translation / pelvis
+            if _aroot:
+                data_dict["smooth_root_2d"].append(self.smooth_root_2d)
+                index_dict["smooth_root_2d"].append(self.frame_indices)
+                data_dict["root_y_pos"].append(self.root_y_pos)
+                index_dict["root_y_pos"].append(self.frame_indices)
+            if _ahead:
+                data_dict["global_root_heading"].append(self.global_root_heading)
+                index_dict["global_root_heading"].append(self.frame_indices)
+
+        def crop_move(self, start: int, end: int):
+            mask = (self.frame_indices >= start) & (self.frame_indices < end)
+            return PartBodyWithRotConstraintSet(
+                self.skeleton,
+                self.frame_indices[mask] - start,
+                self.global_joints_positions[mask],
+                self.global_joints_rots[mask],
+                self.smooth_root_2d[mask],
+            )
+
+    return PartBodyWithRotConstraintSet
+
 # ============================================================================
 # Skeleton mapping: SMPL-22 <-> SOMA-30/77
 # ============================================================================
@@ -724,6 +779,7 @@ def build_constraints_e3(skeleton, soma30_rots, soma30_pos, T, setting,
             frames.append(T - 1)
 
     frame_idx = torch.tensor(frames, dtype=torch.long)
+    build_constraints_e3._last_keyframe_indices = [int(f) for f in frames]
 
     constraint = FullBodyConstraintSet(
         skeleton,
@@ -753,6 +809,15 @@ def build_constraints_e4(skeleton, soma30_rots, soma30_pos, T, setting, caption=
         'E_all4_sparse':   (['LeftHand', 'RightHand', 'LeftFoot', 'RightFoot'],
                             [20, 21, 7, 8], 20),
         'F_rhand_dense':   (['RightHand'], [21], 5),
+        # Current m2m_eval_tasks.py setting names.
+        'single_sparse':  (['RightHand'], [21], 10),
+        'single_medium':  (['RightHand'], [21], 10),
+        'two_sparse':     (['RightHand', 'LeftToeBase'], [21, 10], 15),
+        'two_medium':     (['RightHand', 'LeftToeBase'], [21, 10], 10),
+        'all4_sparse':    (['LeftHand', 'RightHand', 'LeftFoot', 'RightFoot'],
+                           [20, 21, 7, 8], 20),
+        'all4_dense':     (['LeftHand', 'RightHand', 'LeftFoot', 'RightFoot'],
+                           [20, 21, 7, 8], 10),
     }
     if setting not in joint_map:
         # Legacy / unknown → fall back to A_rhand_sparse
@@ -780,12 +845,25 @@ def build_constraints_e4(skeleton, soma30_rots, soma30_pos, T, setting, caption=
 
 
 def build_constraints_e5(skeleton, soma30_rots, soma30_pos, T, setting, caption=""):
-    """E5 Trajectory following: constrain root XZ."""
+    """E5 Trajectory following: constrain root XZ.
+
+    Accepts both legacy setting names (``A``/``B``/``C``) and the v2 registry
+    names (``A_xz_dense`` / ``B_xz_sparse`` / ``C_xz_heading`` / ``D_xyz_dense``
+    / ``E_xyz_sparse`` / ``F_xyz_heading``). KIMODO's ``Root2DConstraintSet`` is
+    a planar (XZ) root constraint and cannot anchor the vertical (Y) axis, so the
+    XYZ settings are unsupported and raise -- they are reported as N/A for KIMODO.
+    """
     from kimodo.constraints import Root2DConstraintSet
     import torch
 
-    intervals = {'A': 1, 'B': 30, 'C': 1}
-    K = intervals.get(setting, 1)
+    s = str(setting)
+    if 'xyz' in s or s in ('D', 'E', 'F'):
+        raise ValueError(
+            f"KIMODO Root2DConstraintSet is XZ-only; XYZ trajectory setting "
+            f"'{s}' is N/A for KIMODO.")
+    is_sparse = ('sparse' in s) or (s == 'B')
+    is_heading = ('heading' in s) or (s == 'C')
+    K = 30 if is_sparse else 1
     frames = list(range(0, T, K))
     frame_idx = torch.tensor(frames, dtype=torch.long)
 
@@ -793,7 +871,7 @@ def build_constraints_e5(skeleton, soma30_rots, soma30_pos, T, setting, caption=
     root_xz = soma30_pos[:, 0, [0, 2]]
 
     heading = None
-    if setting == 'C':
+    if is_heading:
         # Estimate heading from root trajectory
         root_x = soma30_pos[:, 0, 0].numpy()
         root_z = soma30_pos[:, 0, 2].numpy()
@@ -855,6 +933,7 @@ def build_constraints_e6(skeleton, soma30_rots, soma30_pos, gt_pos_22, T, settin
         frame_indices=frame_idx,
         global_joints_positions=soma30_pos[frame_idx],
         global_joints_rots=soma30_rots[frame_idx],
+        smooth_root_2d=soma30_pos[frame_idx, 0, :][:, [0, 2]],
         joint_names=['LeftFoot', 'RightFoot'],
         to_crop=False,
     )
@@ -937,31 +1016,61 @@ def build_constraints_e8(skeleton, soma30_rots, soma30_pos, T, setting, caption=
 
 
 def build_constraints_e10(skeleton, soma30_rots, soma30_pos, T, setting, caption=""):
-    """E10 Part-level editing: constrain body-part joints."""
-    from kimodo.constraints import EndEffectorConstraintSet
+    """E10 Part-level editing: constrain body-part joints.
+
+    Accepts legacy ``A``/``B`` and the v2 registry names ``A_upper`` /
+    ``B_lower`` (and the finer ``*_only`` / single-limb keys). The paper only
+    runs KIMODO on the coarse upper/lower regions; finer parts are reported as
+    N/A for baselines.
+    """
     import torch
+    import numpy as np
 
-    if setting == 'A':
-        soma_names = ['Hips', 'Spine1', 'Spine2', 'Chest', 'Neck1',
-                      'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
-                      'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand', 'Head']
-    elif setting == 'B':
-        soma_names = ['LeftLeg', 'LeftShin', 'LeftFoot', 'LeftToeBase',
-                      'RightLeg', 'RightShin', 'RightFoot', 'RightToeBase']
+    # Normalise to a bare part key: 'A_upper' -> 'upper', 'A' -> 'upper'.
+    s = str(setting)
+    if '_' in s:
+        key = s.split('_', 1)[1]
     else:
-        soma_names = ['Hips']
+        key = {'A': 'upper', 'B': 'lower'}.get(s, s)
 
-    # Constrain every frame for the kept joints
-    frames = list(range(T))
-    frame_idx = torch.tensor(frames, dtype=torch.long)
+    # Derive the kept (observed) joints + root flags from \ours's OWN E10 mask so
+    # KIMODO and \ours observe exactly the same body part. KIMODO's
+    # EndEffectorConstraintSet only supports the 5 end-effectors
+    # (hands/feet/hips) -- it CANNOT express spine_only / single-arm / no_feet
+    # rotation control. So we instead pin ONLY the kept joints' GLOBAL rotations
+    # (+ positions) with a subset-of-fullbody constraint, anchoring the root
+    # xz/heading only when \ours keeps translation/pelvis (rotation-control
+    # semantics, identical to \ours).
+    from hftrainer.evaluation.motion.m2m_eval_tasks import build_part_level_mask
+    m = np.asarray(build_part_level_mask(T=1, D=135, keep_part=key))[0]  # (135,) 0=keep
+    transl_kept = bool(m[0:3].max() == 0)
+    kept_smpl = [j for j in range(22)
+                 if m[3 + 6 * j: 3 + 6 * (j + 1)].max() == 0]
+    pelvis_kept = (0 in kept_smpl)
+    kept_soma = sorted({int(SMPLX22_TO_SOMA30[j]) for j in kept_smpl})
+    if not kept_soma:  # safety: always keep at least the pelvis
+        kept_soma = [int(skeleton.root_idx)]
 
-    constraint = EndEffectorConstraintSet(
+    # KIMODO is a GLOBAL-frame optimizer: with no root constraint at all its
+    # post-processing breaks (frame-index/FPS bounds error). For the root-free
+    # \ours settings (arms_only / single-arm / feet_only) we therefore anchor
+    # the GT root so KIMODO can still run -- KIMODO observes the GT global
+    # trajectory here while \ours regenerates it (flagged in the Table 6
+    # caption as KIMODO's root-anchor requirement).
+    anchor_root = transl_kept or (not transl_kept and not pelvis_kept)
+    anchor_head = pelvis_kept or (not transl_kept and not pelvis_kept)
+
+    frame_idx = torch.arange(T, dtype=torch.long)
+    smooth_root_2d = soma30_pos[frame_idx, skeleton.root_idx, :][:, [0, 2]]
+
+    PartCS = _make_part_with_rot_constraint_set(
+        kept_soma, anchor_root_xz=anchor_root, anchor_heading=anchor_head)
+    constraint = PartCS(
         skeleton,
-        frame_indices=frame_idx,
-        global_joints_positions=soma30_pos[frame_idx],
-        global_joints_rots=soma30_rots[frame_idx],
-        joint_names=soma_names,
-        to_crop=False,
+        frame_idx,
+        soma30_pos[frame_idx],
+        soma30_rots[frame_idx],
+        smooth_root_2d,
     )
     return [constraint]
 
@@ -1259,13 +1368,17 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
         build_constraints_e8._loop_target_pos = None
 
     builder = CONSTRAINT_BUILDERS.get(task_id)
-    if builder is None and task_id != 'E6':
+    if task_id == 'E1':
+        constraints = []
+    elif builder is None and task_id != 'E6':
         build_constraints_e8._loop_target_rots = prev_loop_rots
         build_constraints_e8._loop_target_pos = prev_loop_pos
         return None, {}, {}
 
     try:
-        if task_id == 'E6':
+        if task_id == 'E1':
+            pass
+        elif task_id == 'E6':
             # E6 needs gt_pos_22 for foot contact detection; the detection
             # itself is per-frame local (ankle Y), so canonicalization doesn't
             # shift which frames are contact frames — but the constraint
@@ -1322,7 +1435,7 @@ def evaluate_sample(model, skeleton, soma30_rots, soma30_pos, gt_pos_22,
     # the model's training distribution (~10s).  See _split_num_frames docstring.
     # E8-D MUST run as single segment — multi-prompt crop_move drops the
     # loop-target constraint from the first segment, causing boundary jumps.
-    if force_single_segment:
+    if force_single_segment or task_id in {'E4', 'E6'}:
         seg_lens = [num_frames]
     else:
         seg_lens = _split_num_frames(num_frames)
@@ -1673,6 +1786,11 @@ def main():
                         help='If set, load the rewritten datalist '
                              '(eval_e*_rewritten.json) for caption-carrying '
                              'tasks (caption-aware models only).')
+    parser.add_argument('--force-comparable', action='store_true',
+                        help='Run tasks even if kimodo_comparable=False '
+                             '(e.g. E10 part-level: KIMODO _PART_MAP supports '
+                             'all granularities with rot+pos constraints; the '
+                             'flag only guards the default all-tasks sweep).')
     parser.add_argument('--data-file-override', type=str, default=None,
                         help='Override task.data_file for ALL tasks. Used '
                              'for ablation runs that want to point KIMODO at '
@@ -1680,6 +1798,12 @@ def main():
     args = parser.parse_args()
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    # Match KIMODO's training-time imputation semantics at inference: during
+    # each denoising step, constrained channels are replaced by the noised
+    # clean condition. This is distinct from final hard compositing, which can
+    # create visible boundary jumps and stays disabled by default.
+    os.environ.setdefault("KIMODO_REPAINT_CONDITION", "1")
+    os.environ.setdefault("KIMODO_FINAL_HARD_PASTE", "0")
     import torch
 
     # Determine tasks
@@ -1722,11 +1846,19 @@ def main():
         # to start pose" has no analogous KIMODO constraint set under the
         # new 2026-04-21 redefinition — the runner only implements the
         # legacy _use_target_first semantics, which no current setting uses).
-        if not getattr(task, 'kimodo_comparable', True):
-            print(f"Skipping {task_id} ({task.name}) — kimodo_comparable=False")
+        if not getattr(task, 'kimodo_comparable', True) and not args.force_comparable:
+            print(f"Skipping {task_id} ({task.name}) — kimodo_comparable=False "
+                  f"(pass --force-comparable to run anyway)")
             continue
 
-        settings = list(task.settings.keys()) if not args.settings else args.settings
+        if args.settings:
+            settings = [s for s in args.settings if s in task.settings]
+            if not settings:
+                print(f"Skipping {task_id} ({task.name}) — none of the requested "
+                      "settings belong to this task")
+                continue
+        else:
+            settings = list(task.settings.keys())
 
         for setting_name in settings:
             task_key = f"{task_id}_{setting_name}"
@@ -1806,6 +1938,7 @@ def main():
                     continue
                 if args.end_idx is not None and i >= args.end_idx:
                     continue
+                condition_motion_135 = None
                 motion = sample['motion']   # (T, 135) denormalized
                 T = sample['T']
                 caption = sample.get('caption', '')
@@ -2048,6 +2181,16 @@ def main():
                             N_cond, N_transition, caption,
                             N_cond_a=N_cond_a, N_cond_b=N_cond_b)
 
+                        # Persist the actual condition source on the generated
+                        # timeline for visualization. Only the two condition
+                        # ranges are meant to be shown; the generated middle is
+                        # filled with held boundary poses so mesh loaders see a
+                        # finite sequence while the viewer hides that span.
+                        condition_motion_135 = np.zeros((T_total, 135), dtype=np.float32)
+                        condition_motion_135[:N_cond_a] = motion_a[-N_cond_a:]
+                        condition_motion_135[N_cond_a:N_cond_a + N_transition] = motion_a[-1:]
+                        condition_motion_135[N_cond_a + N_transition:] = motion_b_world[:N_cond_b]
+
                         pred_pos, metrics, soma_data = _run_kimodo_with_constraints(
                             model, skeleton, constraints, caption, T_total,
                             gt_pos, fps_val,
@@ -2178,6 +2321,7 @@ def main():
                             rotation_space='local',
                         )
                         canon_segment = canon_segment_t.numpy()
+                        condition_motion_135 = canon_segment.astype(np.float32)
 
                         # ── Step 6: retarget to SOMA30 ──
                         # P slice (single frame) and A_placed slice
@@ -2333,10 +2477,28 @@ def main():
 
                 if pred_pos is not None:
                     npz_path = os.path.join(npz_dir, f"{i:05d}.npz")
+                    # Only expose gt_motion_135 when it lives on the same
+                    # timeline as the generated sample. Transition/prepend
+                    # tasks build a new output window, so the raw datalist
+                    # motion is merely a source clip and must not be shown as
+                    # GT in visualization.
+                    _source_motion_135 = motion.astype(np.float32)
                     save_fields = dict(
                         positions=pred_pos,
                         translation=pred_pos[:, 0],
+                        source_motion_135=_source_motion_135,
+                        caption=np.array(caption, dtype=object),
+                        task_key=np.array(task_key, dtype=object),
                     )
+                    if int(_source_motion_135.shape[0]) == int(pred_pos.shape[0]):
+                        save_fields['gt_motion_135'] = _source_motion_135
+                    if condition_motion_135 is not None:
+                        save_fields['condition_motion_135'] = condition_motion_135.astype(np.float32)
+                    if task_id == 'E3':
+                        keyframes = getattr(build_constraints_e3, "_last_keyframe_indices", None)
+                        if keyframes:
+                            save_fields['keyframe_indices'] = np.asarray(
+                                keyframes, dtype=np.int32)
                     # Include SOMA-77 data for mesh rendering
                     if soma_data.get('posed_joints') is not None:
                         save_fields['posed_joints'] = soma_data['posed_joints']

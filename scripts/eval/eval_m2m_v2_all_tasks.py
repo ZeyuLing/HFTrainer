@@ -220,6 +220,24 @@ V2_MODELS = {
         'has_caption': True,
         'rotation_space': 'local',
     },
+    # --- Table 5 keyframe \ours config ablation (epoch_80 pinned) ---
+    # Compare the two candidate \ours configs on adaptive sparse keyframe:
+    #   * 046b = original dirty-data model (motionfix/permo_editing in train set)
+    #   * cleandata = same recipe finetuned from editfix ep960 on clean data only
+    'smpl_caption_046b_ep80': {
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
+        'work_dir': 'work_dirs/_eval_smpl_046b_ep80',
+        'desc': 'SMPL Root + Caption (046b dirty data), epoch_80 pinned',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
+    'smpl_caption_cleandata_ep80': {
+        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_cleandata_ablation.py',
+        'work_dir': 'work_dirs/_eval_smpl_cleandata_ep80',
+        'desc': 'SMPL Root + Caption (clean data, editfix-finetuned), epoch_80 pinned',
+        'has_caption': True,
+        'rotation_space': 'local',
+    },
 }
 
 # Also allow running v1 models for comparison
@@ -580,106 +598,34 @@ def _load_adaptive_mask_for_motion(
 # E9 v2 repair helpers (2026-04-22 redesign)
 # ============================================================================
 
+# Canonical mask utilities live in the pipeline package so the offline eval and
+# HyMotionM2MPipeline.infer_repair share ONE implementation (no drift). The thin
+# wrappers below preserve the historical private names/signatures used here.
+from hftrainer.pipelines.motion.repair_utils import (  # noqa: E402
+    compute_ada_keep_mask as _ru_compute_ada_keep_mask,
+    compute_strict_adaptive_mask as _ru_compute_strict_adaptive_mask,
+    smpl22_neighbors as _ru_smpl22_neighbors,
+)
+
+
 def _compute_ada_keep_mask(
     motion_norm_lq: np.ndarray,       # (T, D) normalized LQ
     denoised_stage1: np.ndarray,      # (T, D) normalized stage-1 output
     threshold_mode: str,              # 'abs' or 'topk_pct'
     threshold: float,                 # abs threshold OR top-k fraction
 ) -> np.ndarray:
-    """Stage-2 of MoGenDIT ada_denoise: build a keep_mask from the
-    model's stage-1 change pattern.
-
-    Logic (mirrors ``MoGenDIT.motion_process.motion_refiner`` lines
-    339-361):
-
-        change      = |motion_lq - denoised_stage1|   (elementwise)
-        low_change  = change <= threshold              # or topk_pct
-        → per-channel "clean" flag
-
-    Aggregation strategy: because the model's 198-dim layout is
-    [trans(3) + rot6d(132) + pos(63)], we aggregate to per-joint
-    per-frame: a joint is "clean at frame t" iff ALL of its
-    channels (rot6d 6 + pos 3) are low-change.  Translation (dims
-    0:3) is kept as a single group.  This is stricter than
-    per-channel and avoids artifacts where 3 out of 6 rot6d dims
-    flip state.
-
-    Returns a ``mask`` (T, D) with 1=generate, 0=keep.  Intended to
-    be fed back into the pipeline with ``replacement_guidance='skip_last'``
-    and ``clean_motion=LQ``, so low-change regions stay anchored to LQ.
-
-    The MoGenDIT caller ORed this with the external base mask; we do
-    that in the caller (this function only produces the "stage-2
-    extension").
-    """
-    D = motion_norm_lq.shape[-1]
-    change = np.abs(motion_norm_lq - denoised_stage1)  # (T, D)
-
-    if threshold_mode == 'abs':
-        thr = float(threshold)
-    elif threshold_mode == 'topk_pct':
-        # Pick the threshold so that exactly `threshold` fraction of
-        # (T, D) cells have change > threshold. Any value with
-        # change > thr is "high change" (will be regenerated); rest
-        # is "low change" (kept).
-        thr = float(np.quantile(change.ravel(), 1.0 - float(threshold)))
-    else:
-        raise ValueError(f'Unknown _ada_threshold_mode: {threshold_mode!r}')
-
-    low_change_chan = (change <= thr)  # (T, D) bool, True = clean
-
-    # Per-joint aggregation. For 198-dim we have:
-    #   dim 0:3   translation (group 1)
-    #   dim 3:135 rot6d, 22 joints * 6 dim each (groups 2..23)
-    #   dim 135:198 pos, 21 joints * 3 dim each (follow rot6d groups 3..23)
-    # For 135-dim just trans + rot6d.
-    out_mask = np.ones((motion_norm_lq.shape[0], D), dtype=np.float32)
-
-    # Translation: all 3 dims must agree
-    trans_clean = low_change_chan[:, :3].all(axis=-1)  # (T,)
-    out_mask[trans_clean, :3] = 0.0
-
-    # Rot6d per joint (22 joints, dims 3 + j*6 : 3 + (j+1)*6)
-    for j in range(22):
-        s, e = 3 + j * 6, 3 + (j + 1) * 6
-        j_clean = low_change_chan[:, s:e].all(axis=-1)  # (T,)
-        out_mask[j_clean, s:e] = 0.0
-
-    # Position channels (198-dim only): follow rot6d cleanness per joint.
-    # pos channels are for joints 1..21 (no pelvis), dims 135+(j-1)*3..
-    if D >= 198:
-        for j in range(1, 22):
-            rot_s, rot_e = 3 + j * 6, 3 + (j + 1) * 6
-            j_clean_rot = low_change_chan[:, rot_s:rot_e].all(axis=-1)  # (T,)
-            ps, pe = 135 + (j - 1) * 3, 135 + j * 3
-            j_clean_pos = low_change_chan[:, ps:pe].all(axis=-1)
-            j_clean = j_clean_rot & j_clean_pos
-            out_mask[j_clean, ps:pe] = 0.0
-            # Re-write rot6d section too — both pos AND rot must agree
-            # for this joint to be kept. Stricter than rot-only pass.
-            out_mask[j_clean, rot_s:rot_e] = 0.0
-
-    return out_mask
+    """Stage-2 ada_denoise keep-mask. Delegates to the canonical
+    ``repair_utils.compute_ada_keep_mask`` (single source of truth)."""
+    return _ru_compute_ada_keep_mask(
+        motion_norm_lq, denoised_stage1,
+        threshold_mode=threshold_mode, threshold=threshold,
+    )
 
 
-# SMPL-22 parent array used for strict-mask spatial dilation (kinematic
-# neighbor propagation). Duplicated from SMPL22_PARENTS earlier in file
-# but kept local to document that strict_mask uses it as a symmetric
-# neighborhood (parent AND children included).
 def _smpl22_neighbors() -> List[List[int]]:
-    parents = SMPL22_PARENTS
-    children: List[List[int]] = [[] for _ in range(len(parents))]
-    for child, parent in enumerate(parents):
-        if parent >= 0:
-            children[parent].append(child)
-    neigh: List[List[int]] = []
-    for j in range(len(parents)):
-        nbs = set()
-        if parents[j] >= 0:
-            nbs.add(parents[j])
-        nbs.update(children[j])
-        neigh.append(sorted(nbs))
-    return neigh
+    """Symmetric kinematic neighbourhood. Delegates to the canonical
+    ``repair_utils.smpl22_neighbors``."""
+    return _ru_smpl22_neighbors()
 
 
 def _compute_strict_adaptive_mask(
@@ -687,106 +633,15 @@ def _compute_strict_adaptive_mask(
     dilate: int = 2,                  # temporal dilation radius (frames)
     min_blob: int = 3,                # minimum blob size (frames) to keep
     motion_dim: int = 198,
+    lock_trans: bool = False,         # if True, never mask translation (M7 conv)
 ) -> np.ndarray:
-    """Tighten the raw MoGenDIT adaptive mask using 3 post-processing
-    steps, all in the "1=generate" convention:
-
-    1) Per-joint aggregation: joint j at frame t is flagged iff ALL of
-       its channels in the raw mask agree (reduces per-channel noise).
-    2) Spatial dilation to kinematic neighbors (parent + children)
-       — a bad joint usually drags its neighbors too.
-    3) Temporal dilation by ±`dilate` frames.
-    4) Blob filtering: drop per-joint temporal runs shorter than
-       ``min_blob`` frames (isolated single-frame flags are noise).
-
-    Returns a new (T, D) float mask with 1=generate, 0=keep.
-    """
-    T, D = adaptive_raw.shape
-    # --- Step 1: per-joint aggregation to (T, 22) bool ------------
-    joint_flag = np.zeros((T, 22), dtype=bool)
-    # Translation goes to "joint 0" (pelvis) via OR with any trans dim
-    trans_any = (adaptive_raw[:, :3] >= 0.5).any(axis=-1)  # (T,)
-    joint_flag[:, 0] |= trans_any
-    # Rot6d per joint
-    for j in range(22):
-        s, e = 3 + j * 6, 3 + (j + 1) * 6
-        # Use ANY (less strict) since raw mask already has dropout per dim
-        joint_flag[:, j] |= (adaptive_raw[:, s:e] >= 0.5).any(axis=-1)
-    # Pos channels (if 198d)
-    if D >= 198:
-        for j in range(1, 22):
-            ps, pe = 135 + (j - 1) * 3, 135 + j * 3
-            joint_flag[:, j] |= (adaptive_raw[:, ps:pe] >= 0.5).any(axis=-1)
-
-    # --- Step 2: kinematic spatial dilation -----------------------
-    # 2026-04-23: EXCLUDE upper-chain small joints (neck=12, head=15,
-    # wrists=20/21, collars=13/14) from being both sources AND sinks of
-    # propagation. Reason: the adaptive detector often fires on head due
-    # to small pose noise, then kinematic propagation spreads the flag to
-    # neck → both get regenerated, and the model invents a completely new
-    # head/neck rotation (visible as "sudden head lift / turn" not in LQ).
-    # Case 00165 (foot_sliding): raw mask had 46 head-flagged frames and 0
-    # neck frames; after propagation both became 77 frames → model
-    # generated 8° single-frame head rotation deltas not in LQ.
-    #
-    # Big-joint propagation (hips↔knees↔ankles, spine chain) is kept since
-    # those defects genuinely spread across the chain.
-    _NO_PROPAGATE = {12, 13, 14, 15, 20, 21}  # neck, collars, head, wrists
-    neigh = _smpl22_neighbors()
-    joint_flag_sp = joint_flag.copy()
-    for j in range(22):
-        if j in _NO_PROPAGATE:
-            continue  # don't broadcast from these joints
-        for nb in neigh[j]:
-            if nb in _NO_PROPAGATE:
-                continue  # don't receive into these joints
-            joint_flag_sp[:, nb] |= joint_flag[:, j]
-    joint_flag = joint_flag_sp
-
-    # --- Step 3: temporal dilation --------------------------------
-    if dilate > 0:
-        jf = joint_flag.copy()
-        for s in range(1, dilate + 1):
-            jf[s:] |= joint_flag[:-s]
-            jf[:-s] |= joint_flag[s:]
-        joint_flag = jf
-
-    # --- Step 4: blob filter — drop runs shorter than min_blob ----
-    if min_blob > 1:
-        for j in range(22):
-            col = joint_flag[:, j]
-            if not col.any():
-                continue
-            # Find runs of True
-            runs = []
-            i = 0
-            while i < T:
-                if col[i]:
-                    k = i
-                    while k < T and col[k]:
-                        k += 1
-                    runs.append((i, k))  # [i, k)
-                    i = k
-                else:
-                    i += 1
-            for (s, e) in runs:
-                if (e - s) < min_blob:
-                    col[s:e] = False
-            joint_flag[:, j] = col
-
-    # --- Step 5: map back to (T, D) with joint-group broadcasting --
-    out_mask = np.zeros((T, D), dtype=np.float32)
-    # Trans follows joint 0
-    out_mask[:, :3] = joint_flag[:, 0:1].astype(np.float32)
-    for j in range(22):
-        s, e = 3 + j * 6, 3 + (j + 1) * 6
-        out_mask[:, s:e] = joint_flag[:, j:j+1].astype(np.float32)
-    if D >= 198:
-        for j in range(1, 22):
-            ps, pe = 135 + (j - 1) * 3, 135 + j * 3
-            out_mask[:, ps:pe] = joint_flag[:, j:j+1].astype(np.float32)
-
-    return out_mask
+    """Tighten a raw defect mask (per-joint OR + kinematic spatial dilation +
+    temporal dilation + blob filter). Delegates to the canonical
+    ``repair_utils.compute_strict_adaptive_mask`` (single source of truth)."""
+    return _ru_compute_strict_adaptive_mask(
+        adaptive_raw, dilate=dilate, min_blob=min_blob,
+        motion_dim=motion_dim, lock_trans=lock_trans,
+    )
 
 
 def _gaussian_temporal_smooth(
@@ -2720,6 +2575,7 @@ def evaluate_sample(
                 dilate=int(setting_kwargs.get('_strict_dilate', 2)),
                 min_blob=int(setting_kwargs.get('_strict_min_blob', 3)),
                 motion_dim=motion_dim,
+                lock_trans=bool(setting_kwargs.get('_strict_lock_trans', False)),
             )
         elif task.task_id == 'E9' and setting_kwargs.get('_ada_denoise'):
             # D_ada_denoise_*: two-stage MoGenDIT ada_denoise.
@@ -2816,6 +2672,12 @@ def evaluate_sample(
     # vs keep LQ values (editing mode). Per-setting _editing_mode overrides the
     # task-level task.is_editing default (used by E9 to test inpaint vs edit).
     is_editing_effective = setting_kwargs.get('_editing_mode', task.is_editing)
+    # No-reactive control (ablation): force editing off so the source motion is
+    # NOT fed through the reactive channel (src_motion_norm = motion*(1-mask) = 0
+    # for full-regen masks). Used to isolate the reactive channel's contribution
+    # to editing quality. Gated by env var so normal runs are unaffected.
+    if os.environ.get('MFIX_FORCE_NO_EDITING') == '1':
+        is_editing_effective = False
     if is_editing_effective:
         # editing: keep source/LQ values in the reactive channel. For real
         # style-edit pairs this is the neutral source motion; for synthetic
@@ -2892,9 +2754,15 @@ def evaluate_sample(
                     'text_ctxt_raw_length': text_out['ctxt_length'],
                 }
             except Exception as e:
-                print(f'  WARNING: text conditioning unavailable for '
-                      f'caption[:60]={cap[:60]!r} — falling back to uncond. '
-                      f'Reason: {e}')
+                raise RuntimeError(
+                    f'Text conditioning REQUIRED but unavailable for '
+                    f'caption[:60]={cap[:60]!r}: cache MISS and '
+                    f'bundle.encode_text failed ({e}). The eval caption cache '
+                    f'must be populated via '
+                    f'scripts/caption/extract_eval_caption_embeddings.py before '
+                    f'running caption-conditioned eval. Refusing to silently '
+                    f'degrade to UNCONDITIONED inference (which produces '
+                    f'meaningless edit/T2M results).') from e
 
     # Set pipeline parameters
     pipeline.replacement_guidance = replacement_guidance
@@ -3833,6 +3701,11 @@ def main():
                              'after caption-required filtering. "blank" forces '
                              'null text; "shuffle" deterministically rotates '
                              'captions across samples to test caption sensitivity.')
+    parser.add_argument('--num-shards', type=int, default=1,
+                        help='Split the loaded sample list into this many shards '
+                             '(deterministic stride slicing) for multi-GPU runs.')
+    parser.add_argument('--shard-index', type=int, default=0,
+                        help='Which shard to process (0-based) when --num-shards>1.')
     parser.add_argument('--seed-base', type=lambda x: int(x, 0),
                         default=0xE4A10000,
                         help='Base seed for per-sample random state '
@@ -4008,6 +3881,14 @@ def main():
                     convert_to_198=convert_198,
                     task_id=task.task_id,
                 )
+                sample_indices = list(range(len(samples)))
+                if args.num_shards > 1:
+                    _n0 = len(samples)
+                    sample_indices = sample_indices[
+                        args.shard_index::args.num_shards]
+                    samples = samples[args.shard_index::args.num_shards]
+                    print(f'    [shard {args.shard_index}/{args.num_shards}] '
+                          f'{_n0} -> {len(samples)} samples')
                 print(f'    Loaded {len(samples)} samples '
                       f'(caption_policy={caption_policy})')
 
@@ -4056,6 +3937,7 @@ def main():
 
                 for i, sample in enumerate(samples):
                     try:
+                        sample_idx = sample_indices[i]
                         # 2026-04-22: seed per-sample deterministically so the
                         # SAME (sample_idx, task, setting) always produces the
                         # SAME output across runs, and across models (the seed
@@ -4064,7 +3946,7 @@ def main():
                         # every rerun produced a different motion, which broke
                         # cross-model comparison in the dashboard (switching
                         # models on the same case showed different generations).
-                        seed = args.seed_base + i
+                        seed = args.seed_base + sample_idx
                         torch.manual_seed(seed)
                         if torch.cuda.is_available():
                             torch.cuda.manual_seed_all(seed)
@@ -4087,7 +3969,8 @@ def main():
                                     output_135_t, torch.from_numpy(bone_offsets),
                                     rotation_space=model_info.get('rotation_space', 'local'))
                                 pos_np = wp.numpy()
-                                npz_path = os.path.join(npz_dir, f'{i:05d}.npz')
+                                npz_path = os.path.join(
+                                    npz_dir, f'{sample_idx:05d}.npz')
                                 # Add layout metadata (2026-04-23) so the
                                 # dashboard can cut gray prefix/suffix at the
                                 # correct *dynamic* frame count instead of
@@ -4142,7 +4025,7 @@ def main():
                         metrics.pop('_src_mask', None)
 
                         # Store sample info for DB import
-                        metrics['_sample_idx'] = i
+                        metrics['_sample_idx'] = sample_idx
                         # For E13 multi-prompt: _caption = " | "-joined chain
                         # so legacy single-caption readers still see something
                         # meaningful. The structured list lives in

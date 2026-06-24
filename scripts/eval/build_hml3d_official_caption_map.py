@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 
 
@@ -24,20 +25,50 @@ def read_first_full_caption(text_path: Path) -> str | None:
     return None
 
 
+def read_full_captions(text_path: Path) -> list[str]:
+    captions = []
+    if not text_path.exists():
+        return captions
+    for line in text_path.read_text().splitlines():
+        parts = line.strip().split("#")
+        if len(parts) < 4:
+            continue
+        try:
+            f_tag = float(parts[2])
+            to_tag = float(parts[3])
+        except ValueError:
+            continue
+        caption = parts[0].strip()
+        if f_tag == 0.0 and to_tag == 0.0 and caption:
+            captions.append(caption)
+    return captions
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--anno-file", default="data/annotation/test_hml3d.json")
     ap.add_argument("--src-h3d272", default="ref_repo/MotionStreamer/MotionStreamer/humanml3d_272")
     ap.add_argument("--out-json", required=True)
+    ap.add_argument("--selection", choices=["first", "random"], default="first")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
     anno = json.loads(Path(args.anno_file).read_text())["data_list"]
     text_root = Path(args.src_h3d272) / "texts"
     out = {}
     missing = 0
+    rng = random.Random(args.seed)
     for name, entry in anno.items():
         cid = Path(str(entry.get("smplx_path") or "")).stem
-        cap = read_first_full_caption(text_root / f"{cid}.txt") if cid else None
+        cap = None
+        if cid:
+            text_path = text_root / f"{cid}.txt"
+            if args.selection == "first":
+                cap = read_first_full_caption(text_path)
+            else:
+                candidates = read_full_captions(text_path)
+                if candidates:
+                    cap = rng.choice(candidates)
         if cap is None:
             missing += 1
             continue

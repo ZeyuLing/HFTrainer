@@ -95,6 +95,7 @@ def _retarget_file(
             raise ValueError("SMPL model/rest/parents are required for IK retarget")
         ret = _retarget_one_ik(
             target22,
+            None,
             smpl_model,
             smpl_rest_joints,
             smpl_parents,

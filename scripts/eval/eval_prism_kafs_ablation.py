@@ -103,6 +103,10 @@ def load_test_samples(
     min_frames: int = 24,
     max_frames: int = 360,
     max_samples: Optional[int] = None,
+    require_motion_file: bool = True,
+    keep_ids: Optional[set[str]] = None,
+    shard_idx: Optional[int] = None,
+    num_shards: int = 1,
 ) -> List[Dict]:
     """Load test samples from a motionhub-format annotation JSON.
 
@@ -130,7 +134,11 @@ def load_test_samples(
         raise ValueError(f'Unrecognized annotation format in {anno_file}')
 
     samples = []
+    candidate_idx = 0
     for name, entry in entries:
+        if keep_ids is not None and name not in keep_ids:
+            continue
+
         m_rel = entry.get(f'{motion_key}_path')
         c_rel = entry.get(f'{caption_key}_path')
         num_frames = entry.get('num_frames')
@@ -142,6 +150,12 @@ def load_test_samples(
             continue
         num_frames = min(num_frames, max_frames)
 
+        if shard_idx is not None and num_shards > 1:
+            if candidate_idx % num_shards != shard_idx:
+                candidate_idx += 1
+                continue
+            candidate_idx += 1
+
         m_path = Path(data_dir) / m_rel
         c_path = Path(data_dir) / c_rel
 
@@ -149,7 +163,7 @@ def load_test_samples(
         if caption is None:
             continue
 
-        if not m_path.exists():
+        if require_motion_file and not m_path.exists():
             continue
 
         samples.append({
@@ -175,9 +189,15 @@ def load_prism_bundle(config_path: str, checkpoint_dir: str, device: torch.devic
     The checkpoint directory should contain model.pt (the standard
     AccelerateRunner checkpoint format with per-module state dicts).
     """
+    # PRISM generation needs model-bundle registration.  Some evaluation entry
+    # points set this flag to speed up lightweight metric imports, so clear it
+    # locally before importing the registry.
+    os.environ.pop("HFTRAINER_SKIP_AUTOREGISTER", None)
     from mmengine.config import Config
+    import hftrainer
     from hftrainer.registry import MODEL_BUNDLES
 
+    hftrainer.register_all_modules()
     cfg = Config.fromfile(config_path)
     bundle = MODEL_BUNDLES.build(cfg.model)
 
@@ -215,6 +235,7 @@ def generate_motion(
     num_frames: int,
     num_inference_steps: int = 50,
     guidance_scale: float = 5.0,
+    use_rollout_trans: bool = True,
 ) -> Dict:
     """Generate a single motion sample via the PRISM pipeline.
 
@@ -225,6 +246,7 @@ def generate_motion(
         num_frames_per_segment=num_frames,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
+        use_rollout_trans=use_rollout_trans,
     )
     return output
 
@@ -245,6 +267,41 @@ def save_smplx_npz(out_path: str, smplx_dict: Dict):
         else:
             pack[k] = v
     np.savez_compressed(out_path, **pack)
+
+
+def _fit_first_dim(arr, target_len: int):
+    """Trim or last-frame-pad arrays/tensors whose first dim is time."""
+    if not hasattr(arr, "shape") or len(arr.shape) == 0:
+        return arr
+    cur = int(arr.shape[0])
+    if cur == target_len:
+        return arr
+    if cur > target_len:
+        return arr[:target_len]
+    if cur <= 0:
+        return arr
+    pad_n = target_len - cur
+    if isinstance(arr, torch.Tensor):
+        pad = arr[-1:].repeat((pad_n,) + (1,) * (arr.ndim - 1))
+        return torch.cat([arr, pad], dim=0)
+    if isinstance(arr, np.ndarray):
+        pad = np.repeat(arr[-1:], pad_n, axis=0)
+        return np.concatenate([arr, pad], axis=0)
+    return arr
+
+
+def enforce_smplx_num_frames(smplx_dict: Dict, target_len: int) -> Dict:
+    """Make generated SMPL-X fields exactly match the requested frame count.
+
+    PRISM's latent decoder can return an off-by-one/two sequence when the target
+    length is not aligned with the VAE temporal stride.  For protocol-consistent
+    HumanML3D evaluation and visualization, every time-indexed output field must
+    match the official GT length exactly.
+    """
+    out = dict(smplx_dict)
+    for key, value in list(out.items()):
+        out[key] = _fit_first_dim(value, target_len)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +329,18 @@ def main():
         help='KAFS mode for per-joint adaptive timestep scaling.',
     )
     parser.add_argument(
+        '--kafs-alpha', type=str, default=None,
+        help='Comma-separated 23 alpha values -> custom KAFS mode (overrides '
+             '--kafs-mode). Order: [trans,pelvis,L_hip,R_hip,spine1,L_knee,'
+             'R_knee,spine2,L_ankle,R_ankle,spine3,L_foot,R_foot,neck,L_collar,'
+             'R_collar,head,L_shoulder,R_shoulder,L_elbow,R_elbow,L_wrist,R_wrist].',
+    )
+    parser.add_argument(
+        '--out-subdir', type=str, default=None,
+        help='Override output subdir name (default = kafs-mode). Use to keep '
+             'multiple custom-alpha sweeps separate under --output-dir.',
+    )
+    parser.add_argument(
         '--anno-file', type=str,
         default='data/annotation/test_hml3d.json',
         help='Annotation JSON file (motionhub format).',
@@ -280,6 +349,12 @@ def main():
         '--data-dir', type=str,
         default='data/motionhub',
         help='Root data directory for resolving relative paths in annotation.',
+    )
+    parser.add_argument(
+        '--skip-motion-existence-check', action='store_true',
+        help='Do not require each annotation motion path to exist when loading '
+             'T2M samples. This is useful for official HumanML3D-272 annotations '
+             'where captions and target lengths are sufficient for generation.',
     )
     parser.add_argument(
         '--output-dir', type=str,
@@ -293,6 +368,10 @@ def main():
     parser.add_argument(
         '--max-samples', type=int, default=None,
         help='Limit number of samples loaded from annotation (for debugging).',
+    )
+    parser.add_argument(
+        '--id-file', type=str, default=None,
+        help='Optional newline-separated sample ids to keep after loading annotations.',
     )
     parser.add_argument(
         '--num-inference-steps', type=int, default=50,
@@ -346,6 +425,19 @@ def main():
         '--skip-existing', action='store_true',
         help='Skip samples whose output NPZ already exists (resume-friendly).',
     )
+    parser.add_argument(
+        '--smooth-output', action='store_true',
+        help='Apply HY-Motion-style temporal smoothing to generated SMPLX output '
+             'before saving (quaternion Gaussian rotations + Savitzky-Golay root).',
+    )
+    parser.add_argument(
+        '--translation-decode-mode',
+        choices=['rollout', 'absolute'],
+        default='rollout',
+        help='How to decode PRISM abs_rel translation channels. rollout uses '
+             'initial absolute translation plus cumulative relative deltas '
+             '(previous default); absolute uses decoded absolute channels directly.',
+    )
     args = parser.parse_args()
 
     # ---- Seed ----
@@ -359,11 +451,30 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'[+] Device: {device}')
     print(f'[+] KAFS mode: {args.kafs_mode}')
+    if args.smooth_output:
+        print('[+] Output smoothing: HY-Motion-style temporal smoothing enabled')
 
     # ---- Load test samples ----
     anno_path = Path(args.anno_file)
     data_path = Path(args.data_dir)
     print(f'[+] Loading test samples from {anno_path} ...')
+
+    keep_ids = None
+    if args.id_file:
+        keep_ids = {
+            line.strip()
+            for line in Path(args.id_file).read_text().splitlines()
+            if line.strip()
+        }
+        print(f'    ID prefilter enabled: {len(keep_ids)} ids from {args.id_file}')
+
+    loader_shard_idx = None
+    loader_num_shards = 1
+    if keep_ids is not None and args.num_shards > 1:
+        loader_shard_idx = args.shard_idx
+        loader_num_shards = args.num_shards
+        print(f'    Loader shard prefilter enabled: '
+              f'{loader_shard_idx}/{loader_num_shards}')
 
     samples = load_test_samples(
         anno_file=anno_path,
@@ -373,6 +484,10 @@ def main():
         min_frames=args.min_frames,
         max_frames=args.max_frames,
         max_samples=args.max_samples,
+        require_motion_file=not args.skip_motion_existence_check,
+        keep_ids=keep_ids,
+        shard_idx=loader_shard_idx,
+        num_shards=loader_num_shards,
     )
     print(f'    Loaded {len(samples)} test samples')
     if not samples:
@@ -380,6 +495,11 @@ def main():
             f'No valid test samples found. Check --anno-file ({args.anno_file}) '
             f'and --data-dir ({args.data_dir}).'
         )
+
+    if args.id_file:
+        print(f'    ID filter: kept {len(samples)} samples from {args.id_file}')
+        if not samples:
+            raise RuntimeError(f'No samples left after --id-file filter: {args.id_file}')
 
     # ---- Optional: override GENERATION captions with rewritten ones ----
     # (metrics are still computed against --anno-file's original captions downstream)
@@ -406,8 +526,10 @@ def main():
                                'check motion_id keys match between files.')
 
     # Multi-GPU sharding: keep a deterministic stride subset for this shard.
-    if args.num_shards > 1:
+    if args.num_shards > 1 and loader_shard_idx is None:
         samples = samples[args.shard_idx::args.num_shards]
+        print(f'    Shard {args.shard_idx}/{args.num_shards}: {len(samples)} samples')
+    elif args.num_shards > 1:
         print(f'    Shard {args.shard_idx}/{args.num_shards}: {len(samples)} samples')
 
     # Optionally limit number of samples to generate
@@ -427,10 +549,19 @@ def main():
     pipeline = PrismPipeline(bundle=bundle)
 
     # ---- Set KAFS mode ----
-    pipeline.backend.set_kafs_alpha(mode=args.kafs_mode)
+    if args.kafs_alpha:
+        import torch as _torch
+        _vals = [float(x) for x in args.kafs_alpha.split(',') if x.strip() != '']
+        assert len(_vals) == 23, f'--kafs-alpha needs 23 values, got {len(_vals)}'
+        pipeline.backend.set_kafs_alpha(
+            mode='custom', alpha_vals=_torch.tensor(_vals))
+        print(f'[+] KAFS custom alpha: {_vals}')
+    else:
+        pipeline.backend.set_kafs_alpha(mode=args.kafs_mode)
 
     # ---- Output directory ----
-    out_dir = Path(args.output_dir) / args.kafs_mode
+    _subdir = args.out_subdir if args.out_subdir else args.kafs_mode
+    out_dir = Path(args.output_dir) / _subdir
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f'[+] Output directory: {out_dir}')
 
@@ -443,6 +574,8 @@ def main():
         'data_dir': args.data_dir,
         'num_inference_steps': args.num_inference_steps,
         'guidance_scale': args.guidance_scale,
+        'smooth_output': bool(args.smooth_output),
+        'translation_decode_mode': args.translation_decode_mode,
         'seed': args.seed,
         'num_samples': len(samples),
     }
@@ -474,7 +607,14 @@ def main():
                 num_frames=num_frames,
                 num_inference_steps=args.num_inference_steps,
                 guidance_scale=args.guidance_scale,
+                use_rollout_trans=(args.translation_decode_mode == 'rollout'),
             )
+            if args.smooth_output:
+                from hftrainer.motion.processing.temporal_smoothing import (
+                    smooth_smplx_dict_hymotion,
+                )
+                smplx_dict = smooth_smplx_dict_hymotion(smplx_dict)
+            smplx_dict = enforce_smplx_num_frames(smplx_dict, num_frames)
 
             # Save output NPZ
             out_path = out_dir / f'{sample_name}.npz'

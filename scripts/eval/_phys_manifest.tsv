@@ -1,0 +1,16 @@
+real_smpl	gt272	ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/motion_data
+real_conv	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/real_conv
+motiongpt3	m135	outputs/evaluation/ms272_t1_fill_0609/prep/motiongpt3
+mld	m135	outputs/evaluation/ms272_t1_fill_0609/prep/mld
+momask	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/momask
+mdm	m135	outputs/evaluation/ms272_t1_fill_0609/prep/mdm
+t2mgpt	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/t2mgpt
+flowmdm	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/flowmdm
+motionlab	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/motionlab
+kimodo	m135	outputs/evaluation/ms272_t1_fill_0609/prep/kimodo
+vimogen	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/vimogen
+hymotion	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/hymotion
+gotozero	m135	outputs/evaluation/motionmillion_gtz/prep
+motionstreamer	m135	outputs/evaluation/ms272_tables_h3d_0607/prep/motionstreamer
+ours	m135	outputs/evaluation/prism_kt_spectral_epoch17_gtlen/prep/ours_e17_gtlen
+real_soma	m135	outputs/evaluation/humanml3d_gt_soma_smpl_roundtrip/motion135

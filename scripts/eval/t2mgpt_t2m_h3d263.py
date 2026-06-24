@@ -18,6 +18,7 @@ against the same split.
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import time
 from pathlib import Path
@@ -42,6 +43,84 @@ def first_caption(text_file: Path):
         if parts and parts[0].strip():
             return parts[0].strip()
     return None
+
+
+def _load_json(path: Path):
+    return json.loads(path.read_text())
+
+
+def _iter_entries(raw):
+    if isinstance(raw, dict) and "data_list" in raw:
+        data = raw["data_list"]
+        if isinstance(data, dict):
+            for name, entry in data.items():
+                yield str(name), entry
+        else:
+            for idx, entry in enumerate(data):
+                yield str(entry.get("motion_id") or entry.get("id") or idx), entry
+    elif isinstance(raw, list):
+        for idx, entry in enumerate(raw):
+            yield str(entry.get("motion_id") or entry.get("id") or idx), entry
+    else:
+        raise ValueError("Unrecognized annotation format")
+
+
+def _load_caption_from_json(path: Path):
+    try:
+        data = _load_json(path)
+    except Exception:
+        return None
+    pool = []
+    if isinstance(data, dict) and all(isinstance(data.get(k), list) for k in ("macro", "meso", "micro")):
+        for group in ("macro", "meso", "micro"):
+            pool.extend(v.strip() for v in data[group] if isinstance(v, str) and v.strip())
+    elif isinstance(data, dict) and isinstance(data.get("result"), list):
+        for item in data["result"]:
+            if not isinstance(item, dict):
+                continue
+            for key in ("short_caption_rewritten", "short caption_rewritten"):
+                vals = item.get(key)
+                if isinstance(vals, list):
+                    pool.extend(v.strip() for v in vals if isinstance(v, str) and v.strip())
+                    break
+            else:
+                for key in ("short_caption", "short caption", "caption", "text"):
+                    val = item.get(key)
+                    if isinstance(val, str) and val.strip():
+                        pool.append(val.strip())
+                        break
+    elif isinstance(data, dict):
+        for key in ("caption", "text", "short_caption", "short caption"):
+            val = data.get(key)
+            if isinstance(val, str) and val.strip():
+                pool.append(val.strip())
+                break
+    return pool[0] if pool else None
+
+
+def resolve_annotation_items(
+    anno_file: Path,
+    data_dir: Path,
+    *,
+    source_fps_default: float = 30.0,
+    model_fps: float = 20.0,
+):
+    items = []
+    for name, entry in _iter_entries(_load_json(anno_file)):
+        cap_path = entry.get("hierarchical_caption_path")
+        if not cap_path:
+            continue
+        cap = _load_caption_from_json(data_dir / cap_path)
+        if not cap:
+            continue
+        src_fps = float(entry.get("fps") or source_fps_default)
+        src_len = int(entry.get("num_frames") or round(float(entry.get("duration", 0.0)) * src_fps))
+        if src_len <= 0:
+            continue
+        gt_len = int(round(src_len * model_fps / src_fps))
+        gt_len = max(1, gt_len)
+        items.append((name, cap, gt_len))
+    return items
 
 
 def _resolve_one(arg):
@@ -76,6 +155,11 @@ def resolve_items(data_root: Path, names, workers: int = 32):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--data_root", default=str(DEFAULT_DATA_ROOT))
+    p.add_argument("--anno_file", default=None,
+                   help="Optional annotation JSON. When set, captions and target lengths are read from this file.")
+    p.add_argument("--anno_data_dir", default=str(REPO))
+    p.add_argument("--gt_fps", type=float, default=30.0)
+    p.add_argument("--model_fps", type=float, default=20.0)
     p.add_argument("--model_path", default=str(DEFAULT_MODEL),
                    help="hftrainer T2M-GPT artifact dir OR raw checkpoint dir")
     p.add_argument("--vq_path", default=None, help="raw VQ-VAE .pth (overrides model_path)")
@@ -104,11 +188,22 @@ def main():
 
     data_root = Path(args.data_root)
     t0 = time.time()
-    names = [n.strip() for n in (data_root / "test.txt").read_text().splitlines() if n.strip()]
-    if args.num_shards > 1:
-        names = [n for i, n in enumerate(names) if i % args.num_shards == args.shard_index]
-    cand = names if not args.max_samples else names[: args.max_samples * 3]
-    items = resolve_items(data_root, cand)
+    if args.anno_file:
+        items_all = resolve_annotation_items(
+            Path(args.anno_file),
+            Path(args.anno_data_dir),
+            source_fps_default=args.gt_fps,
+            model_fps=args.model_fps,
+        )
+        if args.num_shards > 1:
+            items_all = [item for i, item in enumerate(items_all) if i % args.num_shards == args.shard_index]
+        items = items_all
+    else:
+        names = [n.strip() for n in (data_root / "test.txt").read_text().splitlines() if n.strip()]
+        if args.num_shards > 1:
+            names = [n for i, n in enumerate(names) if i % args.num_shards == args.shard_index]
+        cand = names if not args.max_samples else names[: args.max_samples * 3]
+        items = resolve_items(data_root, cand)
     if args.max_samples:
         items = items[: args.max_samples]
     print(f"[setup] shard={args.shard_index}/{args.num_shards} items={len(items)} "

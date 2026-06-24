@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -34,11 +35,6 @@ from build_kimodo_skeleton_smpl_ik_viewer import (  # noqa: E402
     _summarize_outputs,
 )
 from hml263_to_smpl_ik import load_smpl_rest, matrix_to_rot6d_rowmajor  # noqa: E402
-from hftrainer.datasets.motion.motionhub.transforms.fk_utils import SMPL22_PARENTS  # noqa: E402
-from hftrainer.pipelines.motion.differentiable_fk import (  # noqa: E402
-    differentiable_fk,
-    rot6d_to_rotmat_row_major,
-)
 
 
 SMPLX22_NAMES = [
@@ -48,6 +44,7 @@ SMPLX22_NAMES = [
     "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
     "left_wrist", "right_wrist",
 ]
+SMPL22_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19]
 SOMA30_NAMES = [
     "Hips", "Spine1", "Spine2", "Chest", "Neck1", "Neck2", "Head", "Jaw",
     "LeftEye", "RightEye", "LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand",
@@ -86,6 +83,34 @@ def _as_numpy(x) -> np.ndarray:
     if isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
     return np.asarray(x)
+
+
+def rot6d_to_rotmat_row_major(rot6d: torch.Tensor) -> torch.Tensor:
+    x = rot6d.reshape(*rot6d.shape[:-1], 3, 2)
+    a1 = x[..., 0]
+    a2 = x[..., 1]
+    b1 = F.normalize(a1, dim=-1)
+    b2 = F.normalize(a2 - torch.einsum("...i,...i->...", b1, a2).unsqueeze(-1) * b1, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack((b1, b2, b3), dim=-1)
+
+
+def differentiable_fk(
+    local_rotmat: torch.Tensor,
+    translation: torch.Tensor,
+    bone_offsets: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    world_rot_list: list[torch.Tensor] = [None] * 22  # type: ignore[list-item]
+    world_pos_list: list[torch.Tensor] = [None] * 22  # type: ignore[list-item]
+    for j, parent in enumerate(SMPL22_PARENTS):
+        if parent < 0:
+            world_rot_list[j] = local_rotmat[..., j, :, :]
+            world_pos_list[j] = translation + bone_offsets[j]
+        else:
+            world_rot_list[j] = world_rot_list[parent] @ local_rotmat[..., j, :, :]
+            offset_rotated = (world_rot_list[parent] @ bone_offsets[j].unsqueeze(-1)).squeeze(-1)
+            world_pos_list[j] = world_pos_list[parent] + offset_rotated
+    return torch.stack(world_pos_list, dim=-2), torch.stack(world_rot_list, dim=-3)
 
 
 @lru_cache(maxsize=None)
@@ -176,6 +201,27 @@ def _rotation_between_np(src: np.ndarray, dst: np.ndarray, eps: float = 1e-8) ->
         return R.from_rotvec(np.pi * axis).as_matrix()
     axis = cross / sin
     return R.from_rotvec(np.arctan2(sin, cos) * axis).as_matrix()
+
+
+def _scaled_rotation_np(rot: np.ndarray, alpha: float) -> np.ndarray:
+    return R.from_rotvec(R.from_matrix(rot).as_rotvec() * float(alpha)).as_matrix()
+
+
+def _neutral_bone_direction_offsets() -> dict[int, np.ndarray]:
+    smpl_neutral = _as_numpy(_neutral_joints("smplx22")).astype(np.float64)
+    soma_neutral = _as_numpy(_neutral_joints("somaskel30")).astype(np.float64)
+    offsets: dict[int, np.ndarray] = {}
+    for smpl_idx, soma_idx in enumerate(SMPLX22_TO_SOMA30):
+        smpl_parent = int(SMPL22_PARENTS[smpl_idx])
+        soma_parent = int(SOMA30_PARENTS[soma_idx])
+        if smpl_parent < 0 or soma_parent < 0:
+            offsets[soma_idx] = np.eye(3, dtype=np.float64)
+            continue
+        offsets[soma_idx] = _rotation_between_np(
+            smpl_neutral[smpl_idx] - smpl_neutral[smpl_parent],
+            soma_neutral[soma_idx] - soma_neutral[soma_parent],
+        )
+    return offsets
 
 
 def _global_to_local_np(global_rots: np.ndarray, parents: np.ndarray) -> np.ndarray:
@@ -303,6 +349,18 @@ def _estimate_soma30_local_rotations(
     return local.astype(np.float32)
 
 
+def _complete_soma30_global_rots(soma_global_rots: torch.Tensor) -> torch.Tensor:
+    soma_global_rots[:, 5] = _slerp_rot_matrices(soma_global_rots[:, 4], soma_global_rots[:, 6], 0.5)
+    soma_global_rots[:, 7] = soma_global_rots[:, 6]
+    soma_global_rots[:, 8] = soma_global_rots[:, 6]
+    soma_global_rots[:, 9] = soma_global_rots[:, 6]
+    soma_global_rots[:, 14] = soma_global_rots[:, 13]
+    soma_global_rots[:, 15] = soma_global_rots[:, 13]
+    soma_global_rots[:, 20] = soma_global_rots[:, 19]
+    soma_global_rots[:, 21] = soma_global_rots[:, 19]
+    return soma_global_rots
+
+
 def _soma30_targets_from_smpl22(
     smplx_world_pos: torch.Tensor,
     direct_soma_pos: torch.Tensor,
@@ -388,10 +446,77 @@ def _smpl22_to_soma30_retarget_position_aware(
     return soma_global_rots, soma_joints
 
 
+def _smpl22_to_soma30_retarget_shoulder_offset(
+    motion_135: np.ndarray,
+    smpl_bone_offsets: np.ndarray,
+    soma_offsets: torch.Tensor,
+    shoulder_offset_alpha: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Mirror KIMODO direct retarget, with shoulder-only rest-frame correction.
+
+    The direct SMPL->SOMA path preserves torso/head rotations well but can make
+    SOMA shoulder skinning collapse because SMPL clavicle and SOMA shoulder rest
+    directions differ substantially.  Applying a small rest-direction offset
+    only to SOMA LeftShoulder/RightShoulder keeps the rest of the body on the
+    official direct path while stabilizing the shoulder mesh.
+    """
+    motion = torch.from_numpy(np.asarray(motion_135, dtype=np.float32))
+    offsets = torch.from_numpy(np.asarray(smpl_bone_offsets, dtype=np.float32))
+    t = motion.shape[0]
+    translation = motion[:, :3]
+    local_rotmat = rot6d_to_rotmat_row_major(motion[:, 3:135].reshape(t, 22, 6))
+    smplx_world_pos, smplx_global_rots = differentiable_fk(local_rotmat, translation, offsets)
+
+    eye = torch.eye(3, dtype=local_rotmat.dtype, device=local_rotmat.device)
+    soma_global_rots = eye[None, None].expand(t, 30, 3, 3).clone()
+    for smplx_idx, soma_idx in enumerate(SMPLX22_TO_SOMA30):
+        soma_global_rots[:, soma_idx] = smplx_global_rots[:, smplx_idx]
+
+    rest_offsets = _neutral_bone_direction_offsets()
+    for name in ("LeftShoulder", "RightShoulder"):
+        soma_idx = _SOMA30_IDX[name]
+        offset = _scaled_rotation_np(rest_offsets[soma_idx], shoulder_offset_alpha).astype(np.float32)
+        soma_global_rots[:, soma_idx] = soma_global_rots[:, soma_idx] @ torch.from_numpy(offset).to(soma_global_rots)
+
+    soma_global_rots = _complete_soma30_global_rots(soma_global_rots)
+    soma_local = _global_to_local_np(_as_numpy(soma_global_rots), SOMA30_PARENTS)
+    soma_root_pos = translation.clone()
+    soma_global_rots, soma_joints = _soma30_fk_from_local(soma_local, soma_root_pos, soma_offsets)
+
+    smplx_foot_indices = [
+        _SMPLX22_IDX["left_foot"],
+        _SMPLX22_IDX["right_foot"],
+        _SMPLX22_IDX["left_ankle"],
+        _SMPLX22_IDX["right_ankle"],
+    ]
+    soma_foot_indices = [
+        _SOMA30_IDX["LeftToeBase"],
+        _SOMA30_IDX["RightToeBase"],
+        _SOMA30_IDX["LeftFoot"],
+        _SOMA30_IDX["RightFoot"],
+    ]
+    smpl_foot_min_y = smplx_world_pos[:, smplx_foot_indices, 1].min(dim=1).values
+    soma_foot_min_y = soma_joints[:, soma_foot_indices, 1].min(dim=1).values
+    y_delta = soma_foot_min_y - smpl_foot_min_y
+    if torch.max(torch.abs(y_delta)) > 1e-4:
+        soma_root_pos = soma_root_pos.clone()
+        soma_root_pos[:, 1] -= y_delta
+        soma_global_rots, soma_joints = _soma30_fk_from_local(soma_local, soma_root_pos, soma_offsets)
+
+    root_delta_xz = translation[:, [0, 2]] - soma_joints[:, 0, :][:, [0, 2]]
+    if torch.max(torch.abs(root_delta_xz)) > 1e-6:
+        soma_root_pos = soma_root_pos.clone()
+        soma_root_pos[:, 0] += root_delta_xz[:, 0]
+        soma_root_pos[:, 2] += root_delta_xz[:, 1]
+        soma_global_rots, soma_joints = _soma30_fk_from_local(soma_local, soma_root_pos, soma_offsets)
+    return soma_global_rots, soma_joints
+
+
 def _soma30_to_smpl22_motion_rotation(
     soma_global_rots: torch.Tensor,
     source_motion_135: np.ndarray,
     smpl_bone_offsets: np.ndarray,
+    height_mode: str = "source_root",
 ) -> dict[str, np.ndarray]:
     source = torch.from_numpy(np.asarray(source_motion_135, dtype=np.float32))
     t = source.shape[0]
@@ -413,16 +538,19 @@ def _soma30_to_smpl22_motion_rotation(
     transl = source[:, :3].to(local.device).clone()
     fitted, _ = differentiable_fk(local, transl, offsets)
 
-    foot_indices = [
-        _SMPLX22_IDX["left_ankle"],
-        _SMPLX22_IDX["right_ankle"],
-        _SMPLX22_IDX["left_foot"],
-        _SMPLX22_IDX["right_foot"],
-    ]
-    y_delta = fitted[:, foot_indices, 1].min(dim=1).values - source_pos[:, foot_indices, 1].min(dim=1).values
-    if torch.max(torch.abs(y_delta)) > 1e-5:
-        transl[:, 1] -= y_delta
-        fitted, _ = differentiable_fk(local, transl, offsets)
+    if height_mode == "foot_floor":
+        foot_indices = [
+            _SMPLX22_IDX["left_ankle"],
+            _SMPLX22_IDX["right_ankle"],
+            _SMPLX22_IDX["left_foot"],
+            _SMPLX22_IDX["right_foot"],
+        ]
+        y_delta = fitted[:, foot_indices, 1].min(dim=1).values - source_pos[:, foot_indices, 1].min(dim=1).values
+        if torch.max(torch.abs(y_delta)) > 1e-5:
+            transl[:, 1] -= y_delta
+            fitted, _ = differentiable_fk(local, transl, offsets)
+    elif height_mode != "source_root":
+        raise ValueError(f"unknown height_mode: {height_mode}")
 
     rot6d = torch.from_numpy(
         matrix_to_rot6d_rowmajor(_as_numpy(local)).reshape(t, 22 * 6)
@@ -459,14 +587,7 @@ def _smpl22_to_soma30_retarget_minimal(
     for smplx_idx, soma_idx in enumerate(SMPLX22_TO_SOMA30):
         soma_global_rots[:, soma_idx] = smplx_global_rots[:, smplx_idx]
 
-    soma_global_rots[:, 5] = _slerp_rot_matrices(soma_global_rots[:, 4], soma_global_rots[:, 6], 0.5)
-    soma_global_rots[:, 7] = soma_global_rots[:, 6]
-    soma_global_rots[:, 8] = soma_global_rots[:, 6]
-    soma_global_rots[:, 9] = soma_global_rots[:, 6]
-    soma_global_rots[:, 14] = soma_global_rots[:, 13]
-    soma_global_rots[:, 15] = soma_global_rots[:, 13]
-    soma_global_rots[:, 20] = soma_global_rots[:, 19]
-    soma_global_rots[:, 21] = soma_global_rots[:, 19]
+    soma_global_rots = _complete_soma30_global_rots(soma_global_rots)
 
     smpl_neutral = _neutral_joints("smplx22")
     soma_neutral = _neutral_joints("somaskel30")
@@ -562,6 +683,7 @@ def _save_roundtrip_item(
     sid: str,
     data_root: Path,
     out_dir: Path,
+    source_motion_dir: Path | None,
     smpl_model,
     smpl_rest_joints: np.ndarray,
     smpl_parents: np.ndarray,
@@ -576,19 +698,42 @@ def _save_roundtrip_item(
     parent_ref_weight: float,
     pose_l2_weight: float,
     angle_prior_weight: float,
+    soma_mode: str,
+    shoulder_offset_alpha: float,
+    smpl_height_mode: str,
 ) -> dict[str, float | int | str]:
-    m272 = np.load(str(data_root / "motion_data" / f"{sid}.npy")).astype(np.float32)
-    source_m135 = humanml272_to_motion135(m272)
+    if source_motion_dir is not None:
+        src_npz = source_motion_dir / f"{sid}.npz"
+        with np.load(src_npz, allow_pickle=True) as src:
+            key = "source_motion_135" if "source_motion_135" in src.files else "motion_135"
+            source_m135 = np.asarray(src[key], dtype=np.float32)
+    else:
+        m272 = np.load(str(data_root / "motion_data" / f"{sid}.npy")).astype(np.float32)
+        source_m135 = humanml272_to_motion135(m272)
 
-    soma_rots, soma_pos = _smpl22_to_soma30_retarget_position_aware(
-        source_m135, smpl_bone_offsets, soma_offsets)
+    if soma_mode == "position_aware":
+        soma_rots, soma_pos = _smpl22_to_soma30_retarget_position_aware(
+            source_m135, smpl_bone_offsets, soma_offsets)
+    elif soma_mode == "shoulder_offset":
+        soma_rots, soma_pos = _smpl22_to_soma30_retarget_shoulder_offset(
+            source_m135, smpl_bone_offsets, soma_offsets, shoulder_offset_alpha)
+    elif soma_mode == "direct":
+        soma_rots, soma_pos = _smpl22_to_soma30_retarget_minimal(
+            source_m135, smpl_bone_offsets, soma_offsets)
+    else:
+        raise ValueError(f"unknown soma_mode: {soma_mode}")
     soma_pos_np = _as_numpy(soma_pos).astype(np.float32)
     target_smpl22 = soma_pos_np[:, SMPLX22_TO_SOMA30, :]
 
     if floor_align:
         target_smpl22 = target_smpl22.copy()
         target_smpl22[..., 1] -= float(target_smpl22[..., 1].min())
-    ret = _soma30_to_smpl22_motion_rotation(soma_rots, source_m135, smpl_bone_offsets)
+    ret = _soma30_to_smpl22_motion_rotation(
+        soma_rots,
+        source_m135,
+        smpl_bone_offsets,
+        height_mode=smpl_height_mode,
+    )
     ret["target_joints"] = target_smpl22.astype(np.float32)
     ret["fit_mpjpe_mm"] = (
         np.linalg.norm(ret["fitted_joints"] - target_smpl22, axis=-1).mean(axis=1) * 1000.0
@@ -606,6 +751,9 @@ def _save_roundtrip_item(
         source_fps=np.array(30.0, dtype=np.float32),
         target_fps=np.array(30.0, dtype=np.float32),
         refine_iters=np.array(refine_iters, dtype=np.int32),
+        soma_mode=np.array(soma_mode, dtype=object),
+        shoulder_offset_alpha=np.array(shoulder_offset_alpha, dtype=np.float32),
+        smpl_height_mode=np.array(smpl_height_mode, dtype=object),
     )
     mpjpe = np.asarray(ret["fit_mpjpe_mm"], dtype=np.float32)
     return {
@@ -620,6 +768,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", default="ref_repo/MotionStreamer/MotionStreamer/humanml3d_272")
     parser.add_argument("--out-dir", default="outputs/evaluation/humanml3d_gt_soma_smpl_roundtrip/motion135")
+    parser.add_argument(
+        "--source-motion-dir",
+        default=None,
+        help="Optional NPZ directory containing source_motion_135 or motion_135; avoids reconverting HumanML3D-272.",
+    )
     parser.add_argument("--ids-dir", default=None, help="Optional directory whose npz/npy stems define the eval IDs.")
     parser.add_argument("--model-dir", default="ref_repo/MDM/body_models")
     parser.add_argument("--min-len", type=int, default=60)
@@ -636,11 +789,25 @@ def main() -> None:
     parser.add_argument("--angle-prior-weight", type=float, default=0.0)
     parser.add_argument("--orientation-mode", choices=["bone", "parent_frame"], default="bone")
     parser.add_argument("--parent-ref-weight", type=float, default=0.25)
+    parser.add_argument(
+        "--soma-mode",
+        choices=["direct", "position_aware", "shoulder_offset"],
+        default="shoulder_offset",
+        help="SMPL->SOMA retarget mode. shoulder_offset preserves direct rotations except a shoulder rest-frame correction.",
+    )
+    parser.add_argument("--shoulder-offset-alpha", type=float, default=0.75)
+    parser.add_argument(
+        "--smpl-height-mode",
+        choices=["source_root", "foot_floor"],
+        default="source_root",
+        help="SOMA->SMPL height handling. source_root preserves original SMPL root height; foot_floor matches feet.",
+    )
     args = parser.parse_args()
 
     data_root = Path(args.data_root)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    source_motion_dir = Path(args.source_motion_dir) if args.source_motion_dir else None
     device = torch.device(args.device)
     limit = args.limit if args.limit > 0 else None
 
@@ -670,6 +837,7 @@ def main() -> None:
                 sid,
                 data_root,
                 out_dir,
+                source_motion_dir,
                 smpl_model,
                 rest_joints,
                 parents,
@@ -684,6 +852,9 @@ def main() -> None:
                 args.parent_ref_weight,
                 args.pose_l2_weight,
                 args.angle_prior_weight,
+                args.soma_mode,
+                args.shoulder_offset_alpha,
+                args.smpl_height_mode,
             )
             per_item.append(item)
             done += 1
@@ -701,7 +872,11 @@ def main() -> None:
         "new_failures": failed,
         "data_root": str(data_root),
         "out_dir": str(out_dir),
+        "source_motion_dir": str(source_motion_dir) if source_motion_dir is not None else None,
         "refine_iters": args.refine_iters,
+        "soma_mode": args.soma_mode,
+        "shoulder_offset_alpha": args.shoulder_offset_alpha,
+        "smpl_height_mode": args.smpl_height_mode,
         "items_new": per_item[:100],
     })
     (out_dir / "_roundtrip_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

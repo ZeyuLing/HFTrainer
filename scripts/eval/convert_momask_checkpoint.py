@@ -11,9 +11,10 @@ dependency on ``ref_repo``::
 
     <out>/momask_config.json     # arch config for all sub-modules
     <out>/vq.safetensors         # RVQ-VAE weights
-    <out>/t2m_trans.safetensors  # MaskTransformer (no CLIP)
-    <out>/res_trans.safetensors  # ResidualTransformer (no CLIP)
+    <out>/t2m_trans.safetensors  # MaskTransformer non-CLIP weights
+    <out>/res_trans.safetensors  # ResidualTransformer non-CLIP weights
     <out>/length_est.safetensors # LengthEstimator
+    <out>/clip.safetensors       # shared CLIP ViT-B/32 text encoder weights
     <out>/Mean.npy, Std.npy      # 263-dim denorm stats (embedded)
 
 Example
@@ -26,10 +27,14 @@ python3 scripts/eval/convert_momask_checkpoint.py \
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
 
 from hftrainer.models.motion.momask import MoMaskBundle
 
@@ -44,6 +49,11 @@ def main():
     p.add_argument("--len_name", default="length_estimator")
     p.add_argument("--out_dir", required=True)
     p.add_argument("--no_length_estimator", action="store_true")
+    p.add_argument(
+        "--no_clip",
+        action="store_true",
+        help="legacy export: do not copy CLIP ViT-B/32 into the artifact",
+    )
     p.add_argument("--verify", action="store_true",
                    help="reload artifact and assert bit-identical generation")
     args = p.parse_args()
@@ -58,7 +68,7 @@ def main():
         len_name=args.len_name,
         load_length_estimator=not args.no_length_estimator,
     )
-    bundle.save_pretrained(args.out_dir)
+    bundle.save_pretrained(args.out_dir, include_clip=not args.no_clip)
     print(f"[convert] wrote artifact -> {args.out_dir}", flush=True)
     print(f"          files: {sorted(p.name for p in Path(args.out_dir).iterdir())}", flush=True)
 

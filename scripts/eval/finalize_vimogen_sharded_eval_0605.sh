@@ -2,8 +2,13 @@
 # Merge sharded ViMoGen outputs and run MotionCLIP + MotionStreamer evaluators.
 set -euo pipefail
 
-cd /apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+ROOT_DIR=${ROOT_DIR:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}
+if [[ ! -d "$ROOT_DIR" ]]; then
+  ROOT_DIR=/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer
+fi
+cd "$ROOT_DIR"
 export PYTHONPATH=$PWD:${PYTHONPATH:-}
+PY=${PY:-python3}
 
 DATASET=${DATASET:-h3d}       # h3d | mh
 TAG=${TAG:-full0605}
@@ -14,6 +19,8 @@ N_REPEATS=${N_REPEATS:-20}
 ROOT=${ROOT:-outputs/evaluation/vimogen_t2m_0605}
 VIMOGEN_ROOT=${VIMOGEN_ROOT:-ref_repo/ViMoGen}
 M135_SRC_FPS=${M135_SRC_FPS:-20}
+EVAL_REWRITTEN_CAPTIONS=${EVAL_REWRITTEN_CAPTIONS:-0}
+RUN_MOTIONCLIP=${RUN_MOTIONCLIP:-1}
 
 if [[ "$DATASET" == "h3d" ]]; then
   ANNO=data/annotation/test_hml3d.json
@@ -25,6 +32,7 @@ else
   echo "Unknown DATASET=$DATASET" >&2
   exit 2
 fi
+ANNO=${ANNO_OVERRIDE:-$ANNO}
 
 MERGED="$ROOT/${DATASET}_${TAG}_merged"
 M135="$MERGED/motionclip135"
@@ -34,6 +42,26 @@ PRED272_MS="$MERGED/pred272_motionstreamer_ids"
 CAPMAP="$MERGED/captions.json"
 LOGDIR="$MERGED/logs"
 mkdir -p "$M135" "$MS_NPZ" "$PRED272" "$PRED272_MS" "$LOGDIR"
+
+(
+  flock 9
+  "$PY" - <<'PY' > "$LOGDIR/install_check.log" 2>&1
+mods = ["einops", "smplx", "mmengine"]
+missing = []
+for mod in mods:
+    try:
+        __import__(mod)
+    except Exception:
+        missing.append(mod)
+print("missing", missing)
+PY
+  if grep -q "missing \\[\\]" "$LOGDIR/install_check.log"; then
+    :
+  else
+    "$PY" -m pip install -q 'numpy<2' einops smplx mmengine \
+      >> "$LOGDIR/install_check.log" 2>&1
+  fi
+) 9>/tmp/vimogen_finalize_pip_install.lock
 
 for i in $(seq 0 $((NUM_SHARDS - 1))); do
   test -f "$ROOT/${DATASET}_${TAG}_s${i}of${NUM_SHARDS}/logs/_DONE"
@@ -48,7 +76,7 @@ for i in $(seq 0 $((NUM_SHARDS - 1))); do
       done
 done
 
-python3 - <<PY
+"$PY" - <<PY
 import json
 from pathlib import Path
 dataset = "$DATASET"
@@ -65,20 +93,29 @@ json.dump(out, open(dst, "w"), indent=2)
 print({"caption_map": str(dst), "captions": len(out)})
 PY
 
-CUDA_VISIBLE_DEVICES="$GPU" python3 scripts/eval/eval_with_motionclip_evaluator.py \
-  --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq \
-  --anno_file "$ANNO" \
-  --data_dir data/motionhub \
-  --pred_dir "$M135" \
-  --rewritten_caption_file "$CAPMAP" \
-  --out_json "$MERGED/metrics_motionclip.json" \
-  --forward_batch_size 64 \
-  --chunk_size "$CHUNK_SIZE" \
-  --n_repeats "$N_REPEATS" \
-  > "$LOGDIR/eval_motionclip.log" 2>&1
+EVAL_ARGS=(
+  --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq
+  --anno_file "$ANNO"
+  --data_dir data/motionhub
+  --pred_dir "$M135"
+  --out_json "$MERGED/metrics_motionclip.json"
+  --forward_batch_size 64
+  --chunk_size "$CHUNK_SIZE"
+  --n_repeats "$N_REPEATS"
+)
+if [[ "$EVAL_REWRITTEN_CAPTIONS" == "1" ]]; then
+  EVAL_ARGS+=(--rewritten_caption_file "$CAPMAP")
+fi
+if [[ "$RUN_MOTIONCLIP" == "1" ]]; then
+  CUDA_VISIBLE_DEVICES="$GPU" "$PY" scripts/eval/eval_with_motionclip_evaluator.py \
+    "${EVAL_ARGS[@]}" \
+    > "$LOGDIR/eval_motionclip.log" 2>&1
+else
+  echo "[skip] RUN_MOTIONCLIP=$RUN_MOTIONCLIP" > "$LOGDIR/eval_motionclip.log"
+fi
 
 if [[ "$DATASET" == "h3d" ]]; then
-  python3 scripts/eval/joints_to_272_npz.py \
+  "$PY" scripts/eval/joints_to_272_npz.py \
     --in-dir "$M135" \
     --out "$MS_NPZ" \
     --input-kind m135 \
@@ -87,12 +124,12 @@ if [[ "$DATASET" == "h3d" ]]; then
     --workers 32 \
     > "$LOGDIR/convert_m135_to_272.log" 2>&1
 
-  python3 scripts/eval/extract_motion272_npz.py \
+  "$PY" scripts/eval/extract_motion272_npz.py \
     --in-dir "$MS_NPZ" \
     --out-dir "$PRED272" \
     > "$LOGDIR/extract_pred272.log" 2>&1
 
-  python3 - <<PY > "$LOGDIR/remap_pred272_motionstreamer_ids.log" 2>&1
+  "$PY" - <<PY > "$LOGDIR/remap_pred272_motionstreamer_ids.log" 2>&1
 import json
 import os
 from pathlib import Path
@@ -125,7 +162,7 @@ for name, entry in anno.items():
 print({"ok": ok, "skip": skip, "collision": collision, "out": str(dst)}, flush=True)
 PY
 
-  CUDA_VISIBLE_DEVICES="$GPU" python3 ref_repo/MotionStreamer/eval_with_motionstreamer_evaluator.py \
+  CUDA_VISIBLE_DEVICES="$GPU" "$PY" ref_repo/MotionStreamer/eval_with_motionstreamer_evaluator.py \
     --evaluator_ckpt ref_repo/MotionStreamer/MotionStreamer/MotionStreamer_HF/Evaluator_272/epoch=99.ckpt \
     --data_root "$MS_DATA" \
     --pred_dir "$PRED272_MS" \
@@ -138,7 +175,7 @@ else
     | tee "$LOGDIR/eval_motionstreamer272.log"
 fi
 
-python3 - <<PY | tee "$LOGDIR/summary.txt"
+"$PY" - <<PY | tee "$LOGDIR/summary.txt"
 import json
 from pathlib import Path
 out = {"dataset": "$DATASET", "tag": "$TAG"}

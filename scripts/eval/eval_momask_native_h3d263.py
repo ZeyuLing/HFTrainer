@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -91,6 +92,83 @@ def _read_h3d_texts(text_file: Path) -> List[Dict]:
     return out
 
 
+def _iter_anno_entries(raw):
+    data = raw.get("data_list", raw) if isinstance(raw, dict) else raw
+    if isinstance(data, dict):
+        yield from data.items()
+        return
+    for idx, entry in enumerate(data):
+        yield str(entry.get("motion_id") or entry.get("id") or idx), entry
+
+
+def _load_caption_map(caption_file: Path | None) -> dict | None:
+    if caption_file is None:
+        return None
+    raw = json.loads(caption_file.read_text())
+    return raw.get("data_list", raw) if isinstance(raw, dict) else raw
+
+
+def _caption_from_map(caption_map: dict | None, name: str) -> str | None:
+    if caption_map is None:
+        return None
+    caption = caption_map.get(str(name))
+    if isinstance(caption, dict):
+        caption = caption.get("caption") or caption.get("text")
+    return caption.strip() if isinstance(caption, str) and caption.strip() else None
+
+
+def _load_motionhub_caption(entry: dict, data_dir: Path) -> str | None:
+    c_rel = entry.get("hierarchical_caption_path")
+    if not c_rel:
+        return None
+    c_path = data_dir / c_rel
+    if not c_path.exists():
+        return None
+    try:
+        data = json.loads(c_path.read_text())
+    except Exception:
+        return None
+    pool: list[str] = []
+    if isinstance(data, dict) and all(k in data for k in ("macro", "meso", "micro")):
+        for key in ("macro", "meso", "micro"):
+            values = data.get(key)
+            if isinstance(values, list):
+                pool.extend(v.strip() for v in values if isinstance(v, str) and v.strip())
+    if isinstance(data, dict) and isinstance(data.get("result"), list):
+        for item in data["result"]:
+            if not isinstance(item, dict):
+                continue
+            for key in ("short_caption_rewritten", "short caption_rewritten"):
+                values = item.get(key)
+                if isinstance(values, list):
+                    pool.extend(v.strip() for v in values if isinstance(v, str) and v.strip())
+                    break
+            else:
+                for key in ("short_caption", "short caption"):
+                    value = item.get(key)
+                    if isinstance(value, str) and value.strip():
+                        pool.append(value.strip())
+                        break
+    return pool[0] if pool else None
+
+
+def _simple_caption_tokens(caption: str) -> list[str]:
+    words = re.findall(r"[a-zA-Z]+|[0-9]+", caption.lower())
+    return [f"{w}/OTHER" for w in words] or ["unk/OTHER"]
+
+
+def _safe_name(name: str) -> str:
+    return str(name).replace("/", "__")
+
+
+def _find_hml_file(root: Path, name: str, entry: dict) -> Path | None:
+    stem = Path(str(entry.get("smplx_path") or "")).stem
+    candidates = [root / f"{_safe_name(name)}.npy", root / f"{name}.npy"]
+    if stem:
+        candidates.append(root / f"{stem}.npy")
+    return next((p for p in candidates if p.exists()), None)
+
+
 # ---------------------------------------------------------------------------
 # core eval (mirrors evaluation_mask_transformer_test, no MM channel)
 # ---------------------------------------------------------------------------
@@ -102,6 +180,14 @@ def main():
     p.add_argument("--momask_root", required=True)
     p.add_argument("--pred_dir", default=None,
                    help="Directory with <id>.npy 263-dim predictions (un-standardised).")
+    p.add_argument("--anno_file", default=None,
+                   help="Optional MotionHub-format annotation file. When set, samples are keyed by annotation id.")
+    p.add_argument("--gt_dir", default=None,
+                   help="GT HML263 directory used with --anno_file.")
+    p.add_argument("--data_dir", default="data/motionhub",
+                   help="MotionHub data root used to read hierarchical captions with --anno_file.")
+    p.add_argument("--caption_file", default=None,
+                   help="Optional {id: caption} JSON override for --anno_file mode.")
     p.add_argument("--mode", choices=["gt-only", "pred"], default="gt-only")
     p.add_argument("--num_repeats", type=int, default=20)
     p.add_argument("--max_motion_length", type=int, default=196)
@@ -118,9 +204,13 @@ def main():
                    help="Exclude HumanML3D mirrored clips (ids starting with 'M'). The "
                         "official published 'Real' metrics use unique (non-mirrored) "
                         "motions; including mirror pairs deflates Diversity.")
-    p.add_argument("--caption_selection", choices=["random", "first"], default="random",
+    p.add_argument("--caption_selection", choices=["random", "first", "mapped"], default="random",
                    help="Debug switch. Official-style eval samples captions randomly; "
-                        "'first' matches offline predictions generated from the first caption.")
+                        "'first' matches offline predictions generated from the first caption; "
+                        "'mapped' uses --caption_map for offline predictions generated from "
+                        "a pre-sampled caption per id.")
+    p.add_argument("--caption_map", default=None,
+                   help="Optional JSON sid->caption map used with --caption_selection mapped.")
     p.add_argument("--output", required=True)
     args = p.parse_args()
 
@@ -138,6 +228,11 @@ def main():
     device = args.device
     rng = np.random.RandomState(args.seed)
     random.seed(args.seed)
+    caption_map = {}
+    if args.caption_selection == "mapped":
+        if not args.caption_map:
+            raise ValueError("--caption_map is required when --caption_selection=mapped")
+        caption_map = json.loads(Path(args.caption_map).read_text())
 
     # ----------- evaluator wrapper -----------
     class Opt:
@@ -160,66 +255,131 @@ def main():
     mean = np.load(str(Path(args.recon_root) / "Mean.npy"))
     std = np.load(str(Path(args.recon_root) / "Std.npy"))
 
-    # ----------- build sample list -----------
-    split_file = Path(args.split) if args.split else (Path(args.recon_root) / "test.txt")
-    test_ids = [s.strip() for s in split_file.read_text().splitlines() if s.strip()]
-    if args.drop_mirrored:
-        n0 = len(test_ids)
-        test_ids = [s for s in test_ids if not s.startswith("M")]
-        print(f"[+] drop_mirrored: {n0} -> {len(test_ids)} ids (removed {n0 - len(test_ids)} mirrored)")
-    src = Path(args.src_h3d272)
-
     samples = []  # each: dict(name, motion_gt(263), text_dict, m_length)
     pred_dir = Path(args.pred_dir) if args.pred_dir else None
     skipped_no_text = skipped_no_pred = skipped_too_short = 0
     min_len = 40
 
-    for sid in tqdm(test_ids, desc="loading", ncols=80):
-        m = np.load(str(Path(args.recon_root) / "new_joint_vecs" / f"{sid}.npy"))
-        if len(m) < min_len or len(m) >= 200:
-            skipped_too_short += 1
-            continue
-        text_list = _read_h3d_texts(src / "texts" / f"{sid}.txt")
-        text_list = [t for t in text_list if t["f_tag"] == 0.0 and t["to_tag"] == 0.0]
-        if not text_list:
-            skipped_no_text += 1
-            continue
-        if args.mode == "pred":
-            assert pred_dir is not None
-            pp = pred_dir / f"{sid}.npy"
-            if not pp.exists():
-                skipped_no_pred += 1
+    if args.anno_file:
+        if args.gt_dir is None:
+            raise ValueError("--gt_dir is required with --anno_file")
+        raw = json.loads(Path(args.anno_file).read_text())
+        gt_dir = Path(args.gt_dir)
+        caption_map = _load_caption_map(Path(args.caption_file)) if args.caption_file else None
+        data_dir = Path(args.data_dir)
+        entries = list(_iter_anno_entries(raw))
+        for sid, entry in tqdm(entries, desc="loading-anno", ncols=80):
+            gt_path = _find_hml_file(gt_dir, sid, entry)
+            if gt_path is None:
+                skipped_no_pred += int(args.mode == "gt-only")
                 continue
-            m_pred = np.load(str(pp))
-            if m_pred.ndim != 2 or m_pred.shape[1] != 263 or len(m_pred) < min_len:
+            m = np.load(str(gt_path))
+            if len(m) < min_len or len(m) >= 200:
                 skipped_too_short += 1
                 continue
-            # Match length: clip to min(len(gt), len(pred))
-            t_eff = min(len(m), len(m_pred))
-            t_eff = (t_eff // args.unit_length) * args.unit_length
-            if t_eff < min_len:
+            caption = _caption_from_map(caption_map, sid)
+            if caption is None:
+                caption = _load_motionhub_caption(entry, data_dir)
+            if caption is None:
+                skipped_no_text += 1
+                continue
+            text_list = [{
+                "caption": caption,
+                "tokens": _simple_caption_tokens(caption),
+                "f_tag": 0.0,
+                "to_tag": 0.0,
+            }]
+            if args.mode == "pred":
+                assert pred_dir is not None
+                pp = _find_hml_file(pred_dir, sid, entry)
+                if pp is None:
+                    skipped_no_pred += 1
+                    continue
+                m_pred = np.load(str(pp))
+                if m_pred.ndim != 2 or m_pred.shape[1] != 263 or len(m_pred) < min_len:
+                    skipped_too_short += 1
+                    continue
+                t_eff = min(len(m), len(m_pred))
+                t_eff = (t_eff // args.unit_length) * args.unit_length
+                if t_eff < min_len:
+                    skipped_too_short += 1
+                    continue
+                samples.append({
+                    "name": sid,
+                    "motion_gt": m[:t_eff],
+                    "motion_pred": m_pred[:t_eff],
+                    "text_list": text_list,
+                    "length": t_eff,
+                })
+            else:
+                t_eff = (len(m) // args.unit_length) * args.unit_length
+                if t_eff < min_len:
+                    skipped_too_short += 1
+                    continue
+                samples.append({
+                    "name": sid,
+                    "motion_gt": m[:t_eff],
+                    "text_list": text_list,
+                    "length": t_eff,
+                })
+            if args.max_samples and len(samples) >= args.max_samples:
+                break
+    else:
+        # ----------- build sample list -----------
+        split_file = Path(args.split) if args.split else (Path(args.recon_root) / "test.txt")
+        test_ids = [s.strip() for s in split_file.read_text().splitlines() if s.strip()]
+        if args.drop_mirrored:
+            n0 = len(test_ids)
+            test_ids = [s for s in test_ids if not s.startswith("M")]
+            print(f"[+] drop_mirrored: {n0} -> {len(test_ids)} ids (removed {n0 - len(test_ids)} mirrored)")
+        src = Path(args.src_h3d272)
+
+        for sid in tqdm(test_ids, desc="loading", ncols=80):
+            m = np.load(str(Path(args.recon_root) / "new_joint_vecs" / f"{sid}.npy"))
+            if len(m) < min_len or len(m) >= 200:
                 skipped_too_short += 1
                 continue
-            samples.append({
-                "name": sid,
-                "motion_gt": m[:t_eff],
-                "motion_pred": m_pred[:t_eff],
-                "text_list": text_list,
-                "length": t_eff,
-            })
-        else:
-            t_eff = (len(m) // args.unit_length) * args.unit_length
-            if t_eff < min_len:
-                skipped_too_short += 1
+            text_list = _read_h3d_texts(src / "texts" / f"{sid}.txt")
+            text_list = [t for t in text_list if t["f_tag"] == 0.0 and t["to_tag"] == 0.0]
+            if not text_list:
+                skipped_no_text += 1
                 continue
-            samples.append({
-                "name": sid,
-                "motion_gt": m[:t_eff],
-                "text_list": text_list,
-                "length": t_eff,
-            })
-        if args.max_samples and len(samples) >= args.max_samples:
-            break
+            if args.mode == "pred":
+                assert pred_dir is not None
+                pp = pred_dir / f"{sid}.npy"
+                if not pp.exists():
+                    skipped_no_pred += 1
+                    continue
+                m_pred = np.load(str(pp))
+                if m_pred.ndim != 2 or m_pred.shape[1] != 263 or len(m_pred) < min_len:
+                    skipped_too_short += 1
+                    continue
+                # Match length: clip to min(len(gt), len(pred))
+                t_eff = min(len(m), len(m_pred))
+                t_eff = (t_eff // args.unit_length) * args.unit_length
+                if t_eff < min_len:
+                    skipped_too_short += 1
+                    continue
+                samples.append({
+                    "name": sid,
+                    "motion_gt": m[:t_eff],
+                    "motion_pred": m_pred[:t_eff],
+                    "text_list": text_list,
+                    "length": t_eff,
+                })
+            else:
+                t_eff = (len(m) // args.unit_length) * args.unit_length
+                if t_eff < min_len:
+                    skipped_too_short += 1
+                    continue
+                samples.append({
+                    "name": sid,
+                    "motion_gt": m[:t_eff],
+                    "text_list": text_list,
+                    "length": t_eff,
+                })
+            if args.max_samples and len(samples) >= args.max_samples:
+                break
 
     print(f"[+] {len(samples)} valid samples; skipped: too_short={skipped_too_short}, "
           f"no_text={skipped_no_text}, no_pred={skipped_no_pred}")
@@ -249,6 +409,12 @@ def main():
             t_eff = s["length"]
             if args.caption_selection == "first":
                 text_data = s["text_list"][0]
+            elif args.caption_selection == "mapped":
+                target_caption = caption_map.get(s["name"])
+                text_data = next(
+                    (item for item in s["text_list"] if item["caption"] == target_caption),
+                    s["text_list"][0],
+                )
             else:
                 text_data = random.choice(s["text_list"])
             tokens = text_data["tokens"]

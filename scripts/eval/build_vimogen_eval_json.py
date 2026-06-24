@@ -8,23 +8,26 @@ from pathlib import Path
 from typing import Optional
 
 
-def load_caption(path: Path) -> Optional[str]:
+def _caption_candidates(path: Path) -> list[str]:
     if not path.exists():
-        return None
+        return []
     try:
         data = json.loads(path.read_text())
     except Exception:
-        return None
+        return []
     if not isinstance(data, dict):
-        return None
+        return []
 
     if all(k in data and isinstance(data[k], list) for k in ("macro", "meso", "micro")):
+        out = []
         for group in ("macro", "meso", "micro"):
             for caption in data[group]:
                 if isinstance(caption, str) and caption.strip():
-                    return caption.strip()
+                    out.append(caption.strip())
+        return out
 
     if "result" in data and isinstance(data["result"], list):
+        out = []
         for item in data["result"]:
             if not isinstance(item, dict):
                 continue
@@ -33,12 +36,28 @@ def load_caption(path: Path) -> Optional[str]:
                 if isinstance(val, list):
                     for caption in val:
                         if isinstance(caption, str) and caption.strip():
-                            return caption.strip()
+                            out.append(caption.strip())
             for key in ("short_caption", "short caption"):
                 val = item.get(key)
                 if isinstance(val, str) and val.strip():
-                    return val.strip()
-    return None
+                    out.append(val.strip())
+        return out
+    return []
+
+
+def load_caption(path: Path, style: str = "first") -> Optional[str]:
+    candidates = _caption_candidates(path)
+    if not candidates:
+        return None
+    if style == "first":
+        return candidates[0]
+    if style == "longest":
+        return max(candidates, key=lambda x: len(x.split()))
+    if style == "concat3":
+        # Keep the prompt detailed enough for ViMoGen while avoiding very long
+        # caption lists that can dominate the text encoder context.
+        return " ".join(candidates[:3])
+    raise ValueError(f"unsupported caption style: {style}")
 
 
 def iter_entries(raw):
@@ -68,6 +87,7 @@ def main() -> None:
     parser.add_argument("--min-len", type=int, default=40)
     parser.add_argument("--max-len", type=int, default=200)
     parser.add_argument("--append-duration-to-prompt", action="store_true")
+    parser.add_argument("--caption-style", choices=["first", "longest", "concat3"], default="first")
     args = parser.parse_args()
 
     if args.num_shards < 1 or not (0 <= args.shard_idx < args.num_shards):
@@ -89,7 +109,7 @@ def main() -> None:
             caption = caption_override.get(str(name))
         caption_rel = entry.get("hierarchical_caption_path")
         if not caption:
-            caption = load_caption(data_dir / caption_rel) if caption_rel else None
+            caption = load_caption(data_dir / caption_rel, style=args.caption_style) if caption_rel else None
         if not caption:
             stats["no_caption"] += 1
             continue

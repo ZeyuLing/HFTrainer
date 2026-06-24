@@ -1,0 +1,13 @@
+real_smpl	gt272	ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/motion_data
+flowmdm_c1	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/flowmdm_c1
+flowmdm_c5	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/flowmdm_c5
+flowmdm_c9	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/flowmdm_c9
+motionlab_c1	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/motionlab_c1
+motionlab_c5	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/motionlab_c5
+motionlab_c9	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/motionlab_c9
+motionstreamer_c1	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/motionstreamer_c1
+motionstreamer_c5	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/motionstreamer_c5
+motionstreamer_c9	m135	outputs/evaluation/ms272_table2_baselines_0608/prep/motionstreamer_c9
+ours_c1	m135	outputs/evaluation/ms272_table2_prism_fix/prep/prism_c1
+ours_c5	m135	outputs/evaluation/ms272_table2_prism_fix/prep/prism_c5
+ours_c9	m135	outputs/evaluation/ms272_table2_prism_fix/prep/prism_c9

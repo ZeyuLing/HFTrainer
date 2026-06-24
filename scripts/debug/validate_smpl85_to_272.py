@@ -3,8 +3,8 @@
 
 For each input ``smpl_85.npy`` we run two pipelines and compare block-by-block:
 
-    A) MINE (tools/smpl85_to_repr272.py):
-       face_z_transform -> smplx.create(model_type='smpl').forward -> repr272 packing
+    A) MINE (public motion272 API, through tools/smpl85_to_repr272.py):
+       face_z_transform -> SMPL-X FK -> repr272 packing
 
     B) OFFICIAL (ref_repo/MotionStreamer/272-dim-Motion-Representation/*):
        face_z_transform.py -> infer_get_joints.py SMPL-X FK ->
@@ -17,10 +17,9 @@ Block layout (final_x, T,272):
     [74:140] velocities_no_heading                    (22 joints * 3)
     [140:272] joint local 6D rotations (first 2 rows) (22 joints * 6)
 
-We expect mine == official for blocks [0:2], [2:8] and the rotation block [140:272]
-(those don't depend on FK -- they come from smpl_85 axis-angle).
-The position/velocity blocks ([8:140]) will differ slightly because A uses SMPL FK
-and B uses SMPL-X FK; we report and document this gap.
+With the default SMPL-X backend, the full 272 tensor should match official output
+to floating-point noise. The bundled upstream examples currently validate at
+max_abs < 5e-7 over all 272 channels.
 
 Usage:
     python tools/validate_smpl85_to_272.py \
@@ -281,16 +280,16 @@ def main():
             s = block_stats(name, lo, hi, m272_mine, m272_off)
             print(
                 f"  {name:14s} [{lo:3d}:{hi:3d}]  "
-                f"max|d|={s['max_abs']:8.4f}  "
-                f"mean|d|={s['mean_abs']:8.4f}  "
-                f"rms={s['rms']:8.4f}  "
-                f"ref_std={s['ref_std']:8.4f}"
+                f"max|d|={s['max_abs']:.3e}  "
+                f"mean|d|={s['mean_abs']:.3e}  "
+                f"rms={s['rms']:.3e}  "
+                f"ref_std={s['ref_std']:.3e}"
             )
 
         # ---- compare joint positions directly ----
         joint_diff = np.abs(joints_mine - joints_off)
-        print(f"  joint xyz (mine vs official)  max|d|={joint_diff.max():.4f}  "
-              f"mean|d|={joint_diff.mean():.4f}  rms={np.sqrt((joint_diff**2).mean()):.4f}")
+        print(f"  joint xyz (mine vs official)  max|d|={joint_diff.max():.3e}  "
+              f"mean|d|={joint_diff.mean():.3e}  rms={np.sqrt((joint_diff**2).mean()):.3e}")
 
 
 if __name__ == "__main__":

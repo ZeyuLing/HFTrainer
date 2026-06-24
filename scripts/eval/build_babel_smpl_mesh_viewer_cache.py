@@ -196,6 +196,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--ids", default="", help="comma-separated BABEL seq ids; default uses audit-json order")
     ap.add_argument("--num-cases", type=int, default=36)
     ap.add_argument("--max-frames", type=int, default=240)
+    ap.add_argument(
+        "--playback-fps",
+        type=float,
+        default=60.0,
+        help=(
+            "Viewer playback fps. MotionStreamer BABEL stream files carry 30fps metadata, "
+            "but visual inspection and segment durations match a 60fps time axis."
+        ),
+    )
     ap.add_argument("--device", default="")
     ap.add_argument("--batch-size", type=int, default=128)
     return ap.parse_args()
@@ -229,6 +238,7 @@ def main() -> None:
         m272 = m272_raw[keep]
         source_fps = _source_fps(gt_smpl_dir, sid, fallback=30.0)
         display_fps = source_fps * (float(len(keep)) / float(total_frames)) if total_frames > 0 else source_fps
+        playback_fps = float(args.playback_fps) * (float(len(keep)) / float(total_frames)) if total_frames > 0 else float(args.playback_fps)
         segments = _segments_for_view(rec, keep, total_frames)
         rot, root = recover_local_rotations_and_root(m272)
         aa = matrix_to_axis_angle(rot.reshape(-1, 3, 3)).reshape(rot.shape[0], rot.shape[1], 3).astype(np.float32)
@@ -244,7 +254,9 @@ def main() -> None:
                 "display_frames": int(len(keep)),
                 "source_fps": source_fps,
                 "display_fps": display_fps,
+                "playback_fps": playback_fps,
                 "duration_sec": float(total_frames / source_fps) if source_fps > 0 else None,
+                "playback_duration_sec": float(len(keep) / playback_fps) if playback_fps > 0 else None,
                 "rewrite_score": int(rec.get("rewrite_score", 0)),
                 "frame_stride_note": "uniform temporal downsample" if len(keep) < total_frames else "native frames",
                 "frame_indices": keep.astype(int).tolist(),
@@ -257,6 +269,7 @@ def main() -> None:
                     "label": "BABEL SMPL mesh from MotionStreamer-272",
                     "fps": float(display_fps),
                     "source_fps": float(source_fps),
+                    "playback_fps": float(playback_fps),
                     "frame_indices": keep.astype(int).tolist(),
                     "color": "#8db7ff",
                     "num_frames": int(verts.shape[0]),
@@ -265,7 +278,7 @@ def main() -> None:
                     "verts_file": verts_file,
                     "info": (
                         f"{verts.shape[0]} displayed frames from {total_frames} raw frames "
-                        f"@{display_fps:.2f}fps display ({source_fps:.2f}fps source) · 6890-vtx neutral SMPL · "
+                        f"@{playback_fps:.2f}fps playback ({source_fps:.2f}fps metadata) · 6890-vtx neutral SMPL · "
                         f"rewrite score {rec.get('rewrite_score', 0)}"
                     ),
                 }
@@ -279,6 +292,7 @@ def main() -> None:
             "display_frames": int(len(keep)),
             "source_fps": source_fps,
             "display_fps": display_fps,
+            "playback_fps": playback_fps,
             "rewrite_score": int(rec.get("rewrite_score", 0)),
         })
     (out_dir / "index.json").write_text(json.dumps({"cases": index_cases}, indent=2, ensure_ascii=False), encoding="utf-8")

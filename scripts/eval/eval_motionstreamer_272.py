@@ -48,14 +48,43 @@ CKPT = _CKPT_SHM if os.path.exists(_CKPT_SHM) else os.path.join(
     MS, "MotionStreamer_HF/Evaluator_272/epoch=99.ckpt")
 # Optional local mirrors of the test-set GT / text data (also from the cache script).
 _SHM_DATA = "/dev/shm/ms272_data"
-GT_MOTION_DIR = (os.path.join(_SHM_DATA, "motion_data")
-                 if os.path.isdir(os.path.join(_SHM_DATA, "motion_data"))
-                 else os.path.join(MS, "humanml3d_272/motion_data"))
-TEXT_DIR = (os.path.join(_SHM_DATA, "texts")
-            if os.path.isdir(os.path.join(_SHM_DATA, "texts"))
-            else os.path.join(MS, "humanml3d_272/texts"))
 SPLIT_TEST = os.path.join(MS, "humanml3d_272/split/test.txt")
 MEAN_STD = os.path.join(MS, "humanml3d_272/mean_std")
+
+
+def _split_count() -> int:
+    try:
+        with open(SPLIT_TEST) as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return 0
+
+
+def _cache_dir_or_source(cache_subdir: str, source_dir: str, suffix: str) -> str:
+    cache_dir = os.path.join(_SHM_DATA, cache_subdir)
+    if not os.path.isdir(cache_dir):
+        return source_dir
+    try:
+        cached = sum(1 for name in os.listdir(cache_dir) if name.endswith(suffix))
+    except OSError:
+        return source_dir
+    expected = _split_count()
+    # A partially-created /dev/shm cache is worse than no cache: the evaluator
+    # will silently drop missing ids and can end up with #ids=0.  Only trust the
+    # cache once it is essentially complete.
+    if expected and cached >= int(expected * 0.98):
+        return cache_dir
+    print(
+        f"[cache-skip] {cache_dir} incomplete ({cached}/{expected}); using {source_dir}",
+        flush=True,
+    )
+    return source_dir
+
+
+GT_MOTION_DIR = _cache_dir_or_source(
+    "motion_data", os.path.join(MS, "humanml3d_272/motion_data"), ".npy")
+TEXT_DIR = _cache_dir_or_source(
+    "texts", os.path.join(MS, "humanml3d_272/texts"), ".txt")
 
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "scripts/eval"))
@@ -187,13 +216,14 @@ def read_caption(cid):
     return captions[0] if captions else None
 
 
-def crop_and_norm(motion, mean, std, rng):
+def crop_and_norm(motion, mean, std, rng, min_motion_len=MIN_MOTION_LEN,
+                  max_motion_length=MAX_MOTION_LENGTH):
     """Replicate dataset_eval_t2m.__getitem__ crop+normalize+pad.
 
     Returns (motion_padded (300,272), m_length) or (None, None) if filtered.
     """
     m_length = len(motion)
-    if m_length < MIN_MOTION_LEN or m_length >= MAX_MOTION_LENGTH:
+    if m_length < min_motion_len or m_length > max_motion_length:
         return None, None
     coin2 = rng.choice(["single", "single", "double"])
     if coin2 == "double":
@@ -203,14 +233,15 @@ def crop_and_norm(motion, mean, std, rng):
     idx = rng.randint(0, len(motion) - m_length + 1)
     motion = motion[idx:idx + m_length]
     motion = (motion - mean) / std
-    if m_length < MAX_MOTION_LENGTH:
+    if m_length < max_motion_length:
         motion = np.concatenate(
-            [motion, np.zeros((MAX_MOTION_LENGTH - m_length, motion.shape[1]))],
+            [motion, np.zeros((max_motion_length - m_length, motion.shape[1]))],
             axis=0)
     return motion.astype(np.float32), m_length
 
 
-def build_items(ids, motion_source, mean, std, rng, io_workers=32):
+def build_items(ids, motion_source, mean, std, rng, io_workers=32,
+                min_motion_len=MIN_MOTION_LEN, max_motion_length=MAX_MOTION_LENGTH):
     """motion_source(cid) -> (T,272) raw, or None. Returns list of (cap,motion,len).
 
     I/O (caption text + motion npz) is prefetched concurrently with a thread pool
@@ -235,7 +266,11 @@ def build_items(ids, motion_source, mean, std, rng, io_workers=32):
             if cap is None or raw is None:
                 skipped += 1
             else:
-                m, L = crop_and_norm(raw, mean, std, rng)
+                m, L = crop_and_norm(
+                    raw, mean, std, rng,
+                    min_motion_len=min_motion_len,
+                    max_motion_length=max_motion_length,
+                )
                 if m is None:
                     skipped += 1
                 else:
@@ -250,16 +285,138 @@ def build_items(ids, motion_source, mean, std, rng, io_workers=32):
 # Embedding pass (batch=32, shuffle, drop_last, sort-by-len desc per batch)
 # ---------------------------------------------------------------------------
 
-@torch.no_grad()
-def encode_items(items, textencoder, motionencoder, device, rng, batch_size=32):
-    order = rng.permutation(len(items))
+def _batch_duplicate_stats(batches, items):
+    dup_items = []
+    dup_extra = []
+    dup_types = []
+    unique_counts = []
+    for batch_idx in batches:
+        counts = {}
+        for i in batch_idx:
+            cap = items[i][0]
+            counts[cap] = counts.get(cap, 0) + 1
+        vals = list(counts.values())
+        dup_items.append(sum(v for v in vals if v > 1))
+        dup_extra.append(sum(v - 1 for v in vals if v > 1))
+        dup_types.append(sum(1 for v in vals if v > 1))
+        unique_counts.append(len(vals))
+    if not batches:
+        return {
+            "n_batches": 0,
+            "batch_size": 0,
+            "duplicate_item_mean": 0.0,
+            "duplicate_item_max": 0,
+            "duplicate_extra_mean": 0.0,
+            "duplicate_extra_max": 0,
+            "duplicate_type_mean": 0.0,
+            "unique_label_mean": 0.0,
+            "unique_label_min": 0,
+        }
+    return {
+        "n_batches": len(batches),
+        "batch_size": len(batches[0]),
+        "duplicate_item_mean": float(np.mean(dup_items)),
+        "duplicate_item_max": int(np.max(dup_items)),
+        "duplicate_extra_mean": float(np.mean(dup_extra)),
+        "duplicate_extra_max": int(np.max(dup_extra)),
+        "duplicate_type_mean": float(np.mean(dup_types)),
+        "unique_label_mean": float(np.mean(unique_counts)),
+        "unique_label_min": int(np.min(unique_counts)),
+    }
+
+
+def _build_rprecision_batches(items, rng, batch_size=32, mode="random"):
+    """Return deterministic R-precision batches.
+
+    ``random`` matches the legacy MS/Guo protocol. ``balanced`` keeps the same
+    shuffle/drop-last spirit but spreads identical captions across batches first,
+    which is important for terse BABEL labels such as "walk" and "stand".
+    ``unique`` is strict: it refuses settings where a duplicate-free batch
+    layout is impossible and never falls back to repeated captions in one batch.
+    """
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be positive, got {batch_size}")
+    order = list(rng.permutation(len(items)))
     n_batches = len(order) // batch_size  # drop_last
+    keep_n = n_batches * batch_size
+    if n_batches == 0:
+        return []
+    if mode == "random":
+        return [
+            order[b * batch_size:(b + 1) * batch_size]
+            for b in range(n_batches)
+        ]
+    if mode not in {"balanced", "unique"}:
+        raise ValueError(f"unknown R-precision batch mode: {mode}")
+
+    groups = {}
+    for i in order[:keep_n]:
+        groups.setdefault(items[i][0], []).append(i)
+    if mode == "unique":
+        max_count = max((len(v) for v in groups.values()), default=0)
+        if max_count > n_batches or batch_size > len(groups):
+            suggested = min(len(groups), max(1, len(items) // max(1, max_count)))
+            raise ValueError(
+                "duplicate-free R-precision batches are impossible with "
+                f"batch_size={batch_size}, n_batches={n_batches}, "
+                f"max_label_count={max_count}, unique_labels={len(groups)}. "
+                f"Try --rprec-batch-size <= {suggested}."
+            )
+
+    caps = list(groups)
+    rng.shuffle(caps)
+    caps.sort(key=lambda cap: len(groups[cap]), reverse=True)
+
+    batches = [[] for _ in range(n_batches)]
+    batch_caps = [set() for _ in range(n_batches)]
+    for cap in caps:
+        idxs = groups[cap]
+        rng.shuffle(idxs)
+        for idx in idxs:
+            candidates = [
+                b for b in range(n_batches)
+                if len(batches[b]) < batch_size and cap not in batch_caps[b]
+            ]
+            if not candidates and mode == "balanced":
+                candidates = [
+                    b for b in range(n_batches)
+                    if len(batches[b]) < batch_size
+                ]
+            if not candidates:
+                raise RuntimeError(
+                    f"{mode} R-precision batching failed to place caption {cap!r}"
+                )
+            min_fill = min(len(batches[b]) for b in candidates)
+            candidates = [b for b in candidates if len(batches[b]) == min_fill]
+            b = candidates[int(rng.randint(len(candidates)))]
+            batches[b].append(idx)
+            batch_caps[b].add(cap)
+
+    if any(len(b) != batch_size for b in batches):
+        raise RuntimeError(f"{mode} R-precision batching produced a non-full batch")
+    return batches
+
+
+@torch.no_grad()
+def encode_items(items, textencoder, motionencoder, device, rng, batch_size=32,
+                 dedup=False, batch_mode="random"):
+    """Embed (caption, motion, len) items and compute R-precision / MM-Dist.
+
+    ``dedup=True`` applies FlowMDM-style per-batch caption deduplication: within
+    each batch the R-precision retrieval matrix is restricted to *unique*
+    captions (so two segments sharing the same terse BABEL label, e.g. "walk",
+    do not penalise each other), then rescaled by ``len(texts)/n_unique`` so the
+    metric stays comparable across batches. GT (val_stream sub-segments) has the
+    highest duplicate rate and is otherwise unfairly deflated.
+    """
+    batches = _build_rprecision_batches(items, rng, batch_size=batch_size,
+                                        mode=batch_mode)
+    n_batches = len(batches)
     em_all, et_all = [], []
     R_sum = np.zeros(3, dtype=np.float64)
     match_sum = 0.0
     nb = 0
-    for b in range(n_batches):
-        batch_idx = order[b * batch_size:(b + 1) * batch_size]
+    for batch_idx in batches:
         batch = [items[i] for i in batch_idx]
         batch.sort(key=lambda x: x[2], reverse=True)  # collate_fn
         texts = [x[0] for x in batch]
@@ -272,9 +429,16 @@ def encode_items(items, textencoder, motionencoder, device, rng, batch_size=32):
         em_all.append(em_np)
         et_all.append(et_np)
 
-        R, match = calculate_R_precision(et_np, em_np, top_k=3, sum_all=True)
-        R_sum += R
-        match_sum += match
+        dist = euclidean_distance_matrix(et_np, em_np)
+        match_sum += dist.trace()  # MM-Dist over full batch (paired)
+        if dedup:
+            uniq = np.unique(np.asarray(texts), return_index=True)[1]
+            argm = np.argsort(dist[uniq][:, uniq], axis=1)
+            tk = calculate_top_k(argm, 3)
+            R_sum += tk.sum(axis=0) * (len(texts) / tk.shape[0])
+        else:
+            argm = np.argsort(dist, axis=1)
+            R_sum += calculate_top_k(argm, 3).sum(axis=0)
         nb += batch_size
     return {
         "em": np.concatenate(em_all, 0),
@@ -283,6 +447,8 @@ def encode_items(items, textencoder, motionencoder, device, rng, batch_size=32):
         "matching": match_sum / nb,
         "nb": nb,
         "n_batches": n_batches,
+        "batch_mode": batch_mode,
+        "batch_stats": _batch_duplicate_stats(batches, items),
     }
 
 
@@ -301,23 +467,44 @@ def diversity_of(em, rng):
 # ---------------------------------------------------------------------------
 
 def main():
+    global TEXT_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred-dir", default=None,
                     help="dir with <id>.npz containing motion_135; omit for GT-only")
     ap.add_argument("--gt-272-dir", default=None,
-                    help="Protocol-A: use <id>.npz motion_272 as the GT-real reference "
-                         "(unified joints->IK->272 chain) instead of native motion_data")
+                    help="Protocol-A: use <id>.npy or <id>.npz motion_272 as the "
+                         "GT-real reference (unified joints->IK->272 chain) instead "
+                         "of native motion_data")
     ap.add_argument("--tag", default="pred")
     ap.add_argument("--real-encoding", choices=["native", "refk"], default="native",
                     help="native=GT272 as-is (Gate B); refk=decode->SMPL-H FK->encode "
                          "(FK-matched fair comparison vs pred)")
     ap.add_argument("--also-refk", action="store_true",
                     help="additionally compute a refk real baseline for FK-matched FID")
+    ap.add_argument("--split", default=None,
+                    help="optional file of ids (one per line) to restrict eval to; "
+                         "ensures identical real reference across methods")
     ap.add_argument("--max-samples", type=int, default=0, help="0 = all")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out-json", default=None)
+    ap.add_argument("--text-dir", default=None,
+                    help="Override HumanML3D texts/<id>.txt directory. Use this "
+                         "to bind evaluation to a curated GT-aligned caption set.")
+    ap.add_argument("--min-motion-len", type=int, default=MIN_MOTION_LEN,
+                    help="minimum raw length kept before evaluator crop/pad; use 1 "
+                         "for the full HumanML3D test split including short clips")
+    ap.add_argument("--max-motion-length", type=int, default=MAX_MOTION_LENGTH,
+                    help="maximum raw length kept before evaluator crop/pad; 300 "
+                         "matches the MotionStreamer evaluator max_len")
+    ap.add_argument("--force-motion135-to-272", action="store_true",
+                    help="diagnostic: ignore stored motion_272 in prediction npz files "
+                         "and re-encode motion_135 through motion135_to_272")
     args = ap.parse_args()
+
+    if args.text_dir:
+        TEXT_DIR = args.text_dir if os.path.isabs(args.text_dir) else os.path.join(REPO, args.text_dir)
+    print(f"text_dir={TEXT_DIR}")
 
     device = torch.device(args.device if torch.cuda.is_available()
                           or args.device == "cpu" else "cpu")
@@ -329,14 +516,38 @@ def main():
     with cs.open(SPLIT_TEST, "r") as f:
         all_ids = [ln.strip() for ln in f.readlines() if ln.strip()]
 
+    if args.split:
+        sp = args.split if os.path.isabs(args.split) else os.path.join(REPO, args.split)
+        with open(sp) as f:
+            keep = set(ln.strip() for ln in f if ln.strip())
+        all_ids = [c for c in all_ids if c in keep]
+        print(f"--split: restricted to {len(all_ids)} ids (from {len(keep)} in file)")
+
     # restrict to ids that have GT + (pred if requested)
     gt272_dir = None
     if args.gt_272_dir:
         gt272_dir = args.gt_272_dir if os.path.isabs(args.gt_272_dir) else os.path.join(REPO, args.gt_272_dir)
 
+    def _find_272_file(root, cid):
+        npy = os.path.join(root, cid + ".npy")
+        if os.path.exists(npy):
+            return npy
+        npz = os.path.join(root, cid + ".npz")
+        if os.path.exists(npz):
+            return npz
+        return None
+
+    def _load_272_file(path):
+        if path.endswith(".npz"):
+            data = np.load(path)
+            if "motion_272" in data:
+                return np.asarray(data["motion_272"], dtype=np.float32)
+            raise KeyError(f"{path} does not contain motion_272")
+        return np.asarray(np.load(path), dtype=np.float32)
+
     def has_gt(cid):
         if gt272_dir is not None:
-            return os.path.exists(os.path.join(gt272_dir, cid + ".npz"))
+            return _find_272_file(gt272_dir, cid) is not None
         return os.path.exists(os.path.join(GT_MOTION_DIR, cid + ".npy"))
 
     pred_cache = {}
@@ -360,12 +571,18 @@ def main():
     # --- build GT-real items -------------------------------------------
     def gt_source(cid):
         if gt272_dir is not None:
-            return np.asarray(np.load(os.path.join(gt272_dir, cid + ".npz"))["motion_272"],
-                              dtype=np.float32)
+            path = _find_272_file(gt272_dir, cid)
+            if path is None:
+                return None
+            return _load_272_file(path)
         return np.load(os.path.join(GT_MOTION_DIR, cid + ".npy"))
 
     rng = np.random.RandomState(args.seed)
-    real_items, sk = build_items(ids, gt_source, mean, std, rng)
+    real_items, sk = build_items(
+        ids, gt_source, mean, std, rng,
+        min_motion_len=args.min_motion_len,
+        max_motion_length=args.max_motion_length,
+    )
     print(f"GT-real items: {len(real_items)} (skipped {sk})")
 
     # encode real (use a fresh rng with same seed for batching reproducibility)
@@ -392,7 +609,10 @@ def main():
         "gt_272_dir": args.gt_272_dir,
         "real_encoding": args.real_encoding,
         "seed": args.seed,
+        "text_dir": TEXT_DIR,
         "ids_with_required_files": int(len(ids)),
+        "min_motion_len": int(args.min_motion_len),
+        "max_motion_length": int(args.max_motion_length),
         "gt_real": {
             "r_precision": real["R"].tolist(),
             "matching_score": float(real["matching"]),
@@ -411,7 +631,11 @@ def main():
         def refk_source(cid):
             return reencode_272_via_fk(np.load(os.path.join(GT_MOTION_DIR, cid + ".npy")))
         rng2 = np.random.RandomState(args.seed)
-        refk_items, _ = build_items(ids, refk_source, mean, std, rng2)
+        refk_items, _ = build_items(
+            ids, refk_source, mean, std, rng2,
+            min_motion_len=args.min_motion_len,
+            max_motion_length=args.max_motion_length,
+        )
         refk = encode_items(refk_items, textencoder, motionencoder, device,
                             np.random.RandomState(args.seed))
         refk_div = diversity_of(refk["em"], np.random.RandomState(args.seed + 100))
@@ -435,7 +659,7 @@ def main():
             d = np.load(os.path.join(pred_dir, cid + ".npz"), allow_pickle=True)
             # Baselines (CondMDI/MotionLab/KIMODO) that only produce joints are
             # pre-encoded to native-272 @30fps and stored under "motion_272".
-            if "motion_272" in d:
+            if "motion_272" in d and not args.force_motion135_to_272:
                 m272 = np.asarray(d["motion_272"], dtype=np.float32)
                 if m272.shape[0] < UNIT_LENGTH + 1:
                     return None
@@ -446,7 +670,11 @@ def main():
             return motion135_to_272(m135)
 
         rng3 = np.random.RandomState(args.seed)
-        pred_items, skp = build_items(ids, pred_source, mean, std, rng3)
+        pred_items, skp = build_items(
+            ids, pred_source, mean, std, rng3,
+            min_motion_len=args.min_motion_len,
+            max_motion_length=args.max_motion_length,
+        )
         print(f"\nPred items: {len(pred_items)} (skipped {skp})")
         pred = encode_items(pred_items, textencoder, motionencoder, device,
                             np.random.RandomState(args.seed))

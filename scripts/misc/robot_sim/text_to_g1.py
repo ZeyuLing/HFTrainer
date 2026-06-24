@@ -184,7 +184,7 @@ def load_motion_from_npz(path, motion_dim=None):
 
 def retarget_motion(motion, args):
     """Step 2: Retarget SMPL motion to G1 joint angles."""
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
 
     print(f'[Step 2] Retargeting SMPL motion to G1 {args.g1_dof}-DOF...')
 
@@ -252,7 +252,7 @@ def save_results(motion, retarget_result, retargeter, args):
 
 def generate_asap_commands(pkl_path, args):
     """Step 3: Generate ASAP training commands."""
-    from hftrainer.models.motion.components.retarget.isaac_gym_bridge import (
+    from hftrainer.motion.retarget.isaac_gym_bridge import (
         ASAPConfigGenerator,
     )
 
@@ -331,7 +331,7 @@ def visualize_motion(retarget_result, args):
             print(f'    {p}')
         return
 
-    from hftrainer.models.motion.components.retarget import SMPLToG1Retargeter
+    from hftrainer.motion.retarget import SMPLToG1Retargeter
     retargeter = SMPLToG1Retargeter(g1_dof=args.g1_dof)
     qpos_seq = retargeter.to_mujoco_qpos(retarget_result)
 

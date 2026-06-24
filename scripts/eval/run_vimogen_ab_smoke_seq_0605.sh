@@ -3,7 +3,7 @@
 # Runs variants sequentially to avoid concurrent T5-XXL text encoder OOMs.
 set -euo pipefail
 
-ROOT="/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer"
+ROOT="/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer"
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1

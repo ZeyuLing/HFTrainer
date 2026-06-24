@@ -61,14 +61,29 @@ def _gather_unique_captions(prefer_rewritten: bool = True) -> List[str]:
     are fine because the set dedups them.
     """
     unique = set()
-    for pattern in ('eval_e*.json', 'eval_e*_rewritten.json',
-                    'eval_h3d_*.json'):
+    # Cover EVERY eval datalist, including non eval_e*/eval_h3d* names such as
+    # ``eval_motionfix_instruction.json``. A too-narrow glob here previously
+    # excluded MotionFix instructions from the cache, so eval-time caption
+    # lookups missed and the editfix bundle (no inference text_encoder) silently
+    # fell back to UNCONDITIONED inference — making instruction editing a no-op
+    # (root-caused 2026-06-22). One broad glob + set dedup avoids re-introducing
+    # this class of bug whenever a new datalist is added.
+    for pattern in ('eval_*.json',):
         for f in sorted(DATALIST_DIR.glob(pattern)):
             try:
-                items = json.load(open(f)).get('data_list', [])
+                obj = json.load(open(f))
             except Exception:
                 continue
+            # Datalists are either {'data_list': [...]} or a bare list.
+            if isinstance(obj, dict):
+                items = obj.get('data_list', obj.get('data', []))
+            elif isinstance(obj, list):
+                items = obj
+            else:
+                items = []
             for it in items:
+                if not isinstance(it, dict):
+                    continue
                 for k in CAPTION_FIELDS:
                     v = it.get(k, '')
                     if isinstance(v, str) and v.strip():

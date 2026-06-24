@@ -197,7 +197,7 @@ def load_versatilemotion_model():
     tok = CLIPTokenizer.from_pretrained(str(CLIP_PATH))
 
     sys.path.insert(0, str(HF_ROOT))
-    from hftrainer.models.motion.components.motion_processor.smpl_processor import (
+    from hftrainer.motion.processing.smpl_processor import (
         SMPLPoseProcessor as HFSMPLPoseProcessor,
     )
     smpl_proc = HFSMPLPoseProcessor(

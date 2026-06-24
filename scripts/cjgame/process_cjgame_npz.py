@@ -43,7 +43,7 @@ for _pkg in [
     'hftrainer.models.motion.components',
     'hftrainer.models.motion.components.utils',
     'hftrainer.models.motion.components.utils.geometry',
-    'hftrainer.models.motion.components.body_models',
+    'hftrainer.motion.body_models',
 ]:
     _subpath = _BASE + _pkg[len('hftrainer'):]
     _make_pkg(_pkg, _subpath)
@@ -68,8 +68,8 @@ def _load(module_name, filepath):
 _geo = os.path.join(_BASE, 'models/motion/components/utils/geometry/')
 _load('hftrainer.models.motion.components.utils.geometry.rotation_convert', _geo + 'rotation_convert.py')
 _load('hftrainer.models.motion.components.utils.geometry.matrix', _geo + 'matrix.py')
-_body = os.path.join(_BASE, 'models/motion/components/body_models/')
-_load('hftrainer.models.motion.components.body_models.smplx_lite', _body + 'smplx_lite.py')
+_body = os.path.join(_BASE, 'motion/body_models/')
+_load('hftrainer.motion.body_models.smplx_lite', _body + 'smplx_lite.py')
 
 _qc = os.path.join(_BASE, 'evaluation/quality_check_rules/')
 for _m in [

@@ -70,7 +70,12 @@ def load_motionclip(ckpt_dir: Path,
         <ckpt_dir>/bundle_config.json
     """
     from safetensors.torch import load_file
+    from hftrainer.registry import HF_MODELS
+    from hftrainer.motion.processing.smpl_processor import SMPLPoseProcessor
     from hftrainer.models.motion.motion_clip import MotionCLIPBundle
+
+    if HF_MODELS.get('SMPLPoseProcessor') is None:
+        HF_MODELS.register_module(name='SMPLPoseProcessor', module=SMPLPoseProcessor)
 
     cfg_path = ckpt_dir / 'bundle_config.json'
     weight_path = ckpt_dir / 'motionclip_model.safetensors'
@@ -161,7 +166,10 @@ def _load_caption(caption_path: Path) -> Optional[str]:
     return None
 
 
-def _load_smpl22_motion(motion_path: Path) -> Optional[np.ndarray]:
+def _load_smpl22_motion(
+    motion_path: Path,
+    rot6d_convention: str = 'row',
+) -> Optional[np.ndarray]:
     """Minimal SMPL-22 loader: returns (T, 135) array (transl + 22 joints * 6D rot).
 
     Reads NPZ produced by motionhub data pipeline. Expects fields:
@@ -169,45 +177,57 @@ def _load_smpl22_motion(motion_path: Path) -> Optional[np.ndarray]:
       global_orient: (T, 3) axis-angle  [will be converted to rot6d]
       body_pose: (T, 21*3) axis-angle    [will be converted to rot6d]
     Either axis-angle or rotation_6d direct fields are acceptable.
+
+    Keep the convention explicit: silently mixing row/column-major 6D rotations
+    gives plausible-looking tensors but invalid motion embeddings. The released
+    evaluator checkpoint is validated with the column-major loader path.
     """
+    if rot6d_convention not in {'row', 'column'}:
+        raise ValueError(f"rot6d_convention must be row/column, got {rot6d_convention!r}")
     if not motion_path.exists():
         return None
     try:
         npz = np.load(str(motion_path), allow_pickle=True)
-    except Exception:
+
+        keys = list(npz.keys()) if hasattr(npz, 'keys') else []
+        if 'transl' not in keys:
+            return None
+        transl = np.asarray(npz['transl'], dtype=np.float32)  # (T, 3)
+        T = transl.shape[0]
+
+        # Try rotation_6d direct first
+        if 'global_orient_rot6d' in keys and 'body_pose_rot6d' in keys:
+            go = np.asarray(npz['global_orient_rot6d'], dtype=np.float32).reshape(T, -1)  # (T, 6)
+            bp = np.asarray(npz['body_pose_rot6d'], dtype=np.float32).reshape(T, -1)      # (T, 21*6)
+        else:
+            # axis-angle path
+            from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
+                axis_angle_to_matrix,
+                matrix_to_rotation_6d,
+            )
+            go_aa = torch.from_numpy(np.asarray(npz['global_orient'], dtype=np.float32)).reshape(T, 3)
+            bp_aa = torch.from_numpy(np.asarray(npz['body_pose'], dtype=np.float32)).reshape(T, 21, 3)
+
+            go_rotmat = axis_angle_to_matrix(go_aa)
+            bp_rotmat = axis_angle_to_matrix(bp_aa)
+            go = matrix_to_rotation_6d(go_rotmat, convention=rot6d_convention).numpy().reshape(T, -1)
+            bp = matrix_to_rotation_6d(bp_rotmat, convention=rot6d_convention).numpy().reshape(T, -1)
+
+        motion135 = np.concatenate([transl, go, bp], axis=-1)
+    except Exception as e:
+        # Skip corrupted / unreadable npz (e.g. BadZipFile CRC errors) instead
+        # of aborting the whole evaluation.
+        print(f'[warn] skip unreadable motion {motion_path}: {e}')
         return None
-
-    keys = list(npz.keys()) if hasattr(npz, 'keys') else []
-    if 'transl' not in keys:
-        return None
-    transl = np.asarray(npz['transl'], dtype=np.float32)  # (T, 3)
-    T = transl.shape[0]
-
-    # Try rotation_6d direct first
-    if 'global_orient_rot6d' in keys and 'body_pose_rot6d' in keys:
-        go = np.asarray(npz['global_orient_rot6d'], dtype=np.float32).reshape(T, -1)  # (T, 6)
-        bp = np.asarray(npz['body_pose_rot6d'], dtype=np.float32).reshape(T, -1)      # (T, 21*6)
-    else:
-        # axis-angle path
-        from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
-            axis_angle_to_matrix,
-            matrix_to_rotation_6d,
-        )
-        go_aa = torch.from_numpy(np.asarray(npz['global_orient'], dtype=np.float32)).reshape(T, 3)
-        bp_aa = torch.from_numpy(np.asarray(npz['body_pose'], dtype=np.float32)).reshape(T, 21, 3)
-
-        go_rotmat = axis_angle_to_matrix(go_aa)
-        bp_rotmat = axis_angle_to_matrix(bp_aa)
-        go = matrix_to_rotation_6d(go_rotmat).numpy().reshape(T, -1)
-        bp = matrix_to_rotation_6d(bp_rotmat).numpy().reshape(T, -1)
-
-    motion135 = np.concatenate([transl, go, bp], axis=-1)
     if motion135.shape[-1] != 135:
         return None
     return motion135.astype(np.float32)
 
 
-def _load_pred_motion(pred_path: Path) -> Optional[np.ndarray]:
+def _load_pred_motion(
+    pred_path: Path,
+    rot6d_convention: str = 'column',
+) -> Optional[np.ndarray]:
     """Load one prediction as (T, 135).
 
     Prediction directories historically stored ``<id>.npy`` arrays. Newer
@@ -229,10 +249,16 @@ def _load_pred_motion(pred_path: Path) -> Optional[np.ndarray]:
             z = np.load(str(pred_path), allow_pickle=True)
         except Exception:
             return None
+        # Prefer axis-angle reconstruction when possible. Several retargeting
+        # scripts saved an older row-major ``motion_135`` while also saving
+        # canonical SMPL axis-angle fields. Reconstructing here keeps GT and
+        # predictions in the same evaluator convention without re-running IK.
+        if {'transl', 'global_orient', 'body_pose'}.issubset(set(z.files)):
+            return _load_smpl22_motion(pred_path, rot6d_convention=rot6d_convention)
         if 'motion_135' in z.files:
             pred = np.asarray(z['motion_135'], dtype=np.float32)
             return pred if pred.ndim == 2 and pred.shape[-1] == 135 else None
-        return _load_smpl22_motion(pred_path)
+        return _load_smpl22_motion(pred_path, rot6d_convention=rot6d_convention)
 
     return None
 
@@ -245,7 +271,8 @@ def load_test_pairs(anno_file: Path,
                     max_frames: int = 360,
                     max_pairs: Optional[int] = None,
                     rewritten_caption_file: Optional[Path] = None,
-                    allowed_names: Optional[set[str]] = None) -> List[Tuple[str, str, np.ndarray, int]]:
+                    allowed_names: Optional[set[str]] = None,
+                    rot6d_convention: str = 'column') -> List[Tuple[str, str, np.ndarray, int]]:
     """Load (name, caption, motion[135], num_frames) pairs from a motionhub anno file.
 
     Supports two layouts:
@@ -296,7 +323,7 @@ def load_test_pairs(anno_file: Path,
             caption = _load_caption(c_path)
             if caption is None:
                 continue
-        motion = _load_smpl22_motion(m_path)
+        motion = _load_smpl22_motion(m_path, rot6d_convention=rot6d_convention)
         if motion is None:
             continue
         T = motion.shape[0]
@@ -461,6 +488,10 @@ def main():
                         '(generate-rewritten + evaluate-rewritten consistent protocol).')
     p.add_argument('--clip_pretrained', default='checkpoints/clip-vit-base-patch32')
     p.add_argument('--stats_file', default='data/statistic/smplx55_stats_hymotion_aug.json')
+    p.add_argument('--rot6d_convention', choices=['row', 'column'], default='column',
+                   help='6D rotation layout used when loading GT SMPL axis-angle motions. '
+                        'The released MotionCLIP evaluator checkpoint is validated with '
+                        'column-major loading; row is kept only for diagnostic reruns.')
 
     p.add_argument('--gt_only', action='store_true',
                    help='Use real motions for both pred and real (sanity check, FID -> 0).')
@@ -508,6 +539,7 @@ def main():
         max_pairs=args.max_pairs,
         rewritten_caption_file=Path(args.rewritten_caption_file) if args.rewritten_caption_file else None,
         allowed_names=allowed_names,
+        rot6d_convention=args.rot6d_convention,
     )
     print(f'    loaded: {len(pairs)} (motion_135-dim, caption) pairs')
     if not pairs:
@@ -543,7 +575,7 @@ def main():
             pred_file = pred_dir / f'{name}.npy'
             if not pred_file.exists():
                 pred_file = pred_dir / f'{name}.npz'
-            pred = _load_pred_motion(pred_file)
+            pred = _load_pred_motion(pred_file, rot6d_convention=args.rot6d_convention)
             if pred is None:
                 continue
             pred_ml = int(pred.shape[0])

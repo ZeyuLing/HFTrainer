@@ -42,6 +42,7 @@ def _motion272_to_motionclip135(
     m272: np.ndarray,
     gt_path: Path | None = None,
     align_mode: str = "yaw",
+    rot6d_convention: str = "column",
 ) -> np.ndarray:
     import torch
 
@@ -80,7 +81,9 @@ def _motion272_to_motionclip135(
             gt_tr0 = torch.from_numpy(np.asarray(gt["transl"], dtype=np.float32)[0])
             root = ((delta @ (root_t - root_t[0]).T).T + gt_tr0).numpy().astype(np.float32)
     rot_t = torch.from_numpy(np.asarray(rot, dtype=np.float32))
-    rot6d = matrix_to_rotation_6d(rot_t, convention="column").numpy()
+    if rot6d_convention not in {"row", "column"}:
+        raise ValueError(f"rot6d_convention must be row/column, got {rot6d_convention!r}")
+    rot6d = matrix_to_rotation_6d(rot_t, convention=rot6d_convention).numpy()
     out = np.concatenate(
         [np.asarray(root, dtype=np.float32), rot6d.reshape(rot6d.shape[0], 22 * 6)],
         axis=-1,
@@ -112,8 +115,8 @@ def _annotation_map(
     return out
 
 
-def _worker(task: tuple[str, str | None, str | None, list[str], str | None, str, bool]) -> tuple[str, str]:
-    src_s, ms_out_s, mc_out_s, anno_names, gt_path_s, align_mode, overwrite = task
+def _worker(task: tuple[str, str | None, str | None, list[str], str | None, str, str, bool]) -> tuple[str, str]:
+    src_s, ms_out_s, mc_out_s, anno_names, gt_path_s, align_mode, rot6d_convention, overwrite = task
     src = Path(src_s)
     try:
         m272 = _load_m272(src)
@@ -127,6 +130,7 @@ def _worker(task: tuple[str, str | None, str | None, list[str], str | None, str,
                 m272,
                 Path(gt_path_s) if gt_path_s else None,
                 align_mode=align_mode,
+                rot6d_convention=rot6d_convention,
             )
             mc_out = Path(mc_out_s)
             mc_out.mkdir(parents=True, exist_ok=True)
@@ -149,6 +153,9 @@ def main() -> None:
     ap.add_argument("--align-to-gt-root", action="store_true",
                     help="Rigidly align converted clips to each sample's GT first-frame root.")
     ap.add_argument("--align-root-mode", choices=["yaw", "full"], default="yaw")
+    ap.add_argument("--rot6d-convention", choices=["row", "column"], default="column",
+                    help="Output 6D rotation layout for MotionCLIP 135D files. "
+                         "MotionCLIP paper evaluator is validated with column-major inputs.")
     ap.add_argument("--include-mirrors", action="store_true", default=True)
     ap.add_argument("--no-include-mirrors", dest="include_mirrors", action="store_false")
     ap.add_argument("--only-mapped", action="store_true",
@@ -181,13 +188,13 @@ def main() -> None:
             for anno_name, gt_path in anno_items:
                 tasks.append((
                     str(src), ms_out, str(mc_dir) if mc_dir else None,
-                    [anno_name], gt_path, args.align_root_mode, args.overwrite,
+                    [anno_name], gt_path, args.align_root_mode, args.rot6d_convention, args.overwrite,
                 ))
         else:
             anno_names = [x[0] for x in anno_items]
             tasks.append((
                 str(src), ms_out, str(mc_dir) if mc_dir else None,
-                anno_names, None, args.align_root_mode, args.overwrite,
+                anno_names, None, args.align_root_mode, args.rot6d_convention, args.overwrite,
             ))
 
     print(

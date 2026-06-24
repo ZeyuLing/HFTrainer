@@ -14,6 +14,11 @@ EVAL_ROOT=${EVAL_ROOT:-outputs/evaluation/${METHOD}_rw_c64_eval0605}
 SMPL_ROOT=${SMPL_ROOT:-outputs/evaluation/${METHOD}_smpl135_fpsfix_0605}
 MC135_ROOT=${MC135_ROOT:-outputs/evaluation/${METHOD}_smpl135_fpsfix_0605_motionclip135}
 NUM_SHARDS=${NUM_SHARDS:-8}
+IFS=',' read -r -a GPU_LIST <<< "${GPUS:-0,1,2,3,4,5,6,7}"
+if [ "${#GPU_LIST[@]}" -eq 0 ]; then
+  echo "GPUS must contain at least one GPU id" >&2
+  exit 1
+fi
 LOGDIR="${EVAL_ROOT}/logs"
 
 mkdir -p "${LOGDIR}" "${EVAL_ROOT}/h3d" "${EVAL_ROOT}/mh" "${SMPL_ROOT}" "${MC135_ROOT}"
@@ -46,7 +51,8 @@ run_retarget_split() {
   local src="$2"
   echo "[${split}-retarget] $(date)" | tee -a "${LOGDIR}/run.log"
   for i in $(seq 0 $((NUM_SHARDS - 1))); do
-    run_ik_shard "${split}" "${src}" "${i}" "${i}" &
+    local gpu="${GPU_LIST[$((i % ${#GPU_LIST[@]}))]}"
+    run_ik_shard "${split}" "${src}" "${gpu}" "${i}" &
   done
   wait
 }
@@ -97,8 +103,8 @@ run_remap_split h3d data/annotation/test_hml3d.json &
 run_remap_split mh data/annotation/test_motionhub_t2m.json &
 wait
 
-run_eval_split h3d data/annotation/test_hml3d.json data/annotation/test_hml3d_rewritten.json 0 &
-run_eval_split mh data/annotation/test_motionhub_t2m.json data/annotation/test_motionhub_t2m_rewritten.json 1 &
+run_eval_split h3d data/annotation/test_hml3d.json data/annotation/test_hml3d_rewritten.json "${GPU_LIST[0]}" &
+run_eval_split mh data/annotation/test_motionhub_t2m.json data/annotation/test_motionhub_t2m_rewritten.json "${GPU_LIST[$((1 % ${#GPU_LIST[@]}))]}" &
 wait
 
 python3 - <<PY | tee "${EVAL_ROOT}/summary.txt"

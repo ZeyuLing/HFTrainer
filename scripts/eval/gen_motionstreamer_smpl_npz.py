@@ -252,7 +252,16 @@ def _load_model(args, device):
 
     t5_path = _resolve_t5_model(MS_ROOT, args.t5_model)
     print(f"[load] SentenceTransformer: {t5_path}", flush=True)
-    t5_model = SentenceTransformer(t5_path)
+    if os.environ.get("T5_FP16_GPU") == "1":
+        # Load fp32 on CPU, cast to fp16, then move to GPU so only ~9.4GB lands on
+        # the device (fits a 15GB T4; fp32 GPU load would OOM). Embeddings are
+        # L2-normalised so the fp16 numerical drift is negligible for conditioning.
+        t5_model = SentenceTransformer(t5_path, device="cpu").half()
+        t5_model = t5_model.to("cuda")
+        t5_model._target_device = torch.device("cuda")
+        print("[load] T5 fp16 on cuda", flush=True)
+    else:
+        t5_model = SentenceTransformer(t5_path)
     t5_model.eval()
     for p in t5_model.parameters():
         p.requires_grad = False
@@ -283,13 +292,19 @@ def _load_model(args, device):
         new_key = ".".join(key.split(".")[1:]) if key.split(".")[0] == "module" else key
         trans_sd[new_key] = value
     trans_encoder.load_state_dict(trans_sd, strict=True)
+    trans_encoder.use_out_proj = bool(getattr(args, "use_out_proj", True))
     trans_encoder.eval().to(device)
     return t5_model, net, trans_encoder
 
 
-def _motion272_to_npz_fields(m272: np.ndarray):
+def _motion272_to_npz_fields(
+    m272: np.ndarray,
+    gt_path: Optional[Path] = None,
+    align_mode: str = "yaw",
+):
     from hftrainer.datasets.motion.representation.humanml_repr import recover_local_rotations_and_root
     from hftrainer.models.motion.components.utils.geometry.rotation_convert import (
+        axis_angle_to_matrix,
         matrix_to_axis_angle,
         matrix_to_rotation_6d,
     )
@@ -297,6 +312,33 @@ def _motion272_to_npz_fields(m272: np.ndarray):
     rot, root = recover_local_rotations_and_root(np.asarray(m272, dtype=np.float32))
     rot = np.asarray(rot, dtype=np.float32)
     root = np.asarray(root, dtype=np.float32)
+    if gt_path is not None and gt_path.exists():
+        gt = np.load(str(gt_path), allow_pickle=True)
+        if "global_orient" in gt.files and "transl" in gt.files:
+            gt_go0 = torch.from_numpy(np.asarray(gt["global_orient"], dtype=np.float32)[:1]).reshape(1, 3)
+            gt_mat0 = axis_angle_to_matrix(gt_go0)[0]
+            pred_mat0 = torch.from_numpy(np.asarray(rot[0, 0], dtype=np.float32))
+            if align_mode == "full":
+                delta = gt_mat0 @ pred_mat0.transpose(0, 1)
+            elif align_mode == "yaw":
+                def yaw_from_mat(mat: torch.Tensor) -> torch.Tensor:
+                    fwd = mat[:, 2]
+                    return torch.atan2(fwd[0], fwd[2])
+
+                yaw = yaw_from_mat(gt_mat0) - yaw_from_mat(pred_mat0)
+                c, s = torch.cos(yaw), torch.sin(yaw)
+                delta = torch.stack([
+                    torch.stack([c, torch.zeros_like(c), s]),
+                    torch.stack([torch.zeros_like(c), torch.ones_like(c), torch.zeros_like(c)]),
+                    torch.stack([-s, torch.zeros_like(c), c]),
+                ])
+            else:
+                raise ValueError(f"unsupported align_mode={align_mode!r}")
+            rot = rot.copy()
+            rot[:, 0] = np.matmul(delta.numpy()[None], rot[:, 0]).astype(np.float32)
+            root_t = torch.from_numpy(root)
+            gt_tr0 = torch.from_numpy(np.asarray(gt["transl"], dtype=np.float32)[0])
+            root = ((delta @ (root_t - root_t[0]).T).T + gt_tr0).numpy().astype(np.float32)
     rot_t = torch.from_numpy(rot)
     d6 = matrix_to_rotation_6d(rot_t, convention="row").numpy().reshape(rot.shape[0], -1)
     aa = matrix_to_axis_angle(rot_t).numpy().astype(np.float32)
@@ -310,8 +352,39 @@ def _motion272_to_npz_fields(m272: np.ndarray):
     }
 
 
+def _fit_motion_length(motion: np.ndarray, target_len: int) -> np.ndarray:
+    """Trim or last-frame-pad a motion array to the exact requested length."""
+    motion = np.asarray(motion, dtype=np.float32)
+    target_len = int(target_len)
+    if motion.shape[0] == target_len:
+        return motion
+    if motion.shape[0] > target_len:
+        return motion[:target_len]
+    if motion.shape[0] <= 0:
+        return motion
+    pad = np.repeat(motion[-1:], target_len - motion.shape[0], axis=0)
+    return np.concatenate([motion, pad], axis=0).astype(np.float32)
+
+
 def _safe_name(name: str) -> str:
     return name.replace("/", "_")
+
+
+def _build_gt_path_map(anno_file: Optional[Path], data_dir: Path) -> Dict[str, Path]:
+    if anno_file is None or not anno_file.exists():
+        return {}
+    raw = _load_json(anno_file)
+    out: Dict[str, Path] = {}
+    for name, entry in _iter_motionhub_entries(raw):
+        smplx_path = entry.get("smplx_path")
+        if not smplx_path:
+            continue
+        path = data_dir / smplx_path
+        out[str(name)] = path
+        stem = Path(str(smplx_path)).stem
+        if stem:
+            out[stem] = path
+    return out
 
 
 def main():
@@ -346,6 +419,9 @@ def main():
     parser.add_argument("--max-motion-length", type=int, default=300,
                         help="Maximum generated frame length before unit-length rounding; "
                              "MotionStreamer HumanML3D eval uses max_motion_length=300.")
+    parser.add_argument("--align-to-gt-root", action="store_true",
+                        help="Align the decoded 272 motion to each paired GT first-frame root before saving SMPL fields.")
+    parser.add_argument("--align-root-mode", choices=["yaw", "full"], default="yaw")
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--hidden_size", default=1024, type=int)
@@ -355,6 +431,8 @@ def main():
     parser.add_argument("--dilation-growth-rate", type=int, default=3)
     parser.add_argument("--num_diffusion_head_layers", type=int, default=9)
     parser.add_argument("--latent_dim", type=int, default=16)
+    parser.add_argument("--disable-out-proj", dest="use_out_proj", action="store_false")
+    parser.set_defaults(use_out_proj=True)
     args = parser.parse_args()
 
     if not (0 <= args.shard_index < args.num_shards):
@@ -416,6 +494,7 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     meta_path = out_dir / f"manifest_shard{args.shard_index}of{args.num_shards}.jsonl"
+    gt_path_map = _build_gt_path_map(anno_file, Path(args.data_dir)) if args.align_to_gt_root else {}
 
     t5_model, net, trans_encoder = _load_model(args, device)
     reference_end_latent = None
@@ -433,7 +512,7 @@ def main():
                     skipped += 1
                     continue
                 try:
-                    if args.dataset == "humanml3d" and args.humanml3d_protocol == "official_eval":
+                    if args.dataset == "humanml3d":
                         capped_target_len = int(target_len)
                     else:
                         capped_target_len = min(int(target_len), int(args.max_motion_length))
@@ -463,7 +542,13 @@ def main():
                     motion_norm = net.forward_decoder(latents).squeeze(0).detach().cpu().numpy()
                     motion_norm = motion_norm[:eval_len]
                     motion_272 = (motion_norm * std + mean).astype(np.float32)
-                    fields = _motion272_to_npz_fields(motion_272)
+                    motion_272 = _fit_motion_length(motion_272, capped_target_len)
+                    gt_path = gt_path_map.get(name) if args.align_to_gt_root else None
+                    fields = _motion272_to_npz_fields(
+                        motion_272,
+                        gt_path=gt_path,
+                        align_mode=args.align_root_mode,
+                    )
                     np.savez_compressed(
                         out_path,
                         **fields,
@@ -474,6 +559,9 @@ def main():
                         generated_length=int(motion_272.shape[0]),
                         caption_protocol=args.caption_protocol,
                         dataset=args.dataset,
+                        aligned_to_gt_root=bool(gt_path is not None),
+                        align_root_mode=args.align_root_mode if gt_path is not None else "",
+                        motionstreamer_use_out_proj=bool(args.use_out_proj),
                     )
                     meta_f.write(json.dumps({
                         "sample_id": name,
@@ -482,6 +570,8 @@ def main():
                         "target_length": int(target_len),
                         "generated_length": int(motion_272.shape[0]),
                         "capped_target_length": int(capped_target_len),
+                        "gt_path": str(gt_path) if gt_path is not None else "",
+                        "motionstreamer_use_out_proj": bool(args.use_out_proj),
                     }, ensure_ascii=False) + "\n")
                     meta_f.flush()
                     ok += 1

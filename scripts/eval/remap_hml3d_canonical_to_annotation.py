@@ -55,7 +55,7 @@ def main() -> None:
         if args.copy:
             shutil.copy2(src, dst)
         else:
-            os.symlink(src, dst)
+            os.symlink(os.path.relpath(src, dst.parent), dst)
         linked += 1
 
     print(

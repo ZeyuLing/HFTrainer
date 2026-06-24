@@ -29,9 +29,11 @@ def build_start_cmd(num_gpus: int, max_samples: int | None,
                     shard_offset: int = 0,
                     infer_only: bool = False,
                     eval_only: bool = False,
-                    log_tag: str | None = None):
-    out263 = "outputs/evaluation/humanml3d_hml3d263_fixed_stats/flowmdm"
-    out272 = "outputs/evaluation/humanml3d/flowmdm"
+                    log_tag: str | None = None,
+                    out_tag: str | None = None):
+    tag_suffix = f"_{out_tag}" if out_tag else ""
+    out263 = f"outputs/evaluation/humanml3d_hml3d263_fixed_stats{tag_suffix}/flowmdm"
+    out272 = f"outputs/evaluation/humanml3d{tag_suffix}/flowmdm"
     logs = f"{out272}/_logs"
     cap = f"--max-samples {max_samples} " if max_samples else ""
     tag = "smoke" if smoke else "full"
@@ -115,6 +117,8 @@ def main():
     parser.add_argument("--infer-only", action="store_true")
     parser.add_argument("--eval-only", action="store_true")
     parser.add_argument("--log-tag", default=None)
+    parser.add_argument("--out-tag", default=None,
+                        help="Optional suffix for fresh output roots, e.g. 0605b.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -129,7 +133,8 @@ def main():
         shard_offset=args.shard_offset,
         infer_only=args.infer_only,
         eval_only=args.eval_only,
-        log_tag=args.log_tag)
+        log_tag=args.log_tag,
+        out_tag=args.out_tag)
     print(f"\n{'=' * 60}\nJob: {task_flag} ({args.num_gpus}x{args.gpu})\n{'=' * 60}")
     print(start_cmd[:800] + " ...\n")
     if args.dry_run:

@@ -147,11 +147,11 @@ def build_args():
     parser.add_argument("--out_dir", required=True)
     parser.add_argument(
         "--mean_path",
-        default="ref_repo/Momask/weights/t2m/rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/mean.npy",
+        default="ref_repo/MDM/save/humanml_enc_512_50steps/Mean.npy",
     )
     parser.add_argument(
         "--std_path",
-        default="ref_repo/Momask/weights/t2m/rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/std.npy",
+        default="ref_repo/MDM/save/humanml_enc_512_50steps/Std.npy",
     )
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_index", type=int, default=0)

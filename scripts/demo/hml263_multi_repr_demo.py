@@ -136,7 +136,7 @@ def _save_verts(out_dir: Path, sid: str, rep: str, verts: np.ndarray) -> str:
 # --------------------------------------------------------------------------- #
 class SMPLMesh:
     def __init__(self, model_dir: Path, device: str):
-        from hftrainer.models.motion.components.retarget.smpl_soma import (
+        from hftrainer.motion.retarget.smpl_soma import (
             _import_smplx,
             _resolve_smpl_model_dir,
         )
@@ -309,11 +309,11 @@ class G1GMR:
 # --------------------------------------------------------------------------- #
 # build a single case
 # --------------------------------------------------------------------------- #
-def build_case(feats, text, sid, device, out_dir, smpl_mesh, soma_mesh, g1) -> dict:
+def build_case(feats, text, sid, device, out_dir, smpl_mesh, soma_mesh, g1, refine_iters=0) -> dict:
     from hftrainer.motion.representation import convert
     from hftrainer.motion.retarget.hml263_smpl import retarget_hml263_clip
     from hftrainer.motion.retarget import smpl_soma30_roundtrip, SMPL22_PARENTS
-    from hftrainer.models.motion.components.retarget import SMPL_JOINT_NAMES
+    from hftrainer.motion.retarget import SMPL_JOINT_NAMES
 
     reps = []
     smpl_faces_b64 = _b64(smpl_mesh.faces.astype(np.int32))
@@ -331,7 +331,7 @@ def build_case(feats, text, sid, device, out_dir, smpl_mesh, soma_mesh, g1) -> d
     })
 
     # 2. HML263 -> SMPL motion_135 (IK) -> SMPL mesh (30 fps)
-    ik = retarget_hml263_clip(feats, device=device, refine_iters=0)
+    ik = retarget_hml263_clip(feats, device=device, refine_iters=refine_iters)
     m135 = ik["motion_135"]
     fit_mm = float(np.mean(ik["fit_mpjpe_mm"]))
     smpl_v = smpl_mesh.vertices(ik["global_orient"], ik["body_pose"], ik["transl"])
@@ -369,14 +369,15 @@ def build_case(feats, text, sid, device, out_dir, smpl_mesh, soma_mesh, g1) -> d
         "info": f"{smpl_from_soma_v.shape[0]} frames @30fps · round-trip joint err = {rt_mm:.1f} mm",
     })
 
-    # 5. SMPL motion_135 -> SMPL-X -> GMR -> G1 robot mesh
-    g1_data = g1.robot_frames(ik["global_orient"], ik["body_pose"], ik["transl"], 30, sid)
-    reps.append({
-        "name": "g1", "type": "robot", "label": "Unitree G1 (GMR mink IK retarget)",
-        "fps": 30, "color": "#c4b5fd", "num_frames": g1_data["num_frames"],
-        "bodies": g1_data["bodies"], "frames": g1_data["frames"],
-        "info": f"{g1_data['num_frames']} frames @30fps · {g1_data['num_bodies']} G1 links (GMR)",
-    })
+    # 5. SMPL motion_135 -> SMPL-X -> GMR -> G1 robot mesh (optional)
+    if g1 is not None:
+        g1_data = g1.robot_frames(ik["global_orient"], ik["body_pose"], ik["transl"], 30, sid)
+        reps.append({
+            "name": "g1", "type": "robot", "label": "Unitree G1 (GMR mink IK retarget)",
+            "fps": 30, "color": "#c4b5fd", "num_frames": g1_data["num_frames"],
+            "bodies": g1_data["bodies"], "frames": g1_data["frames"],
+            "info": f"{g1_data['num_frames']} frames @30fps · {g1_data['num_bodies']} G1 links (GMR)",
+        })
 
     return {"id": sid, "text": text, "reps": reps}
 
@@ -415,6 +416,8 @@ def main():
     ap.add_argument("--num-cases", type=int, default=3)
     ap.add_argument("--max-frames", type=int, default=120)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--id-prefix", default="", help="prefix for case ids (read files by bare stem; keeps GT cases distinct)")
+    ap.add_argument("--refine-iters", type=int, default=0, help="IK Adam refine iters (match the eval pipeline, e.g. 80)")
     args = ap.parse_args()
 
     import torch
@@ -431,28 +434,44 @@ def main():
     _bootstrap_kimodo_skeleton()
     smpl_mesh = SMPLMesh(SMPL_MODEL_DIR, device)
     soma_mesh = SOMAMesh(SOMA_SKIN, device)
-    g1 = G1GMR(G1_MJCF, out_dir / "g1_work")
-    print("[setup] SMPL / SOMA / G1(GMR) backends ready", flush=True)
+    try:
+        g1 = G1GMR(G1_MJCF, out_dir / "g1_work")
+        print("[setup] SMPL / SOMA / G1(GMR) backends ready", flush=True)
+    except Exception as e:  # noqa: BLE001
+        g1 = None
+        print(f"[setup] SMPL / SOMA ready; G1(GMR) backend unavailable, skipping ({e})", flush=True)
 
-    index = []
-    for sid in ids:
-        feats = np.load(in_dir / f"{sid}.npy").astype(np.float32)
+    new_cases = []
+    for stem in ids:
+        feats = np.load(in_dir / f"{stem}.npy").astype(np.float32)
         if feats.shape[0] > args.max_frames:
             feats = feats[: args.max_frames]
-        text = read_text(sid, text_dir)
-        print(f"[case] {sid}: T={feats.shape[0]} text={text!r}", flush=True)
-        case = build_case(feats, text, sid, device, out_dir, smpl_mesh, soma_mesh, g1)
-        (out_dir / f"case_{sid}.json").write_text(json.dumps(case))
-        index.append({
-            "id": sid, "text": text,
+        text = read_text(stem, text_dir)
+        disp = f"{args.id_prefix}{stem}"
+        print(f"[case] {disp}: T={feats.shape[0]} text={text!r}", flush=True)
+        case = build_case(feats, text, disp, device, out_dir, smpl_mesh, soma_mesh, g1,
+                          refine_iters=args.refine_iters)
+        (out_dir / f"case_{disp}.json").write_text(json.dumps(case))
+        new_cases.append({
+            "id": disp, "text": text,
             "reps": [{"name": r["name"], "type": r["type"], "label": r["label"], "info": r["info"]}
                      for r in case["reps"]],
         })
         for r in case["reps"]:
             print(f"    - {r['name']:<16} [{r['type']:<8}] {r['info']}", flush=True)
 
-    (out_dir / "index.json").write_text(json.dumps({"cases": index}, indent=2))
-    print(f"[done] wrote {len(index)} cases -> {out_dir}", flush=True)
+    # merge into existing index.json (replace same-id, keep others) so multiple runs coexist
+    index_path = out_dir / "index.json"
+    existing = []
+    if index_path.exists():
+        try:
+            existing = json.loads(index_path.read_text()).get("cases", [])
+        except Exception:
+            existing = []
+    new_ids = {c["id"] for c in new_cases}
+    merged = [c for c in existing if c.get("id") not in new_ids] + new_cases
+    index_path.write_text(json.dumps({"cases": merged}, indent=2))
+    print(f"[done] wrote {len(new_cases)} cases ({len(merged)} total) -> {out_dir}", flush=True)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import os
 import random
 import re
 import sys
+import types
 from pathlib import Path
 from typing import Iterable
 
@@ -39,6 +40,35 @@ def force_untied_t5_lm_head() -> None:
 
     from_pretrained_untied._motiongpt_untied = True
     T5ForConditionalGeneration.from_pretrained = from_pretrained_untied
+
+
+def install_dummy_mgpt_metrics() -> None:
+    """Avoid optional text-metric dependencies during pure generation."""
+    if "mGPT.metrics" in sys.modules:
+        return
+
+    class _DummyBaseMetrics(torch.nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+    metrics_mod = types.ModuleType("mGPT.metrics")
+    metrics_mod.BaseMetrics = _DummyBaseMetrics
+    sys.modules["mGPT.metrics"] = metrics_mod
+
+
+def repair_t5_shared_embeddings(language_model) -> None:
+    """Keep T5 encoder/decoder token embeddings tied while leaving lm_head untied."""
+    shared = getattr(language_model, "shared", None)
+    if shared is None:
+        return
+    repaired = []
+    for stack_name in ("encoder", "decoder"):
+        stack = getattr(language_model, stack_name, None)
+        if stack is not None and hasattr(stack, "embed_tokens"):
+            stack.embed_tokens = shared
+            repaired.append(f"{stack_name}.embed_tokens")
+    if repaired:
+        print(f"[repair] tied {'/'.join(repaired)} to language_model.shared", flush=True)
 
 
 def iter_entries(raw) -> Iterable[tuple[str, dict]]:
@@ -178,6 +208,11 @@ def main() -> None:
     parser.add_argument("--debug-generations", action="store_true")
     parser.add_argument("--tie-word-embeddings", action="store_true",
                         help="Keep the default T5 tied input/output embeddings. This is incorrect for the released MotionGPT checkpoint.")
+    parser.add_argument(
+        "--restore-t5-logit-scale",
+        action="store_true",
+        help="Keep the untied released lm_head, but restore T5's tied-embedding logit scaling during generation.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-existing", action="store_true")
     args = parser.parse_args()
@@ -214,6 +249,7 @@ def main() -> None:
         force_untied_t5_lm_head()
 
     os.chdir(MOTIONGPT_ROOT)
+    install_dummy_mgpt_metrics()
     from mGPT.models.base import BaseModel  # noqa: WPS433
     BaseModel.configure_metrics = lambda self: setattr(self, "metrics", torch.nn.Module())
     from mGPT.models.build_model import build_model  # noqa: WPS433
@@ -226,9 +262,13 @@ def main() -> None:
     if load_result is not None:
         missing, unexpected = load_result
         print(f"[load] missing={len(missing)} unexpected={len(unexpected)}", flush=True)
+    if not args.tie_word_embeddings and hasattr(model.lm, "language_model"):
+        repair_t5_shared_embeddings(model.lm.language_model)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
+    if args.restore_t5_logit_scale and hasattr(model.lm, "language_model"):
+        model.lm.language_model.config.tie_word_embeddings = True
 
     instructions = json.loads(Path(args.instruction_file).read_text())
     t2m_tasks = instructions["Text-to-Motion"][args.instruction_key]
@@ -251,28 +291,23 @@ def main() -> None:
             return repaired
 
         if args.prompt_mode == "official_nolen":
-            tasks = [{"input": ["Generate motion: <Caption_Placeholder>"], "output": [""]}] * len(texts)
-            prompts, _ = model.lm.template_fulfill(
-                tasks,
-                [0] * len(texts),
-                [""] * len(texts),
-                texts,
+            return model.lm.generate_conditional(
+                texts=texts,
+                lengths=lengths,
+                task="t2m",
+                with_len=False,
                 stage="test",
+                tasks=None,
             )
-            return _generate_from_prompts(prompts)
         if args.prompt_mode == "official_len":
-            tasks = [{
-                "input": ["Generate motion with <Frame_Placeholder> frames: <Caption_Placeholder>"],
-                "output": [""],
-            }] * len(texts)
-            prompts, _ = model.lm.template_fulfill(
-                tasks,
-                lengths,
-                [""] * len(texts),
-                texts,
+            return model.lm.generate_conditional(
+                texts=texts,
+                lengths=lengths,
+                task="t2m",
+                with_len=True,
                 stage="test",
+                tasks=None,
             )
-            return _generate_from_prompts(prompts)
         if args.prompt_mode == "instruction":
             tasks = [t2m_tasks] * len(texts)
             motion_strings = [""] * len(texts)

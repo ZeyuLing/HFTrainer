@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HyMotion V2M — SMPL Mesh Viewer</title>
+<style>
+  :root { --bg:#0d1014; --panel:#161b22; --fg:#e6edf3; --accent:#3fb950; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif; }
+  header { padding:10px 16px; font-size:14px; border-bottom:1px solid #21262d;
+    display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header b { color:var(--accent); }
+  #stage { display:flex; height:calc(100% - 96px); }
+  .pane { flex:1; min-width:0; position:relative; }
+  .pane.left { border-right:1px solid #21262d; display:flex; align-items:center; justify-content:center; background:#000; }
+  #vidwrap { position:relative; display:inline-block; max-width:100%; max-height:100%; line-height:0; }
+  video { display:block; max-width:100%; max-height:100%; }
+  #bboxOverlay { position:absolute; left:0; top:0; pointer-events:none; }
+  #gl { width:100%; height:100%; display:block; }
+  .label { position:absolute; top:8px; left:10px; font-size:12px; color:#8b949e;
+    background:rgba(0,0,0,.45); padding:2px 8px; border-radius:4px; }
+  footer { height:56px; display:flex; align-items:center; gap:14px; padding:0 16px;
+    border-top:1px solid #21262d; background:var(--panel); }
+  button { background:#21262d; color:var(--fg); border:1px solid #30363d;
+    border-radius:6px; padding:6px 14px; cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); }
+  input[type=range] { flex:1; accent-color:var(--accent); }
+  #frame { font-variant-numeric: tabular-nums; min-width:96px; font-size:13px; color:#8b949e; }
+  label.chk { font-size:12px; color:#8b949e; display:flex; align-items:center; gap:5px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <span><b>HyMotion V2M</b> · SMPL-H Mesh</span>
+  <span id="meta">loading…</span>
+  <label class="chk"><input type="checkbox" id="bbox" checked /> 追踪框</label>
+  <label class="chk"><input type="checkbox" id="wire" /> wireframe</label>
+  <label class="chk"><input type="checkbox" id="rot" /> auto-rotate</label>
+  <span style="color:#8b949e;font-size:12px;">拖拽旋转 · 滚轮缩放 · 右键平移</span>
+</header>
+
+<div id="stage">
+  <div class="pane left"><div class="label">原视频 + 人体追踪框</div>
+    <div id="vidwrap"><video id="vid" muted playsinline loop></video><canvas id="bboxOverlay"></canvas></div>
+  </div>
+  <div class="pane"><div class="label">预测 SMPL Mesh</div><canvas id="gl"></canvas></div>
+</div>
+
+<footer>
+  <button id="play">⏸ 暂停</button>
+  <input type="range" id="seek" min="0" max="0" value="0" step="1" />
+  <span id="frame">0 / 0</span>
+</footer>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const canvas = document.getElementById('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1014);
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+
+// lights
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223044, 0.85));
+const key = new THREE.DirectionalLight(0xffffff, 1.4);
+key.position.set(2, 4, 3); key.castShadow = true;
+key.shadow.mapSize.set(1024,1024); scene.add(key);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.5); fill.position.set(-3,2,-2); scene.add(fill);
+
+let body, posAttr, baseVerts, V, T, FPS, frames;
+let playing = true, t0 = performance.now(), startFrame = 0;
+const seek = document.getElementById('seek');
+const frameLbl = document.getElementById('frame');
+const vid = document.getElementById('vid');
+
+// ---- human tracking box overlay (left video pane) ----
+const bboxCanvas = document.getElementById('bboxOverlay');
+const bctx = bboxCanvas.getContext('2d');
+let bboxData = null;  // { boxes, video_width, video_height, start_frame, end_frame }
+async function loadBbox(){
+  try { bboxData = await (await fetch('bbox.json')).json(); }
+  catch(e){ bboxData = null; }
+}
+function drawBbox(f){
+  const w = vid.clientWidth, h = vid.clientHeight;
+  if (bboxCanvas.width !== w || bboxCanvas.height !== h){ bboxCanvas.width = w; bboxCanvas.height = h; }
+  bctx.clearRect(0,0,w,h);
+  if (!bboxData || !document.getElementById('bbox').checked) return;
+  const nb = bboxData.boxes.length;
+  let i = f - (bboxData.start_frame || 0);
+  if (i < 0 || i >= nb) return;
+  const vw = bboxData.video_width || vid.videoWidth || w;
+  const vh = bboxData.video_height || vid.videoHeight || h;
+  const sx = w / vw, sy = h / vh;
+  const [x1,y1,x2,y2] = bboxData.boxes[i];
+  bctx.lineWidth = Math.max(2, w*0.004);
+  bctx.strokeStyle = '#3fb950';
+  bctx.strokeRect(x1*sx, y1*sy, (x2-x1)*sx, (y2-y1)*sy);
+  bctx.fillStyle = 'rgba(63,185,80,0.85)';
+  const lbl = 'tracked person';
+  bctx.font = `${Math.max(11, w*0.018)}px sans-serif`;
+  const tw = bctx.measureText(lbl).width + 8;
+  const ty = Math.max(0, y1*sy - Math.max(14, w*0.022));
+  bctx.fillRect(x1*sx, ty, tw, Math.max(14, w*0.022));
+  bctx.fillStyle = '#0d1014';
+  bctx.fillText(lbl, x1*sx + 4, ty + Math.max(11, w*0.018));
+}
+
+function resize(){
+  const p = canvas.parentElement.getBoundingClientRect();
+  renderer.setSize(p.width, p.height, false);
+  camera.aspect = p.width / p.height; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+async function load(){
+  const meta = await (await fetch('meta.json')).json();
+  T = meta.num_frames; V = meta.num_vertices; FPS = meta.fps;
+  document.getElementById('meta').textContent =
+    `${T} 帧 · ${V} 顶点 · ${meta.num_faces} 面 · ${FPS}fps`;
+  seek.max = T - 1;
+
+  const fbuf = await (await fetch('faces.bin')).arrayBuffer();
+  const faces = new Uint32Array(fbuf);
+  const vbuf = await (await fetch('mesh.bin')).arrayBuffer();
+  frames = new Float32Array(vbuf);   // T*V*3
+
+  // The motion is grounded so feet sit near the floor plane. SMPL world is
+  // y-up here; we put a ground grid at y=min and look from the front.
+  const geo = new THREE.BufferGeometry();
+  baseVerts = new Float32Array(V * 3);
+  posAttr = new THREE.BufferAttribute(baseVerts, 3);
+  posAttr.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', posAttr);
+  geo.setIndex(new THREE.BufferAttribute(faces, 1));
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x6fb1ff, roughness:0.65, metalness:0.0,
+    side: THREE.DoubleSide, flatShading:false });
+  body = new THREE.Mesh(geo, mat);
+  body.castShadow = true; body.receiveShadow = true;
+  scene.add(body);
+
+  // ground
+  const bmin = meta.bbox_min, bmax = meta.bbox_max;
+  const floorY = bmin[1];
+  const cx = (bmin[0]+bmax[0])/2, cz = (bmin[2]+bmax[2])/2;
+  const grid = new THREE.GridHelper(6, 24, 0x30363d, 0x21262d);
+  grid.position.set(cx, floorY, cz);
+  scene.add(grid);
+  const shadowPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(6,6),
+    new THREE.ShadowMaterial({ opacity:0.28 }));
+  shadowPlane.rotation.x = -Math.PI/2;
+  shadowPlane.position.set(cx, floorY, cz); shadowPlane.receiveShadow = true;
+  scene.add(shadowPlane);
+
+  // frame the subject
+  const cy = (bmin[1]+bmax[1])/2;
+  const h = Math.max(bmax[1]-bmin[1], 1.2);
+  controls.target.set(cx, cy, cz);
+  camera.position.set(cx, cy + 0.2, cz + h*2.2);
+  camera.near = 0.01; camera.far = 100; camera.updateProjectionMatrix();
+
+  setFrame(0);
+  resize();
+  animate();
+}
+
+// Update mesh + tracking box for frame f.  The VIDEO is the master clock:
+// during playback we read f from the video so the box always matches the frame
+// actually on screen; only scrubbing writes back to video.currentTime.
+function setFrame(f, syncVideo){
+  f = Math.max(0, Math.min(T - 1, f | 0));
+  const off = f * V * 3;
+  baseVerts.set(frames.subarray(off, off + V*3));
+  posAttr.needsUpdate = true;
+  body.geometry.computeVertexNormals();
+  body.geometry.computeBoundingSphere();
+  seek.value = f;
+  frameLbl.textContent = `${f} / ${T-1}`;
+  if (syncVideo && vid.readyState >= 1 && isFinite(vid.duration)) {
+    vid.currentTime = Math.min(f / FPS, vid.duration - 1e-3);
+  }
+  drawBbox(f);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.autoRotate = document.getElementById('rot').checked;
+  controls.autoRotateSpeed = 1.2;
+  body.material.wireframe = document.getElementById('wire').checked;
+  if (playing && vid.readyState >= 2){
+    // tracked range is the first T frames; loop within it even if the mp4 is longer
+    if (vid.currentTime * FPS >= T - 0.5){ vid.currentTime = 0; }
+    setFrame(Math.round(vid.currentTime * FPS), false);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+document.getElementById('play').onclick = (e)=>{
+  playing = !playing;
+  e.target.textContent = playing ? '⏸ 暂停' : '▶ 播放';
+  if (playing) vid.play(); else vid.pause();
+};
+seek.oninput = ()=>{
+  playing = false; document.getElementById('play').textContent = '▶ 播放';
+  vid.pause(); setFrame(parseInt(seek.value), true);
+};
+// when a scrub seek lands, refresh box against the freshly displayed frame
+vid.addEventListener('seeked', ()=>{ if (!playing) setFrame(Math.round(vid.currentTime * FPS), false); });
+
+vid.src = 'video.mp4';
+vid.play().catch(()=>{});
+vid.addEventListener('loadedmetadata', ()=> drawBbox(parseInt(seek.value)||0));
+window.addEventListener('resize', ()=> drawBbox(parseInt(seek.value)||0));
+document.getElementById('bbox').addEventListener('change', ()=> drawBbox(parseInt(seek.value)||0));
+loadBbox().then(load);
+</script>
+</body>
+</html>

@@ -23,9 +23,11 @@ RECON_ROOT = f"{NODE_PROJ}/work_dirs/h3d263_eval/h3d263_test_recon_fk"
 
 
 def build_start_cmd(num_gpus: int, batch_size: int, max_samples: int | None,
-                    num_repeats: int, smoke: bool, use_cache: bool = True):
-    out263 = "outputs/evaluation/humanml3d_hml3d263_fixed_stats/motionlab"
-    out272 = "outputs/evaluation/humanml3d/motionlab"
+                    num_repeats: int, smoke: bool, use_cache: bool = True,
+                    out_tag: str | None = None):
+    tag_suffix = f"_{out_tag}" if out_tag else ""
+    out263 = f"outputs/evaluation/humanml3d_hml3d263_fixed_stats{tag_suffix}/motionlab"
+    out272 = f"outputs/evaluation/humanml3d{tag_suffix}/motionlab"
     logs = f"{out272}/_logs"
     cap = f"--max-samples {max_samples} " if max_samples else ""
     tag = "smoke" if smoke else "full"
@@ -99,6 +101,8 @@ def main():
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--flag-suffix", default="")
     parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--out-tag", default=None,
+                        help="Optional suffix for fresh output roots, e.g. 0605b.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -108,7 +112,8 @@ def main():
     task_flag = f"motionlab_t2m272_{'smoke' if args.smoke else 'full'}{args.flag_suffix}"
     start_cmd = build_start_cmd(args.num_gpus, args.batch_size, max_samples,
                                 args.num_repeats, args.smoke,
-                                use_cache=not args.no_cache)
+                                use_cache=not args.no_cache,
+                                out_tag=args.out_tag)
     print(f"\n{'=' * 60}\nJob: {task_flag} ({args.num_gpus}x{args.gpu})\n{'=' * 60}")
     print(start_cmd[:800] + " ...\n")
     if args.dry_run:

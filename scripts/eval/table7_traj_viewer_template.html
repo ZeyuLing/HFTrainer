@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Table7 Trajectory SMPL Viewer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #0a0c12; color: #e8ecf3; }
+    .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 14px;
+           background: #12151d; border-bottom: 1px solid #2a3142; }
+    select, button { background: #1a2030; color: #e8ecf3; border: 1px solid #3a455c; border-radius: 6px; padding: 6px 10px; }
+    .legend { display: flex; gap: 14px; font-size: 12px; color: #aab4c8; margin-left: auto; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(300px, 1fr);
+            gap: 10px; padding: 10px; height: calc(100vh - 96px); overflow-y: auto; }
+    .panel { position: relative; background: #10141c; border: 1px solid #2a3142; border-radius: 8px; overflow: hidden; min-height: 300px; }
+    .panel h3 { position: absolute; top: 8px; left: 10px; z-index: 2; margin: 0; font-size: 13px; font-weight: 700;
+                padding: 4px 10px; border-radius: 999px; background: rgba(0,0,0,0.55); }
+    canvas { width: 100%; height: 100%; display: block; }
+    .caption { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 8px 10px; font-size: 11px;
+               color: #aab4c8; background: linear-gradient(transparent, rgba(0,0,0,0.75)); max-height: 72px; overflow: auto; }
+    .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+               background: rgba(10,12,18,0.82); color: #9aa7bd; z-index: 3; font-size: 13px; }
+    .err { color: #ff8a8a; }
+    .controls { padding: 8px 14px 12px; display: flex; gap: 12px; align-items: center; background: #12151d; border-top: 1px solid #2a3142; }
+    #frameSlider { flex: 1; accent-color: #4da3ff; }
+    #frameInfo { min-width: 90px; font-family: ui-monospace, monospace; font-size: 12px; color: #9aa7bd; }
+  </style>
+  <script type="importmap">
+  { "imports": {
+      "three": "/static/three/three.module.js",
+      "three/addons/": "/static/three/jsm/"
+  }}
+  </script>
+</head>
+<body>
+  <div class="bar">
+    <strong>Table 7 · Trajectory control</strong>
+    <label>Setting <select id="setting"></select></label>
+    <label>Case <select id="case"></select></label>
+    <label><input type="checkbox" id="smooth" checked> Smooth</label>
+    <button id="reload">Reload</button>
+    <div class="legend">
+      <span><i class="dot" style="background:#3b82f6"></i>Condition path</span>
+      <span><i class="dot" style="background:#f59e0b"></i>Pelvis path</span>
+      <span><i class="dot" style="background:#3b82f6;border-radius:2px"></i>Waypoint</span>
+    </div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="controls">
+    <button id="playBtn">Play</button>
+    <input id="frameSlider" type="range" min="0" max="0" value="0">
+    <span id="frameInfo">0 / 0</span>
+  </div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { load_smpl_with_shapes } from '/static/scripts3d/load_smpl.js';
+
+const COLOR_COND = 0x3b82f6;
+const COLOR_SELF = 0xf59e0b;
+
+let PANELS = [];
+let setting = '', caseId = '';
+let numFrames = 0, currentFrame = 0, playing = false, lastTime = 0;
+const viewers = {};
+const smplCache = {};
+const _axis = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+
+function makePanel(p) {
+  const el = document.createElement('div');
+  el.className = 'panel';
+  el.innerHTML = `
+    <h3 style="color:${p.color}">${p.label}</h3>
+    <div class="loading" id="load_${p.key}">Loading…</div>
+    <canvas id="cv_${p.key}"></canvas>
+    <div class="caption" id="cap_${p.key}"></div>`;
+  return el;
+}
+
+function initViewer(key) {
+  const canvas = document.getElementById(`cv_${key}`);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0c12);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+  camera.position.set(3.0, 2.2, 4.2);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.target.set(0, 0.9, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.85);
+  dl.position.set(4, 8, 5);
+  scene.add(dl);
+  const grid = new THREE.GridHelper(12, 24, 0x2a3142, 0x222838);
+  grid.material.opacity = 0.35; grid.material.transparent = true;
+  scene.add(grid);
+  viewers[key] = {
+    scene, camera, renderer, controls,
+    smplMesh: null, smplBones: null, smplSkeleton: null, smplEdges: null,
+    groundOffset: 0, smplData: null,
+    condLine: null, selfLine: null, wpGroup: null,
+  };
+  resizeViewer(key);
+}
+
+function resizeViewer(key) {
+  const vs = viewers[key];
+  if (!vs || !vs.renderer) return;
+  const canvas = vs.renderer.domElement;
+  const parent = canvas.parentElement;
+  const w = Math.max(parent.clientWidth, 1);
+  const h = Math.max(parent.clientHeight, 1);
+  vs.camera.aspect = w / h;
+  vs.camera.updateProjectionMatrix();
+  vs.renderer.setSize(w, h, false);
+  vs.renderer.render(vs.scene, vs.camera);
+}
+
+function resizeAll() { PANELS.forEach(p => resizeViewer(p.key)); }
+
+const SMPLH_EDGES = [-1,0,0,0,1,2,3,4,5,6,7,8,9,9,9,12,13,14,16,17,18,19,20,22,23,20,25,26,20,28,29,20,31,32,20,34,35,21,37,38,21,40,41,21,43,44,21,46,47,21,49,50];
+
+function drawSMPLFrame(vs, frameIdx) {
+  const smplData = vs.smplData;
+  if (!smplData || !vs.smplBones) return;
+  const frame = smplData.frames[frameIdx];
+  if (!frame || !frame[0]) return;
+  const p = frame[0];
+  if (p.Rh && p.Rh[0]) {
+    _axis.set(p.Rh[0][0], p.Rh[0][1], p.Rh[0][2]);
+    const angle = _axis.length();
+    if (angle > 1e-8) { _axis.normalize(); _quat.setFromAxisAngle(_axis, angle); }
+    else _quat.identity();
+    vs.smplBones[0].quaternion.copy(_quat);
+  }
+  if (p.Th && p.Th[0]) {
+    vs.smplBones[0].position.set(p.Th[0][0], p.Th[0][1], p.Th[0][2]);
+  }
+  const poses = p.poses[0];
+  const numJ = vs.smplEdges.length;
+  const off = (poses && poses.length === (numJ - 1) * 3) ? -3 : 0;
+  for (let i = 1; i < numJ && i < vs.smplBones.length; i++) {
+    const base = off + 3 * i;
+    if (base < 0 || base + 2 >= poses.length) continue;
+    _axis.set(poses[base], poses[base+1], poses[base+2]);
+    const angle = _axis.length();
+    if (angle > 1e-8) { _axis.normalize(); _quat.setFromAxisAngle(_axis, angle); }
+    else _quat.identity();
+    vs.smplBones[i].quaternion.copy(_quat);
+  }
+  vs.smplMesh?.updateMatrixWorld(true);
+}
+
+function recomputeSMPLGround(vs) {
+  if (!vs.smplMesh || !vs.smplData?.frames || !vs.smplSkeleton) return;
+  let minY = Infinity;
+  const step = Math.max(1, Math.floor(vs.smplData.frames.length / 20));
+  for (let f = 0; f < vs.smplData.frames.length; f += step) {
+    drawSMPLFrame(vs, f);
+    vs.smplMesh.updateMatrixWorld(true);
+    const posAttr = vs.smplMesh.geometry.attributes.position;
+    const skinIndex = vs.smplMesh.geometry.attributes.skinIndex;
+    const skinWeight = vs.smplMesh.geometry.attributes.skinWeight;
+    if (!skinIndex || !skinWeight) break;
+    const sampleStride = Math.max(1, Math.floor(posAttr.count / 500));
+    const boneMatrices = vs.smplSkeleton.bones.map(b => { b.updateMatrixWorld(true); return b.matrixWorld; });
+    const invBind = vs.smplSkeleton.boneInverses;
+    for (let i = 0; i < posAttr.count; i += sampleStride) {
+      const vx = posAttr.getX(i), vy = posAttr.getY(i), vz = posAttr.getZ(i);
+      let accY = 0, accW = 0;
+      for (let k = 0; k < 4; k++) {
+        const w = skinWeight.getComponent(i, k);
+        if (w === 0) continue;
+        const bi = skinIndex.getComponent(i, k);
+        const eI = invBind[bi].elements;
+        const eM = boneMatrices[bi].elements;
+        const rx = eI[0]*vx + eI[4]*vy + eI[8]*vz + eI[12];
+        const ry = eI[1]*vx + eI[5]*vy + eI[9]*vz + eI[13];
+        const rz = eI[2]*vx + eI[6]*vy + eI[10]*vz + eI[14];
+        const wy = eM[1]*rx + eM[5]*ry + eM[9]*rz + eM[13];
+        accY += w * wy; accW += w;
+      }
+      if (accW > 0 && accY / accW < minY) minY = accY / accW;
+    }
+  }
+  vs.groundOffset = Number.isFinite(minY) ? -minY : 0;
+  vs.smplMesh.position.y = vs.groundOffset;
+}
+
+async function loadSMPLMesh(vs, smplData, meshColor) {
+  if (vs.smplMesh) {
+    vs.scene.remove(vs.smplMesh);
+    vs.smplMesh.geometry.dispose();
+    vs.smplMesh.material.dispose();
+    vs.smplMesh = null; vs.smplBones = null; vs.smplSkeleton = null;
+  }
+  const frame0 = smplData.frames[0][0];
+  const shapesArr = Array.isArray(frame0.shapes[0]) ? frame0.shapes[0] : frame0.shapes;
+  const result = await load_smpl_with_shapes({
+    shapes: shapesArr,
+    gender: frame0.gender || 'neutral',
+    poses: frame0.poses,
+    Rh: frame0.Rh, Th: frame0.Th,
+    smpl_type: frame0.smpl_type || 'smplh',
+    framerate: frame0.mocap_framerate || 30,
+    colorOverride: meshColor,
+  });
+  vs.smplMesh = result.mesh;
+  vs.smplBones = result.bones;
+  vs.smplSkeleton = result.skeleton;
+  vs.smplEdges = SMPLH_EDGES;
+  vs.smplMesh.material.transparent = true;
+  vs.smplMesh.material.opacity = 0.6;
+  vs.smplMesh.material.depthWrite = false;
+  vs.scene.add(vs.smplMesh);
+  recomputeSMPLGround(vs);
+}
+
+const GROUND_Y = 0.02;          // world height of the floor grid
+const TUBE_RADIAL = 8;
+
+function clearTraj(vs) {
+  for (const k of ['condLine', 'selfLine', 'condDot', 'selfDot', 'gapLine']) {
+    if (vs[k]) { vs.scene.remove(vs[k]); vs[k].geometry?.dispose?.(); vs[k].material?.dispose?.(); vs[k] = null; }
+  }
+  if (vs.wpGroup) { vs.scene.remove(vs.wpGroup); vs.wpGroup = null; }
+  vs.condPts = null; vs.selfPts = null; vs.coord = 'xz';
+  vs.selfSeg = 0;
+}
+
+// payload pelvis point [x,y,z] -> world Vector3.
+// xz settings: project to the ground (y=0); xyz settings: keep pelvis height.
+function toVec(vs, p) {
+  if (vs.coord === 'xyz') return new THREE.Vector3(p[0], p[1] + vs.groundOffset, p[2]);
+  return new THREE.Vector3(p[0], GROUND_Y, p[2]);
+}
+
+function makeTubeFromVecs(vecs, color, radius, opacity) {
+  const v = [];
+  for (const p of vecs) { if (!v.length || v[v.length - 1].distanceTo(p) > 1e-4) v.push(p); }
+  if (v.length < 2) v.push(v[0].clone().add(new THREE.Vector3(0.001, 0, 0.001)));
+  const curve = new THREE.CatmullRomCurve3(v);
+  const seg = Math.min(Math.max(v.length * 3, 16), 1500);
+  const geom = new THREE.TubeGeometry(curve, seg, radius, TUBE_RADIAL, false);
+  const mat = new THREE.MeshStandardMaterial({
+    color, emissive: color, emissiveIntensity: 0.45,
+    transparent: true, opacity: opacity ?? 0.95, depthTest: true,
+  });
+  return { mesh: new THREE.Mesh(geom, mat), seg };
+}
+
+function makeDot(color, r) {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(r, 16, 16),
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.7, depthTest: false }));
+}
+
+function buildTraj(vs, traj) {
+  clearTraj(vs);
+  if (!traj) return;
+  vs.coord = traj.coord || 'xz';
+  vs.condPts = traj.cond || null;
+  vs.selfPts = traj.self || null;
+  // condition path (blue) = full static target plan
+  if (vs.condPts && vs.condPts.length) {
+    const r = makeTubeFromVecs(vs.condPts.map(p => toVec(vs, p)), COLOR_COND, 0.017, 0.6);
+    vs.condLine = r.mesh; vs.condLine.renderOrder = 5; vs.scene.add(vs.condLine);
+  }
+  // generated path (orange) = full geometry, revealed progressively via drawRange
+  if (vs.selfPts && vs.selfPts.length) {
+    const r = makeTubeFromVecs(vs.selfPts.map(p => toVec(vs, p)), COLOR_SELF, 0.013, 0.98);
+    vs.selfLine = r.mesh; vs.selfSeg = r.seg; vs.selfLine.renderOrder = 6; vs.scene.add(vs.selfLine);
+  }
+  // waypoint markers (sparse) on the condition path
+  if (traj.waypoints && traj.waypoints.length && vs.condPts) {
+    vs.wpGroup = new THREE.Group();
+    for (const fi of traj.waypoints) {
+      const c = vs.condPts[fi]; if (!c) continue;
+      const s = makeDot(COLOR_COND, 0.05); const w = toVec(vs, c); s.position.set(w.x, w.y, w.z);
+      vs.wpGroup.add(s);
+    }
+    vs.scene.add(vs.wpGroup);
+  }
+  // current-frame markers: target (blue) + actual pelvis (orange) + error gap line
+  vs.condDot = makeDot(COLOR_COND, 0.045); vs.condDot.renderOrder = 999; vs.scene.add(vs.condDot);
+  vs.selfDot = makeDot(COLOR_SELF, 0.045); vs.selfDot.renderOrder = 999; vs.scene.add(vs.selfDot);
+  const gg = new THREE.BufferGeometry();
+  gg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+  vs.gapLine = new THREE.Line(gg, new THREE.LineBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.9, depthTest: false }));
+  vs.gapLine.renderOrder = 998; vs.scene.add(vs.gapLine);
+  frameCamera(vs);
+  updateTrajFrame(vs, 0);
+}
+
+function updateTrajFrame(vs, fi) {
+  const n = vs.selfPts ? vs.selfPts.length : (vs.condPts ? vs.condPts.length : 0);
+  if (!n) return;
+  const frac = n > 1 ? Math.min(fi, n - 1) / (n - 1) : 1;
+  // grow the generated (orange) path up to the current frame
+  if (vs.selfLine && vs.selfSeg) {
+    const k = Math.max(1, Math.round(vs.selfSeg * frac));
+    vs.selfLine.geometry.setDrawRange(0, k * TUBE_RADIAL * 6);
+  }
+  let cp = null, sp = null;
+  if (vs.condPts && vs.condPts.length) { const w = toVec(vs, vs.condPts[Math.min(fi, vs.condPts.length - 1)]); cp = w; vs.condDot?.position.copy(w); }
+  if (vs.selfPts && vs.selfPts.length) { const w = toVec(vs, vs.selfPts[Math.min(fi, vs.selfPts.length - 1)]); sp = w; vs.selfDot?.position.copy(w); }
+  if (vs.gapLine && cp && sp) {
+    const a = vs.gapLine.geometry.getAttribute('position');
+    a.setXYZ(0, cp.x, cp.y, cp.z); a.setXYZ(1, sp.x, sp.y, sp.z); a.needsUpdate = true;
+  }
+}
+
+function frameCamera(vs) {
+  const pts = [];
+  if (vs.condPts) for (const p of vs.condPts) pts.push(toVec(vs, p));
+  if (vs.selfPts) for (const p of vs.selfPts) pts.push(toVec(vs, p));
+  if (!pts.length) return;
+  let minx = Infinity, maxx = -Infinity, minz = Infinity, maxz = -Infinity, maxy = 0;
+  for (const p of pts) { minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x); minz = Math.min(minz, p.z); maxz = Math.max(maxz, p.z); maxy = Math.max(maxy, p.y); }
+  if (!Number.isFinite(minx)) return;
+  const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2;
+  const span = Math.max(maxx - minx, maxz - minz, 1.2);
+  vs.controls.target.set(cx, Math.max(0.8, maxy * 0.5), cz);
+  vs.camera.position.set(cx + span * 0.55, span * 0.75 + 1.6, cz + span * 0.95);
+  vs.camera.updateProjectionMatrix();
+}
+
+async function loadPanel(p) {
+  const loadEl = document.getElementById(`load_${p.key}`);
+  const capEl = document.getElementById(`cap_${p.key}`);
+  loadEl.style.display = 'flex'; loadEl.classList.remove('err'); loadEl.textContent = 'Loading…';
+  try {
+    const sm = document.getElementById('smooth').checked ? '1' : '0';
+    const r = await fetch(`/api/smpl_data?setting=${setting}&case=${caseId}&model=${p.key}&smooth=${sm}`);
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+    smplCache[p.key] = data;
+    capEl.textContent = data.caption || '';
+    if (!viewers[p.key]) initViewer(p.key);
+    const vs = viewers[p.key];
+    vs.smplData = data;
+    await loadSMPLMesh(vs, data, p.colorHex);
+    buildTraj(vs, data.traj);
+    loadEl.style.display = 'none';
+  } catch (e) {
+    loadEl.style.display = 'flex'; loadEl.classList.add('err');
+    loadEl.textContent = String(e.message || e);
+    smplCache[p.key] = null;
+  }
+}
+
+function updateFrame() {
+  for (const p of PANELS) {
+    const data = smplCache[p.key];
+    const vs = viewers[p.key];
+    if (!data || !vs) continue;
+    const fi = Math.min(currentFrame, (data.num_frames || 1) - 1);
+    drawSMPLFrame(vs, fi);
+    updateTrajFrame(vs, fi);
+  }
+  document.getElementById('frameSlider').value = currentFrame;
+  document.getElementById('frameInfo').textContent = `${currentFrame} / ${Math.max(numFrames - 1, 0)}`;
+}
+
+async function loadAll() {
+  playing = false;
+  document.getElementById('playBtn').textContent = 'Play';
+  await Promise.all(PANELS.map(loadPanel));
+  numFrames = Math.max(...PANELS.map(p => (smplCache[p.key] && smplCache[p.key].num_frames) || 0), 0);
+  currentFrame = 0;
+  document.getElementById('frameSlider').max = Math.max(numFrames - 1, 0);
+  document.getElementById('frameSlider').value = 0;
+  updateFrame();
+}
+
+function renderAll() {
+  for (const p of PANELS) {
+    const vs = viewers[p.key];
+    if (!vs?.renderer) continue;
+    vs.controls.update();
+    vs.renderer.render(vs.scene, vs.camera);
+  }
+}
+
+function animate(t) {
+  requestAnimationFrame(animate);
+  if (playing && numFrames > 0 && t - lastTime > 1000 / 30) {
+    currentFrame = (currentFrame + 1) % numFrames;
+    updateFrame();
+    lastTime = t;
+  }
+  renderAll();
+}
+
+async function loadSettings() {
+  const d = await (await fetch('/api/settings')).json();
+  const sel = document.getElementById('setting');
+  sel.innerHTML = d.settings.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  sel.onchange = () => { setting = sel.value; loadModelsThenCases(); };
+  setting = d.settings[0].key;
+  await loadModelsThenCases();
+}
+
+async function loadModelsThenCases() {
+  const m = await (await fetch(`/api/models?setting=${setting}`)).json();
+  PANELS = m.models.map(x => ({ key: x.key, label: x.label, color: x.color, colorHex: parseInt(x.color.slice(1), 16) }));
+  await loadCases();
+}
+
+async function loadCases() {
+  const d = await (await fetch(`/api/cases?setting=${setting}`)).json();
+  const sel = document.getElementById('case');
+  sel.innerHTML = d.cases.map(c => `<option value="${c}">${c}</option>`).join('');
+  sel.onchange = () => { caseId = sel.value; rebuildGrid(); };
+  caseId = d.cases[0];
+  rebuildGrid();
+}
+
+function rebuildGrid() {
+  for (const k of Object.keys(viewers)) delete viewers[k];
+  document.getElementById('grid').innerHTML = '';
+  for (const p of PANELS) document.getElementById('grid').appendChild(makePanel(p));
+  requestAnimationFrame(() => {
+    for (const p of PANELS) initViewer(p.key);
+    resizeAll();
+    loadAll();
+  });
+}
+
+document.getElementById('reload').onclick = () => loadAll();
+document.getElementById('smooth').onchange = () => loadAll();
+document.getElementById('playBtn').onclick = () => {
+  playing = !playing;
+  document.getElementById('playBtn').textContent = playing ? 'Pause' : 'Play';
+  lastTime = performance.now();
+};
+document.getElementById('frameSlider').oninput = (e) => { currentFrame = Number(e.target.value); updateFrame(); };
+window.addEventListener('resize', resizeAll);
+
+loadSettings();
+animate(0);
+</script>
+</body>
+</html>

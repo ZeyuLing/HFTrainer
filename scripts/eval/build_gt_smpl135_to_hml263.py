@@ -65,9 +65,12 @@ def _load_smpl22_row135(path: Path) -> np.ndarray | None:
 
 
 def _worker(task):
-    key, entry, data_dir, out_dir, src_fps, dst_fps, skip_existing = task
-    out_path = Path(out_dir) / f"{key}.npy"
-    if skip_existing and out_path.exists():
+    key, entry, data_dir, out_dir, src_fps, dst_fps, min_hml_len, layout, skip_existing = task
+    out_dir = Path(out_dir)
+    flat_path = out_dir / f"{key}.npy"
+    hml_path = out_dir / "new_joint_vecs" / f"{key}.npy"
+    check_path = hml_path if layout in {"humanml", "both"} else flat_path
+    if skip_existing and check_path.exists():
         return key, "skip"
     rel = entry.get("smplx_path")
     if not rel:
@@ -89,9 +92,13 @@ def _worker(task):
         )
     except Exception as exc:  # noqa: BLE001
         return key, f"convert_failed:{type(exc).__name__}:{exc}"
-    if len(m263) < 40 or not np.isfinite(m263).all():
+    if len(m263) < min_hml_len or not np.isfinite(m263).all():
         return key, f"bad_m263:shape={m263.shape}"
-    np.save(out_path, m263.astype(np.float32))
+    if layout in {"flat", "both"}:
+        np.save(flat_path, m263.astype(np.float32))
+    if layout in {"humanml", "both"}:
+        hml_path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(hml_path, m263.astype(np.float32))
     return key, "ok"
 
 
@@ -102,23 +109,73 @@ def main() -> None:
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--num-person", type=int, default=1)
+    ap.add_argument(
+        "--max-duration",
+        type=float,
+        default=0.0,
+        help="Skip motions longer than this many seconds. 0 disables filtering.",
+    )
     ap.add_argument("--src-fps", type=float, default=30.0)
     ap.add_argument("--dst-fps", type=float, default=20.0)
+    ap.add_argument(
+        "--min-hml-len",
+        type=int,
+        default=0,
+        help="Skip converted HML263 clips shorter than this many frames.",
+    )
+    ap.add_argument(
+        "--layout",
+        choices=["flat", "humanml", "both"],
+        default="both",
+        help="Output layout. 'humanml' writes new_joint_vecs/<id>.npy and test.txt.",
+    )
     ap.add_argument("--skip-existing", action="store_true")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    entries = list(_iter_annotation(Path(args.anno_file)))
+    entries = []
+    skipped_person = 0
+    skipped_duration = 0
+    for key, entry in _iter_annotation(Path(args.anno_file)):
+        path = entry.get("smplx_path")
+        n_person = len(path) if isinstance(path, list) else 1
+        if n_person != args.num_person:
+            skipped_person += 1
+            continue
+        if args.max_duration > 0:
+            fps = float(entry.get("fps") or args.src_fps)
+            num_frames = int(entry.get("num_frames") or 0)
+            duration = num_frames / fps if fps > 0 and num_frames > 0 else 0.0
+            if duration > args.max_duration:
+                skipped_duration += 1
+                continue
+        entries.append((key, entry))
     if args.limit:
         entries = entries[: args.limit]
     tasks = [
-        (key, entry, args.data_dir, str(out_dir), args.src_fps, args.dst_fps, args.skip_existing)
+        (
+            key,
+            entry,
+            args.data_dir,
+            str(out_dir),
+            args.src_fps,
+            args.dst_fps,
+            args.min_hml_len,
+            args.layout,
+            args.skip_existing,
+        )
         for key, entry in entries
     ]
-    print(f"[start] {len(tasks)} entries -> {out_dir}", flush=True)
+    print(
+        f"[start] {len(tasks)} entries -> {out_dir} "
+        f"skipped_person={skipped_person} skipped_duration={skipped_duration}",
+        flush=True,
+    )
 
     ok = skipped = failed = 0
+    ok_keys = []
     failures = []
     if args.workers <= 1:
         iterator = map(_worker, tasks)
@@ -131,8 +188,10 @@ def main() -> None:
         for i, (key, status) in enumerate(iterator, 1):
             if status == "ok":
                 ok += 1
+                ok_keys.append(key)
             elif status == "skip":
                 skipped += 1
+                ok_keys.append(key)
             else:
                 failed += 1
                 failures.append((key, status))
@@ -149,6 +208,30 @@ def main() -> None:
             pool.join()
 
     print(f"[done] ok={ok} skipped={skipped} failed={failed} out={out_dir}", flush=True)
+    ok_set = set(ok_keys)
+    ordered_ok = [key for key, _ in entries if key in ok_set]
+    if args.layout in {"humanml", "both"}:
+        (out_dir / "test.txt").write_text("\n".join(ordered_ok) + ("\n" if ordered_ok else ""), encoding="utf-8")
+    summary = {
+        "anno_file": args.anno_file,
+        "data_dir": args.data_dir,
+        "out_dir": str(out_dir),
+        "num_person": args.num_person,
+        "max_duration": args.max_duration,
+        "min_hml_len": args.min_hml_len,
+        "layout": args.layout,
+        "num_entries_after_filters": len(entries),
+        "ok": ok,
+        "skipped_existing": skipped,
+        "failed": failed,
+        "test_ids": len(ordered_ok),
+        "skipped_person": skipped_person,
+        "skipped_duration": skipped_duration,
+    }
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"[summary] {out_dir / 'summary.json'}", flush=True)
+    if args.layout in {"humanml", "both"}:
+        print(f"[split] {out_dir / 'test.txt'} ({len(ordered_ok)} ids)", flush=True)
     if failures:
         report = out_dir / "_failures.json"
         report.write_text(json.dumps(failures, indent=2), encoding="utf-8")

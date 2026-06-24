@@ -121,17 +121,24 @@ def _safe_name(name: str) -> str:
     return str(name).replace("/", "__")
 
 
+def _resolve_repo_path(path_like: str | Path) -> Path:
+    path = Path(path_like)
+    if path.is_absolute():
+        return path.resolve()
+    return (REPO / path).resolve()
+
+
 class _DummyDataModule:
     name = "humanml3d"
     njoints = 22
     fps = 20
     is_mm = False
 
-    def __init__(self):
-        mean_path = MGPT3_ROOT / "datasets" / "humanml3d" / "Mean.npy"
-        std_path = MGPT3_ROOT / "datasets" / "humanml3d" / "Std.npy"
-        self.mean = torch.from_numpy(np.load(mean_path)).float()
-        self.std = torch.from_numpy(np.load(std_path)).float()
+    def __init__(self, mean_path: Path, std_path: Path):
+        self.mean_path = _resolve_repo_path(mean_path)
+        self.std_path = _resolve_repo_path(std_path)
+        self.mean = torch.from_numpy(np.load(self.mean_path)).float()
+        self.std = torch.from_numpy(np.load(self.std_path)).float()
 
     def denormalize(self, features: torch.Tensor) -> torch.Tensor:
         mean = self.mean.to(features.device, features.dtype)
@@ -213,7 +220,8 @@ def _load_cfg(args):
     cfg.lm_ablation.model_guidance_scale = args.guidance_scale
     cfg.FOLDER = str(Path(args.out_dir).resolve())
     cfg.TIME = _dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    cfg.FOLDER_EXP = str((Path(args.out_dir).resolve() / "_motiongpt3_runtime"))
+    runtime_dir = Path(args.runtime_dir).resolve() if args.runtime_dir else (Path(args.out_dir).resolve() / "_motiongpt3_runtime")
+    cfg.FOLDER_EXP = str(runtime_dir)
     return cfg
 
 
@@ -231,10 +239,28 @@ def build_args():
     parser.add_argument("--max_samples", type=int, default=0)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--skip_existing", action="store_true")
+    parser.add_argument(
+        "--runtime_dir",
+        default=None,
+        help="Directory for MotionGPT3 runtime/checkpoint/logger side effects. "
+             "Defaults to <out_dir>/_motiongpt3_runtime for backward compatibility.",
+    )
     parser.add_argument("--gt_fps", type=float, default=30.0)
     parser.add_argument("--model_fps", type=float, default=20.0)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument(
+        "--mean_path",
+        default=str(MGPT3_ROOT / "assets" / "meta" / "mean.npy"),
+        help="HumanML3D-263 mean used to denormalize decoded MotionGPT3 features. "
+             "Defaults to MotionGPT3 WebUI/release assets.",
+    )
+    parser.add_argument(
+        "--std_path",
+        default=str(MGPT3_ROOT / "assets" / "meta" / "std.npy"),
+        help="HumanML3D-263 std used to denormalize decoded MotionGPT3 features. "
+             "Defaults to MotionGPT3 WebUI/release assets.",
+    )
     return parser.parse_args()
 
 
@@ -278,7 +304,16 @@ def main():
     from motGPT.models.build_model import build_model
 
     cfg = _load_cfg(args)
-    datamodule = _DummyDataModule()
+    datamodule = _DummyDataModule(Path(args.mean_path), Path(args.std_path))
+    print(f"[stats] mean_path={datamodule.mean_path}", flush=True)
+    print(f"[stats] std_path={datamodule.std_path}", flush=True)
+    print(
+        "[stats] first4 mean="
+        f"{np.array2string(datamodule.mean[:4].numpy(), precision=6, suppress_small=False)} "
+        "std="
+        f"{np.array2string(datamodule.std[:4].numpy(), precision=6, suppress_small=False)}",
+        flush=True,
+    )
     model = build_model(cfg, datamodule).eval()
     patched = _patch_motiongpt3_transformers_compat(model)
     if patched:

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Retarget KIMODO SMPL-22 skeleton outputs to SMPL ``motion_135`` via IK.
+"""Retarget KIMODO/SOMA outputs to SMPL ``motion_135``.
 
-This follows the same idea as ``scripts/eval/hml263_to_smpl_ik.py`` used for
-HumanML3D->SMPL baseline retargeting, but starts from KIMODO's already-decoded
-22-joint skeleton instead of HumanML3D-263 features.
+KIMODO exports native SOMA rotations in ``global_rot_mats``.  When those are
+available this script uses the public :mod:`hftrainer.motion.retarget.smpl_soma`
+rotation-transfer operator.  Position-only IK is only a fallback for legacy
+files that do not contain SOMA rotations.
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -29,6 +31,10 @@ from hml263_to_smpl_ik import (  # noqa: E402
     matrix_to_rot6d_rowmajor,
     refine_smpl_fit,
     smpl_forward_22,
+)
+from hftrainer.motion.retarget.smpl_soma import (  # noqa: E402
+    KIMODOSOMAToSMPLRetargeter,
+    SOMAToSMPLIKConfig,
 )
 
 
@@ -52,6 +58,56 @@ SOMA77_IDX = {
     "RightToeBase": 75,
     "RightToeEnd": 76,
 }
+
+
+def _make_joint_fit_weights(preset: str) -> np.ndarray | None:
+    if preset == "uniform":
+        return None
+    weights = np.ones(N_JOINTS, dtype=np.float32)
+    if preset == "relaxed_torso":
+        # SOMA and SMPL differ most around the upper spine/head landmarks.
+        # Downweight those positional targets so the optimizer prefers a
+        # plausible SMPL mesh over twisting the torso/neck to chase a few cm.
+        for j in [6, 9, 12, 15]:  # spine2, spine3, neck, head
+            weights[j] = 0.15
+        for j in [3, 13, 14]:  # spine1 and collar joints
+            weights[j] = 0.4
+        return weights
+    if preset == "relaxed_upper":
+        # Diagnostic/visual retarget preset: keep pelvis/hips/legs reliable,
+        # but stop upper-body SOMA/SMPL proportion mismatch from contorting the
+        # SMPL torso, neck, head, and toe/hand leaves.
+        for j in [3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]:
+            weights[j] = 0.08
+        for j in [10, 11]:  # foot leaf/toe-base positions
+            weights[j] = 0.25
+        return weights
+    raise ValueError(f"unknown joint fit weight preset: {preset}")
+
+
+def _load_gmm_pose_prior(device: torch.device):
+    prior_path = (
+        PROJECT_ROOT
+        / "ref_repo/FlowMDM/utils/visualize/joints2smpl/src/prior.py"
+    )
+    prior_folder = (
+        PROJECT_ROOT
+        / "ref_repo/FlowMDM/utils/visualize/joints2smpl/smpl_models"
+    )
+    spec = importlib.util.spec_from_file_location("flowmdm_joints2smpl_prior", prior_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load prior module from {prior_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    prior = module.MaxMixturePrior(
+        prior_folder=str(prior_folder),
+        num_gaussians=8,
+        dtype=torch.float32,
+    ).to(device)
+    prior.eval()
+    for param in prior.parameters():
+        param.requires_grad_(False)
+    return prior
 
 
 def _load_target(path: Path) -> tuple[np.ndarray, np.ndarray | None, str]:
@@ -85,6 +141,8 @@ def _append_guide(
     target_vec: np.ndarray,
     weight: float,
 ) -> None:
+    if weight <= 0:
+        return
     if np.linalg.norm(target_vec) < 1e-6:
         return
     scale = max(float(np.linalg.norm(rest_vec)), 1e-3)
@@ -262,6 +320,10 @@ def _retarget_one(
     angle_prior_weight: float,
     foot_height_align: bool = True,
     smooth_weight: float = 1e-3,
+    joint_accel_weight: float = 0.0,
+    joint_fit_weights: np.ndarray | None = None,
+    gmm_pose_prior=None,
+    gmm_pose_prior_weight: float = 0.0,
     soma_orientation_guides: bool = False,
     head_guide_weight: float = 1.0,
     leaf_guide_weight: float = 0.35,
@@ -392,6 +454,8 @@ def main() -> None:
     parser.add_argument("--model-dir", default="ref_repo/MDM/body_models")
     parser.add_argument("--ids", default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--num-shards", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--skip-existing", action="store_true")
@@ -400,6 +464,13 @@ def main() -> None:
     parser.add_argument("--refine-iters", type=int, default=0)
     parser.add_argument("--refine-lr", type=float, default=2e-2)
     parser.add_argument("--smooth-weight", type=float, default=1e-3)
+    parser.add_argument("--joint-accel-weight", type=float, default=0.0)
+    parser.add_argument("--gmm-pose-prior-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--joint-fit-weight-preset",
+        choices=["uniform", "relaxed_torso", "relaxed_upper"],
+        default="uniform",
+    )
     parser.add_argument("--pose-l2-weight", type=float, default=0.0)
     parser.add_argument("--angle-prior-weight", type=float, default=0.0)
     parser.add_argument("--foot-height-align", action="store_true", default=True)
@@ -409,6 +480,17 @@ def main() -> None:
     parser.add_argument("--soma-orientation-guides", action="store_true")
     parser.add_argument("--head-guide-weight", type=float, default=1.0)
     parser.add_argument("--leaf-guide-weight", type=float, default=0.35)
+    parser.add_argument(
+        "--force-position-ik",
+        action="store_true",
+        help="Ignore global_rot_mats and use the legacy position-only IK path.",
+    )
+    parser.add_argument(
+        "--smpl-height-mode",
+        choices=["source_root", "foot_floor"],
+        default="source_root",
+        help="Height policy for the SOMA-rotation transfer path.",
+    )
     args = parser.parse_args()
 
     in_dir = Path(args.in_dir)
@@ -416,11 +498,41 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     debug_dir = Path(args.debug_dir) if args.debug_dir else None
     device = torch.device(args.device)
-    model, rest_joints, parents = load_smpl_rest(Path(args.model_dir), device)
+    rotation_retargeter = KIMODOSOMAToSMPLRetargeter(
+        SOMAToSMPLIKConfig(
+            model_dir=args.model_dir,
+            device=device,
+            batch_size=args.batch_size,
+            floor_align=args.floor_align,
+            foot_height_align=args.foot_height_align,
+            refine_iters=args.refine_iters,
+            refine_lr=args.refine_lr,
+            orientation_mode=args.orientation_mode,
+            parent_ref_weight=args.parent_ref_weight,
+            pose_l2_weight=args.pose_l2_weight,
+            angle_prior_weight=args.angle_prior_weight,
+            smooth_weight=args.smooth_weight,
+            joint_accel_weight=args.joint_accel_weight,
+            joint_fit_weight_preset=args.joint_fit_weight_preset,
+            soma_orientation_guides=args.soma_orientation_guides,
+            head_guide_weight=args.head_guide_weight,
+            leaf_guide_weight=args.leaf_guide_weight,
+            smpl_height_mode=args.smpl_height_mode,
+        )
+    )
+    model, rest_joints, parents = rotation_retargeter.model, rotation_retargeter.rest_joints, rotation_retargeter.parents
+    joint_fit_weights = _make_joint_fit_weights(args.joint_fit_weight_preset)
+    gmm_pose_prior = _load_gmm_pose_prior(device) if args.gmm_pose_prior_weight > 0 else None
+    if args.num_shards < 1:
+        raise ValueError("--num-shards must be >= 1")
+    if not 0 <= args.shard_index < args.num_shards:
+        raise ValueError("--shard-index must be in [0, num_shards)")
     files = _target_files(in_dir, Path(args.ids) if args.ids else None, args.limit)
+    if args.num_shards > 1:
+        files = [path for idx, path in enumerate(files) if idx % args.num_shards == args.shard_index]
     print(
         f"[setup] files={len(files)} in={in_dir} out={out_dir} device={device} "
-        f"refine_iters={args.refine_iters}",
+        f"refine_iters={args.refine_iters} shard={args.shard_index}/{args.num_shards}",
         flush=True,
     )
 
@@ -432,27 +544,39 @@ def main() -> None:
             continue
         try:
             target, soma77, caption = _load_target(path)
-            ret = _retarget_one(
-                target,
-                soma77,
-                model,
-                rest_joints,
-                parents,
-                args.batch_size,
-                device,
-                args.floor_align,
-                args.refine_iters,
-                args.refine_lr,
-                args.orientation_mode,
-                args.parent_ref_weight,
-                args.pose_l2_weight,
-                args.angle_prior_weight,
-                args.foot_height_align,
-                args.smooth_weight,
-                args.soma_orientation_guides,
-                args.head_guide_weight,
-                args.leaf_guide_weight,
-            )
+            has_soma_rotations = False
+            if path.suffix == ".npz":
+                with np.load(path, allow_pickle=True) as data:
+                    has_soma_rotations = "global_rot_mats" in data.files
+            if has_soma_rotations and not args.force_position_ik:
+                ret = rotation_retargeter.retarget_file(path)
+            else:
+                ret = _retarget_one(
+                    target,
+                    soma77,
+                    model,
+                    rest_joints,
+                    parents,
+                    args.batch_size,
+                    device,
+                    args.floor_align,
+                    args.refine_iters,
+                    args.refine_lr,
+                    args.orientation_mode,
+                    args.parent_ref_weight,
+                    args.pose_l2_weight,
+                    args.angle_prior_weight,
+                    args.foot_height_align,
+                    args.smooth_weight,
+                    args.joint_accel_weight,
+                    joint_fit_weights,
+                    gmm_pose_prior,
+                    args.gmm_pose_prior_weight,
+                    args.soma_orientation_guides,
+                    args.head_guide_weight,
+                    args.leaf_guide_weight,
+                )
+                ret["retarget_method"] = np.array("legacy_position_ik", dtype=object)
             caption = _load_caption(debug_dir, path.stem, caption)
             np.savez_compressed(
                 dst,
@@ -465,6 +589,9 @@ def main() -> None:
                 refine_iters=np.array(args.refine_iters, dtype=np.int32),
                 foot_height_align=np.array(args.foot_height_align, dtype=np.bool_),
                 smooth_weight=np.array(args.smooth_weight, dtype=np.float32),
+                joint_accel_weight=np.array(args.joint_accel_weight, dtype=np.float32),
+                gmm_pose_prior_weight=np.array(args.gmm_pose_prior_weight, dtype=np.float32),
+                joint_fit_weight_preset=np.array(args.joint_fit_weight_preset, dtype=object),
                 soma_orientation_guides=np.array(args.soma_orientation_guides, dtype=np.bool_),
                 head_guide_weight=np.array(args.head_guide_weight, dtype=np.float32),
                 leaf_guide_weight=np.array(args.leaf_guide_weight, dtype=np.float32),

@@ -11,9 +11,11 @@ dependency on ``ref_repo`` or the original ``.pth`` format::
     <out>/t2mgpt_config.json   # vqvae + gpt arch config + clip name
     <out>/vq.safetensors       # HumanVQVAE weights
     <out>/gpt.safetensors      # Text2Motion_Transformer weights
+    <out>/clip.safetensors     # CLIP ViT-B/32 text encoder weights
     <out>/Mean.npy, Std.npy    # 263-dim denorm stats (embedded, self-contained)
 
-The CLIP ViT-B/32 text encoder is reloaded by name and is not stored.
+By default the CLIP ViT-B/32 text encoder is stored in the artifact. Use
+``--no_clip`` only for legacy lightweight exports.
 
 Example
 -------
@@ -25,10 +27,14 @@ python3 scripts/eval/convert_t2mgpt_checkpoint.py \
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
 
 from hftrainer.models.motion.t2mgpt import T2MGPTBundle
 
@@ -41,6 +47,11 @@ def main():
     p.add_argument("--clip_name", default="ViT-B/32")
     p.add_argument("--mean_path", default=None)
     p.add_argument("--std_path", default=None)
+    p.add_argument(
+        "--no_clip",
+        action="store_true",
+        help="legacy export: do not copy CLIP ViT-B/32 into the artifact",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--verify",
@@ -58,7 +69,7 @@ def main():
         std_path=args.std_path,
         device="cuda" if torch.cuda.is_available() else "cpu",
     )
-    bundle.save_pretrained(args.out_dir)
+    bundle.save_pretrained(args.out_dir, include_clip=not args.no_clip)
     print(f"[convert] wrote artifact -> {args.out_dir}", flush=True)
     print(f"          files: {sorted(p.name for p in Path(args.out_dir).iterdir())}", flush=True)
 

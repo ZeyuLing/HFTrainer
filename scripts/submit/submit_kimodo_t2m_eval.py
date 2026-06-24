@@ -29,6 +29,7 @@ def build_start_cmd(
     feature_batch_size: int,
     skip_feature_extract: bool,
     postprocess: bool,
+    force_single_segment: bool,
 ) -> str:
     out = f"{out_root}/kimodo_official"
     pos22 = f"{out}/positions22"
@@ -68,10 +69,12 @@ def build_start_cmd(
         )
     gen_one = (
         f"python3 scripts/eval/gen_kimodo_t2m_positions.py "
-        f"--humanml3d-272 {H272} --out-dir {pos22} --debug-npz-dir {dbg} "
+        f"--humanml3d-272 {H272} --corpus {corpus} "
+        f"--out-dir {pos22} --debug-npz-dir {dbg} "
         f"--num-shards {num_gpus} {cap}--skip-existing "
         f"--text-feature-cache-dir {cache_dir} --text-feature-namespace {feature_namespace}"
         f"{' --postprocess' if postprocess else ''}"
+        f"{' --force-single-segment' if force_single_segment else ''}"
     )
     launch = (
         f"for i in $(seq 0 {num_gpus - 1}); do "
@@ -120,6 +123,8 @@ def main() -> None:
     parser.add_argument("--skip-feature-extract", action="store_true")
     parser.add_argument("--postprocess", action="store_true",
                         help="Enable KIMODO's official post_processing path during generation.")
+    parser.add_argument("--force-single-segment", action="store_true",
+                        help="Use KIMODO's single-prompt path instead of repeated-caption long-motion split.")
     parser.add_argument("--elastic", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -135,6 +140,7 @@ def main() -> None:
         args.feature_batch_size,
         args.skip_feature_extract,
         args.postprocess,
+        args.force_single_segment,
     )
     print(f"\n{'=' * 60}\nJob: {task_flag} ({args.num_gpus}x{args.gpu})\n{'=' * 60}")
     print(start_cmd[:800] + " ...\n")

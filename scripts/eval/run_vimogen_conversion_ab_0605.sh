@@ -2,9 +2,13 @@
 # Conversion-only A/B for an already generated ViMoGen run.
 set -euo pipefail
 
-ROOT="/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer"
+ROOT="${ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
+if [ ! -d "${ROOT}" ]; then
+  ROOT="/apdcephfs/AILab_DHA/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer"
+fi
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
+PY=${PY:-python3}
 
 BASE=${BASE:-outputs/evaluation/vimogen_t2m_0605}
 RUN=${RUN:-h3d_seq_dn07_dur0}
@@ -45,14 +49,15 @@ run_one() {
   )
   if [[ "${rfv}" == "0" ]]; then
     args+=(--no-recover-from-velocity)
+    args+=(--no-equal-length)
   fi
 
   echo "[${tag}] convert $(date)"
-  CUDA_VISIBLE_DEVICES="${GPU}" python3 scripts/eval/convert_vimogen276_to_motionclip135.py "${args[@]}" \
+  CUDA_VISIBLE_DEVICES="${GPU}" "$PY" scripts/eval/convert_vimogen276_to_motionclip135.py "${args[@]}" \
     > "${out}/logs/convert.log" 2>&1
 
   echo "[${tag}] eval $(date)"
-  CUDA_VISIBLE_DEVICES="${GPU}" python3 scripts/eval/eval_with_motionclip_evaluator.py \
+  CUDA_VISIBLE_DEVICES="${GPU}" "$PY" scripts/eval/eval_with_motionclip_evaluator.py \
     --evaluator_ckpt checkpoints/motion_clip/motionclip_base_1p_aug_hq \
     --anno_file "${ANNO}" \
     --data_dir data/motionhub \
@@ -64,7 +69,7 @@ run_one() {
     --n_repeats 20 \
     > "${out}/logs/eval_motionclip.log" 2>&1
 
-  TAG="${tag}" METRICS="${out}/metrics_motionclip.json" python3 - <<'PY' >> "${SUMMARY}"
+  TAG="${tag}" METRICS="${out}/metrics_motionclip.json" "$PY" - <<'PY' >> "${SUMMARY}"
 import json
 import os
 
