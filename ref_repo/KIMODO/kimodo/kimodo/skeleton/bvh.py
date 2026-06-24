@@ -521,7 +521,11 @@ def load_bvh_animation(
 
     rotations = Rotation.from_euler(rot_order, joint_eulers.reshape(-1, 3))
     if return_quat:
-        joint_rots = rotations.as_quat(scalar_first=True).reshape(joint_eulers.shape[:-1] + (4,))
+        try:
+            joint_rots = rotations.as_quat(scalar_first=True).reshape(joint_eulers.shape[:-1] + (4,))
+        except TypeError:
+            quat_xyzw = rotations.as_quat()
+            joint_rots = quat_xyzw[:, [3, 0, 1, 2]].reshape(joint_eulers.shape[:-1] + (4,))
     else:
         joint_rots = rotations.as_matrix().reshape(joint_eulers.shape[:-1] + (3, 3))
 

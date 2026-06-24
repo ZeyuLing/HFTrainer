@@ -107,6 +107,26 @@ def get_keyframes_mask(data, lengths, edit_mode='benchmark_sparse', trans_length
             gt_indices = np.array([0, max(0, length - 1)])
             obs_joint_mask[i, :, :, gt_indices] = True  # set keyframes
 
+    elif edit_mode in ('pre20', 'post20', 'mid60'):
+        # 2026-06-11: parity with HyMotion-M2M E2 long-context protocols.
+        # Observed frame counts use ceil(0.2*length) exactly like
+        # hftrainer build_inbetween_mask(keep_start_frac/keep_end_frac=0.20):
+        #   pre20  : observe first  ceil(0.2L) frames  -> predict the rest
+        #   post20 : observe last   ceil(0.2L) frames  -> predict the past
+        #   mid60  : observe first & last ceil(0.2L)   -> predict middle 60%
+        for i, length in enumerate(lengths.cpu().numpy()):
+            length = int(length)
+            ks = int(np.ceil(length * 0.20))
+            ks = max(0, min(ks, length))
+            idx = []
+            if edit_mode in ('pre20', 'mid60'):
+                idx += list(range(0, ks))
+            if edit_mode in ('post20', 'mid60'):
+                idx += list(range(max(0, length - ks), length))
+            if idx:
+                gt_indices = np.array(sorted(set(idx)))
+                obs_joint_mask[i, :, :, gt_indices] = True  # set keyframes
+
     elif edit_mode == 'uncond':
         # Observe no frames
         # used for inference

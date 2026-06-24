@@ -162,7 +162,11 @@ if __name__ == '__main__':
             rte = compute_rte_wrapper(gt_joints, joints, lengths)
             raw_rte = compute_rte_wrapper(gt_joints, joints, lengths, align=False)
             error_accel = compute_error_accel_wrapper(gt_joints, joints, lengths)
-            m2m_score, m2m_r1, m2m_r3 = tmr_m2m_score_wrapper(joints, gt_joints, lengths, y_is_z_axis=False, device='cpu')
+            try:
+                m2m_score, m2m_r1, m2m_r3 = tmr_m2m_score_wrapper(joints, gt_joints, lengths, y_is_z_axis=False, device='cpu')
+            except Exception as _e:
+                print(f"[WARN] TMR unavailable ({type(_e).__name__}: {_e}); skipping m2m R@3.")
+                m2m_score, m2m_r1, m2m_r3 = float('nan'), float('nan'), float('nan')
 
             print(
                 f"Motion from {motiontype}"

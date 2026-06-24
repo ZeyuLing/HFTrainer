@@ -1,3 +1,4 @@
+from __future__ import annotations
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """LLM2Vec encoder wrapper for Kimodo text conditioning."""
@@ -40,6 +41,9 @@ class LLM2VecEncoder:
             p.requires_grad = False
 
     def to(self, device: torch.device):
+        pinned_device = os.environ.get("KIMODO_TEXT_ENCODER_DEVICE")
+        if pinned_device:
+            device = torch.device(pinned_device)
         self.model = self.model.to(device)
         return self
 
@@ -56,8 +60,14 @@ class LLM2VecEncoder:
             text = [text]
             is_string = True
 
+        encode_device = os.environ.get("KIMODO_TEXT_ENCODER_DEVICE")
         with torch.no_grad():
-            encoded_text = self.model.encode(text, batch_size=len(text), show_progress_bar=False)
+            encoded_text = self.model.encode(
+                text,
+                batch_size=len(text),
+                show_progress_bar=False,
+                device=encode_device,
+            )
 
         assert len(encoded_text.shape)
         assert self.llm_dim == encoded_text.shape[-1]

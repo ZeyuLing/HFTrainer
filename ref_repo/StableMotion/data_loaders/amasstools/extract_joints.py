@@ -68,9 +68,13 @@ def extract_joints_smpldata(
         assert smpl_layer is not None
 
     smpldata["mocap_framerate"] = fps
-    poses = smpldata["poses"].to(device)
-    trans = smpldata["trans"].to(device)
-    joints = smpldata["joints"]
+    # robustness: accept numpy or torch smpldata payloads (cross-method)
+    def _ten(x):
+        import numpy as _np
+        return x if torch.is_tensor(x) else torch.as_tensor(_np.asarray(x))
+    poses = _ten(smpldata["poses"]).to(device)
+    trans = _ten(smpldata["trans"]).to(device)
+    joints = _ten(smpldata["joints"])
 
     if value_from == "smpl":
         with torch.no_grad():

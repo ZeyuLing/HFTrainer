@@ -1,3 +1,4 @@
+from __future__ import annotations
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Kimodo model: denoiser, text encoder, diffusion sampling, and post-processing."""
@@ -614,9 +615,11 @@ class Kimodo(nn.Module):
                 else:
                     observed_at_t = observed_motion
                 cur_mot = cur_mot * (1 - motion_mask) + observed_at_t * motion_mask
-        if (os.environ.get("KIMODO_FINAL_HARD_PASTE", "1") == "1"
+        if (os.environ.get("KIMODO_FINAL_HARD_PASTE", "0") == "1"
                 and motion_mask is not None and observed_motion is not None):
-            # The denoiser uses constraints as conditioning, but that is still
-            # soft. Paste observed features back so constrained frames are exact.
+            # Optional exact compositing for constrained channels. This is not
+            # the denoiser's in-loop imputation path; enabling it can introduce
+            # visible boundary jumps when neighboring generated frames remain
+            # on the model's soft trajectory.
             cur_mot = cur_mot * (1 - motion_mask) + observed_motion * motion_mask
         return cur_mot

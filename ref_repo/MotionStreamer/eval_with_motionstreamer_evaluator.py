@@ -60,8 +60,9 @@ def _import_evaluator_modules():
 
 def load_evaluator(ckpt_path: Path, device: torch.device):
     DistilbertActorAgnosticEncoder, ActorAgnosticEncoder = _import_evaluator_modules()
+    distilbert_path = os.environ.get("MOTIONSTREAMER_DISTILBERT_PATH", "distilbert-base-uncased")
     textenc = DistilbertActorAgnosticEncoder(
-        "distilbert-base-uncased", num_layers=4, latent_dim=256
+        distilbert_path, num_layers=4, latent_dim=256
     )
     motenc = ActorAgnosticEncoder(
         nfeats=272, vae=True, num_layers=4, latent_dim=256, max_len=300

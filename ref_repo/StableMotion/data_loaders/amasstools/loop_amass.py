@@ -17,7 +17,9 @@ def loop_amams(
     if only_mirror:
         match_str = f"M/**/*{ext}"
 
-    for motion_file in tqdm(glob(match_str, root_dir=base_folder, recursive=True)):
+    _abs = glob(os.path.join(base_folder, match_str), recursive=True)
+    _rel = [os.path.relpath(_p, base_folder) for _p in _abs]
+    for motion_file in tqdm(_rel):
         if exclude and exclude in motion_file:
             continue
 

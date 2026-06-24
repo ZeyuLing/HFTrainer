@@ -1,3 +1,4 @@
+from __future__ import annotations
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Convert kimodo motion (y-up, z-forward) to MuJoCo qpos (z-up, x-forward) for G1 skeleton."""
@@ -21,6 +22,18 @@ from kimodo.tools import ensure_batched, to_numpy, to_torch
 
 # Cache so that the same (skeleton, xml_path) returns the same converter instance.
 _converter_cache: dict[tuple[int, str], "MujocoQposConverter"] = {}
+
+
+def _rotation_from_quat_wxyz(quat_wxyz):
+    """SciPy-compatible wxyz quaternion loader.
+
+    Older SciPy releases do not expose Rotation.from_quat(..., scalar_first=True).
+    """
+    quat_wxyz = np.asarray(quat_wxyz, dtype=np.float64)
+    try:
+        return Rotation.from_quat(quat_wxyz, scalar_first=True)
+    except TypeError:
+        return Rotation.from_quat(quat_wxyz[[1, 2, 3, 0]])
 
 
 class MujocoQposConverter:
@@ -177,9 +190,8 @@ class MujocoQposConverter:
         for i, joint in enumerate(mujoco_hinge_joints):
             body = parent_map[joint]
             if "quat" in body.attrib:
-                rot = Rotation.from_quat(
-                    [float(x) for x in body.get("quat").strip().split(" ")],
-                    scalar_first=True,
+                rot = _rotation_from_quat_wxyz(
+                    [float(x) for x in body.get("quat").strip().split(" ")]
                 )
                 idx = self._mujoco_indices_to_kimodo_indices[i]
                 self._rot_offsets_q2t[idx] = torch.from_numpy(rot.as_matrix())
