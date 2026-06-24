@@ -1,11 +1,11 @@
 """T2M-GPT ModelBundle.
 
-Wraps a **vendored, self-contained** reproduction of *T2M-GPT* (Zhang et al.,
-CVPR 2023): a VQ-VAE motion tokenizer + a cross-conditional GPT that
-autoregressively predicts motion tokens from a CLIP text embedding. The two
-networks are vendored into ``hftrainer.models.motion.t2mgpt._t2mgpt`` and are
-fully independent of ``ref_repo``; this module only exposes a clean
-hftrainer-native :class:`ModelBundle` facade.
+Wraps the hftrainer-native T2M-GPT implementation (Zhang et al., CVPR 2023): a
+VQ-VAE motion tokenizer + a cross-conditional GPT that autoregressively predicts
+motion tokens from a CLIP text embedding. The runtime imports only the local
+``hftrainer.models.motion.t2mgpt.network`` package and self-contained
+hftrainer artifacts; raw upstream checkpoints are accepted only when explicit
+paths are provided by conversion scripts.
 
 The reproduction preserves exact numerical parity with the released checkpoint
 and the gold-standard ``scripts/eval/t2mgpt_infer_hml3d263.py`` script (same
@@ -17,8 +17,8 @@ Components
   263-dim HumanML3D input, ``nb_code=512`` codebook.
 * ``self.gpt`` — :class:`Text2Motion_Transformer` (9-layer cross-conditional GPT,
   ``embed_dim=1024``, ``clip_dim=512``).
-* ``self.clip_model`` — CLIP ViT-B/32 text encoder (frozen, reloaded by name;
-  **not** stored in the hftrainer artifact, exactly like CLIP in MDM).
+* ``self.clip_model`` — CLIP ViT-B/32 text encoder (frozen, stored in the
+  hftrainer artifact as ``clip.safetensors`` for offline ``from_pretrained``).
 * ``mean`` / ``std`` — 263-dim HumanML3D denorm stats (register_buffer).
 """
 
@@ -35,12 +35,7 @@ import torch
 from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES
 
-# Repo root: hftrainer/models/motion/t2mgpt/bundle.py -> parents[4]
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-
-_T2MGPT_ROOT = _REPO_ROOT / "ref_repo" / "T2M-GPT"
-_DEFAULT_VQ = _T2MGPT_ROOT / "pretrained" / "VQVAE" / "net_last.pth"
-_DEFAULT_GPT = _T2MGPT_ROOT / "pretrained" / "VQTransformer_corruption05" / "net_best_fid.pth"
 
 # 263-dim HumanML3D denorm stats used by the parity script. These are embedded
 # into the self-contained artifact so the reproduced checkpoint never depends on
@@ -48,7 +43,8 @@ _DEFAULT_GPT = _T2MGPT_ROOT / "pretrained" / "VQTransformer_corruption05" / "net
 _DEFAULT_MEAN = _REPO_ROOT / "work_dirs" / "h3d263_eval" / "h3d263_test_recon_fk" / "Mean.npy"
 _DEFAULT_STD = _REPO_ROOT / "work_dirs" / "h3d263_eval" / "h3d263_test_recon_fk" / "Std.npy"
 
-# CLIP text encoder (clip_dim = 512). Resolved by name via ``clip.load``.
+# CLIP text encoder (clip_dim = 512). New artifacts store its state dict and
+# use this name only as a fallback for legacy/lightweight exports.
 _DEFAULT_CLIP_NAME = "ViT-B/32"
 
 # VQ-VAE defaults — match the official README HumanML3D config (and the
@@ -106,23 +102,25 @@ class T2MGPTBundle(ModelBundle):
         gpt_weights_path: Optional[str] = None,
         mean_path: Optional[str] = None,
         std_path: Optional[str] = None,
+        clip_weights_path: Optional[str] = None,
         load_clip: bool = True,
         device: Optional[str] = None,
         **kwargs,
     ):
         """Construct the bundle.
 
-        Two weight sources are supported (mirroring the MotionMillion bundle):
+        Two weight sources are supported:
 
-        * **Raw upstream checkpoints** — ``vq_path`` (a ``net_last.pth`` with a
-          ``net`` key) and ``gpt_path`` (a ``net_best_fid.pth`` with a ``trans``
-          key). Defaults to the released T2M-GPT checkpoints under ``ref_repo``.
         * **Self-contained hftrainer artifact** — ``config`` plus
           ``vq_weights_path`` / ``gpt_weights_path`` (safetensors), as produced
           by :meth:`save_pretrained` / consumed by :meth:`from_pretrained`.
+        * **Explicit raw upstream checkpoints** — ``vq_path`` (a ``net_last.pth``
+          with a ``net`` key) and ``gpt_path`` (a ``net_best_fid.pth`` with a
+          ``trans`` key). These are intended for converter scripts only; this
+          bundle never guesses an upstream checkout location.
         """
         super().__init__()
-        from ._t2mgpt import HumanVQVAE, Text2Motion_Transformer
+        from .network import HumanVQVAE, Text2Motion_Transformer
 
         self.clip_name = clip_name
         cfg = dict(config) if config is not None else {}
@@ -168,11 +166,21 @@ class T2MGPTBundle(ModelBundle):
         if vq_weights_path is not None:
             self._load_weights(vqvae, vq_weights_path, key=None)
         else:
-            self._load_weights(vqvae, str(vq_path or _DEFAULT_VQ), key="net")
+            if vq_path is None:
+                raise ValueError(
+                    "T2MGPTBundle requires vq_weights_path from an hftrainer "
+                    "artifact or an explicit raw vq_path for conversion."
+                )
+            self._load_weights(vqvae, str(vq_path), key="net")
         if gpt_weights_path is not None:
             self._load_weights(gpt, gpt_weights_path, key=None)
         else:
-            self._load_weights(gpt, str(gpt_path or _DEFAULT_GPT), key="trans")
+            if gpt_path is None:
+                raise ValueError(
+                    "T2MGPTBundle requires gpt_weights_path from an hftrainer "
+                    "artifact or an explicit raw gpt_path for conversion."
+                )
+            self._load_weights(gpt, str(gpt_path), key="trans")
 
         vqvae.eval()
         gpt.eval()
@@ -180,10 +188,14 @@ class T2MGPTBundle(ModelBundle):
         self.gpt = gpt
         self.nfeats = 263
 
-        # --- CLIP text encoder (frozen, reloadable; not stored in artifact) #
+        # --- CLIP text encoder (frozen, stored in new artifacts) ---------- #
         self.clip_model = None
         if load_clip:
-            self.clip_model = self._build_clip(clip_name, device)
+            self.clip_model = self._build_clip(
+                clip_name,
+                device,
+                weights_path=clip_weights_path,
+            )
 
         # --- normalization buffers (263-dim) ---------------------------- #
         mean = np.load(str(mean_path or _DEFAULT_MEAN)).astype(np.float32)
@@ -218,7 +230,7 @@ class T2MGPTBundle(ModelBundle):
         module.load_state_dict(sd, strict=True)
 
     @staticmethod
-    def _build_clip(name: str, device: Optional[str]):
+    def _build_clip(name: str, device: Optional[str], weights_path: Optional[str] = None):
         """Load + freeze CLIP exactly like the parity script.
 
         ``clip.load`` -> ``clip.model.convert_weights`` (fp16) -> ``eval`` ->
@@ -230,8 +242,17 @@ class T2MGPTBundle(ModelBundle):
         dev = device
         if dev is None:
             dev = "cuda" if torch.cuda.is_available() else "cpu"
-        clip_model, _ = clip.load(name, device=dev, jit=False)
-        clip.model.convert_weights(clip_model)
+        if weights_path is not None:
+            if str(weights_path).endswith(".safetensors"):
+                from safetensors.torch import load_file
+
+                state = load_file(str(weights_path), device="cpu")
+            else:
+                state = torch.load(str(weights_path), map_location="cpu")
+            clip_model = clip.model.build_model(dict(state)).to(dev)
+        else:
+            clip_model, _ = clip.load(name, device=dev, jit=False)
+            clip.model.convert_weights(clip_model)
         clip_model.eval()
         for p in clip_model.parameters():
             p.requires_grad = False
@@ -243,7 +264,13 @@ class T2MGPTBundle(ModelBundle):
     def config_dict(self) -> dict:
         return {"vqvae": dict(self._vq_cfg), "gpt": dict(self._gpt_cfg)}
 
-    def save_pretrained(self, save_directory: str, safe_serialization: bool = True, **kwargs):
+    def save_pretrained(
+        self,
+        save_directory: str,
+        safe_serialization: bool = True,
+        include_clip: bool = True,
+        **kwargs,
+    ):
         """Export a self-contained hftrainer T2M-GPT artifact.
 
         Layout::
@@ -251,22 +278,82 @@ class T2MGPTBundle(ModelBundle):
             <dir>/t2mgpt_config.json    # vqvae + gpt arch config, clip name
             <dir>/vq.safetensors        # HumanVQVAE (encoder/decoder/quantizer)
             <dir>/gpt.safetensors       # Text2Motion_Transformer weights
+            <dir>/clip.safetensors      # CLIP ViT-B/32 text encoder weights
             <dir>/Mean.npy, Std.npy     # 263-dim denorm stats
-
-        The CLIP ViT-B/32 text encoder is reloaded by name (``clip_name``) and
-        is **not** stored in the artifact (exactly like MDM).
         """
         import os
 
         os.makedirs(save_directory, exist_ok=True)
         save_dir = Path(save_directory)
+        if include_clip and self.clip_model is None:
+            self.clip_model = self._build_clip(
+                self.clip_name,
+                str(self.device) if hasattr(self, "mean") else None,
+            )
+        clip_artifact = (
+            ("clip.safetensors" if safe_serialization else "clip.pt")
+            if include_clip
+            else None
+        )
 
         cfg = {
             "model_type": "t2mgpt",
+            "format": "hftrainer-t2mgpt-v1",
             "clip_name": self.clip_name,
+            "components": {
+                "clip": {
+                    "name": self.clip_name,
+                    "stored_in_artifact": bool(include_clip),
+                    "path": clip_artifact,
+                }
+            },
             "config": self.config_dict(),
         }
         (save_dir / "t2mgpt_config.json").write_text(json.dumps(cfg, indent=2))
+        (save_dir / "model_index.json").write_text(
+            json.dumps(
+                {
+                    "_class_name": "T2MGPTPipeline",
+                    "_library_name": "hftrainer",
+                    "model_type": "t2mgpt",
+                    "format": "hftrainer-t2mgpt-v1",
+                    "bundle_class": "hftrainer.models.motion.t2mgpt.bundle.T2MGPTBundle",
+                    "pipeline_class": "hftrainer.pipelines.t2mgpt.pipeline.T2MGPTPipeline",
+                    "artifacts": {
+                        "vqvae": "vq.safetensors" if safe_serialization else "vq.pt",
+                        "gpt": "gpt.safetensors" if safe_serialization else "gpt.pt",
+                        "clip": clip_artifact,
+                        "mean": "Mean.npy",
+                        "std": "Std.npy",
+                    },
+                    "components": {
+                        "clip": {
+                            "name": self.clip_name,
+                            "stored_in_artifact": bool(include_clip),
+                            "path": clip_artifact,
+                        }
+                    },
+                    "external_components": {
+                        "clip": {
+                            "name": self.clip_name,
+                            "stored_in_artifact": bool(include_clip),
+                            "path": clip_artifact,
+                        }
+                    },
+                    "api": {
+                        "from_pretrained": (
+                            "hftrainer.models.motion.t2mgpt.T2MGPTBundle"
+                            ".from_pretrained"
+                        ),
+                        "from_config": (
+                            "hftrainer.models.motion.t2mgpt.T2MGPTBundle"
+                            ".from_config"
+                        ),
+                    },
+                },
+                indent=2,
+            )
+        )
 
         def _cpu_state(m):
             return {k: v.detach().cpu().contiguous() for k, v in m.state_dict().items()}
@@ -276,9 +363,13 @@ class T2MGPTBundle(ModelBundle):
 
             save_file(_cpu_state(self.vqvae), str(save_dir / "vq.safetensors"))
             save_file(_cpu_state(self.gpt), str(save_dir / "gpt.safetensors"))
+            if include_clip:
+                save_file(_cpu_state(self.clip_model), str(save_dir / "clip.safetensors"))
         else:
             torch.save(_cpu_state(self.vqvae), str(save_dir / "vq.pt"))
             torch.save(_cpu_state(self.gpt), str(save_dir / "gpt.pt"))
+            if include_clip:
+                torch.save(_cpu_state(self.clip_model), str(save_dir / "clip.pt"))
 
         np.save(str(save_dir / "Mean.npy"), self.mean.detach().cpu().numpy().astype(np.float32))
         np.save(str(save_dir / "Std.npy"), self.std.detach().cpu().numpy().astype(np.float32))
@@ -301,7 +392,11 @@ class T2MGPTBundle(ModelBundle):
         gpt_w = path / "gpt.safetensors"
         if not gpt_w.exists():
             gpt_w = path / "gpt.pt"
+        clip_w = path / "clip.safetensors"
+        if not clip_w.exists():
+            clip_w = path / "clip.pt"
         clip_name = kwargs.pop("clip_name", meta.get("clip_name", _DEFAULT_CLIP_NAME))
+        load_clip = kwargs.get("load_clip", True)
         return cls(
             config=meta["config"],
             vq_weights_path=str(vq_w),
@@ -309,6 +404,7 @@ class T2MGPTBundle(ModelBundle):
             mean_path=str(path / "Mean.npy"),
             std_path=str(path / "Std.npy"),
             clip_name=clip_name,
+            clip_weights_path=str(clip_w) if load_clip and clip_w.exists() else None,
             **kwargs,
         )
 

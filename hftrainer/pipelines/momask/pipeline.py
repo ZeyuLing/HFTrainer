@@ -1,7 +1,7 @@
 """MoMask text-to-motion pipeline.
 
-Drives the **vendored** MoMask reproduction
-(``hftrainer.models.motion.momask._momask``): CLIP text features ->
+Drives the hftrainer-native MoMask implementation
+(``hftrainer.models.motion.momask.network``): CLIP text features ->
 ``MaskTransformer.generate`` (masked iterative decoding of the base token map,
 classifier-free guidance) -> ``ResidualTransformer.generate`` (quantizers
 1..5) -> ``RVQVAE.forward_decoder`` -> 263-dim motion -> de-normalise to
@@ -33,6 +33,8 @@ MOMASK_MAX_FRAMES = 196
 @PIPELINES.register_module()
 class MoMaskPipeline(BasePipeline):
     """Inference pipeline for the MoMask bundle."""
+
+    BUNDLE_CLS = "hftrainer.models.motion.momask.MoMaskBundle"
 
     def __init__(self, bundle, device: Optional[str] = None, **kwargs):
         super().__init__(bundle, **kwargs)
@@ -83,7 +85,7 @@ class MoMaskPipeline(BasePipeline):
         Returns:
             List of B arrays, each ``(T_i, 263)`` un-standardized.
         """
-        from hftrainer.models.motion.momask._momask import (
+        from hftrainer.models.motion.momask.network import (
             estimate_token_lengths,
             generate_motion,
         )

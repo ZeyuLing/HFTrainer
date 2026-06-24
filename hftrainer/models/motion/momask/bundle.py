@@ -1,13 +1,12 @@
 """MoMask ModelBundle.
 
-Wraps a **vendored, self-contained** reproduction of MoMask (Guo et al.,
-CVPR 2024) behind a clean hftrainer ``ModelBundle`` interface. The
-reproduction is fully independent of ``ref_repo``: the RVQ-VAE tokenizer, the
-masked generative transformer, the residual transformer and the length
-estimator are all ported into ``hftrainer.models.motion.momask._momask`` while
-preserving numerical parity with the released HumanML3D checkpoints.
+Wraps the hftrainer-native MoMask implementation (Guo et al., CVPR 2024) behind
+a clean ``ModelBundle`` interface. The RVQ-VAE tokenizer, masked generative
+transformer, residual transformer and length estimator live in
+``hftrainer.models.motion.momask.network`` while preserving numerical parity
+with the released HumanML3D checkpoints.
 
-Architecture (all vendored, see ``hftrainer.models.motion.momask._momask``):
+Architecture (see ``hftrainer.models.motion.momask.network``):
 
 * **RVQVAE** (``vq_model``) — non-causal 1D-conv encoder/decoder with a
   **6-quantizer residual VQ** codebook (nb_code=512, code_dim=512). Tokenizes
@@ -19,8 +18,7 @@ Architecture (all vendored, see ``hftrainer.models.motion.momask._momask``):
 * **LengthEstimator** (``length_estimator``, optional) — samples a motion
   length (in tokens) from the CLIP text embedding when no length is given.
 * **CLIP ViT-B/32** text encoder — frozen, lives inside the two transformers,
-  reloaded by name (``clip_version``); **not** stored in the hftrainer
-  artifact, exactly like CLIP in MDM.
+  and is stored once in the hftrainer artifact as ``clip.safetensors``.
 
 Representation: **HumanML3D-263** (263-dim, 20 fps, 22 joints). After
 de-normalising with the RVQ-VAE training ``Mean`` / ``Std`` the raw 263 vectors
@@ -43,7 +41,6 @@ from hftrainer.registry import MODEL_BUNDLES
 # Repo root: hftrainer/models/motion/momask/bundle.py -> parents[4]
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
-_DEFAULT_WEIGHTS_ROOT = _REPO_ROOT / "ref_repo/Momask/weights"
 _DEFAULT_DATASET = "t2m"
 _DEFAULT_VQ_NAME = "rvq_nq6_dc512_nc512_noshare_qdp0.2"
 _DEFAULT_T2M_NAME = "t2m_nlayer8_nhead6_ld384_ff1024_cdp0.1_rvq6ns"
@@ -114,7 +111,7 @@ class MoMaskBundle(ModelBundle):
 
     def __init__(
         self,
-        # --- raw upstream weights (ref_repo/Momask/weights) ---------------
+        # --- explicit raw upstream weights (converter/debug only) ---------
         weights_root: Optional[str] = None,
         dataset_name: str = _DEFAULT_DATASET,
         vq_name: str = _DEFAULT_VQ_NAME,
@@ -129,6 +126,7 @@ class MoMaskBundle(ModelBundle):
         length_weights_path: Optional[str] = None,
         mean_path: Optional[str] = None,
         std_path: Optional[str] = None,
+        clip_weights_path: Optional[str] = None,
         # --- shared -------------------------------------------------------
         clip_version: str = _CLIP_VERSION,
         load_length_estimator: bool = True,
@@ -137,21 +135,38 @@ class MoMaskBundle(ModelBundle):
     ):
         """Construct the MoMask bundle.
 
-        Two weight sources are supported (mirroring the MDM / MotionMillion
-        bundles):
+        Two weight sources are supported:
 
         * **Raw upstream checkpoints** — the released ``.tar`` files under
           ``<weights_root>/<dataset_name>/<name>/model/`` plus
           ``meta/{mean,std}.npy``. This is what
-          :func:`scripts.eval.convert_momask_checkpoint` consumes.
+          :func:`scripts.eval.convert_momask_checkpoint` consumes; the bundle
+          never guesses a raw-checkout location.
         * **Self-contained hftrainer artifact** — ``config`` plus
-          ``*_weights_path`` (safetensors) + ``Mean.npy`` / ``Std.npy``, as
-          produced by :meth:`save_pretrained` / consumed by
-          :meth:`from_pretrained`. The CLIP backbone is never stored; it is
-          reloaded by ``clip_version``.
+          ``*_weights_path`` (safetensors) + ``clip.safetensors`` +
+          ``Mean.npy`` / ``Std.npy``, as produced by :meth:`save_pretrained` /
+          consumed by :meth:`from_pretrained`.
         """
         super().__init__()
-        from ._momask import (
+        use_artifact = vq_weights_path is not None
+        if use_artifact:
+            missing = [
+                name
+                for name, value in (
+                    ("t2m_weights_path", t2m_weights_path),
+                    ("res_weights_path", res_weights_path),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(f"MoMask artifact load is missing: {', '.join(missing)}")
+        elif weights_root is None:
+            raise ValueError(
+                "MoMaskBundle requires artifact weights or an explicit "
+                "weights_root for raw checkpoint conversion."
+            )
+
+        from .network import (
             LengthEstimator,
             MaskTransformer,
             ResidualTransformer,
@@ -159,6 +174,8 @@ class MoMaskBundle(ModelBundle):
         )
 
         self.clip_version = clip_version
+        self._clip_weights_path = clip_weights_path
+        effective_clip_version = clip_weights_path or clip_version
         # ``opt.device`` controls CLIP precision (cuda -> fp16 via
         # clip.model.convert_weights), matching the parity script. We pick the
         # final device up-front so CLIP text features are bit-identical.
@@ -222,7 +239,7 @@ class MoMaskBundle(ModelBundle):
             dropout=trans_cfg["dropout"],
             clip_dim=trans_cfg["clip_dim"],
             cond_drop_prob=trans_cfg["cond_drop_prob"],
-            clip_version=clip_version,
+            clip_version=effective_clip_version,
             opt=trans_opt,
         )
 
@@ -245,7 +262,7 @@ class MoMaskBundle(ModelBundle):
             shared_codebook=vq_cfg["shared_codebook"],
             cond_drop_prob=res_cfg["cond_drop_prob"],
             share_weight=res_cfg["share_weight"],
-            clip_version=clip_version,
+            clip_version=effective_clip_version,
             opt=res_opt,
         )
 
@@ -257,7 +274,6 @@ class MoMaskBundle(ModelBundle):
             )
 
         # ----- weight loading ---------------------------------------------
-        use_artifact = vq_weights_path is not None
         if use_artifact:
             self._load_module(vq_model, vq_weights_path, key=None, allow_clip_missing=False)
             self._load_module(t2m_transformer, t2m_weights_path, key=None, allow_clip_missing=True)
@@ -265,7 +281,7 @@ class MoMaskBundle(ModelBundle):
             if length_estimator is not None and length_weights_path is not None:
                 self._load_module(length_estimator, length_weights_path, key=None, allow_clip_missing=False)
         else:
-            root = Path(weights_root or _DEFAULT_WEIGHTS_ROOT)
+            root = Path(weights_root)
             vq_dir = root / dataset_name / vq_name
             t2m_dir = root / dataset_name / t2m_name
             res_dir = root / dataset_name / res_name
@@ -362,7 +378,7 @@ class MoMaskBundle(ModelBundle):
         }
 
     # ------------------------------------------------------------------
-    # diffusers-style artifact I/O (self-contained, ref_repo-independent)
+    # diffusers-style artifact I/O (self-contained, raw-checkout-independent)
     # ------------------------------------------------------------------
     def config_dict(self) -> dict:
         return {
@@ -372,32 +388,106 @@ class MoMaskBundle(ModelBundle):
             "length": dict(self._len_cfg),
         }
 
-    def save_pretrained(self, save_directory: str, safe_serialization: bool = True, **kwargs):
+    def save_pretrained(
+        self,
+        save_directory: str,
+        safe_serialization: bool = True,
+        include_clip: bool = True,
+        **kwargs,
+    ):
         """Export a self-contained hftrainer MoMask artifact.
 
         Layout::
 
             <dir>/momask_config.json   # arch config for all sub-modules
             <dir>/vq.safetensors       # RVQ-VAE weights
-            <dir>/t2m_trans.safetensors  # MaskTransformer (no CLIP)
-            <dir>/res_trans.safetensors  # ResidualTransformer (no CLIP)
+            <dir>/t2m_trans.safetensors  # MaskTransformer non-CLIP weights
+            <dir>/res_trans.safetensors  # ResidualTransformer non-CLIP weights
             <dir>/length_est.safetensors # LengthEstimator (if present)
+            <dir>/clip.safetensors       # shared CLIP ViT-B/32 text encoder
             <dir>/Mean.npy, Std.npy    # 263-dim denorm stats
-
-        The CLIP ViT-B/32 text encoder is reloaded by name (``clip_version``).
         """
         import os
 
         os.makedirs(save_directory, exist_ok=True)
         save_dir = Path(save_directory)
+        clip_artifact = (
+            ("clip.safetensors" if safe_serialization else "clip.pt")
+            if include_clip
+            else None
+        )
 
         cfg = {
             "model_type": "momask",
+            "format": "hftrainer-momask-v1",
             "clip_version": self.clip_version,
             "has_length_estimator": self.length_estimator is not None,
+            "components": {
+                "clip": {
+                    "name": self.clip_version,
+                    "stored_in_artifact": bool(include_clip),
+                    "path": clip_artifact,
+                }
+            },
             "config": self.config_dict(),
         }
         (save_dir / "momask_config.json").write_text(json.dumps(cfg, indent=2))
+        (save_dir / "model_index.json").write_text(
+            json.dumps(
+                {
+                    "_class_name": "MoMaskPipeline",
+                    "_library_name": "hftrainer",
+                    "model_type": "momask",
+                    "format": "hftrainer-momask-v1",
+                    "bundle_class": "hftrainer.models.motion.momask.bundle.MoMaskBundle",
+                    "pipeline_class": "hftrainer.pipelines.momask.pipeline.MoMaskPipeline",
+                    "artifacts": {
+                        "vq": "vq.safetensors" if safe_serialization else "vq.pt",
+                        "t2m_transformer": "t2m_trans.safetensors"
+                        if safe_serialization else "t2m_trans.pt",
+                        "res_transformer": "res_trans.safetensors"
+                        if safe_serialization else "res_trans.pt",
+                        "length_estimator": (
+                            "length_est.safetensors"
+                            if safe_serialization and self.length_estimator is not None
+                            else (
+                                "length_est.pt"
+                                if self.length_estimator is not None
+                                else None
+                            )
+                        ),
+                        "clip": clip_artifact,
+                        "mean": "Mean.npy",
+                        "std": "Std.npy",
+                    },
+                    "components": {
+                        "clip": {
+                            "name": self.clip_version,
+                            "stored_in_artifact": bool(include_clip),
+                            "path": clip_artifact,
+                        }
+                    },
+                    "external_components": {
+                        "clip": {
+                            "name": self.clip_version,
+                            "stored_in_artifact": bool(include_clip),
+                            "path": clip_artifact,
+                        }
+                    },
+                    "api": {
+                        "from_pretrained": (
+                            "hftrainer.models.motion.momask.MoMaskBundle"
+                            ".from_pretrained"
+                        ),
+                        "from_config": (
+                            "hftrainer.models.motion.momask.MoMaskBundle"
+                            ".from_config"
+                        ),
+                    },
+                },
+                indent=2,
+            )
+        )
 
         if safe_serialization:
             from safetensors.torch import save_file
@@ -407,12 +497,28 @@ class MoMaskBundle(ModelBundle):
             save_file(self._state_dict_no_clip(self.res_transformer), str(save_dir / "res_trans.safetensors"))
             if self.length_estimator is not None:
                 save_file(self.length_estimator.state_dict(), str(save_dir / "length_est.safetensors"))
+            if include_clip:
+                save_file(
+                    {
+                        k: v.detach().cpu().contiguous()
+                        for k, v in self.t2m_transformer.clip_model.state_dict().items()
+                    },
+                    str(save_dir / "clip.safetensors"),
+                )
         else:
             torch.save(self.vq_model.state_dict(), str(save_dir / "vq.pt"))
             torch.save(self._state_dict_no_clip(self.t2m_transformer), str(save_dir / "t2m_trans.pt"))
             torch.save(self._state_dict_no_clip(self.res_transformer), str(save_dir / "res_trans.pt"))
             if self.length_estimator is not None:
                 torch.save(self.length_estimator.state_dict(), str(save_dir / "length_est.pt"))
+            if include_clip:
+                torch.save(
+                    {
+                        k: v.detach().cpu().contiguous()
+                        for k, v in self.t2m_transformer.clip_model.state_dict().items()
+                    },
+                    str(save_dir / "clip.pt"),
+                )
 
         np.save(str(save_dir / "Mean.npy"), self.mean.detach().cpu().numpy().astype(np.float32))
         np.save(str(save_dir / "Std.npy"), self.std.detach().cpu().numpy().astype(np.float32))
@@ -436,6 +542,7 @@ class MoMaskBundle(ModelBundle):
 
         load_length = kwargs.pop("load_length_estimator", meta.get("has_length_estimator", True))
         length_w = _w("length_est")
+        clip_w = _w("clip")
         clip_version = kwargs.pop("clip_version", meta.get("clip_version", _CLIP_VERSION))
         return cls(
             config=meta["config"],
@@ -445,6 +552,7 @@ class MoMaskBundle(ModelBundle):
             length_weights_path=str(length_w) if length_w.exists() else None,
             mean_path=str(path / "Mean.npy"),
             std_path=str(path / "Std.npy"),
+            clip_weights_path=str(clip_w) if clip_w.exists() else None,
             clip_version=clip_version,
             load_length_estimator=load_length and length_w.exists(),
             **kwargs,

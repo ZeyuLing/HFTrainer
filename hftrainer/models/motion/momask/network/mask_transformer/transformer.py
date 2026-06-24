@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import clip
 from einops import rearrange, repeat
 import math
+from pathlib import Path
 from random import random
 from tqdm.auto import tqdm
 from typing import Callable, Optional, List, Dict
@@ -13,6 +14,31 @@ from copy import deepcopy
 from functools import partial
 from .tools import *
 from torch.distributions.categorical import Categorical
+
+
+def _load_openai_clip_model(clip_version, device):
+    clip_path = Path(str(clip_version)) if clip_version is not None else None
+    if clip_path is not None and clip_path.is_file():
+        if str(clip_path).endswith(".safetensors"):
+            from safetensors.torch import load_file
+
+            state = load_file(str(clip_path), device="cpu")
+        else:
+            state = torch.load(str(clip_path), map_location="cpu")
+        build_state = dict(state)
+        clip_model = clip.model.build_model(build_state)
+        if str(device) == "cpu" and any(
+            torch.is_floating_point(v) and v.dtype == torch.float32
+            for v in state.values()
+        ):
+            clip_model = clip_model.float()
+            clip_model.load_state_dict(state, strict=True)
+        return clip_model
+
+    clip_model, _ = clip.load(clip_version, device="cpu", jit=False)
+    if str(device) != "cpu":
+        clip.model.convert_weights(clip_model)
+    return clip_model
 
 class InputProcess(nn.Module):
     def __init__(self, input_feats, latent_dim):
@@ -176,13 +202,7 @@ class MaskTransformer(nn.Module):
         return [p for name, p in self.named_parameters() if not name.startswith('clip_model.')]
 
     def load_and_freeze_clip(self, clip_version):
-        clip_model, clip_preprocess = clip.load(clip_version, device='cpu',
-                                                jit=False)  # Must set jit=False for training
-        # Added support for cpu
-        if str(self.opt.device) != "cpu":
-            clip.model.convert_weights(
-                clip_model)  # Actually this line is unnecessary since clip by default already on float16
-            # Date 0707: It's necessary, only unecessary when load directly to gpu. Disable if need to run on cpu
+        clip_model = _load_openai_clip_model(clip_version, self.opt.device)
 
         # Freeze CLIP weights
         clip_model.eval()
@@ -729,13 +749,7 @@ class ResidualTransformer(nn.Module):
         return [p for name, p in self.named_parameters() if not name.startswith('clip_model.')]
 
     def load_and_freeze_clip(self, clip_version):
-        clip_model, clip_preprocess = clip.load(clip_version, device='cpu',
-                                                jit=False)  # Must set jit=False for training
-        # Added support for cpu
-        if str(self.opt.device) != "cpu":
-            clip.model.convert_weights(
-                clip_model)  # Actually this line is unnecessary since clip by default already on float16
-            # Date 0707: It's necessary, only unecessary when load directly to gpu. Disable if need to run on cpu
+        clip_model = _load_openai_clip_model(clip_version, self.opt.device)
 
         # Freeze CLIP weights
         clip_model.eval()

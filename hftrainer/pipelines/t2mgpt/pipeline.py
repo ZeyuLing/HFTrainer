@@ -1,7 +1,7 @@
 """T2M-GPT text-to-motion pipeline.
 
-Drives the **vendored** T2M-GPT reproduction
-(``hftrainer.models.motion.t2mgpt._t2mgpt``): CLIP ViT-B/32 text feature ->
+Drives the hftrainer-native T2M-GPT implementation
+(``hftrainer.models.motion.t2mgpt.network``): CLIP ViT-B/32 text feature ->
 cross-conditional GPT autoregressive token sampling -> VQ-VAE
 ``forward_decoder`` -> 263-dim motion -> de-normalise to physical scale.
 
@@ -16,7 +16,7 @@ The inference path is byte-for-byte aligned with the gold-standard
 ⚠️ Upstream ``GPT_eval_multi`` keeps the GPT in ``train()`` mode at inference
 (dropout stays active). We replicate that here — :meth:`infer_t2m` flips the GPT
 to ``train()`` — because it is part of the released sampling distribution and is
-required for numerical parity. Fully independent of ``ref_repo``.
+    required for numerical parity. Fully independent of upstream checkout code.
 """
 
 from __future__ import annotations
@@ -33,6 +33,8 @@ from hftrainer.registry import PIPELINES
 @PIPELINES.register_module()
 class T2MGPTPipeline(BasePipeline):
     """Inference pipeline for the T2M-GPT bundle."""
+
+    BUNDLE_CLS = "hftrainer.models.motion.t2mgpt.T2MGPTBundle"
 
     def __init__(self, bundle, device: Optional[str] = None, **kwargs):
         super().__init__(bundle, **kwargs)
