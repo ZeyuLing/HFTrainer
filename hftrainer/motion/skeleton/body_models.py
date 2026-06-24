@@ -1,8 +1,10 @@
 """Light SMPL / SMPL-X / SMPL-H body-model loaders and asset resolution.
 
-This module is the public home for body-model access. The actual differentiable
-LBS modules currently live in ``hftrainer.models.motion.components.body_models``
-and are re-exported here; new code should import from this path.
+This module is a skeleton-oriented facade over the public body-model package at
+``hftrainer.motion.body_models``. New code that constructs the differentiable
+LBS modules directly may import from either public path; legacy
+``hftrainer.motion.body_models`` imports are compatibility
+wrappers only.
 
 Asset resolution prefers the in-repo ``checkpoints/`` symlinks over ``ref_repo``
 so that library code never hard-codes a ``ref_repo`` path.
@@ -52,7 +54,7 @@ def resolve_smpl_model_dir(override: Optional[str] = None) -> str:
 # constructed.
 def __getattr__(name: str):  # PEP 562 module-level lazy attribute
     if name in {"SmplLite", "SmplxLite", "SmplxLiteJ24", "SmplxLiteV437Coco17"}:
-        from hftrainer.models.motion.components.body_models import smplx_lite
+        from hftrainer.motion.body_models import smplx_lite
 
         return getattr(smplx_lite, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

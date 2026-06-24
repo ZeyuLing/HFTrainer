@@ -15,8 +15,11 @@ The input to the transformer is just x_t (motion_dim), not
 
 from __future__ import annotations
 
+import json
 import os.path as osp
+import shutil
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -26,6 +29,29 @@ from torch import Tensor
 
 from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.registry import MODEL_BUNDLES
+
+
+_DEFAULT_TEXT_ENCODER_CFG = {
+    'type': 'HYTextModel',
+    'llm_type': 'qwen3',
+    'max_length_llm': 128,
+    'sentence_emb_type': 'clipl',
+    'max_length_sentence_emb': 77,
+    'enable_llm_padding': True,
+}
+_ARTIFACT_FORMAT = 'hftrainer-hymotion-t2m-v1'
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_DTYPE_ALIASES = {
+    'fp32': torch.float32,
+    'float32': torch.float32,
+    'torch.float32': torch.float32,
+    'fp16': torch.float16,
+    'float16': torch.float16,
+    'torch.float16': torch.float16,
+    'bf16': torch.bfloat16,
+    'bfloat16': torch.bfloat16,
+    'torch.bfloat16': torch.bfloat16,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +67,94 @@ def _length_to_mask(lengths: Tensor, max_len: int) -> Tensor:
 
 def _get_module_device(module: nn.Module) -> torch.device:
     return next(module.parameters()).device
+
+
+def _maybe_download_hub(name_or_path: str, local: Path) -> Path:
+    """Resolve a HuggingFace Hub repo id to a local snapshot dir."""
+    if local.exists():
+        return local
+    try:
+        from huggingface_hub import snapshot_download
+
+        return Path(snapshot_download(repo_id=name_or_path))
+    except Exception:
+        return local
+
+
+def _resolve_dtype(dtype: Optional[Any]) -> Optional[torch.dtype]:
+    if dtype is None or isinstance(dtype, torch.dtype):
+        return dtype
+    if isinstance(dtype, str):
+        resolved = _DTYPE_ALIASES.get(dtype)
+        if resolved is not None:
+            return resolved
+    raise ValueError(f'Unsupported text dtype: {dtype!r}')
+
+
+def _dtype_name(dtype: Optional[Any]) -> Optional[str]:
+    dtype = _resolve_dtype(dtype)
+    if dtype is None:
+        return None
+    if dtype is torch.float32:
+        return 'fp32'
+    if dtype is torch.float16:
+        return 'fp16'
+    if dtype is torch.bfloat16:
+        return 'bf16'
+    return str(dtype)
+
+
+def _jsonable(value):
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, torch.dtype):
+        return _dtype_name(value)
+    return value
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
+def _is_local_relative_path(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    path = str(value)
+    return '://' not in path and not Path(path).is_absolute()
+
+
+def _resolve_repo_path(value: str) -> Path:
+    path = Path(value)
+    if path.exists() or path.is_absolute():
+        return path
+    repo_path = _REPO_ROOT / path
+    if repo_path.exists():
+        return repo_path
+    return path
+
+
+def _resolve_artifact_path(value: Optional[str], artifact_dir: Path) -> Optional[str]:
+    if not value or not _is_local_relative_path(value):
+        return value
+    return str(artifact_dir / value)
+
+
+def _copy_pretrained_tree(src: Path, dst: Path, ignore_patterns: Optional[tuple[str, ...]] = None) -> None:
+    if not src.exists():
+        raise FileNotFoundError(f'pretrained component not found: {src}')
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    ignore = shutil.ignore_patterns(*(ignore_patterns or ())) if ignore_patterns else None
+    shutil.copytree(src, dst, symlinks=False, ignore=ignore)
+
+
+def _ensure_motion_transformer_registered() -> None:
+    # Needed when users set HFTRAINER_SKIP_AUTOREGISTER=1 for lightweight
+    # inference/imports.
+    import hftrainer.models.motion.components.hunyuan_motion  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -78,12 +192,19 @@ class HyMotionT2MBundle(ModelBundle):
         cond_mask_prob: float = 0.1,
         vtxt_input_dim: int = 768,
         ctxt_input_dim: int = 4096,
+        # ----- self-contained artifact loading --------------------------
+        motion_weights_path: Optional[str] = None,
+        mean_path: Optional[str] = None,
+        std_path: Optional[str] = None,
+        text_dtype: Optional[Any] = None,
+        device: Optional[str] = None,
         # ----- SMPL body model path (optional; skipped if None) -----
         body_model_path: Optional[str] = None,
     ):
         super().__init__()
 
         # ---- build trainable module via _build_modules ----
+        _ensure_motion_transformer_registered()
         self._build_modules({'motion_transformer': motion_transformer})
 
         # ---- hyper-params ----
@@ -91,6 +212,7 @@ class HyMotionT2MBundle(ModelBundle):
         self.pred_type = pred_type
         self.uncondition_mode = uncondition_mode
         self.cond_mask_prob = cond_mask_prob
+        self._losses_cfg = deepcopy(losses_cfg or {})
         self._noise_scheduler_cfg = deepcopy(noise_scheduler_cfg or {'method': 'euler'})
         self._infer_noise_scheduler_cfg = deepcopy(
             infer_noise_scheduler_cfg or {'validation_steps': 50}
@@ -98,6 +220,7 @@ class HyMotionT2MBundle(ModelBundle):
 
         # ---- text encoder config (lazy-loaded) ----
         self._text_encoder_cfg = deepcopy(text_encoder) if text_encoder else None
+        self._text_dtype = _resolve_dtype(text_dtype)
 
         # ---- null embeddings for classifier-free guidance ----
         # Zero default; actual values loaded from pretrained checkpoint.
@@ -105,11 +228,11 @@ class HyMotionT2MBundle(ModelBundle):
         self.null_ctxt_input = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim))
 
         # ---- mean / std buffers ----
-        self._load_mean_std(mean_std_dir)
+        self._load_mean_std(mean_std_dir, mean_path=mean_path, std_path=std_path)
 
         # ---- M2M loss (reused for T2M: same velocity / x1 loss) ----
-        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
-        self.m2m_loss = M2MLoss(**(losses_cfg or {}))
+        from hftrainer.models.motion.components.hunyuan_motion.m2m_loss import M2MLoss
+        self.m2m_loss = M2MLoss(**self._losses_cfg)
 
         # ---- SMPL body model (optional for FK losses / decode) ----
         self._body_model_path = body_model_path
@@ -124,12 +247,29 @@ class HyMotionT2MBundle(ModelBundle):
             'validation_steps', 50
         )
 
+        if motion_weights_path is not None:
+            self._load_artifact_weights(motion_weights_path)
+
+        if device is not None:
+            self.to(torch.device(device))
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _load_mean_std(self, mean_std_dir: Optional[str]) -> None:
-        if mean_std_dir is not None and osp.isdir(mean_std_dir):
+    def _load_mean_std(
+        self,
+        mean_std_dir: Optional[str],
+        mean_path: Optional[str] = None,
+        std_path: Optional[str] = None,
+    ) -> None:
+        if mean_path is not None and std_path is not None:
+            mean = torch.from_numpy(np.load(str(mean_path))).float()
+            std = torch.from_numpy(np.load(str(std_path))).float()
+            std = torch.where(std < 1e-3, torch.zeros_like(std), std)
+            self.register_buffer('mean', mean)
+            self.register_buffer('std', std)
+        elif mean_std_dir is not None and osp.isdir(mean_std_dir):
             mean = torch.from_numpy(
                 np.load(osp.join(mean_std_dir, 'Mean.npy'))
             ).float()
@@ -145,11 +285,33 @@ class HyMotionT2MBundle(ModelBundle):
             self.register_buffer('mean', torch.zeros(1))
             self.register_buffer('std', torch.ones(1))
 
+    def _load_artifact_weights(self, weights_path: str) -> None:
+        p = str(weights_path)
+        if p.endswith('.safetensors'):
+            from safetensors.torch import load_file
+
+            state = load_file(p)
+        else:
+            state = torch.load(p, map_location='cpu')
+        mt_prefix = 'motion_transformer.'
+        mt_state = {
+            k[len(mt_prefix):]: v
+            for k, v in state.items()
+            if k.startswith(mt_prefix)
+        }
+        if not mt_state:
+            raise ValueError(f'No motion_transformer.* weights found in {weights_path}')
+        self.motion_transformer.load_state_dict(mt_state, strict=True)
+        for name in ('null_vtxt_feat', 'null_ctxt_input'):
+            if name not in state:
+                raise ValueError(f'{weights_path} is missing {name}')
+            getattr(self, name).data.copy_(state[name].to(getattr(self, name).device))
+
     @property
     def body_model(self):
         """Lazy-load SmplxLiteJ24 body model."""
         if self._body_model is None:
-            from hftrainer.models.motion.hymotion_m2m.network.smpl_lite import SmplxLiteJ24
+            from hftrainer.models.motion.components.hunyuan_motion.smpl_lite import SmplxLiteJ24
             kwargs = {}
             if self._body_model_path is not None:
                 kwargs['model_path'] = self._body_model_path
@@ -177,18 +339,329 @@ class HyMotionT2MBundle(ModelBundle):
                 raise RuntimeError(
                     'No text_encoder config provided; cannot encode text.'
                 )
-            from hftrainer.models.motion.hymotion_m2m.network.text_encoder import (
+            from hftrainer.models.motion.components.hunyuan_motion.text_encoder import (
                 HYTextModel,
             )
             cfg = deepcopy(self._text_encoder_cfg)
             cfg.pop('type', None)
-            self._text_encoder = HYTextModel(**cfg)
+            if self._text_dtype is not None:
+                cfg['torch_dtype'] = self._text_dtype
+            elif 'torch_dtype' in cfg:
+                cfg['torch_dtype'] = _resolve_dtype(cfg['torch_dtype'])
+            self._text_encoder = HYTextModel(**cfg).to(device).eval()
+        else:
+            self._text_encoder = self._text_encoder.to(device).eval()
         vtxt, ctxt, ctxt_len = self._text_encoder.encode(text)
         return {
             'text_vec_raw': vtxt.to(device),
             'text_ctxt_raw': ctxt.to(device),
             'text_ctxt_raw_length': ctxt_len.to(device),
         }
+
+    # ------------------------------------------------------------------
+    # diffusers-style artifact I/O
+    # ------------------------------------------------------------------
+
+    def _artifact_text_encoder_cfg(self) -> dict:
+        cfg = deepcopy(self._text_encoder_cfg) if self._text_encoder_cfg else deepcopy(_DEFAULT_TEXT_ENCODER_CFG)
+        if self._text_dtype is not None:
+            cfg['torch_dtype'] = _dtype_name(self._text_dtype)
+        return cfg
+
+    @staticmethod
+    def _text_encoder_cfg_is_packaged(cfg: dict) -> bool:
+        return bool(cfg.get('llm_model_path') and cfg.get('sentence_emb_model_path'))
+
+    def text_encoder_components(self, cfg: Optional[dict] = None, stored: Optional[bool] = None) -> dict:
+        """Return text-encoder component metadata for this artifact."""
+        cfg = deepcopy(cfg) if cfg is not None else self._artifact_text_encoder_cfg()
+        if stored is None:
+            stored = self._text_encoder_cfg_is_packaged(cfg)
+        return {
+            'llm': {
+                'type': cfg.get('llm_type', _DEFAULT_TEXT_ENCODER_CFG['llm_type']),
+                'stored_in_artifact': bool(stored),
+                'path': cfg.get('llm_model_path'),
+            },
+            'sentence': {
+                'type': cfg.get(
+                    'sentence_emb_type',
+                    _DEFAULT_TEXT_ENCODER_CFG['sentence_emb_type'],
+                ),
+                'stored_in_artifact': bool(stored),
+                'path': cfg.get('sentence_emb_model_path'),
+            },
+        }
+
+    def external_text_encoder_components(self) -> dict:
+        """Backward-compatible alias for component metadata."""
+        return self.text_encoder_components()
+
+    def text_encoder_requires_external_weights(self) -> bool:
+        """Return True only for legacy lightweight artifacts without encoder paths."""
+        return not self._text_encoder_cfg_is_packaged(self._artifact_text_encoder_cfg())
+
+    def config_dict(self) -> dict:
+        """Architecture and inference metadata persisted in HYMotion artifacts."""
+        text_encoder_cfg = self._artifact_text_encoder_cfg()
+        text_encoder_components = self.text_encoder_components(text_encoder_cfg)
+        return {
+            'format': _ARTIFACT_FORMAT,
+            'motion_transformer': self.get_module_build_cfg('motion_transformer'),
+            'text_encoder': text_encoder_cfg,
+            'text_encoder_components': text_encoder_components,
+            'external_text_encoder_components': text_encoder_components,
+            'motion_type': self.motion_type,
+            'pred_type': self.pred_type,
+            'uncondition_mode': self.uncondition_mode,
+            'losses_cfg': deepcopy(self._losses_cfg),
+            'noise_scheduler_cfg': deepcopy(self._noise_scheduler_cfg),
+            'infer_noise_scheduler_cfg': deepcopy(self._infer_noise_scheduler_cfg),
+            'cond_mask_prob': self.cond_mask_prob,
+            'vtxt_input_dim': self._vtxt_input_dim,
+            'ctxt_input_dim': self._ctxt_input_dim,
+            'body_model_path': self._body_model_path,
+        }
+
+    def _copy_text_encoder_artifacts(
+        self,
+        save_dir: Path,
+        text_encoder_cfg: dict,
+        text_encoder_subdir: str,
+    ) -> dict:
+        from hftrainer.models.motion.components.hunyuan_motion.text_encoder import (
+            LLM_ENCODER_LAYOUT,
+            SENTENCE_EMB_LAYOUT,
+        )
+
+        cfg = deepcopy(text_encoder_cfg)
+        llm_type = cfg.get('llm_type', _DEFAULT_TEXT_ENCODER_CFG['llm_type'])
+        sentence_type = cfg.get(
+            'sentence_emb_type',
+            _DEFAULT_TEXT_ENCODER_CFG['sentence_emb_type'],
+        )
+        if llm_type not in LLM_ENCODER_LAYOUT:
+            raise ValueError(f'Unsupported HYMotion LLM type: {llm_type}')
+        if sentence_type not in SENTENCE_EMB_LAYOUT:
+            raise ValueError(f'Unsupported HYMotion sentence encoder type: {sentence_type}')
+
+        llm_src = _resolve_repo_path(
+            cfg.get('llm_model_path') or LLM_ENCODER_LAYOUT[llm_type]['module_path']
+        )
+        sentence_src = _resolve_repo_path(
+            cfg.get('sentence_emb_model_path')
+            or SENTENCE_EMB_LAYOUT[sentence_type]['module_path']
+        )
+        llm_rel = f'{text_encoder_subdir}/llm'
+        sentence_rel = f'{text_encoder_subdir}/sentence'
+        _copy_pretrained_tree(llm_src, save_dir / llm_rel, ignore_patterns=('.cache',))
+        sentence_ignore = ('.cache',)
+        if (sentence_src / 'model.safetensors').exists():
+            # CLIP-L snapshots often keep equivalent PyTorch/TF/Flax exports
+            # next to the safetensors file. Transformers loads model.safetensors
+            # directly, so omit duplicate framework weights from artifacts.
+            sentence_ignore = (
+                '.cache',
+                'pytorch_model.bin',
+                'tf_model.h5',
+                'flax_model.msgpack',
+            )
+        _copy_pretrained_tree(sentence_src, save_dir / sentence_rel, sentence_ignore)
+        cfg['llm_model_path'] = llm_rel
+        cfg['llm_tokenizer_path'] = llm_rel
+        cfg['sentence_emb_model_path'] = sentence_rel
+        cfg['sentence_emb_tokenizer_path'] = sentence_rel
+        return cfg
+
+    @staticmethod
+    def _resolve_text_encoder_cfg_paths(cfg: Optional[dict], artifact_dir: Path) -> Optional[dict]:
+        if cfg is None:
+            return None
+        out = deepcopy(cfg)
+        packaged_llm = artifact_dir / 'text_encoder' / 'llm'
+        packaged_sentence = artifact_dir / 'text_encoder' / 'sentence'
+        if packaged_llm.exists() and 'llm_model_path' not in out:
+            out['llm_model_path'] = str(packaged_llm)
+            out['llm_tokenizer_path'] = str(packaged_llm)
+        if packaged_sentence.exists() and 'sentence_emb_model_path' not in out:
+            out['sentence_emb_model_path'] = str(packaged_sentence)
+            out['sentence_emb_tokenizer_path'] = str(packaged_sentence)
+        for key in (
+            'llm_model_path',
+            'llm_tokenizer_path',
+            'sentence_emb_model_path',
+            'sentence_emb_tokenizer_path',
+        ):
+            out[key] = _resolve_artifact_path(out.get(key), artifact_dir)
+        return out
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        safe_serialization: bool = True,
+        variant: Optional[str] = None,
+        include_text_encoder: bool = True,
+        text_encoder_subdir: str = 'text_encoder',
+        **kwargs,
+    ):
+        """Export a self-contained hftrainer HYMotion-T2M artifact.
+
+        Layout::
+
+            <dir>/hymotion_t2m_config.json
+            <dir>/motion_transformer.safetensors
+            <dir>/Mean.npy, Std.npy
+            <dir>/text_encoder/llm/
+            <dir>/text_encoder/sentence/
+        """
+        save_dir = Path(save_directory)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        config = self.config_dict()
+        text_encoder_cfg = deepcopy(config['text_encoder'])
+        if include_text_encoder:
+            text_encoder_cfg = self._copy_text_encoder_artifacts(
+                save_dir,
+                text_encoder_cfg,
+                text_encoder_subdir=text_encoder_subdir,
+            )
+            components = self.text_encoder_components(text_encoder_cfg, stored=True)
+        else:
+            components = self.text_encoder_components(text_encoder_cfg, stored=False)
+        config['text_encoder'] = _jsonable(text_encoder_cfg)
+        config['text_encoder_components'] = _jsonable(components)
+        config['external_text_encoder_components'] = _jsonable(components)
+
+        meta = {
+            'model_type': 'hymotion_t2m',
+            'format': _ARTIFACT_FORMAT,
+            'variant': variant,
+            'config': _jsonable(config),
+            'pipeline_class': 'hftrainer.pipelines.motion.hymotion_t2m_pipeline.HyMotionT2MPipeline',
+            'bundle_class': 'hftrainer.models.motion.hymotion_t2m.bundle.HyMotionT2MBundle',
+            'weights': {
+                'motion_transformer': 'motion_transformer.safetensors'
+                if safe_serialization else 'motion_transformer.pt',
+                'mean': 'Mean.npy',
+                'std': 'Std.npy',
+            },
+            'components': {
+                'text_encoder': _jsonable(components),
+            },
+            'external_components': _jsonable(components),
+        }
+        if include_text_encoder:
+            meta['weights']['text_encoder'] = text_encoder_subdir
+        (save_dir / 'hymotion_t2m_config.json').write_text(
+            json.dumps(meta, indent=2)
+        )
+        model_index = {
+            '_class_name': 'HyMotionT2MPipeline',
+            '_library_name': 'hftrainer',
+            'model_type': 'hymotion_t2m',
+            'format': _ARTIFACT_FORMAT,
+            'bundle_class': meta['bundle_class'],
+            'pipeline_class': meta['pipeline_class'],
+            'artifacts': meta['weights'],
+            'components': meta['components'],
+            'external_components': meta['external_components'],
+            'api': {
+                'from_pretrained': (
+                    'hftrainer.models.motion.hymotion_t2m.HyMotionT2MBundle'
+                    '.from_pretrained'
+                ),
+                'from_config': (
+                    'hftrainer.models.motion.hymotion_t2m.HyMotionT2MBundle'
+                    '.from_config'
+                ),
+            },
+        }
+        (save_dir / 'model_index.json').write_text(json.dumps(model_index, indent=2))
+        readme = save_dir / 'README.md'
+        if not readme.exists():
+            readme.write_text(
+                '# HYMotion T2M hftrainer Artifact\n\n'
+                'This repository stores a self-contained hftrainer HYMotion T2M '
+                'artifact, including the motion transformer, classifier-free '
+                'null embeddings, normalization stats, and frozen text encoder '
+                'weights. Load it with '
+                '`HyMotionT2MBundle.from_pretrained(...)` and run it through '
+                '`HyMotionT2MPipeline`.\n'
+            )
+
+        state = {
+            f'motion_transformer.{k}': v.detach().cpu().contiguous()
+            for k, v in self.motion_transformer.state_dict().items()
+        }
+        state['null_vtxt_feat'] = self.null_vtxt_feat.detach().cpu().contiguous()
+        state['null_ctxt_input'] = self.null_ctxt_input.detach().cpu().contiguous()
+
+        if safe_serialization:
+            from safetensors.torch import save_file
+
+            save_file(state, str(save_dir / 'motion_transformer.safetensors'))
+        else:
+            torch.save(state, str(save_dir / 'motion_transformer.pt'))
+
+        np.save(str(save_dir / 'Mean.npy'), self.mean.detach().cpu().numpy().astype(np.float32))
+        np.save(str(save_dir / 'Std.npy'), self.std.detach().cpu().numpy().astype(np.float32))
+        return save_directory
+
+    @classmethod
+    def from_config(cls, cfg: Optional[dict] = None, **kwargs):
+        """Construct from a raw bundle config, artifact metadata, or config file path."""
+        if isinstance(cfg, (str, Path)):
+            cfg_path = Path(cfg)
+            if cfg_path.is_dir():
+                cfg_path = cfg_path / 'hymotion_t2m_config.json'
+            cfg = _read_json(cfg_path)
+        cfg_dict = cls._to_plain_dict(cfg)
+        if cfg_dict.get('model_type') == 'hymotion_t2m' and 'config' in cfg_dict:
+            cfg_dict = deepcopy(cfg_dict['config'])
+        cfg_dict.pop('format', None)
+        cfg_dict.pop('external_text_encoder_components', None)
+        cfg_dict.pop('text_encoder_components', None)
+        return super().from_config(cfg_dict, **kwargs)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str,
+        device: Optional[str] = None,
+        text_dtype: Optional[Any] = 'bf16',
+        **kwargs,
+    ):
+        """Load a HYMotion-T2M artifact from a local dir or HuggingFace Hub id."""
+        path = Path(pretrained_model_name_or_path)
+        if not (path / 'hymotion_t2m_config.json').exists():
+            path = _maybe_download_hub(str(pretrained_model_name_or_path), path)
+        cfg_file = path / 'hymotion_t2m_config.json'
+        if not cfg_file.exists():
+            return super().from_pretrained(pretrained_model_name_or_path, **kwargs)
+
+        meta = json.loads(cfg_file.read_text())
+        weights = path / 'motion_transformer.safetensors'
+        if not weights.exists():
+            weights = path / 'motion_transformer.pt'
+
+        cfg = deepcopy(meta['config'])
+        cfg.pop('format', None)
+        cfg.pop('external_text_encoder_components', None)
+        cfg.pop('text_encoder_components', None)
+        if 'text_encoder' in cfg:
+            cfg['text_encoder'] = cls._resolve_text_encoder_cfg_paths(
+                cfg['text_encoder'],
+                path,
+            )
+        if text_dtype is not None:
+            cfg['text_dtype'] = text_dtype
+        cfg.update(kwargs)
+        return cls(
+            motion_weights_path=str(weights),
+            mean_path=str(path / 'Mean.npy'),
+            std_path=str(path / 'Std.npy'),
+            device=device,
+            **cfg,
+        )
 
     def mask_text_cond(
         self,
@@ -257,12 +730,21 @@ class HyMotionT2MBundle(ModelBundle):
     def decode_motion_from_latent(
         self,
         latent: Tensor,
+        should_apply_smoothing: bool = True,
     ) -> Dict[str, Tensor]:
         """Denormalize latent and run FK to get 3D keypoints.
 
+        When ``should_apply_smoothing`` (the official HY-Motion-1.0 inference
+        default) the raw flow-matching output is temporally filtered before FK:
+        rot6d gets quaternion-Gaussian SLERP smoothing (sigma=1.0) and the root
+        translation gets Savitzky-Golay smoothing (window=11, polyorder=5),
+        matching ``MotionFlowMatching.decode_motion_from_latent`` /
+        ``_decode_o6dp``. Skipping this (the previous behaviour) leaves severe
+        high-frequency jitter in the generated motion.
+
         Returns dict with keys: keypoints3d, rot6d, transl, latent_denorm.
         """
-        from hftrainer.models.motion.hymotion_m2m.network.geometry import rot6d_to_rotation_matrix
+        from hftrainer.models.motion.components.hunyuan_motion.geometry import rot6d_to_rotation_matrix
 
         std = torch.where(self.std < 1e-3, torch.zeros_like(self.std), self.std)
         latent_denorm = latent * std + self.mean
@@ -272,6 +754,19 @@ class HyMotionT2MBundle(ModelBundle):
         root_rot6d = latent_denorm[..., 3:9].reshape(B, L, 1, 6).clone()
         body6d = latent_denorm[..., 9:135].reshape(B, L, 21, 6).clone()
         rot6d = torch.cat([root_rot6d, body6d], dim=2)
+
+        if should_apply_smoothing:
+            from hftrainer.models.motion.hymotion_t2m._smoothing import (
+                smooth_with_savgol,
+                smooth_with_slerp,
+            )
+            # SLERP smoothing on the 22 body joints' rot6d (sigma=1.0); transl
+            # Savitzky-Golay (window=11, polyorder=5) — official inference path.
+            rot6d = smooth_with_slerp(rot6d, sigma=1.0)
+            transl = smooth_with_savgol(transl, window_length=11, polyorder=5)
+            root_rot6d = rot6d[:, :, 0:1, :]
+            body6d = rot6d[:, :, 1:, :]
+
         root_rotmat = rot6d_to_rotation_matrix(rot6d[:, :, 0, :])
 
         k3d = None

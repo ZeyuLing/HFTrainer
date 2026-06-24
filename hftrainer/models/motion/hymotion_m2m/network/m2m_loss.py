@@ -77,7 +77,23 @@ class M2MLoss(nn.Module):
             return ((0, 3), (3, 9), (9, 135), (135, 198))
         if dim >= 135:
             return ((0, 3), (3, 9), (9, 135))
+        if dim == 38:
+            # G1-native layout: transl(0:3) + pelvis rot6d(3:9) + 29 joint angles(9:38).
+            # Splitting here lets ``component_mean`` give translation and root
+            # rotation their own mean instead of being swamped by the 29 dof.
+            return ((0, 3), (3, 9), (9, 38))
         return ((0, dim),)
+
+    @staticmethod
+    def _component_names(dim: int):
+        """Log-friendly names aligned with :meth:`_motion_components`."""
+        if dim >= 198:
+            return ('trans', 'root_rot', 'body_rot', 'joint_pos')
+        if dim >= 135:
+            return ('trans', 'root_rot', 'body_rot')
+        if dim == 38:
+            return ('trans', 'root_rot', 'joint')
+        return ('all',)
 
     def _update_spike_detection_stats(self, trans_loss_magnitude: float):
         """Update rolling statistics for spike detection.
@@ -175,9 +191,10 @@ class M2MLoss(nn.Module):
         """
         data_mask = data_mask_temporal.to(per_dim.device).to(per_dim.dtype)
         comp_ranges = self._motion_components(per_dim.shape[-1])
+        comp_names = self._component_names(per_dim.shape[-1])
         comp_dict: Dict[str, Tensor] = {}
         active = []
-        for (start, end), name in zip(comp_ranges, self._COMP_NAMES):
+        for (start, end), name in zip(comp_ranges, comp_names):
             comp = per_dim[..., start:end]
             if generation_mask is not None:
                 comp_mask = (

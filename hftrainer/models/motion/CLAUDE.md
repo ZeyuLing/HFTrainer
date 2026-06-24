@@ -185,12 +185,14 @@ feed `global_joints_rots` to the denoiser; it stores them so
 `KIMODO_POST_PROCESSING=0`, boundary palms/knees can visibly jump even when
 canonicalization and root height are correct.
 
-SMPL↔KIMODO SOMA conversion reference: the eval bridge lives in
-`scripts/kimodo/run_kimodo_all_tasks.py` (`smpl22_to_soma30_retarget`,
-`soma30_to_soma77`, `soma77_to_smpl22`). It is documented in
-`ref_repo/KIMODO/CLAUDE.md` §“SMPL ↔ SOMA 转换逻辑（我方评测桥接）”. The
-E14/E15 visualization appenders reuse the same chain to write SOMA-77
-`posed_joints` / `global_rot_mats` for source context frames.
+SMPL↔KIMODO SOMA conversion reference: new code should use the reusable
+library API in `hftrainer/models/motion/components/retarget/smpl_soma.py`.
+The developer-facing documentation is
+`docs/kimodo_smpl_retargeting.md`. Older eval scripts may still contain local
+helper functions, but they should be treated as historical callers or
+validation scripts rather than the canonical implementation. The E14/E15
+visualization appenders reuse the same chain to write SOMA-77 `posed_joints` /
+`global_rot_mats` for source context frames.
 
 ---
 

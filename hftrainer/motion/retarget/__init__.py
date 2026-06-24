@@ -7,7 +7,11 @@
 
 from hftrainer.motion.retarget.smpl_soma import *  # noqa: F401,F403
 from hftrainer.motion.retarget.smpl_g1 import *  # noqa: F401,F403
-from hftrainer.motion.retarget.hml263_smpl import (  # noqa: F401
-    hml263_to_motion135,
-    retarget_hml263_clip,
-)
+
+try:
+    from hftrainer.motion.retarget.hml263_smpl import (  # noqa: F401
+        hml263_to_motion135,
+        retarget_hml263_clip,
+    )
+except ModuleNotFoundError:
+    pass

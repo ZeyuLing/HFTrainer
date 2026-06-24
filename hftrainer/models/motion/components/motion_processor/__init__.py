@@ -1,7 +1,6 @@
-"""Motion processors."""
+"""Compatibility wrappers for public motion processing modules.
 
-from hftrainer.models.motion.components.motion_processor.smpl_processor import (
-    SMPLPoseProcessor,
-)
+New code should import from :mod:`hftrainer.motion.processing`.
+"""
 
-__all__ = ['SMPLPoseProcessor']
+from hftrainer.motion.processing import *  # noqa: F401,F403

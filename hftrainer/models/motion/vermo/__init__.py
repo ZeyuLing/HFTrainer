@@ -1,4 +1,5 @@
 from hftrainer.models.motion.vermo.bundle import VermoBundle
+from hftrainer.models.motion.vermo.fs_quantizer import FSQuantizer
 from hftrainer.models.motion.vermo.llama import VermoLlamaForCausalLM
 from hftrainer.models.motion.vermo.qwen3 import VermoQwen3ForCausalLM
 from hftrainer.models.motion.vermo.processor import VermoProcessor
@@ -20,6 +21,7 @@ __all__ = [
     'VermoLlamaForCausalLM',
     'VermoQwen3ForCausalLM',
     'VermoProcessor',
+    'FSQuantizer',
     'VQVAEVermo1D',
     'VQVAEVermo2DTK',
     'VQVAEWanMotion1D',

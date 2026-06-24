@@ -25,6 +25,7 @@ joints = convert.hml263_to_joints(m263)        # 263 -> (T,22,3)
 m135   = convert.hml263_to_motion135(m263)     # 263 -> SMPL motion_135 (ROW, IK)
 m272   = convert.motion135_to_motion272(m135)  # motion_135 -> MS272 (FK+encode)
 m272b  = convert.hml263_to_motion272(m263)     # full chain
+m1, m2, L = convert.smpl_to_interhuman262_pair(j1, bp1, j2, bp2)  # SMPL-X -> InterHuman-262 (2P, InterCLIP)
 ```
 
 Do NOT pick low-level helpers by hand — the rot6d-convention trap (COLUMN vs

@@ -13,19 +13,93 @@ Key Features:
     - Feed-forward network with gated residual connections
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from diffusers.models.transformers.transformer_wan import (
-    WanAttention,
-    WanAttnProcessor,
-    FeedForward,
-)
+try:
+    from diffusers.models.transformers.transformer_wan import (
+        FeedForward,
+        WanAttention,
+        WanAttnProcessor,
+    )
+    from .attention_fp32_upcast import WanAttnProcessorFP32Upcast
+
+    _WAN_ATTENTION_API = "wan"
+except ImportError:
+    from diffusers.models.transformers.transformer_wan import (
+        Attention as WanAttention,
+        FeedForward,
+        WanAttnProcessor2_0 as WanAttnProcessor,
+    )
+
+    WanAttnProcessorFP32Upcast = None
+    _WAN_ATTENTION_API = "attention"
 from diffusers.models.normalization import FP32LayerNorm
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 
-from .attention_fp32_upcast import WanAttnProcessorFP32Upcast
+
+def _make_wan_attention(
+    *,
+    dim: int,
+    num_heads: int,
+    eps: float,
+    qk_norm: str,
+    added_kv_proj_dim: Optional[int],
+    cross_attention_dim_head: Optional[int],
+    use_fp32_upcast_attention: bool,
+) -> nn.Module:
+    processor = (
+        WanAttnProcessorFP32Upcast()
+        if use_fp32_upcast_attention and WanAttnProcessorFP32Upcast is not None
+        else WanAttnProcessor()
+    )
+    dim_head = dim // num_heads
+    if _WAN_ATTENTION_API == "wan":
+        return WanAttention(
+            dim=dim,
+            heads=num_heads,
+            dim_head=dim_head,
+            eps=eps,
+            added_kv_proj_dim=added_kv_proj_dim,
+            cross_attention_dim_head=cross_attention_dim_head,
+            processor=processor,
+        )
+
+    return WanAttention(
+        query_dim=dim,
+        heads=num_heads,
+        kv_heads=num_heads,
+        dim_head=dim_head,
+        qk_norm=qk_norm,
+        eps=eps,
+        bias=True,
+        cross_attention_dim=None,
+        out_bias=True,
+        added_kv_proj_dim=added_kv_proj_dim,
+        added_proj_bias=True,
+        processor=processor,
+    )
+
+
+def _rotary_emb_for_attention_api(
+    rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]],
+) -> Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
+    """Adapt PRISM RoPE to the older diffusers ``Attention`` API when needed."""
+
+    if _WAN_ATTENTION_API != "attention" or rotary_emb is None:
+        return rotary_emb
+
+    freqs_cos, freqs_sin = rotary_emb
+    # PRISM/new WanAttention uses tuple cos/sin shaped like (1, seq, 1, dim).
+    # Older WanAttnProcessor2_0 expects complex freqs broadcastable to
+    # (batch, heads, seq, dim / 2).
+    cos = freqs_cos[..., 0::2]
+    sin = freqs_sin[..., 1::2]
+    if cos.ndim == 4 and cos.shape[2] == 1:
+        cos = cos.permute(0, 2, 1, 3).contiguous()
+        sin = sin.permute(0, 2, 1, 3).contiguous()
+    return torch.complex(cos.to(torch.float64), sin.to(torch.float64))
 
 
 @maybe_allow_in_graph
@@ -94,33 +168,28 @@ class WanTransformerBlockWithMask(nn.Module):
         # Self-attention: Query, Key, Value all come from hidden_states
         # cross_attention_dim_head=None indicates this is self-attention
         # Use FP32 upcast processor if enabled to prevent softmax overflow in fp16
-        attn1_processor = (
-            WanAttnProcessorFP32Upcast() if use_fp32_upcast_attention else WanAttnProcessor()
-        )
-        self.attn1 = WanAttention(
+        self.attn1 = _make_wan_attention(
             dim=dim,
-            heads=num_heads,
-            dim_head=dim // num_heads,
+            num_heads=num_heads,
             eps=eps,
-            cross_attention_dim_head=None,  # Self-attention: Q, K, V from same source
-            processor=attn1_processor,
+            qk_norm=qk_norm,
+            added_kv_proj_dim=None,
+            cross_attention_dim_head=None,
+            use_fp32_upcast_attention=use_fp32_upcast_attention,
         )
 
         # ========== 2. Cross-attention ==========
         # Cross-attention: Query from hidden_states, Key/Value from encoder_hidden_states
         # cross_attention_dim_head is set to enable cross-attention mode
         # Use FP32 upcast processor if enabled to prevent softmax overflow in fp16
-        attn2_processor = (
-            WanAttnProcessorFP32Upcast() if use_fp32_upcast_attention else WanAttnProcessor()
-        )
-        self.attn2 = WanAttention(
+        self.attn2 = _make_wan_attention(
             dim=dim,
-            heads=num_heads,
-            dim_head=dim // num_heads,
+            num_heads=num_heads,
             eps=eps,
-            added_kv_proj_dim=added_kv_proj_dim,  # For I2V: additional image KV projection
-            cross_attention_dim_head=dim // num_heads,  # Enables cross-attention mode
-            processor=attn2_processor,
+            qk_norm=qk_norm,
+            added_kv_proj_dim=added_kv_proj_dim,
+            cross_attention_dim_head=dim // num_heads,
+            use_fp32_upcast_attention=use_fp32_upcast_attention,
         )
 
         # Optional normalization before cross-attention
@@ -240,7 +309,7 @@ class WanTransformerBlockWithMask(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=None,  # Self-attention: Q, K, V from hidden_states
             attention_mask=combined_self_attn_mask,  # Mask padding + causal in motion sequence
-            rotary_emb=rotary_emb,  # Apply rotary position embeddings
+            rotary_emb=_rotary_emb_for_attention_api(rotary_emb),  # Apply rotary position embeddings
         )
 
         # Gated residual connection: x = x + gate * attn_output

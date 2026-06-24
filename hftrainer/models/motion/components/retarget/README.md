@@ -37,4 +37,4 @@ docs/kimodo_smpl_retargeting.md
 
 New scripts should import from `hftrainer.motion.retarget`. The old
 `hftrainer.models.motion.components.retarget` path remains as a compatibility
-namespace while the motion library migration is in progress.
+namespace only.

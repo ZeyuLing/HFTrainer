@@ -25,7 +25,7 @@ repr          rot6d      who/where
 ============  =========  ===================================================
 motion_135    row        HyMotion M2M (load_smplx reorders aa→rot6d to row)
 motion_138    column     PRISM / MCM / VerMo (SMPLPoseProcessor rot_convert default)
-motion_201    column     HyMotion T2M (SMPLPoseProcessor smpl_33 default)
+motion_201    row        HyMotion T2M o6dp_1103: motion_135 head + RIC joints
 MS272         row        joint rot block [140:272] and heading [2:8]
 HML263        column     rot_data block [67:193] (cont6d, column-major)
 ============  =========  ===================================================
@@ -240,18 +240,22 @@ MOTION_201 = MotionRepr(
     name="motion_201",
     dim=201,
     fps=30,
-    body_model=_SMPL33,
-    num_joints=33,
-    rot6d_convention=ROT6D_COLUMN,
-    transl_type="rel",
+    body_model=_SMPL22,
+    num_joints=22,
+    rot6d_convention=ROT6D_ROW,
+    transl_type="abs",
     fields=(
-        FieldSpec("transl", 0, 3, "relative root translation (first frame = 0)"),
-        FieldSpec("rot6d", 3, 201, "33 joints x rot6d(6), COLUMN-major, local"),
+        FieldSpec("transl", 0, 3, "absolute root translation (same convention as motion_135)"),
+        FieldSpec("root_rot6d", 3, 9, "root joint rot6d, ROW-major"),
+        FieldSpec("body_rot6d", 9, 135, "21 body joints x rot6d(6), ROW-major, local"),
+        FieldSpec("ric_joint_pos", 135, 201, "22 joints x 3 root-invariant joint positions"),
     ),
     norm_stats="checkpoints/HY-Motion-1.0/stats/{Mean,Std}.npy",
-    decode_via="forward_kinematics (smpl_33)",
-    notes="HyMotion T2M. transl_type='rel' needs the original abs_trans[0] to "
-    "reconstruct absolute translation. rot6d COLUMN-major (SMPLPoseProcessor default).",
+    decode_via="decode_motion_from_latent -> motion_135 head + optional RIC diagnostics",
+    notes="HyMotion T2M official o6dp_1103 representation. After denormalization, "
+    "[0:135] is motion_135 (abs transl + 22 ROW rot6d) and [135:201] is FK-derived "
+    "root-invariant joint positions. Official checkpoints use rel_trans=False; do "
+    "not cumsum transl and do not reinterpret [135:201] as extra rotations.",
     aliases=("201", "hymotion_t2m"),
 )
 
@@ -303,12 +307,44 @@ MS272 = MotionRepr(
         FieldSpec("joint_rot6d", 140, 272, "22 joint LOCAL rot6d (22x6), ROW-major"),
     ),
     norm_stats="data/evaluators/humanml3d_272/{Mean,Std}.npy",
-    decode_via="recover_local_rotations_and_root / SMPL-H FK "
-    "(hftrainer.motion.representation.humanml)",
-    notes="MotionStreamer-272 evaluator space, 30 fps. The MS272 FK skeleton is the "
-    "GT-272 canonical body (bone_offsets_canon272.npy), NOT the SMPL-H rest pose; "
-    "using the wrong rest skeleton inflates 272 FID.",
+    decode_via="recover_272_stored_positions for native joints; "
+    "recover_local_rotations_and_root for SMPL-like root+rot",
+    notes="MotionStreamer-272 evaluator space, 30 fps. It stores heading-removed "
+    "joint positions directly and also stores recoverable root translation + local "
+    "rotations, but it does not store betas. Raw SMPL should use smpl85_to_272 "
+    "(official SMPL-X FK with betas when available). motion135_to_272 is an "
+    "approximate feature bridge using the fixed GT-272 canonical offsets "
+    "(bone_offsets_canon272.npy), not SMPL-H.",
     aliases=("272", "motionstreamer_272", "humanml3d_272", "h3d272", "gotozero_272"),
+)
+
+
+# InterHuman / InterGen 262: per-person two-person T2M representation. Canonical
+# joint positions + velocities + NON-root SMPL body_pose local rot6d + foot
+# contacts. The rot6d block is ROW-major (component-interleaved), same packing as
+# MS272, NOT column. Encode drops the last frame (output length T-1).
+IH262 = MotionRepr(
+    name="interhuman_262",
+    dim=262,
+    fps=30,
+    body_model=_SMPL22,
+    num_joints=22,
+    rot6d_convention=ROT6D_ROW,  # body_rot6d block [132:258], component-interleaved
+    transl_type=None,            # absolute translation baked into canonical positions
+    fields=(
+        FieldSpec("joint_pos", 0, 66, "22 joint positions (22x3), canonical (Y-up, floor=0, root xz origin, face +Z)"),
+        FieldSpec("joint_vel", 66, 132, "22 joint velocities (22x3), forward difference"),
+        FieldSpec("body_rot6d", 132, 258, "21 NON-root joint local rot6d (21x6), ROW-major"),
+        FieldSpec("foot_contact", 258, 262, "4 foot-contact flags (L heel/toe, R heel/toe)"),
+    ),
+    norm_stats="InterGen/InterCLIP global_mean_std (262-dim); two-person concat for InterCLIP",
+    decode_via="interhuman262_to_joints (positions stored directly in [0:66]) "
+    "(hftrainer.motion.representation.interhuman262)",
+    notes="InterHuman / InterGen two-person space, 30 fps. rot6d block is ROW-major "
+    "(SMPL body_pose, NON-root 21 joints); COLUMN layout silently drops ~0.3 R@3. "
+    "Encode = process_motion_np canonicalisation, output length T-1. Person2 is "
+    "rigid_transform-aligned to person1's first-frame heading + xz.",
+    aliases=("262", "interhuman262", "ih262", "intergen262", "interhuman_native_262"),
 )
 
 
@@ -321,6 +357,7 @@ _ALL: Tuple[MotionRepr, ...] = (
     MOTION_201,
     HML263,
     MS272,
+    IH262,
 )
 
 REGISTRY: Dict[str, MotionRepr] = {}
@@ -386,4 +423,5 @@ __all__ = [
     "MOTION_201",
     "HML263",
     "MS272",
+    "IH262",
 ]

@@ -79,6 +79,10 @@ class HYTextModel(nn.Module):
         max_length_sentence_emb: int = 77,
         enable_llm_padding: bool = True,
         torch_dtype: Optional[torch.dtype] = None,
+        llm_model_path: Optional[str] = None,
+        llm_tokenizer_path: Optional[str] = None,
+        sentence_emb_model_path: Optional[str] = None,
+        sentence_emb_tokenizer_path: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.text_encoder_type = "hy_text_model"
@@ -87,12 +91,19 @@ class HYTextModel(nn.Module):
 
         self.sentence_emb_type = sentence_emb_type
         self.max_length_sentence_emb = max_length_sentence_emb
-        self.sentence_emb_tokenizer = SENTENCE_EMB_LAYOUT[sentence_emb_type]["tokenizer_class"].from_pretrained(
-            SENTENCE_EMB_LAYOUT[sentence_emb_type]["module_path"],
+        sentence_layout = SENTENCE_EMB_LAYOUT[sentence_emb_type]
+        sentence_emb_model_path = sentence_emb_model_path or sentence_layout["module_path"]
+        sentence_emb_tokenizer_path = (
+            sentence_emb_tokenizer_path
+            or sentence_emb_model_path
+            or sentence_layout["module_path"]
+        )
+        self.sentence_emb_tokenizer = sentence_layout["tokenizer_class"].from_pretrained(
+            sentence_emb_tokenizer_path,
             max_length=max_length_sentence_emb,
         )
-        self.sentence_emb_text_encoder = SENTENCE_EMB_LAYOUT[sentence_emb_type]["text_encoder_class"].from_pretrained(
-            SENTENCE_EMB_LAYOUT[sentence_emb_type]["module_path"],
+        self.sentence_emb_text_encoder = sentence_layout["text_encoder_class"].from_pretrained(
+            sentence_emb_model_path,
             torch_dtype=torch_dtype,
         )
         self.sentence_emb_text_encoder = self.sentence_emb_text_encoder.eval().requires_grad_(False)
@@ -101,15 +112,18 @@ class HYTextModel(nn.Module):
         self.llm_type = llm_type
         self._orig_max_length_llm = max_length_llm
         self.enable_llm_padding = enable_llm_padding
-        self.llm_tokenizer = LLM_ENCODER_LAYOUT[llm_type]["tokenizer_class"].from_pretrained(
-            LLM_ENCODER_LAYOUT[llm_type]["module_path"],
+        llm_layout = LLM_ENCODER_LAYOUT[llm_type]
+        llm_model_path = llm_model_path or llm_layout["module_path"]
+        llm_tokenizer_path = llm_tokenizer_path or llm_model_path or llm_layout["module_path"]
+        self.llm_tokenizer = llm_layout["tokenizer_class"].from_pretrained(
+            llm_tokenizer_path,
             padding_side="right",
         )
         self.crop_start = self._compute_crop_start()
         self.max_length_llm = self._orig_max_length_llm + self.crop_start
 
-        self.llm_text_encoder = LLM_ENCODER_LAYOUT[llm_type]["text_encoder_class"].from_pretrained(
-            LLM_ENCODER_LAYOUT[llm_type]["module_path"],
+        self.llm_text_encoder = llm_layout["text_encoder_class"].from_pretrained(
+            llm_model_path,
             low_cpu_mem_usage=True,
             torch_dtype=torch_dtype,
         )

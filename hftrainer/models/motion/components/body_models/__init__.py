@@ -1,15 +1,6 @@
-"""Body model helpers for motion components."""
+"""Compatibility wrappers for public body-model modules.
 
-from hftrainer.models.motion.components.body_models.smplx_lite import (
-    SmplLite,
-    SmplxLite,
-    SmplxLiteJ24,
-    SmplxLiteV437Coco17,
-)
+New code should import from :mod:`hftrainer.motion.body_models`.
+"""
 
-__all__ = [
-    'SmplLite',
-    'SmplxLite',
-    'SmplxLiteJ24',
-    'SmplxLiteV437Coco17',
-]
+from hftrainer.motion.body_models import *  # noqa: F401,F403
