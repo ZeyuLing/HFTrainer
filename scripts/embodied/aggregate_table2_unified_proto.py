@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-SPLITS = ("lafan1_fixed600", "wild_clean_fixed600", "amass_fixed600")
+DEFAULT_SPLITS = ("amass_test_fixed600", "lafan1_fixed600", "wild_clean_fixed600")
 
 
 def _expected_shards(protocol_root: Path, split: str) -> list[int]:
@@ -46,22 +46,26 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--protocol-root", type=Path, default=Path("outputs/evaluation/physflow/table2_tracker/unified_protocol_v1"))
     ap.add_argument("--method", default="protomotions_g1_bones")
+    ap.add_argument("--splits", default=",".join(DEFAULT_SPLITS), help="Comma/space separated split names to aggregate.")
     ap.add_argument("--allow-missing", action="store_true")
     args = ap.parse_args()
+    splits = tuple(s for s in args.splits.replace(",", " ").split() if s)
 
-    missing = {split: _missing_logs(args.protocol_root, split, args.method) for split in SPLITS}
+    missing = {split: _missing_logs(args.protocol_root, split, args.method) for split in splits}
     missing = {k: v for k, v in missing.items() if v}
     if missing and not args.allow_missing:
         raise SystemExit(f"Missing ProtoMotions shard outputs: {json.dumps(missing, indent=2)}")
 
     summaries = {}
-    for split in SPLITS:
+    for split in splits:
         if missing.get(split):
             continue
         eval_root = args.protocol_root / "runs" / "protomotions" / split
         motion_base = args.protocol_root / "proto_motions" / split
         if not eval_root.is_dir():
             continue
+        expected_shards = _expected_shards(args.protocol_root, split)
+        num_shards = max(expected_shards) + 1 if expected_shards else 0
         shard_template = f"{split}_g1_shard_{{shard}}.pt"
         _run([
             sys.executable,
@@ -71,7 +75,7 @@ def main() -> None:
             "--motion-base",
             str(motion_base),
             "--num-shards",
-            "32",
+            str(num_shards),
             "--shard-file-template",
             shard_template,
         ])
@@ -83,7 +87,7 @@ def main() -> None:
             "--motion-base",
             str(motion_base),
             "--num-shards",
-            "32",
+            str(num_shards),
             "--shard-file-template",
             shard_template,
             "--methods",

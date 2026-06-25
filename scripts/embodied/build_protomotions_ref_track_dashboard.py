@@ -44,6 +44,8 @@ G1_MESH_SRC = (
 LOCAL_SUCCESS_THRESH_M = 0.2
 ROOT_HEIGHT_SUCCESS_THRESH_M = 0.2
 ROOT_TRAJ_SUCCESS_THRESH_M = 0.5
+COMPLETION_SUCCESS_THRESH = 0.95
+DISPLAY_FPS = 30
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -118,6 +120,68 @@ def _slice_lib(lib: dict[str, Any], motion_id: int) -> tuple[np.ndarray, np.ndar
     return pos, quat_xyzw, dt, motion_file
 
 
+def _motion_length_s(lib: dict[str, Any], motion_id: int, frames: int, dt: float) -> float:
+    if "motion_lengths" in lib:
+        lengths = _as_np(lib["motion_lengths"]).astype(np.float32).reshape(-1)
+        return float(lengths[min(motion_id, len(lengths) - 1)])
+    return float(max(frames - 1, 0) * dt)
+
+
+def _interp_linear(values: np.ndarray, src_dt: float, query_times: np.ndarray) -> np.ndarray:
+    flat = values.reshape(values.shape[0], -1)
+    src_times = np.arange(values.shape[0], dtype=np.float32) * float(src_dt)
+    query = np.minimum(query_times.astype(np.float32), src_times[-1])
+    out = np.stack([np.interp(query, src_times, flat[:, i]) for i in range(flat.shape[1])], axis=-1)
+    return out.reshape((len(query_times),) + values.shape[1:]).astype(np.float32)
+
+
+def _interp_quat_xyzw(quat: np.ndarray, src_dt: float, query_times: np.ndarray) -> np.ndarray:
+    if quat.shape[0] == 1:
+        return np.repeat(quat, len(query_times), axis=0).astype(np.float32)
+
+    src_times = np.arange(quat.shape[0], dtype=np.float32) * float(src_dt)
+    query = np.minimum(query_times.astype(np.float32), src_times[-1])
+    idx0 = np.floor(query / float(src_dt)).astype(np.int64)
+    idx0 = np.clip(idx0, 0, quat.shape[0] - 1)
+    idx1 = np.clip(idx0 + 1, 0, quat.shape[0] - 1)
+    blend = ((query - idx0.astype(np.float32) * float(src_dt)) / max(float(src_dt), 1e-9)).reshape(-1, 1)
+
+    q0 = quat[idx0].astype(np.float32)
+    q1 = quat[idx1].astype(np.float32)
+    while blend.ndim < q0.ndim:
+        blend = np.expand_dims(blend, axis=-1)
+    q0 = q0 / np.linalg.norm(q0, axis=-1, keepdims=True).clip(min=1e-9)
+    q1 = q1 / np.linalg.norm(q1, axis=-1, keepdims=True).clip(min=1e-9)
+
+    dot = np.sum(q0 * q1, axis=-1, keepdims=True)
+    q1 = np.where(dot < 0.0, -q1, q1)
+    dot = np.abs(dot).clip(0.0, 1.0)
+
+    theta = np.arccos(dot)
+    sin_theta = np.sin(theta)
+    linear = sin_theta < 1e-5
+    s0 = np.sin((1.0 - blend) * theta) / np.where(linear, 1.0, sin_theta)
+    s1 = np.sin(blend * theta) / np.where(linear, 1.0, sin_theta)
+    out = np.where(linear, (1.0 - blend) * q0 + blend * q1, s0 * q0 + s1 * q1)
+    out = out / np.linalg.norm(out, axis=-1, keepdims=True).clip(min=1e-9)
+    return out.astype(np.float32)
+
+
+def _resample_motion(
+    pos: np.ndarray,
+    quat_xyzw: np.ndarray,
+    src_dt: float,
+    dst_dt: float,
+    duration_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    frames = max(1, int(np.floor(max(float(duration_s), 0.0) / max(float(dst_dt), 1e-9))) + 1)
+    query_times = np.arange(frames, dtype=np.float32) * float(dst_dt)
+    return (
+        _interp_linear(pos, src_dt, query_times),
+        _interp_quat_xyzw(quat_xyzw.reshape(quat_xyzw.shape[0], -1, 4), src_dt, query_times),
+    )
+
+
 def _latest_predicted(root: Path) -> Path | None:
     candidates = sorted((root / "results").glob("predicted_motion_lib_epoch_*.pt"))
     return candidates[-1] if candidates else None
@@ -155,6 +219,7 @@ def _metrics(
     pred_pos: np.ndarray,
     pred_quat: np.ndarray,
     dt: float,
+    completion: float,
 ) -> dict[str, float]:
     frames = min(len(ref_pos), len(pred_pos), len(ref_quat), len(pred_quat))
     ref_pos = ref_pos[:frames]
@@ -180,19 +245,23 @@ def _metrics(
     root_height_m = float(root_height_err.mean())
     root_err_m = float(root_err.mean())
     success = (
-        local_mpjpe_m <= LOCAL_SUCCESS_THRESH_M
+        completion >= COMPLETION_SUCCESS_THRESH
+        and local_mpjpe_m <= LOCAL_SUCCESS_THRESH_M
         and root_height_m <= ROOT_HEIGHT_SUCCESS_THRESH_M
         and root_err_m <= ROOT_TRAJ_SUCCESS_THRESH_M
     )
     return {
         "frames": float(frames),
         "success": float(success),
+        "dt": float(dt),
+        "completion": float(completion),
         "aligned_global_mpjpe_mm": float(aligned_body_err.mean() * 1000.0),
         "local_mpjpe_mm": float(local_mpjpe_m * 1000.0),
         "root_err_m": root_err_m,
         "root_err_max_m": float(root_err.max()),
         "root_height_err_m": root_height_m,
         "success_root_traj_thresh_m": ROOT_TRAJ_SUCCESS_THRESH_M,
+        "success_completion_thresh": COMPLETION_SUCCESS_THRESH,
         "local_mpjve_mps": float(np.nanmean(local_step_vel) / safe_dt),
         "local_mpjae_mps2": float(np.nanmean(local_step_acc) / (safe_dt * safe_dt)),
         "ref_disp_m": float(np.linalg.norm(ref_pos[-1, 0, :2] - ref_pos[0, 0, :2])) if frames > 1 else 0.0,
@@ -226,7 +295,7 @@ def _write_robot_frames(path: Path, pos: np.ndarray, quat_xyzw: np.ndarray, bodi
             {
                 "type": "robot_frames",
                 "robot": "g1",
-                "fps": 30,
+                "fps": DISPLAY_FPS,
                 "source_fps_note": "normalized_to_30fps_for_visual_inspection",
                 "num_frames": len(frames),
                 "num_bodies": len(bodies),
@@ -311,14 +380,32 @@ def _build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
         pred_lib = _load(pred_path)
         for row in shard_rows:
             motion_id = int(row["local_motion_id"])
-            ref_pos, ref_quat, ref_dt, motion_file = _slice_lib(ref_lib, motion_id)
-            pred_pos_raw, pred_quat, pred_dt, _ = _slice_lib(pred_lib, motion_id)
-            frames = min(int(row["frames"]), len(ref_pos), len(pred_pos_raw))
-            ref_pos = ref_pos[:frames]
-            ref_quat = ref_quat[:frames]
-            pred_quat = pred_quat[:frames]
-            pred_pos = _align_xy_to_reference(pred_pos_raw[:frames], ref_pos)
-            metrics = _metrics(ref_pos, ref_quat, pred_pos, pred_quat, pred_dt or ref_dt)
+            ref_pos_src, ref_quat_src, ref_dt, motion_file = _slice_lib(ref_lib, motion_id)
+            pred_pos_raw, pred_quat_raw, pred_dt, _ = _slice_lib(pred_lib, motion_id)
+            ref_len_s = _motion_length_s(ref_lib, motion_id, len(ref_pos_src), ref_dt)
+            max_ref_frames_at_pred_dt = int(np.floor(ref_len_s / max(pred_dt, 1e-9))) + 1
+            metric_frames = min(int(row["frames"]), len(pred_pos_raw), max_ref_frames_at_pred_dt)
+            if metric_frames <= 1:
+                continue
+
+            metric_times = np.arange(metric_frames, dtype=np.float32) * pred_dt
+            ref_pos_metric = _interp_linear(ref_pos_src, ref_dt, metric_times)
+            ref_quat_metric = _interp_quat_xyzw(ref_quat_src.reshape(ref_quat_src.shape[0], -1, 4), ref_dt, metric_times)
+            pred_pos_metric = _align_xy_to_reference(pred_pos_raw[:metric_frames], ref_pos_metric)
+            pred_quat_metric = pred_quat_raw[:metric_frames]
+            completion = min(float(len(pred_pos_raw)) * pred_dt / max(ref_len_s, pred_dt), 1.0)
+            metrics = _metrics(ref_pos_metric, ref_quat_metric, pred_pos_metric, pred_quat_metric, pred_dt, completion)
+
+            display_duration_s = float(max(metric_frames - 1, 0) * pred_dt)
+            ref_pos, ref_quat = _resample_motion(ref_pos_src, ref_quat_src, ref_dt, 1.0 / DISPLAY_FPS, display_duration_s)
+            pred_pos_display_raw, pred_quat = _resample_motion(
+                pred_pos_raw,
+                pred_quat_raw,
+                pred_dt,
+                1.0 / DISPLAY_FPS,
+                display_duration_s,
+            )
+            pred_pos = _align_xy_to_reference(pred_pos_display_raw, ref_pos)
             stem = Path(motion_file).stem if motion_file else f"motion_{row['global_index']:06d}"
             case_id = f"{args.dataset_key}_g{int(row['global_index']):05d}_s{shard:02d}_m{motion_id:04d}_{stem}"
             case_dir = args.out_dir / "data" / case_id

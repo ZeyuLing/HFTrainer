@@ -12,14 +12,27 @@ PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_tra
 PROTO_ROOT="${PROTO_ROOT:-${PROJECT_ROOT}/hftrainer/models/motion/physflow/trackers/protomotions/vendor}"
 ENVDIR="${ENVDIR:-/apdcephfs_cq11/share_1467498/home/zeyuling/physflow_env}"
 PROTOCOL_ROOT="${PROTOCOL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow/table2_tracker/unified_protocol_v1}"
-SPLITS="${SPLITS:-lafan1_fixed600 wild_clean_fixed600 amass_fixed600}"
+SPLITS="${SPLITS:-amass_test_fixed600 lafan1_fixed600 wild_clean_fixed600}"
 SPLITS="${SPLITS//,/ }"
 TOTAL_SHARDS="${TOTAL_SHARDS:-32}"
 LOCAL_SHARDS="${LOCAL_SHARDS:-8}"
 SHARD_START="${SHARD_START:-0}"
-OUTPUT_FPS="${OUTPUT_FPS:-30}"
-MAX_EVAL_STEPS="${MAX_EVAL_STEPS:-600}"
-NUM_ENVS="${NUM_ENVS:-128}"
+REFERENCE_FPS="${REFERENCE_FPS:-30}"
+TRACKER_CONTROL_FPS="${TRACKER_CONTROL_FPS:-50}"
+MAX_REFERENCE_FRAMES="${MAX_REFERENCE_FRAMES:-600}"
+OUTPUT_FPS="${OUTPUT_FPS:-${TRACKER_CONTROL_FPS}}"
+if [[ -z "${MAX_EVAL_STEPS+x}" ]]; then
+  MAX_EVAL_STEPS=$(( (MAX_REFERENCE_FRAMES * TRACKER_CONTROL_FPS + REFERENCE_FPS - 1) / REFERENCE_FPS ))
+fi
+PROTO_SIMULATOR="${PROTO_SIMULATOR:-isaacgym}"
+if [[ -z "${NUM_ENVS+x}" ]]; then
+  if [[ "${PROTO_SIMULATOR}" == "mujoco" ]]; then
+    NUM_ENVS=1
+  else
+    NUM_ENVS=128
+  fi
+fi
+MAX_EVAL_JOBS="${MAX_EVAL_JOBS:-1}"
 FORCE_CONVERT="${FORCE_CONVERT:-0}"
 FORCE_PACK="${FORCE_PACK:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
@@ -35,7 +48,7 @@ exec > >(tee -a "${PROTOCOL_ROOT}/logs/run_${HOST_TAG}.log") 2>&1
 echo "[unified-proto] start $(date)"
 echo "[unified-proto] host=$(hostname) shard_start=${SHARD_START} local_shards=${LOCAL_SHARDS} total_shards=${TOTAL_SHARDS}"
 echo "[unified-proto] splits=${SPLITS}"
-echo "[unified-proto] num_envs=${NUM_ENVS} max_eval_steps=${MAX_EVAL_STEPS} output_fps=${OUTPUT_FPS}"
+echo "[unified-proto] simulator=${PROTO_SIMULATOR} num_envs=${NUM_ENVS} max_eval_steps=${MAX_EVAL_STEPS} output_fps=${OUTPUT_FPS} reference_fps=${REFERENCE_FPS} tracker_control_fps=${TRACKER_CONTROL_FPS} max_reference_frames=${MAX_REFERENCE_FRAMES} max_eval_jobs=${MAX_EVAL_JOBS}"
 echo "[unified-proto] checkpoints=${CHECKPOINT_SPECS}"
 
 wait_for_background() {
@@ -109,15 +122,17 @@ for name in ("torch", "isaacgym", "mujoco", "lightning", "tensordict"):
     print(f"import_check {name}: {'OK' if importlib.util.find_spec(name) else 'MISSING'}")
 PY
 
-  echo "[unified-proto] warm IsaacGym gymtorch"
-  if [[ "${REBUILD_GYMTORCH:-0}" == "1" ]]; then
-    rm -rf "${TORCH_EXTENSIONS_DIR}/gymtorch"
-  fi
-  "${TRACKER_PY[@]}" - <<'PY'
+  if [[ "${PROTO_SIMULATOR}" == "isaacgym" ]]; then
+    echo "[unified-proto] warm IsaacGym gymtorch"
+    if [[ "${REBUILD_GYMTORCH:-0}" == "1" ]]; then
+      rm -rf "${TORCH_EXTENSIONS_DIR}/gymtorch"
+    fi
+    "${TRACKER_PY[@]}" - <<'PY'
 import isaacgym  # noqa: F401
 from isaacgym import gymtorch  # noqa: F401
 print("gymtorch warmup OK")
 PY
+  fi
   nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader | sed 's/^/[unified-proto] gpu /' || true
 }
 
@@ -227,7 +242,7 @@ eval_split() {
         "${TRACKER_PY[@]}" protomotions/inference_agent.py \
           --checkpoint "${ckpt}" \
           --motion-file "${shard_pt}" \
-          --simulator isaacgym \
+          --simulator "${PROTO_SIMULATOR}" \
           --num-envs "${NUM_ENVS}" \
           --headless \
           --full-eval \
@@ -238,6 +253,10 @@ eval_split() {
           > "${log}" 2>&1
       ) &
       pids+=("$!")
+      if [[ "${#pids[@]}" -ge "${MAX_EVAL_JOBS}" ]]; then
+        wait_for_background "${split} ${name} eval" "${pids[@]}"
+        pids=()
+      fi
     done
     wait_for_background "${split} ${name} eval" "${pids[@]}"
   done
