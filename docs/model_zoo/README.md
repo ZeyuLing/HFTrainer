@@ -31,6 +31,9 @@ These entries are expected to be usable as model-zoo baselines.
 | T2M-GPT | Text-to-motion | HumanML3D-263 | `T2MGPTBundle` / `T2MGPTPipeline` | [`ZeyuLing/hftrainer-t2mgpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-t2mgpt-humanml3d) | [t2mgpt.md](t2mgpt.md) |
 | MoMask | Text-to-motion | HumanML3D-263 | `MoMaskBundle` / `MoMaskPipeline` | [`ZeyuLing/hftrainer-momask-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-momask-humanml3d) | [momask.md](momask.md) |
 | MoGenTS | Text-to-motion | HumanML3D-263 | `MoGenTSBundle` / `MoGenTSPipeline` | [`ZeyuLing/hftrainer-mogents-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mogents-humanml3d) | [mogents.md](mogents.md) |
+| FlowMDM | Text-to-motion / motion composition | HumanML3D-263 | `FlowMDMBundle` / `FlowMDMPipeline` | [`ZeyuLing/hftrainer-flowmdm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-flowmdm-humanml3d) | [flowmdm.md](flowmdm.md) |
+| MotionLab | Text-to-motion / motion editing | HumanML3D-263 | `MotionLabBundle` / `MotionLabPipeline` | [`ZeyuLing/hftrainer-motionlab-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlab-humanml3d) | [motionlab.md](motionlab.md) |
+| MotionGPT3 | Text-to-motion / motion-language generation | HumanML3D-263 | `MotionGPT3Bundle` / `MotionGPT3Pipeline` | [`ZeyuLing/hftrainer-motiongpt3-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motiongpt3-humanml3d) | [motiongpt3.md](motiongpt3.md) |
 | PRISM 1.0 | Text-to-motion | PRISM `motion_138` / SMPL motion_135 | `PrismBundle` / `PrismPipeline` | [`ZeyuLing/hftrainer-prism-1.0-humanml3d-iter15000`](https://huggingface.co/ZeyuLing/hftrainer-prism-1.0-humanml3d-iter15000) (raw checkpoint package) | [prism.md](prism.md) |
 | InterGen | Two-person text-to-motion | InterHuman native-262 | `InterGenBundle` | [`ZeyuLing/hftrainer-intergen-interhuman`](https://huggingface.co/ZeyuLing/hftrainer-intergen-interhuman) | [intergen.md](intergen.md) |
 | InterMask | Two-person / InterX text-to-motion | InterHuman native-262 / InterX `(T,56,12)` | `InterMaskBundle` | [`InterHuman`](https://huggingface.co/ZeyuLing/hftrainer-intermask-interhuman), [`InterX`](https://huggingface.co/ZeyuLing/hftrainer-intermask-interx) | [intermask.md](intermask.md) |
@@ -61,6 +64,9 @@ not require importing upstream implementation code unless explicitly noted.
 | InterMask | `hftrainer.models.motion.intermask.network` native RVQ-VAE + MaskTransformer sampling | No | InterHuman and InterX VQ/Transformer checkpoints are packaged in `checkpoints/intermask` |
 | MotionLCM | `hftrainer.models.motion.motionlcm.network` native MLD VAE + LCM denoiser | No | artifact published as `ZeyuLing/hftrainer-motionlcm-humanml3d` |
 | MotionStreamer | `hftrainer.models.motion.motionstreamer.network` native TAE + AR + diffusion head | No | raw checkpoints must be passed explicitly outside artifact inference |
+| FlowMDM | `hftrainer.models.motion.flowmdm.network` vendored FlowMDM runtime + BPE diffusion wrapper | No | `FlowMDMPipeline.infer_sequential_t2m` supports BABEL-style multi-prompt generation |
+| MotionLab | `hftrainer.models.motion.motionlab.network` vendored RFMotion / MotionFlow runtime | No | config namespaces are rewritten into the hftrainer package before construction |
+| MotionGPT3 | `hftrainer.models.motion.motiongpt3.network` vendored MotionGPT3 / MoT runtime | No | local `mot-gpt2` adapter is packaged in the artifact |
 | Go to Zero / MotionMillion | `hftrainer.models.motion.motionmillion.network` native FSQ VAE + LLaMA AR | No | text encoder is packaged in the hftrainer artifact |
 | HY-Motion T2M 1.0 | `hftrainer.models.motion.hymotion_t2m` + shared HunyuanMotion MMDiT modules | No | shared component shim preserves HYMotion M2M compatibility; text encoders are packaged in artifacts |
 | KIMODO | `hftrainer.models.motion.kimodo.network` native model / motion representation / skeleton runtime | No | four checkpoint variants pass seeded parity against the previous package path |
@@ -108,7 +114,7 @@ published as model-zoo cards yet.
 
 | Task family | Model-zoo coverage | Evaluation / conversion |
 |---|---|---|
-| Text-to-motion | MDM, T2M-GPT, MoMask, MotionLCM, MotionStreamer, Go to Zero, HY-Motion T2M | HumanML3D-263 and/or MotionStreamer-272 evaluators |
+| Text-to-motion | MDM, T2M-GPT, MoMask, MoGenTS, FlowMDM, MotionLab, MotionGPT3, MotionLCM, MotionStreamer, Go to Zero, HY-Motion T2M | HumanML3D-263 and/or MotionStreamer-272 evaluators |
 | Two-person / interaction T2M | InterGen, InterMask | InterHuman-262 / InterCLIP evaluator; InterX official HHI text-mot-match evaluator |
 | Streaming / autoregressive T2M | MotionStreamer, Go to Zero, T2M-GPT | native model cards plus MS272 evaluator where applicable |
 | Text + kinematic control | KIMODO | SOMA/G1/SMPL-X runtime; SMPL mesh bridge via `hftrainer.motion.retarget` |

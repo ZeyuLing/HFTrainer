@@ -68,6 +68,27 @@ CARDS: tuple[ModelZooCard, ...] = (
         license="mit",
     ),
     ModelZooCard(
+        slug="flowmdm",
+        doc_path=Path("docs/model_zoo/flowmdm.md"),
+        local_dirs=(Path("checkpoints/baselines/flowmdm"),),
+        hub_repos=("ZeyuLing/hftrainer-flowmdm-humanml3d",),
+        tags=("motion-generation", "text-to-motion", "humanml3d", "flowmdm"),
+    ),
+    ModelZooCard(
+        slug="motionlab",
+        doc_path=Path("docs/model_zoo/motionlab.md"),
+        local_dirs=(Path("checkpoints/baselines/motionlab"),),
+        hub_repos=("ZeyuLing/hftrainer-motionlab-humanml3d",),
+        tags=("motion-generation", "text-to-motion", "humanml3d", "motionlab", "motion-editing"),
+    ),
+    ModelZooCard(
+        slug="motiongpt3",
+        doc_path=Path("docs/model_zoo/motiongpt3.md"),
+        local_dirs=(Path("checkpoints/baselines/motiongpt3"),),
+        hub_repos=("ZeyuLing/hftrainer-motiongpt3-humanml3d",),
+        tags=("motion-generation", "text-to-motion", "humanml3d", "motiongpt3", "motion-language"),
+    ),
+    ModelZooCard(
         slug="prism",
         doc_path=Path("docs/model_zoo/prism.md"),
         local_dirs=(Path("checkpoints/prism/prism_1_0_humanml3d_iter15000"),),

@@ -16,8 +16,11 @@ _BUNDLE_IMPORTS = {
     # Reproduced open-source T2M baselines (Model Zoo; native runtime)
     'MDMBundle': ('hftrainer.models.motion.mdm.bundle', 'MDMBundle'),
     'MotionStreamerBundle': ('hftrainer.models.motion.motionstreamer.bundle', 'MotionStreamerBundle'),
+    'FlowMDMBundle': ('hftrainer.models.motion.flowmdm.bundle', 'FlowMDMBundle'),
+    'MotionLabBundle': ('hftrainer.models.motion.motionlab.bundle', 'MotionLabBundle'),
     'MotionMillionBundle': ('hftrainer.models.motion.motionmillion.bundle', 'MotionMillionBundle'),
     'T2MGPTBundle': ('hftrainer.models.motion.t2mgpt.bundle', 'T2MGPTBundle'),
+    'MotionGPT3Bundle': ('hftrainer.models.motion.motiongpt3.bundle', 'MotionGPT3Bundle'),
     'MoMaskBundle': ('hftrainer.models.motion.momask.bundle', 'MoMaskBundle'),
     'MoGenTSBundle': ('hftrainer.models.motion.mogents.bundle', 'MoGenTSBundle'),
     'MotionLCMBundle': ('hftrainer.models.motion.motionlcm.bundle', 'MotionLCMBundle'),
@@ -43,7 +46,8 @@ __all__ = [
     'PrismBundle', 'PrismMCMBundle', 'VermoBundle',
     'HyMotionM2MBundle', 'HyMotionT2MBundle', 'HyMotionUMOBundle',
     'MotionCLIPBundle',
-    'MDMBundle', 'MotionStreamerBundle', 'MotionMillionBundle',
-    'T2MGPTBundle', 'MoMaskBundle', 'MoGenTSBundle', 'MotionLCMBundle', 'KIMODOBundle',
+    'MDMBundle', 'MotionStreamerBundle', 'FlowMDMBundle', 'MotionLabBundle',
+    'MotionMillionBundle', 'T2MGPTBundle', 'MotionGPT3Bundle',
+    'MoMaskBundle', 'MoGenTSBundle', 'MotionLCMBundle', 'KIMODOBundle',
     'InterGenBundle', 'InterMaskBundle',
 ]
