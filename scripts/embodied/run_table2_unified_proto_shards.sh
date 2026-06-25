@@ -36,6 +36,8 @@ MAX_EVAL_JOBS="${MAX_EVAL_JOBS:-1}"
 FORCE_CONVERT="${FORCE_CONVERT:-0}"
 FORCE_PACK="${FORCE_PACK:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
+REQUIRE_CUDA_DRIVER_MIN="${REQUIRE_CUDA_DRIVER_MIN:-470}"
+REQUIRE_NVIDIA_CUDA_VERSION="${REQUIRE_NVIDIA_CUDA_VERSION:-}"
 SAVE_PREDICTED_MOTION_LIB="${SAVE_PREDICTED_MOTION_LIB:-1}"
 PREDICTED_MOTION_LIB_EVERY="${PREDICTED_MOTION_LIB_EVERY:-1}"
 CHECKPOINT_SPECS="${CHECKPOINT_SPECS:-protomotions_g1_bones=data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt}"
@@ -65,6 +67,49 @@ wait_for_background() {
   if [[ "${failed}" != "0" ]]; then
     exit 6
   fi
+}
+
+check_gpu_driver_preflight() {
+  if [[ -z "${REQUIRE_CUDA_DRIVER_MIN}" && -z "${REQUIRE_NVIDIA_CUDA_VERSION}" ]]; then
+    return
+  fi
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "[unified-proto] ERROR: nvidia-smi missing; cannot run GPU tracker" >&2
+    exit 44
+  fi
+  local smi
+  smi="$(nvidia-smi)"
+  echo "${smi}" | sed 's/^/[unified-proto] nvidia-smi /'
+  SMI_TEXT="${smi}" REQUIRE_CUDA_DRIVER_MIN="${REQUIRE_CUDA_DRIVER_MIN}" REQUIRE_NVIDIA_CUDA_VERSION="${REQUIRE_NVIDIA_CUDA_VERSION}" python3 - <<'PY'
+import os, re, sys
+smi = os.environ.get("SMI_TEXT", "")
+driver_min = os.environ.get("REQUIRE_CUDA_DRIVER_MIN", "")
+cuda_required = os.environ.get("REQUIRE_NVIDIA_CUDA_VERSION", "")
+driver_match = re.search(r"Driver Version:\s*([0-9]+)(?:\.([0-9]+))?", smi)
+cuda_match = re.search(r"CUDA Version:\s*([0-9]+(?:\.[0-9]+)?)", smi)
+if driver_min:
+    if not driver_match:
+        print("[unified-proto] ERROR: cannot parse nvidia driver version", file=sys.stderr)
+        raise SystemExit(44)
+    major = int(driver_match.group(1))
+    if major < int(driver_min):
+        print(
+            f"[unified-proto] ERROR: nvidia driver {major} < required {driver_min}; "
+            "rejecting this host before eval",
+            file=sys.stderr,
+        )
+        raise SystemExit(44)
+if cuda_required:
+    cuda_seen = cuda_match.group(1) if cuda_match else "unknown"
+    if cuda_seen != cuda_required:
+        print(
+            f"[unified-proto] ERROR: nvidia-smi CUDA Version {cuda_seen} != required {cuda_required}; "
+            "rejecting this host before eval",
+            file=sys.stderr,
+        )
+        raise SystemExit(44)
+print("[unified-proto] gpu driver preflight OK")
+PY
 }
 
 setup_tracker_runtime() {
@@ -262,6 +307,7 @@ eval_split() {
   done
 }
 
+check_gpu_driver_preflight
 setup_tracker_runtime
 for split in ${SPLITS}; do
   convert_and_pack_split "${split}"
