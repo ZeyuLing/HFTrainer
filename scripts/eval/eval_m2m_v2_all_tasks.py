@@ -95,64 +95,10 @@ def _lookup_caption_embedding(caption: str
 # ============================================================================
 
 V2_MODELS = {
-    'uncond_local': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_uncond_local_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_uncond_local_046b',
-        'desc': 'v2 Unconditioned + Local rotation',
-        'has_caption': False,
-        'rotation_space': 'local',
-    },
-    'uncond_global': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_uncond_global_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_uncond_global_046b',
-        'desc': 'v2 Unconditioned + Global rotation',
-        'has_caption': False,
-        'rotation_space': 'global',
-    },
-    'caption_local': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_046b',
-        'desc': 'v2 Caption + Local rotation (mixed training)',
-        'has_caption': True,
-        'rotation_space': 'local',
-    },
-    'caption_global': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_046b',
-        'desc': 'v2 Caption + Global rotation (mixed training)',
-        'has_caption': True,
-        'rotation_space': 'global',
-    },
-    # Phase 1 variants: pure T2M curriculum (no completion tasks)
-    'caption_local_phase1': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase1.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_phase1',
-        'desc': 'v2 Caption + Local rotation (Phase 1: pure T2M)',
-        'has_caption': True,
-        'rotation_space': 'local',
-    },
-    'caption_global_phase1': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_phase1.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_phase1',
-        'desc': 'v2 Caption + Global rotation (Phase 1: pure T2M)',
-        'has_caption': True,
-        'rotation_space': 'global',
-    },
-    # Phase 2 variants: T2M base + completion curriculum (longer training)
-    'caption_local_phase2': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_local_phase2.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_caption_local_phase2',
-        'desc': 'v2 Caption + Local rotation (Phase 2: T2M + completion)',
-        'has_caption': True,
-        'rotation_space': 'local',
-    },
-    'caption_global_phase2': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_caption_global_phase2.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_caption_global_phase2',
-        'desc': 'v2 Caption + Global rotation (Phase 2: T2M + completion)',
-        'has_caption': True,
-        'rotation_space': 'global',
-    },
+    # NOTE (2026-06-25 config convergence): the uncond_local / uncond_global /
+    # caption_local / caption_global entries and their phase1/phase2 variants
+    # were removed here because their configs were deleted when the M2M config
+    # set was converged to the SMPL-root and KIMODO-root editfix mainlines.
     # Phase 0 root-representation ablations trained on the 2026-05-14 data.
     'M2M_v2_KIMODO_root_caption_permo_resume_E4': {
         'config': 'configs/hymotion_m2m/hymotion_m2m_kimodo_caption_permo_resume_046b.py',
@@ -165,13 +111,6 @@ V2_MODELS = {
         'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_E2',
         'desc': 'v2 SMPL Root + Caption (E2)',
-        'has_caption': True,
-        'rotation_space': 'local',
-    },
-    'smpl_caption_resume_E2': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_resume_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_resume_E2',
-        'desc': 'v2 SMPL Root + Caption Resume (E2)',
         'has_caption': True,
         'rotation_space': 'local',
     },
@@ -220,10 +159,7 @@ V2_MODELS = {
         'has_caption': True,
         'rotation_space': 'local',
     },
-    # --- Table 5 keyframe \ours config ablation (epoch_80 pinned) ---
-    # Compare the two candidate \ours configs on adaptive sparse keyframe:
-    #   * 046b = original dirty-data model (motionfix/permo_editing in train set)
-    #   * cleandata = same recipe finetuned from editfix ep960 on clean data only
+    # --- Table 5 keyframe \ours config (epoch_80 pinned) ---
     'smpl_caption_046b_ep80': {
         'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
         'work_dir': 'work_dirs/_eval_smpl_046b_ep80',
@@ -231,34 +167,11 @@ V2_MODELS = {
         'has_caption': True,
         'rotation_space': 'local',
     },
-    'smpl_caption_cleandata_ep80': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_cleandata_ablation.py',
-        'work_dir': 'work_dirs/_eval_smpl_cleandata_ep80',
-        'desc': 'SMPL Root + Caption (clean data, editfix-finetuned), epoch_80 pinned',
-        'has_caption': True,
-        'rotation_space': 'local',
-    },
 }
 
-# Also allow running v1 models for comparison
-V1_MODELS = {
-    'v1_uncond_fm_man': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_completion_uncond_fm_man_046b',
-        'desc': 'v1 Unconditioned FM+MAN',
-        'has_caption': False,
-        'rotation_space': 'local',
-        'motion_dim': 135,
-    },
-    'v1_uncond_fm_man_globalrot': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_completion_uncond_fm_man_globalrot_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_completion_uncond_fm_man_globalrot_046b',
-        'desc': 'v1 Unconditioned FM+MAN+GlobalRot',
-        'has_caption': False,
-        'rotation_space': 'global',
-        'motion_dim': 135,
-    },
-}
+# v1 (135-dim) comparison models removed in the 2026-06-25 config convergence:
+# their completion_uncond_fm_man[_globalrot] configs no longer exist.
+V1_MODELS = {}
 
 ALL_MODELS = {**V2_MODELS, **V1_MODELS}
 
