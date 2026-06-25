@@ -2,6 +2,26 @@
 
 Every training run creates a structured work directory. Each run gets a **timestamped subdirectory** for logs, config, and TensorBoard events, so reruns never overwrite previous results. Checkpoints are stored at the base level for easy `auto_resume` discovery.
 
+## Naming and Lifecycle
+
+Use `work_dirs/` only for training state: config snapshots, logs, TensorBoard events, checkpoints, and short training visualizations. Inference, evaluation, converted predictions, paper tables, and viewer assets should go under `outputs/` instead.
+
+Experiment names should be stable and readable:
+
+```text
+work_dirs/{method}_{task_or_dataset}_{key_setting}/
+```
+
+Good names describe the training job, not the debugging history. Prefer `vermo_pretrain_16k_llama1b_a100_fp16` over names with `fix`, `rerun`, `debug`, `smoke`, dates, or host names. Put run-specific details in the timestamped run subdirectory and logs.
+
+Lifecycle rules:
+
+- Long-lived training jobs keep the latest useful checkpoints and the run logs needed to reproduce them.
+- Use `max_keep_ckpts` for normal jobs; do not keep every checkpoint unless the experiment explicitly needs a dense trajectory.
+- Smoke tests, dry runs, wrong-data runs, quick checks, and failed import/debug probes should be cleaned or quarantined once their conclusion has been promoted into notes, configs, or canonical `outputs/evaluation/...` artifacts.
+- Loose files directly under `work_dirs/` are discouraged. Put launch logs inside `work_dirs/{experiment}/{timestamp}/` or, for non-training operational logs, under `outputs/diagnostics/{topic}/`.
+- Cleanup is performed by `tools/maintenance/audit_result_dirs.py`: first write a dry-run manifest, then move safe candidates to `.trash/result_cleanup_<timestamp>/` with `--apply`.
+
 ## Directory Layout
 
 ```

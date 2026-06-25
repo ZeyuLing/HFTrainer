@@ -298,6 +298,36 @@ outputs/tmp/{YYYYMMDD}_{owner_or_topic}/
 - 临时目录最多保留短期 debug 上下文；若超过一周仍有价值，迁移到 `outputs/diagnostics/` 或正式目录。
 - 脚本中的 scratch/cache/temp 参数一律默认指向 `outputs/tmp/...`，避免散落到 `scripts/`、`docs/temp/`、源码目录或仓库根目录。
 
+### 结果清理与生命周期
+
+清理 `outputs/` 和 `work_dirs/` 时先审计、再隔离、最后人工确认删除，禁止直接裸 `rm -rf` 正式结果目录。
+
+标准流程：
+
+```bash
+python3 tools/maintenance/audit_result_dirs.py \
+  --out-jsonl outputs/diagnostics/result_cleanup_YYYYMMDD/manifest.dryrun.jsonl \
+  --out-csv outputs/diagnostics/result_cleanup_YYYYMMDD/manifest.dryrun.csv
+```
+
+确认候选后再执行：
+
+```bash
+python3 tools/maintenance/audit_result_dirs.py \
+  --apply \
+  --quarantine-root .trash/result_cleanup_YYYYMMDD_HHMMSS \
+  --out-jsonl outputs/diagnostics/result_cleanup_YYYYMMDD/manifest.applied.jsonl \
+  --out-csv outputs/diagnostics/result_cleanup_YYYYMMDD/manifest.applied.csv
+```
+
+规则：
+
+- `outputs/tmp/*`、`outputs/debug/`、cache、老 smoke/debug 子目录默认是可隔离对象；24 小时内更新或被活跃进程引用的路径自动保护。
+- `outputs/evaluation/...` 中的正式 canonical 目录默认长期保留；旧式顶层 eval 目录、带 `fix`/`rerun`/日期/非规范 method 名的目录先标记 `review`，不要直接用于新表格或论文指标。
+- `work_dirs/{experiment}/` 是训练状态目录，含 checkpoint 的目录默认 `review`；只隔离明确 `wrong`/`dryrun`/`smoke`/`quickcheck` 且无顶层 checkpoint 的目录或散落日志。
+- 隔离目标统一放 `.trash/result_cleanup_<timestamp>/`，保留原相对路径。确认无人需要后，再手动删除对应 `.trash` 批次。
+- 新脚本必须把正式结果、诊断结果和临时 scratch 分开写；如果一个临时结果后来被采用，迁移到 canonical 路径并补齐 `run_config.json` / `command.txt` / `metrics/`。
+
 ---
 
 ## 目标重构架构（WIP，逐步迁移）
