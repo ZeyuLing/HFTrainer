@@ -41,6 +41,9 @@ G1_MESH_SRC = (
     ROOT
     / "hftrainer/models/motion/physflow/trackers/protomotions/vendor/protomotions/data/assets/mesh/G1"
 )
+LOCAL_SUCCESS_THRESH_M = 0.2
+ROOT_HEIGHT_SUCCESS_THRESH_M = 0.2
+ROOT_TRAJ_SUCCESS_THRESH_M = 0.5
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -175,15 +178,21 @@ def _metrics(
     safe_dt = max(float(dt), 1e-9)
     local_mpjpe_m = float(local_err.mean())
     root_height_m = float(root_height_err.mean())
-    success = local_mpjpe_m <= 0.2 and root_height_m <= 0.2
+    root_err_m = float(root_err.mean())
+    success = (
+        local_mpjpe_m <= LOCAL_SUCCESS_THRESH_M
+        and root_height_m <= ROOT_HEIGHT_SUCCESS_THRESH_M
+        and root_err_m <= ROOT_TRAJ_SUCCESS_THRESH_M
+    )
     return {
         "frames": float(frames),
         "success": float(success),
         "aligned_global_mpjpe_mm": float(aligned_body_err.mean() * 1000.0),
         "local_mpjpe_mm": float(local_mpjpe_m * 1000.0),
-        "root_err_m": float(root_err.mean()),
+        "root_err_m": root_err_m,
         "root_err_max_m": float(root_err.max()),
         "root_height_err_m": root_height_m,
+        "success_root_traj_thresh_m": ROOT_TRAJ_SUCCESS_THRESH_M,
         "local_mpjve_mps": float(np.nanmean(local_step_vel) / safe_dt),
         "local_mpjae_mps2": float(np.nanmean(local_step_acc) / (safe_dt * safe_dt)),
         "ref_disp_m": float(np.linalg.norm(ref_pos[-1, 0, :2] - ref_pos[0, 0, :2])) if frames > 1 else 0.0,

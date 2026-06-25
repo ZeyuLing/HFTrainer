@@ -97,6 +97,17 @@ def main() -> None:
         default=None,
         help="Optional native validation heldout_score.json. Omitted until the split manifest is frozen.",
     )
+    ap.add_argument(
+        "--max-global-mpjpe-mm",
+        type=float,
+        default=500.0,
+        help="Fail closed if the released rollout exceeds this global MPJPE threshold.",
+    )
+    ap.add_argument(
+        "--allow-global-failure",
+        action="store_true",
+        help="Still emit diagnostic artifacts when the global-tracking gate fails.",
+    )
     args = ap.parse_args()
 
     method = args.method
@@ -148,6 +159,11 @@ def main() -> None:
     diagnostics = {
         "completed_columns": [k for k, v in row.items() if v is not None],
         "missing_columns": [k for k, v in row.items() if v is None],
+        "global_tracking_gate": {
+            "max_global_mpjpe_mm": args.max_global_mpjpe_mm,
+            "observed_global_mpjpe_mm": row["e_g_mpjpe_mm"],
+            "passed": row["e_g_mpjpe_mm"] <= args.max_global_mpjpe_mm,
+        },
         "amass": {
             "n_full_eval": amass_n,
             "n_predicted": pred_amass_n,
@@ -170,8 +186,19 @@ def main() -> None:
             "Saved rollout raw_global_mpjpe_mm is retained only for diagnostics, not Table 2.",
             "Wild-G1 is the single in-the-wild generalization split used in the main row.",
             "Native is left null unless its formal heldout_score.json path is provided.",
+            "If the global tracking gate fails, the row is diagnostic only and should not be copied into the main paper table.",
         ],
     }
+
+    if (
+        row["e_g_mpjpe_mm"] > args.max_global_mpjpe_mm
+        and not args.allow_global_failure
+    ):
+        raise SystemExit(
+            "ProtoMotions global-tracking gate failed: "
+            f"E_g={row['e_g_mpjpe_mm']:.1f}mm > {args.max_global_mpjpe_mm:.1f}mm. "
+            "Use --allow-global-failure only for diagnostic artifact export."
+        )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     payload = {"row": row, "diagnostics": diagnostics}

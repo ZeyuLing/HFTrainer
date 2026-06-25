@@ -28,6 +28,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.embodied.build_protomotions_ref_track_dashboard import (  # noqa: E402
+    LOCAL_SUCCESS_THRESH_M,
+    ROOT_HEIGHT_SUCCESS_THRESH_M,
+    ROOT_TRAJ_SUCCESS_THRESH_M,
     _align_xy_to_reference,
     _copy_assets,
     _html_doc,
@@ -82,16 +85,22 @@ def _metrics_wxyz(
     safe_dt = max(float(dt), 1e-9)
     local_mpjpe_m = float(local_err.mean()) if frames else float("nan")
     root_height_m = float(root_height_err.mean()) if frames else float("nan")
-    local_gate_success = local_mpjpe_m <= 0.2 and root_height_m <= 0.2
+    root_err_m = float(root_err.mean()) if frames else float("nan")
+    local_gate_success = (
+        local_mpjpe_m <= LOCAL_SUCCESS_THRESH_M
+        and root_height_m <= ROOT_HEIGHT_SUCCESS_THRESH_M
+        and root_err_m <= ROOT_TRAJ_SUCCESS_THRESH_M
+    )
     return {
         "frames": float(frames),
         "success": float(judge_success),
         "local_gate_success": float(local_gate_success),
         "aligned_global_mpjpe_mm": float(aligned_body_err.mean() * 1000.0) if frames else float("nan"),
         "local_mpjpe_mm": float(local_mpjpe_m * 1000.0),
-        "root_err_m": float(root_err.mean()) if frames else float("nan"),
+        "root_err_m": root_err_m,
         "root_err_max_m": float(root_err.max()) if frames else float("nan"),
         "root_height_err_m": root_height_m,
+        "success_root_traj_thresh_m": ROOT_TRAJ_SUCCESS_THRESH_M,
         "local_mpjve_mps": float(np.nanmean(local_step_vel) / safe_dt),
         "local_mpjae_mps2": float(np.nanmean(local_step_acc) / (safe_dt * safe_dt)),
         "ref_disp_m": float(np.linalg.norm(ref_pos[-1, 0, :2] - ref_pos[0, 0, :2])) if frames > 1 else 0.0,

@@ -18,6 +18,11 @@ import numpy as np
 import torch
 
 
+DEFAULT_LOCAL_SUCCESS_THRESH_M = 0.2
+DEFAULT_ROOT_HEIGHT_SUCCESS_THRESH_M = 0.2
+DEFAULT_ROOT_TRAJ_SUCCESS_THRESH_M = 0.5
+
+
 def _load(path: Path) -> dict[str, Any]:
     return torch.load(path, map_location="cpu", weights_only=False)
 
@@ -94,7 +99,14 @@ def _align_xy_to_reference(pred_pos: np.ndarray, ref_pos: np.ndarray) -> np.ndar
     return aligned
 
 
-def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[str, float]]:
+def _per_motion_metrics(
+    ref: dict[str, Any],
+    pred: dict[str, Any],
+    *,
+    local_success_thresh_m: float,
+    root_height_success_thresh_m: float,
+    root_traj_success_thresh_m: float,
+) -> list[dict[str, float]]:
     ref_starts, ref_lens = _starts_and_lens(ref)
     pred_starts, pred_lens = _starts_and_lens(pred)
     n = min(len(ref_lens), len(pred_lens))
@@ -160,7 +172,12 @@ def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[
         local_acc_mps2 = local_step_acc_err_m / max(dt * dt, 1e-9)
         global_acc_mps2 = global_step_acc_err_m / max(dt * dt, 1e-9)
 
-        paper_failed = local_mpjpe_m > 0.2 or root_height_err_m > 0.2
+        root_err_m = float(root_err.mean())
+        paper_failed = (
+            local_mpjpe_m > local_success_thresh_m
+            or root_height_err_m > root_height_success_thresh_m
+            or root_err_m > root_traj_success_thresh_m
+        )
         rows.append(
             {
                 "motion_id": float(motion_id),
@@ -178,9 +195,12 @@ def _per_motion_metrics(ref: dict[str, Any], pred: dict[str, Any]) -> list[dict[
                 "local_mpjae_mm_per_frame2": local_step_acc_err_m * 1000.0,
                 "mpjae_mps2": global_acc_mps2,
                 "local_mpjae_mps2": local_acc_mps2,
-                "root_err_m": float(root_err.mean()),
+                "root_err_m": root_err_m,
                 "root_err_max_m": float(root_err.max()),
                 "root_height_err_m": root_height_err_m,
+                "success_local_thresh_m": float(local_success_thresh_m),
+                "success_root_height_thresh_m": float(root_height_success_thresh_m),
+                "success_root_traj_thresh_m": float(root_traj_success_thresh_m),
             }
         )
     return rows
@@ -229,6 +249,24 @@ def main() -> None:
         default=None,
         help="Optional output Markdown path. Defaults to <eval-root>/predicted_metrics.md.",
     )
+    parser.add_argument(
+        "--local-success-thresh-m",
+        type=float,
+        default=DEFAULT_LOCAL_SUCCESS_THRESH_M,
+        help="Mean root-frame MPJPE threshold for strict rollout success.",
+    )
+    parser.add_argument(
+        "--root-height-success-thresh-m",
+        type=float,
+        default=DEFAULT_ROOT_HEIGHT_SUCCESS_THRESH_M,
+        help="Mean root-height error threshold for strict rollout success.",
+    )
+    parser.add_argument(
+        "--root-traj-success-thresh-m",
+        type=float,
+        default=DEFAULT_ROOT_TRAJ_SUCCESS_THRESH_M,
+        help="Mean root trajectory error threshold for strict rollout success.",
+    )
     args = parser.parse_args()
 
     all_results: dict[str, dict[str, Any]] = {}
@@ -248,7 +286,15 @@ def main() -> None:
             if not ref_path.exists() or pred_path is None:
                 missing_paths.append(str(pred_root / "results"))
                 continue
-            rows.extend(_per_motion_metrics(_load(ref_path), _load(pred_path)))
+            rows.extend(
+                _per_motion_metrics(
+                    _load(ref_path),
+                    _load(pred_path),
+                    local_success_thresh_m=args.local_success_thresh_m,
+                    root_height_success_thresh_m=args.root_height_success_thresh_m,
+                    root_traj_success_thresh_m=args.root_traj_success_thresh_m,
+                )
+            )
 
         if rows:
             all_results[name] = {
