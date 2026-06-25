@@ -455,7 +455,7 @@ def reencode_272_via_stored_positions(m272: np.ndarray) -> np.ndarray:
 
     Isolates the encoding math from any FK/body-model mismatch.
     """
-    from hftrainer.motion.representation.humanml import (
+    from hftrainer.datasets.motion.representation.humanml_repr import (
         recover_local_rotations_and_root,
         recover_272_stored_positions,
     )
@@ -467,7 +467,7 @@ def reencode_272_via_stored_positions(m272: np.ndarray) -> np.ndarray:
 
 def reencode_272_via_fk(m272: np.ndarray, smplh_model: Optional[str] = None) -> np.ndarray:
     """GT272 -> decode (rot, root) -> SMPL-H FK joints -> re-encode."""
-    from hftrainer.motion.representation.humanml import (
+    from hftrainer.datasets.motion.representation.humanml_repr import (
         recover_local_rotations_and_root,
         fk_smplh_joints,
         DEFAULT_PATHS,
