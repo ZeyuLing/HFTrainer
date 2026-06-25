@@ -10,7 +10,7 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
 PROTOCOL_ROOT="${PROTOCOL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow/table2_tracker/unified_protocol_v1}"
 METHODS="${METHODS:-any2track humanoid_gpt}"
-SPLITS="${SPLITS:-lafan1_fixed600 wild_clean_fixed600 amass_fixed600}"
+SPLITS="${SPLITS:-amass_test_fixed600 lafan1_fixed600 wild_clean_fixed600}"
 METHODS="${METHODS//,/ }"
 SPLITS="${SPLITS//,/ }"
 TOTAL_SHARDS="${TOTAL_SHARDS:-32}"
@@ -51,7 +51,7 @@ make_shards() {
   local out_dir="${PROTOCOL_ROOT}/manifests/${split}"
   mkdir -p "${out_dir}"
   python3 - "${manifest}" "${out_dir}" "${TOTAL_SHARDS}" <<'PY'
-import json, sys
+import json, os, sys, uuid
 from pathlib import Path
 manifest = Path(sys.argv[1])
 out_dir = Path(sys.argv[2])
@@ -60,9 +60,39 @@ names = json.loads(manifest.read_text())
 shards = [[] for _ in range(num)]
 for i, name in enumerate(names):
     shards[i % num].append(name)
+token = f".{os.uname().nodename}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
 for i, shard in enumerate(shards):
-    (out_dir / f"shard_{i}.json").write_text(json.dumps(shard, indent=2) + "\n")
+    path = out_dir / f"shard_{i}.json"
+    text = json.dumps(shard, indent=2) + "\n"
+    if path.is_file():
+        try:
+            if json.loads(path.read_text()) == shard:
+                continue
+        except json.JSONDecodeError:
+            pass
+    tmp = path.with_name(path.name + token)
+    tmp.write_text(text)
+    tmp.replace(path)
 print(f"{manifest}: motions={len(names)} shards={num}")
+PY
+}
+
+manifest_count() {
+  local python_bin="$1"
+  local manifest="$2"
+  "${python_bin}" - "${manifest}" <<'PY'
+import json, sys, time
+from pathlib import Path
+path = Path(sys.argv[1])
+last_error = None
+for _ in range(20):
+    try:
+        print(len(json.loads(path.read_text())))
+        raise SystemExit(0)
+    except json.JSONDecodeError as exc:
+        last_error = exc
+        time.sleep(0.25)
+raise last_error
 PY
 }
 
@@ -116,9 +146,13 @@ run_any2track_split() {
   for shard in $(seq "${SHARD_START}" $((SHARD_START + LOCAL_SHARDS - 1))); do
     local manifest="${PROTOCOL_ROOT}/manifests/${split}/shard_${shard}.json"
     local count
-    count="$("${PYTHON_BIN}" -c "import json; print(len(json.load(open('${manifest}'))))")"
+    count="$(manifest_count "${PYTHON_BIN}" "${manifest}")"
     if [[ "${count}" == "0" ]]; then
       echo "[unified-baselines] Any2Track ${split} shard ${shard}: empty"
+      continue
+    fi
+    if [[ "${FORCE_EVAL:-0}" != "1" && -s "${out_dir}/eval_shard_${shard}.json" ]]; then
+      echo "[unified-baselines] Any2Track ${split} shard ${shard}: already done"
       continue
     fi
     (
@@ -169,9 +203,13 @@ run_hgpt_split() {
   for shard in $(seq "${SHARD_START}" $((SHARD_START + LOCAL_SHARDS - 1))); do
     local manifest="${PROTOCOL_ROOT}/manifests/${split}/shard_${shard}.json"
     local count
-    count="$("${HGPT_PYTHON}" -c "import json; print(len(json.load(open('${manifest}'))))")"
+    count="$(manifest_count "${HGPT_PYTHON}" "${manifest}")"
     if [[ "${count}" == "0" ]]; then
       echo "[unified-baselines] Humanoid-GPT ${split} shard ${shard}: empty"
+      continue
+    fi
+    if [[ "${FORCE_EVAL:-0}" != "1" && -s "${out_dir}/shard_${shard}/summary.json" ]]; then
+      echo "[unified-baselines] Humanoid-GPT ${split} shard ${shard}: already done"
       continue
     fi
     (

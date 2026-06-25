@@ -9,12 +9,16 @@ protocol shared by released tracker baselines:
 * Stored frequency: 30 FPS.
 * Window: first ``max_frames`` frames after resampling, preserving shorter clips.
 * Manifest: JSON list of flat stems consumed by Any2Track and Humanoid-GPT.
+* AMASS-G1 root rotations are read with their explicit source quaternion order.
+* The main paper protocol uses an explicit AMASS-test manifest.  The full-AMASS
+  sweep is an opt-in stress test, not the default Table-2 input.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +123,16 @@ def _normalize_quat(q: np.ndarray) -> np.ndarray:
     return q / np.linalg.norm(q, axis=-1, keepdims=True).clip(min=1e-8)
 
 
+def _apply_root_frame_correction_wxyz(root_quat: np.ndarray, correction: str) -> np.ndarray:
+    if correction == "none":
+        return _normalize_quat(root_quat).astype(np.float32)
+    if correction != "rx_neg90":
+        raise ValueError(f"Unsupported root frame correction: {correction}")
+    src_xyzw = _normalize_quat(root_quat)[:, [1, 2, 3, 0]]
+    corrected_xyzw = (Rotation.from_euler("x", -90, degrees=True) * Rotation.from_quat(src_xyzw)).as_quat()
+    return _normalize_quat(corrected_xyzw[:, [3, 0, 1, 2]]).astype(np.float32)
+
+
 def _resample_qpos_wxyz(qpos: np.ndarray, source_fps: float, target_fps: float) -> np.ndarray:
     if abs(source_fps - target_fps) < 1e-6 or len(qpos) < 2:
         return qpos.astype(np.float32, copy=False)
@@ -138,7 +152,11 @@ def _resample_qpos_wxyz(qpos: np.ndarray, source_fps: float, target_fps: float) 
     return out.astype(np.float32)
 
 
-def _amp_source_to_qpos(data: np.lib.npyio.NpzFile, body_quat_order: str) -> tuple[np.ndarray, float, list[str]]:
+def _amp_source_to_qpos(
+    data: np.lib.npyio.NpzFile,
+    body_quat_order: str,
+    root_frame_correction: str,
+) -> tuple[np.ndarray, float, list[str]]:
     body_names = _as_list(data["body_names"])
     dof_names = _as_list(data["dof_names"])
     pelvis_idx = body_names.index("pelvis") if "pelvis" in body_names else 0
@@ -148,7 +166,7 @@ def _amp_source_to_qpos(data: np.lib.npyio.NpzFile, body_quat_order: str) -> tup
         root_quat = root_quat[:, [3, 0, 1, 2]]
     elif body_quat_order != "wxyz":
         raise ValueError(f"Unsupported body_quat_order={body_quat_order}")
-    root_quat = _normalize_quat(root_quat)
+    root_quat = _apply_root_frame_correction_wxyz(root_quat, root_frame_correction)
     dof_src = np.asarray(data["dof_positions"], dtype=np.float32)
     dof = np.zeros((dof_src.shape[0], len(TARGET_G1_DOF_NAMES)), dtype=np.float32)
     missing: list[str] = []
@@ -161,7 +179,11 @@ def _amp_source_to_qpos(data: np.lib.npyio.NpzFile, body_quat_order: str) -> tup
     return qpos, _scalar(data, ("frequency", "fps"), 30.0), missing
 
 
-def _load_g1_qpos(path: Path, body_quat_order: str) -> tuple[np.ndarray, float, list[str]]:
+def _load_g1_qpos(
+    path: Path,
+    body_quat_order: str,
+    root_frame_correction: str,
+) -> tuple[np.ndarray, float, list[str]]:
     data = np.load(path, allow_pickle=True)
     if "qpos" in data.files:
         qpos = np.asarray(data["qpos"], dtype=np.float32)
@@ -176,7 +198,7 @@ def _load_g1_qpos(path: Path, body_quat_order: str) -> tuple[np.ndarray, float, 
         return qpos36, fps, missing
     required = {"body_positions", "body_rotations", "dof_positions", "dof_names", "body_names"}
     if required.issubset(data.files):
-        return _amp_source_to_qpos(data, body_quat_order)
+        return _amp_source_to_qpos(data, body_quat_order, root_frame_correction)
     raise ValueError(f"{path}: unsupported npz fields {data.files}")
 
 
@@ -187,13 +209,14 @@ def _write_motion(
     target_fps: float,
     max_frames: int,
     body_quat_order: str,
+    root_frame_correction: str,
 ) -> dict[str, Any]:
-    qpos, src_fps, missing = _load_g1_qpos(src, body_quat_order)
+    qpos, src_fps, missing = _load_g1_qpos(src, body_quat_order, root_frame_correction)
     qpos = _resample_qpos_wxyz(qpos, src_fps, target_fps)
     if max_frames > 0:
         qpos = qpos[:max_frames]
     out = out_dir / f"{stem}.npz"
-    np.savez_compressed(out, qpos=qpos.astype(np.float32), frequency=np.float32(target_fps), source=str(src))
+    np.savez(out, qpos=qpos.astype(np.float32), frequency=np.float32(target_fps), source=str(src))
     return {
         "stem": stem,
         "source": str(src),
@@ -212,7 +235,7 @@ def _build_lafan(args: argparse.Namespace, split_dir: Path) -> dict[str, Any]:
     manifest = []
     for name in names:
         stem = _safe_stem(name)
-        rows.append(_write_motion(args.lafan_root / f"{name}.npz", npz_dir, stem, args.target_fps, args.max_frames, "wxyz"))
+        rows.append(_write_motion(args.lafan_root / f"{name}.npz", npz_dir, stem, args.target_fps, args.max_frames, "wxyz", "none"))
         manifest.append(stem)
     (split_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return {"count": len(manifest), "motions": rows}
@@ -226,25 +249,104 @@ def _build_wild(args: argparse.Namespace, split_dir: Path) -> dict[str, Any]:
     manifest = []
     for name in names:
         stem = _safe_stem(name)
-        rows.append(_write_motion(args.wild_root / f"{name}.npz", npz_dir, stem, args.target_fps, args.max_frames, "wxyz"))
+        rows.append(_write_motion(args.wild_root / f"{name}.npz", npz_dir, stem, args.target_fps, args.max_frames, "wxyz", "none"))
         manifest.append(stem)
     (split_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return {"count": len(manifest), "motions": rows}
 
 
-def _build_amass(args: argparse.Namespace, split_dir: Path) -> dict[str, Any]:
-    src_files = sorted(args.amass_root.glob("**/*.npz"))
-    if args.amass_limit:
-        src_files = src_files[: args.amass_limit]
+def _resolve_manifest_paths(root: Path, manifest_path: Path) -> list[Path]:
+    names = json.loads(manifest_path.read_text())
+    out: list[Path] = []
+    for name in names:
+        rel = Path(name)
+        if rel.suffix != ".npz":
+            rel = rel.with_suffix(".npz")
+        path = root / rel
+        if not path.is_file():
+            raise FileNotFoundError(f"Manifest entry {name!r} does not exist under {root}")
+        out.append(path)
+    return out
+
+
+def _read_protomotions_amass_yaml(yaml_path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for line in yaml_path.read_text().splitlines():
+        match = re.match(r"\s*-\s*file:\s*(.+?)\s*$", line)
+        if match:
+            current = {"file": match.group(1), "fps": None}
+            rows.append(current)
+            continue
+        match = re.match(r"\s*fps:\s*([0-9.]+)\s*$", line)
+        if match and current is not None and current["fps"] is None:
+            current["fps"] = float(match.group(1))
+    if not rows:
+        raise ValueError(f"{yaml_path}: no ProtoMotions AMASS entries found")
+    missing_fps = [row["file"] for row in rows if row["fps"] is None]
+    if missing_fps:
+        raise ValueError(f"{yaml_path}: missing fps for {missing_fps[:5]}")
+    return rows
+
+
+def _resolve_protomotions_amass_test_paths(
+    root: Path,
+    yaml_path: Path,
+) -> tuple[list[Path], dict[str, Any]]:
+    rows = _read_protomotions_amass_yaml(yaml_path)
+    out: list[Path] = []
+    missing: list[dict[str, Any]] = []
+    for row in rows:
+        rel_motion = Path(row["file"]).with_suffix("")
+        fps = int(round(float(row["fps"])))
+        candidates = [
+            rel_motion.parent / f"{rel_motion.name}_{fps}_jpos.npz",
+            rel_motion.parent / f"{rel_motion.name}_jpos.npz",
+            rel_motion.with_suffix(".npz"),
+        ]
+        hit = next((root / rel for rel in candidates if (root / rel).is_file()), None)
+        if hit is None:
+            missing.append({
+                "file": row["file"],
+                "fps": row["fps"],
+                "candidates": [str(rel) for rel in candidates],
+            })
+            continue
+        out.append(hit)
+    meta = {
+        "source": str(yaml_path),
+        "source_format": "ProtoMotions data/yaml_files/amass_smpl_test.yaml",
+        "source_entries": len(rows),
+        "matched_entries": len(out),
+        "missing_entries": missing,
+    }
+    return out, meta
+
+
+def _build_amass(args: argparse.Namespace, split_dir: Path, src_files: list[Path] | None = None) -> dict[str, Any]:
+    if src_files is None:
+        src_files = sorted(args.amass_root.glob("**/*.npz"))
+        if args.amass_limit:
+            src_files = src_files[: args.amass_limit]
     npz_dir = split_dir / "npz"
     npz_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     manifest = []
-    for src in src_files:
+    for idx, src in enumerate(src_files, start=1):
         rel = src.relative_to(args.amass_root).with_suffix("")
         stem = _safe_stem(str(rel))
-        rows.append(_write_motion(src, npz_dir, stem, args.target_fps, args.max_frames, args.amass_body_quat_order))
+        rows.append(_write_motion(
+            src,
+            npz_dir,
+            stem,
+            args.target_fps,
+            args.max_frames,
+            args.amass_body_quat_order,
+            args.amass_root_frame_correction,
+        ))
         manifest.append(stem)
+        if idx % 1000 == 0:
+            print(f"[build-table2] amass {idx}/{len(src_files)}", flush=True)
     (split_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return {"count": len(manifest), "motions": rows}
 
@@ -259,20 +361,65 @@ def main() -> None:
     ap.add_argument("--wild-root", type=Path, default=Path("output/heldout_frozen_score"))
     ap.add_argument("--wild-manifest", type=Path, default=Path("outputs/evaluation/physflow/table2_tracker/wild_g1_clean/manifest.json"))
     ap.add_argument("--amass-root", type=Path, default=Path("data/AMASS_Retarged_for_G1/g1"))
+    ap.add_argument("--amass-test-manifest", type=Path, default=None, help="Optional relative AMASS-test npz paths; overrides --amass-test-yaml.")
+    ap.add_argument("--amass-test-yaml", type=Path, default=Path("ref_repo/ProtoMotions/data/yaml_files/amass_smpl_test.yaml"), help="ProtoMotions AMASS test yaml used for the main AMASS-test-G1 split.")
+    ap.add_argument("--skip-amass-test", action="store_true", help="Do not build the main AMASS-test-G1 split.")
+    ap.add_argument("--strict-amass-test", action="store_true", help="Fail if any ProtoMotions AMASS-test entry is missing from the local G1 retarget root.")
+    ap.add_argument("--include-full-amass-stress", action="store_true", help="Also build the optional full-AMASS stress split.")
+    ap.add_argument("--skip-wild", action="store_true", help="Do not build the main Wild-G1 split.")
+    ap.add_argument("--include-wild-stress", action="store_true", help="Deprecated compatibility flag; Wild-G1 is a main split by default.")
     ap.add_argument("--amass-limit", type=int, default=0, help="0 means all AMASS files")
-    ap.add_argument("--amass-body-quat-order", choices=["xyzw", "wxyz"], default="xyzw")
+    ap.add_argument("--amass-body-quat-order", choices=["xyzw", "wxyz"], default="wxyz")
+    ap.add_argument(
+        "--amass-root-frame-correction",
+        choices=["none", "rx_neg90"],
+        default="none",
+        help="Optional diagnostic correction from AMASS-G1 pelvis rotations into the G1 free-joint frame.",
+    )
     args = ap.parse_args()
 
     args.out_root.mkdir(parents=True, exist_ok=True)
+    splits: dict[str, Any] = {
+        "lafan1_fixed600": _build_lafan(args, args.out_root / "inputs" / "lafan1_fixed600"),
+    }
+    amass_test_source: dict[str, Any] | None = None
+    if not args.skip_amass_test:
+        if args.amass_test_manifest is not None:
+            amass_test_files = _resolve_manifest_paths(args.amass_root, args.amass_test_manifest)
+            amass_test_source = {
+                "source": str(args.amass_test_manifest),
+                "source_format": "relative npz manifest",
+                "source_entries": len(amass_test_files),
+                "matched_entries": len(amass_test_files),
+                "missing_entries": [],
+            }
+        else:
+            amass_test_files, amass_test_source = _resolve_protomotions_amass_test_paths(
+                args.amass_root,
+                args.amass_test_yaml,
+            )
+        if amass_test_source.get("missing_entries") and args.strict_amass_test:
+            raise FileNotFoundError(f"Missing AMASS-test-G1 files: {amass_test_source['missing_entries']}")
+        if not amass_test_files:
+            raise RuntimeError("AMASS-test-G1 split resolved to zero local files")
+        splits["amass_test_fixed600"] = _build_amass(
+            args,
+            args.out_root / "inputs" / "amass_test_fixed600",
+            amass_test_files,
+        )
+    if not args.skip_wild or args.include_wild_stress:
+        splits["wild_clean_fixed600"] = _build_wild(args, args.out_root / "inputs" / "wild_clean_fixed600")
+    if args.include_full_amass_stress:
+        splits["amass_fixed600"] = _build_amass(args, args.out_root / "inputs" / "amass_fixed600")
+
     summary = {
         "schema": "table2_unified_protocol_v1",
         "target_fps": args.target_fps,
         "max_frames": args.max_frames,
-        "splits": {
-            "lafan1_fixed600": _build_lafan(args, args.out_root / "inputs" / "lafan1_fixed600"),
-            "wild_clean_fixed600": _build_wild(args, args.out_root / "inputs" / "wild_clean_fixed600"),
-            "amass_fixed600": _build_amass(args, args.out_root / "inputs" / "amass_fixed600"),
-        },
+        "amass_body_quat_order": args.amass_body_quat_order,
+        "amass_root_frame_correction": args.amass_root_frame_correction,
+        "amass_test_source": amass_test_source,
+        "splits": splits,
     }
     (args.out_root / "protocol_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     compact = {

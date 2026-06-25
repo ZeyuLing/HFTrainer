@@ -6,7 +6,7 @@ set -euo pipefail
 export PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
 export PROTOCOL_ROOT="${PROTOCOL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow/table2_tracker/unified_protocol_v1}"
 export METHODS="${METHODS:-humanoid_gpt}"
-export SPLITS="${SPLITS:-lafan1_fixed600,wild_clean_fixed600,amass_fixed600}"
+export SPLITS="${SPLITS:-amass_test_fixed600,lafan1_fixed600,wild_clean_fixed600}"
 export TOTAL_SHARDS="${TOTAL_SHARDS:-32}"
 export LOCAL_SHARDS="${LOCAL_SHARDS:-8}"
 export SHARD_START="${SHARD_START:-0}"
