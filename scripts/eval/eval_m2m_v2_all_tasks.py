@@ -100,13 +100,6 @@ V2_MODELS = {
     # were removed here because their configs were deleted when the M2M config
     # set was converged to the SMPL-root and KIMODO-root editfix mainlines.
     # Phase 0 root-representation ablations trained on the 2026-05-14 data.
-    'M2M_v2_KIMODO_root_caption_permo_resume_E4': {
-        'config': 'configs/hymotion_m2m/hymotion_m2m_kimodo_caption_permo_resume_046b.py',
-        'work_dir': 'work_dirs/hymotion_m2m_v2_kimodo_caption_permo_resume_E4',
-        'desc': 'v2 KIMODO Root + Caption + PerMo Resume (E4)',
-        'has_caption': True,
-        'rotation_space': 'local',
-    },
     'smpl_caption_E2': {
         'config': 'configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py',
         'work_dir': 'work_dirs/hymotion_m2m_v2_smpl_caption_E2',
