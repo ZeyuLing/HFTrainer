@@ -87,7 +87,7 @@ def norm_pad(motion, mean, std, length=None):
 def encode_motion_only(items, motionencoder, device, batch_size=32):
     """items: list of (motion(MAX_LEN,272), len). Returns embeddings (N,256)."""
     em = []
-    for b in range(0, len(items) - len(items) % batch_size, batch_size):
+    for b in range(0, len(items), batch_size):
         batch = items[b:b + batch_size]
         batch.sort(key=lambda x: x[1], reverse=True)
         motions = torch.from_numpy(np.stack([x[0] for x in batch])).float().to(device)

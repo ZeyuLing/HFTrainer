@@ -27,6 +27,17 @@ MS_UNIT_LENGTH = 4
 MS_MAX_TOKENS = 77
 
 
+def _to_2d_latents(latents: torch.Tensor) -> torch.Tensor:
+    """Normalize MotionStreamer sampler outputs to ``(tokens, latent_dim)``."""
+    if latents.ndim == 3:
+        latents = latents.squeeze(0)
+    if latents.ndim == 2 and latents.shape[0] == 16 and latents.shape[1] != 16:
+        latents = latents.transpose(0, 1).contiguous()
+    if latents.ndim != 2 or latents.shape[-1] != 16:
+        raise ValueError(f"expected MotionStreamer latents shaped (*, 16), got {tuple(latents.shape)}")
+    return latents.contiguous()
+
+
 @PIPELINES.register_module()
 class MotionStreamerPipeline(BasePipeline):
     """Inference pipeline for the MotionStreamer bundle."""
@@ -106,5 +117,89 @@ class MotionStreamerPipeline(BasePipeline):
 
         return outputs
 
+    @torch.no_grad()
+    def infer_sequential_t2m(
+        self,
+        captions_per_sample: Sequence[Sequence[str]],
+        lengths_per_sample: Sequence[Sequence[int]],
+        guidance_param: Optional[float] = None,
+        temperature: float = 1.0,
+        progress: bool = False,
+    ) -> List[np.ndarray]:
+        """Generate one continuous MotionStreamer-272 motion per prompt sequence.
+
+        The first segment is sampled from text as normal T2M. Each following
+        segment is sampled with MotionStreamer's BABEL continuation sampler,
+        conditioned on all previously generated latent tokens. The full latent
+        stream is decoded once at the end, matching the sequential BABEL eval
+        generation protocol.
+        """
+        if len(captions_per_sample) != len(lengths_per_sample):
+            raise ValueError("captions_per_sample and lengths_per_sample must have equal length")
+        bundle = self.bundle
+        if bundle.text_model is None:
+            raise RuntimeError(
+                "MotionStreamerBundle was built with load_text_model=False; "
+                "the SentenceT5 text encoder is required for generation."
+            )
+        device = self.device
+        scale = bundle.guidance_param if guidance_param is None else float(guidance_param)
+
+        outputs: List[np.ndarray] = []
+        for i, (captions, raw_lengths) in enumerate(zip(captions_per_sample, lengths_per_sample)):
+            if len(captions) != len(raw_lengths):
+                raise ValueError(
+                    f"sample {i} has {len(captions)} captions but {len(raw_lengths)} lengths"
+                )
+            if not captions:
+                raise ValueError(f"sample {i} has no captions")
+            seg_lengths = [self.clamp_length(n) for n in raw_lengths]
+
+            first_latent = bundle.ar.sample_for_eval_CFG(
+                [str(captions[0])],
+                length=seg_lengths[0],
+                tokenize_model=bundle.text_model,
+                device=device,
+                unit_length=MS_UNIT_LENGTH,
+                cfg=scale,
+            )
+            acc = _to_2d_latents(first_latent)
+            total_len = seg_lengths[0]
+
+            for caption, seg_len in zip(captions[1:], seg_lengths[1:]):
+                total_len += seg_len
+                prefix_tokens = int(acc.shape[0])
+                length = max(total_len, (prefix_tokens + 1) * MS_UNIT_LENGTH)
+                _, new_latents = bundle.ar.sample_for_eval_CFG_babel_inference_new_demo(
+                    B_text=str(caption),
+                    A_motion=acc,
+                    length=length,
+                    clip_model=bundle.text_model,
+                    device=device,
+                    tokenizer="t5-xxl",
+                    unit_length=MS_UNIT_LENGTH,
+                    cfg=scale,
+                    temperature=float(temperature),
+                )
+                acc = torch.cat([acc, _to_2d_latents(new_latents)], dim=0)
+
+            motion = bundle.tae.forward_decoder(acc.unsqueeze(0))[0]
+            motion = bundle.denormalize(motion)[:total_len].cpu().numpy().astype(np.float32)
+            outputs.append(motion)
+            if progress:
+                print(
+                    f"[ms-seq] {i + 1}/{len(captions_per_sample)} "
+                    f"segments={len(captions)} len={total_len} -> {motion.shape}",
+                    flush=True,
+                )
+
+        return outputs
+
+    infer_multi_prompt_t2m = infer_sequential_t2m
+
     def __call__(self, captions, lengths, **kwargs):
+        if kwargs.pop("sequential", False):
+            return self.infer_sequential_t2m(captions, lengths, **kwargs)
+        if len(captions) > 0 and not isinstance(captions[0], str):
+            return self.infer_sequential_t2m(captions, lengths, **kwargs)
         return self.infer_t2m(captions, lengths, **kwargs)

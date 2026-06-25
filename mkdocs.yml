@@ -26,6 +26,7 @@ nav:
   - Comparison: comparison.md
   - Leaderboards:
     - T2M HumanML3D: leaderboards/t2m_humanml3d.html
+    - BABEL Sequential T2M: leaderboards/babel_sequential_t2m.html
   - Design:
     - Overview: design/index.md
     - ModelBundle: design/model_bundle.md

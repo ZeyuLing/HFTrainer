@@ -33,6 +33,7 @@ fi
 TOTAL_SHARDS=$((MACHINE_NUM * NUM_GPUS))
 
 mkdir -p "$OUT_ROOT/logs"
+LOG_PREFIX=${LOG_PREFIX:-$PIPELINE}
 echo "[vm-$PIPELINE] host_rank=$HOST_RANK machines=$MACHINE_NUM gpus/node=$NUM_GPUS total_shards=$TOTAL_SHARDS text=$TEXT_DIR"
 for i in $(seq 0 $((NUM_GPUS - 1))); do
   SHARD=$((HOST_RANK * NUM_GPUS + i))
@@ -42,7 +43,8 @@ for i in $(seq 0 $((NUM_GPUS - 1))); do
       --babel_text_dir="$TEXT_DIR" \
       --babel_npy_dir="$NPY_DIR" \
       --output_root="$OUT_ROOT" \
-      > "$OUT_ROOT/logs/${PIPELINE}_h${HOST_RANK}_g$i.log" 2>&1 &
+      ${EXTRA_ARGS:-} \
+      > "$OUT_ROOT/logs/${LOG_PREFIX}_h${HOST_RANK}_g$i.log" 2>&1 &
 done
 wait
 n=$(find "$OUT_ROOT/$PIPELINE/default/default" -name 'pred.npz' 2>/dev/null | wc -l)

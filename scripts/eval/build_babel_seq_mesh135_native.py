@@ -67,14 +67,33 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default="data/babel/babel_seq_val_manifest.jsonl")
     ap.add_argument("--out", default="outputs/evaluation/babel_seq/mesh135_native")
+    ap.add_argument("--gt-dir", default=GT_DIR)
+    ap.add_argument(
+        "--native",
+        action="append",
+        default=[],
+        metavar="METHOD=DIR",
+        help="Override or add a native SMPL source directory for one method.",
+    )
     ap.add_argument("--max-total", type=int, default=360)
     ap.add_argument("--skip-existing", action="store_true")
     args = ap.parse_args()
 
+    native_dirs = dict(NATIVE)
+    for item in args.native:
+        if "=" not in item:
+            raise SystemExit(f"--native must be METHOD=DIR, got: {item}")
+        method, src = item.split("=", 1)
+        method = method.strip()
+        src = src.strip()
+        if not method or not src:
+            raise SystemExit(f"--native must be METHOD=DIR, got: {item}")
+        native_dirs[method] = src
+
     man = [json.loads(l) for l in open(REPO / args.manifest) if l.strip()]
     man = [m for m in man if m.get("total_frames", 0) <= args.max_total]
     out = REPO / args.out
-    methods = ["GT"] + list(NATIVE)
+    methods = ["GT"] + list(native_dirs)
     for m in methods:
         (out / m).mkdir(parents=True, exist_ok=True)
 
@@ -84,10 +103,10 @@ def main():
     for rec in man:
         sid = rec["id"]
         # require all generators present (+GT) so panels stay aligned
-        gtp = REPO / GT_DIR / f"{sid}.npy"
+        gtp = REPO / args.gt_dir / f"{sid}.npy"
         natz = {}
         miss = not gtp.exists()
-        for meth, d in NATIVE.items():
+        for meth, d in native_dirs.items():
             p = REPO / d / f"{sid}.npz"
             if not p.exists():
                 miss = True

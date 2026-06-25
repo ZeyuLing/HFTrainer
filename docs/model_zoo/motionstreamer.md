@@ -39,6 +39,11 @@ pipe = MotionStreamerPipeline.from_pretrained(
     device="cuda",
 )
 motions = pipe.infer_t2m(["a person walks forward then turns around"], [120])  # list of (T, 272)
+
+seq_motions = pipe.infer_sequential_t2m(
+    [["a person looks around", "a person scratches their arm"]],
+    [[132, 104]],
+)  # one continuous BABEL-style multi-prompt motion, list of (T, 272)
 ```
 
 Complete text-encoder packaging is still pending for the current public
