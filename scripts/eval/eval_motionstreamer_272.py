@@ -568,7 +568,7 @@ def main():
         pred_dir = args.pred_dir if os.path.isabs(args.pred_dir) else os.path.join(REPO, args.pred_dir)
 
         def has_pred(cid):
-            return os.path.exists(os.path.join(pred_dir, cid + ".npz"))
+            return _find_272_file(pred_dir, cid) is not None
         ids = [c for c in all_ids if has_gt(c) and has_pred(c)]
     else:
         pred_dir = None
@@ -669,7 +669,12 @@ def main():
         from motionstreamer_272_encoder import motion135_to_272
 
         def pred_source(cid):
-            d = np.load(os.path.join(pred_dir, cid + ".npz"), allow_pickle=True)
+            path = _find_272_file(pred_dir, cid)
+            if path is None:
+                return None
+            if path.endswith(".npy"):
+                return np.asarray(np.load(path), dtype=np.float32)
+            d = np.load(path, allow_pickle=True)
             # Baselines (CondMDI/MotionLab/KIMODO) that only produce joints are
             # pre-encoded to native-272 @30fps and stored under "motion_272".
             if "motion_272" in d and not args.force_motion135_to_272:

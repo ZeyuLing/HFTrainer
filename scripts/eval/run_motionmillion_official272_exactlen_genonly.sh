@@ -24,13 +24,15 @@ echo "[python] $(command -v "$PY") $("$PY" --version 2>&1)"
 NGPU=${NGPU:-8}
 TOTAL_SHARDS=${TOTAL_SHARDS:-32}
 SHARD_BASE=${SHARD_BASE:-0}
-OUT=${OUT:-outputs/evaluation/motionmillion_official272_exactlen_0617/raw272}
+OUT=${OUT:-outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero}
 DTYPE=${DTYPE:-bf16}
-STEPS=${STEPS:-50}
+STEPS=${STEPS:-150}
+LIMIT=${LIMIT:-0}
 ARTIFACT=${ARTIFACT:-checkpoints/gotozero/hftrainer_7b_humanml272}
 FSQ=${FSQ:-}
 AR=${AR:-checkpoints/motionmillion/pretrained_models/t2m_7B_all.zip}
-TEXT=${TEXT:-checkpoints/flan-t5-xl}
+TEXT=${TEXT:-}
+ANNO=${ANNO:-outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json}
 
 ckpt_args=()
 if [ -n "$ARTIFACT" ]; then
@@ -39,10 +41,12 @@ else
   [ -n "$FSQ" ] && ckpt_args+=(--fsq_path "$FSQ")
   ckpt_args+=(--ar_path "$AR")
 fi
+text_args=()
+[ -n "$TEXT" ] && text_args+=(--text_model_name "$TEXT")
 
 mkdir -p "$OUT" "$(dirname "$OUT")/_logs"
 LOGDIR="$(dirname "$OUT")/_logs"
-echo "[mm-exactlen] $(date) TOTAL_SHARDS=$TOTAL_SHARDS SHARD_BASE=$SHARD_BASE ARTIFACT=${ARTIFACT:-<raw>} -> $OUT"
+echo "[mm-exactlen] $(date) TOTAL_SHARDS=$TOTAL_SHARDS SHARD_BASE=$SHARD_BASE STEPS=$STEPS LIMIT=$LIMIT ANNO=$ANNO ARTIFACT=${ARTIFACT:-<raw>} -> $OUT"
 
 pids=()
 for g in $(seq 0 $((NGPU-1))); do
@@ -50,10 +54,11 @@ for g in $(seq 0 $((NGPU-1))); do
   [ "$gidx" -ge "$TOTAL_SHARDS" ] && continue
   CUDA_VISIBLE_DEVICES=$g "$PY" -u scripts/eval/motionmillion_h3d272.py \
     --out_dir "$OUT" --device cuda --dtype "$DTYPE" "${ckpt_args[@]}" \
-    --text_model_name "$TEXT" \
+    "${text_args[@]}" \
     --max_sample_steps "$STEPS" \
-    --pair_source official_split --canonical_output \
+    --pair_source annotation --anno_file "$ANNO" --anno_data_dir . --canonical_output \
     --num_shards "$TOTAL_SHARDS" --shard_index "$gidx" \
+    --limit "$LIMIT" \
     --skip_existing \
     > "$LOGDIR/mm_g${gidx}of${TOTAL_SHARDS}.log" 2>&1 &
   pids+=($!)

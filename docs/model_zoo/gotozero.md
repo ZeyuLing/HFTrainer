@@ -80,13 +80,14 @@ into the `MotionStreamer272Evaluator` — no rotation re-encoding required.
 Generation path:
 
 ```
-text -> Flan-T5-XL -> LLaMA 7B AR (greedy, EOS-stopped, ≤50 tokens)
+text -> Flan-T5-XL -> LLaMA 7B AR (greedy, EOS-stopped, ≤150 tokens)
      -> FSQ de-quantize -> HumanVQVAE decoder (×2 upsample) -> 272-dim motion
 ```
 
-The released sampler emits at most 50 motion tokens (≈100 frames @ 30 fps); we
-keep this faithful behaviour and truncate each prediction to the GT length for
-evaluation (`max_sample_steps` is configurable on the pipeline).
+The upstream demo sampler caps generation at 50 motion tokens (about 100 frames
+at 30 fps), which truncates many HumanML3D test clips. The model block size
+supports the full benchmark range, so the hftrainer reproduction uses
+`max_sample_steps=150` and writes exact-GT-length MS272 predictions.
 
 Convert to HumanML3D-263 with `hftrainer.motion.representation.convert`
 (`motion272_to_hml263`).
@@ -95,34 +96,58 @@ Convert to HumanML3D-263 with `hftrainer.motion.representation.convert`
 
 ## Evaluation
 
-Generation pairs mirror `MotionStreamer272Evaluator.load_test_pairs()` (per
-`(name, caption)` on the released `humanml3d_272` test split, 7412 pairs).
-Reproduce with:
+Generation uses the shared HumanML3D official-test selected-caption protocol
+(`4042` clips, one verified caption per motion) and writes canonical-id MS272
+files to:
+
+```
+outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero
+```
+
+Reproduce generation with the packaged artifact:
 
 ```bash
-# 1) generate + score (dedicated 8-GPU Taiji job, bf16)
-python3 tools/taiji_submit.py mm_t2m_h3d272 --host_num 1 --host_gpu_num 8 --gpu_name V100 \
-    --start-cmd "cd $PWD && bash scripts/eval/_run_motionmillion_h3d272_taiji.sh"
-# or locally:
-python3 scripts/eval/motionmillion_h3d272.py --out_dir outputs/evaluation/motionmillion_h3d272/mm_272 --device cuda --dtype bf16
-python3 scripts/eval/eval_ms_h3d272.py --pred_dir outputs/evaluation/motionmillion_h3d272/mm_272
+NGPU=6 TOTAL_SHARDS=6 LIMIT=0 \
+OUT=outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero \
+STEPS=150 DTYPE=bf16 \
+bash scripts/eval/run_motionmillion_official272_exactlen_genonly.sh
 ```
 
 ### MotionStreamer-272 evaluator (native space)
 
-Full HumanML3D test set (7411 / 7412 pairs scored, 8×V100, `n_repeats=20`):
+HumanML3D official test, selected captions, `n=4042` files (`nb=4032` after
+32-way R-Precision batching):
 
 | Metric | hftrainer (Go-to-Zero 7B) | GT (real) |
 |---|---|---|
-| FID ↓ | **3.029** | 0.0 |
-| R-Precision Top-1 / 2 / 3 ↑ | 0.696 / 0.848 / 0.903 | 0.704 / 0.856 / 0.911 |
-| MM-Dist ↓ | 15.183 | 15.006 |
-| Diversity → | 27.222 | 27.328 |
+| FID ↓ | **3.065** | 0.0 |
+| FID-refk ↓ | 5.071 | - |
+| R-Precision Top-1 / 2 / 3 ↑ | 0.749 / 0.883 / 0.924 | 0.778 / 0.906 / 0.946 |
+| MM-Dist ↓ | 15.287 | 14.820 |
+| Diversity → | 27.528 | 27.853 |
 
-Go-to-Zero 7B gives the **lowest FID** of the Model-Zoo T2M baselines on this
-evaluator (vs MotionStreamer 11.79 / HY-Motion-1.0 12.96), and its generated
-motions are **almost as retrievable as the ground truth** (R@1 0.696 vs GT 0.704)
-with matching MM-Dist (15.18 vs 15.01) and Diversity (27.22 vs 27.33).
+Go-to-Zero remains very close to GT in the native MS272 evaluator: the semantic
+retrieval gap is small (R@1 0.749 vs GT 0.778), MM-Dist is near-real, and the
+motion activation distribution has low FID.
+
+### MotionCLIP and physical metrics
+
+MotionCLIP metrics use the current leaderboard protocol: MS272 predictions are
+converted to MotionCLIP-135 and compared against the HML3D-roundtrip GT reference
+with **raw, non-L2-normalized** MotionCLIP projection embeddings. This metric is
+more sensitive to representation conversion than the native MS272 evaluator, so
+use it as a secondary diagnostic.
+
+| Metric | Go-to-Zero 7B |
+|---|---:|
+| MotionCLIP R-Precision Top-1 / 2 / 3 ↑ | 0.695 / 0.832 / 0.888 |
+| MotionCLIP FID ↓ | 303.328 |
+| MotionCLIP MM-Dist ↓ | 42.464 |
+| MotionCLIP Diversity → | 23.072 |
+| Slide ↓ | 4.447 |
+| Float ↓ | 20.303 |
+| Jitter ↓ | 9.810 |
+| Dynamic → | 21.192 |
 
 #### Sampler / evaluation protocol (important reproduction notes)
 
@@ -135,9 +160,13 @@ with matching MM-Dist (15.18 vs 15.01) and Diversity (27.22 vs 27.33).
 - **KV-cache**: we add a cached decoder (`LLaMAHF.sample_cached`) that is verified
   **token-for-token identical** to the un-cached sampler while running ~7× faster
   (≈5 s vs ≈40 s per sample at 150 tokens), making full-set evaluation tractable.
-- **Length alignment**: GT is encoded at its full `m_length`; predictions at their
-  own generated length (mirroring `evaluation_transformer_motionmillion`). A short
-  AR sample must **not** truncate the GT reference.
+- **Length alignment**: the wrapper writes one `<HumanML3D id>.npy` file per
+  selected-caption official-test motion, exactly cropped/padded to the GT
+  `num_frames`.
+- **Caption source**: generation and evaluation use
+  `outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/`.
+  Do not fall back to the first raw HumanML3D caption, because several raw first
+  captions are known mismatches.
 
 > Note: the official "Go to Zero" paper reports on **MotionMillion-Eval** (its own
 > zero-shot benchmark), not the HumanML3D test set, so there is no directly
