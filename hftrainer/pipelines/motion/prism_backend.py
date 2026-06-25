@@ -550,6 +550,7 @@ class PrismARPipeline(DiffusionPipeline):
         overlap_frames: int = 1,
         ar_condition_frames: int = 5,
         use_rollout_trans: bool = True,
+        preserve_segment_lengths: bool = False,
     ) -> Dict:
         """Generate long motion autoregressively from multiple prompts.
 
@@ -575,6 +576,10 @@ class PrismARPipeline(DiffusionPipeline):
             attention_kwargs: Additional kwargs for attention.
             overlap_frames: Number of overlapping frames between segments (default 1).
                 The last frame of previous segment becomes the first frame of next segment.
+            preserve_segment_lengths: Generate enough VAE-aligned frames for each
+                segment to survive autoregressive prefix removal, then trim each
+                segment contribution back to its requested length.  Use this for
+                fixed-boundary evaluation protocols.
 
         Returns:
             smplx_dict: Dictionary containing SMPL-X parameters for the full motion.
@@ -586,7 +591,7 @@ class PrismARPipeline(DiffusionPipeline):
         num_segments = len(prompts)
         print_log(f"Generating {num_segments} motion segments autoregressively...")
 
-        # Per-segment frame counts (round each to valid VAE length)
+        # Per-segment frame counts.
         scale = self.vae_scale_factor_temporal
 
         def _round_frames(n: int) -> int:
@@ -594,18 +599,48 @@ class PrismARPipeline(DiffusionPipeline):
                 return (n // scale) * scale + 1
             return max(1, n)
 
+        def _ceil_frames(n: int) -> int:
+            n = max(1, int(n))
+            if (n - 1) % scale == 0:
+                return n
+            return ((n - 1 + scale - 1) // scale) * scale + 1
+
+        def _as_segment_list(v: Union[int, List[int]]) -> List[int]:
+            if isinstance(v, list):
+                if len(v) != num_segments:
+                    print_log(
+                        f"num_frames_per_segment list length {len(v)} != num_segments {num_segments}; using first value for all."
+                    )
+                    first = int(v[0] if v else 129)
+                    return [first] * num_segments
+                return [int(n) for n in v]
+            return [int(v)] * num_segments
+
+        requested_segment_lengths = _as_segment_list(num_frames_per_segment)
+
+        # Number of trailing frames carried across the autoregressive boundary.
+        # Snap to scale*n+1 so the VAE encode/decode of the carried clip is exact
+        # (the conditioned region in the next segment is then exactly k frames).
+        k_carry = max(1, int(ar_condition_frames))
+        k_carry = ((k_carry - 1) // scale) * scale + 1
+
         if isinstance(num_frames_per_segment, list):
-            if len(num_frames_per_segment) != num_segments:
-                print_log(
-                    f"num_frames_per_segment list length {len(num_frames_per_segment)} != num_segments {num_segments}; using first value for all."
-                )
-                single = _round_frames(num_frames_per_segment[0] if num_frames_per_segment else 129)
-                num_frames_per_segment_list = [single] * num_segments
+            if preserve_segment_lengths:
+                num_frames_per_segment_list = [
+                    _ceil_frames(n + (k_carry if i > 0 else 0))
+                    for i, n in enumerate(requested_segment_lengths)
+                ]
             else:
-                num_frames_per_segment_list = [_round_frames(n) for n in num_frames_per_segment]
+                num_frames_per_segment_list = [_round_frames(n) for n in requested_segment_lengths]
         else:
-            single = _round_frames(num_frames_per_segment)
-            num_frames_per_segment_list = [single] * num_segments
+            if preserve_segment_lengths:
+                num_frames_per_segment_list = [
+                    _ceil_frames(n + (k_carry if i > 0 else 0))
+                    for i, n in enumerate(requested_segment_lengths)
+                ]
+            else:
+                single = _round_frames(num_frames_per_segment)
+                num_frames_per_segment_list = [single] * num_segments
 
         # Load first frame condition if provided
         first_frame_motion = None
@@ -614,12 +649,6 @@ class PrismARPipeline(DiffusionPipeline):
                 first_frame_motion_path,
                 condition_num_frames=condition_num_frames,
             )
-
-        # Number of trailing frames carried across the autoregressive boundary.
-        # Snap to scale*n+1 so the VAE encode/decode of the carried clip is exact
-        # (the conditioned region in the next segment is then exactly k frames).
-        k_carry = max(1, int(ar_condition_frames))
-        k_carry = ((k_carry - 1) // scale) * scale + 1
 
         # Store all motion segments
         all_motion_segments = []
@@ -649,14 +678,26 @@ class PrismARPipeline(DiffusionPipeline):
                 # carried tail of the previous segment (the prefix condition), so
                 # drop them to avoid duplication.
                 if seg_idx == 0:
-                    all_motion_segments.append(motion_vec)
+                    contrib = motion_vec
                 else:
                     skip = min(k_carry, motion_vec.shape[1] - 1)
-                    all_motion_segments.append(motion_vec[:, skip:])
+                    contrib = motion_vec[:, skip:]
 
-                # Carry the trailing k_carry frames as the prefix condition for the
-                # next segment (conveys position + velocity -> smooth junction).
-                first_frame_motion = self.extract_last_frame_motion(motion_vec, k_carry)
+                if preserve_segment_lengths:
+                    target_len = int(requested_segment_lengths[seg_idx])
+                    if contrib.shape[1] >= target_len:
+                        contrib = contrib[:, :target_len]
+                    else:
+                        pad_n = target_len - int(contrib.shape[1])
+                        pad = contrib[:, -1:].repeat(1, pad_n, 1, 1)
+                        contrib = torch.cat([contrib, pad], dim=1)
+                all_motion_segments.append(contrib)
+
+                # Carry the trailing k_carry frames from the actually retained
+                # contribution.  When preserve_segment_lengths=True we may have
+                # generated a few extra VAE-aligned frames; conditioning on those
+                # discarded frames would silently shift the next boundary.
+                first_frame_motion = self.extract_last_frame_motion(contrib, k_carry)
 
                 progress_bar.update()
 
