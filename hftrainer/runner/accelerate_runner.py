@@ -813,6 +813,78 @@ class AccelerateRunner:
         return TRAINERS.build(trainer_cfg, default_args={'bundle': bundle})
 
     @staticmethod
+    def _build_weighted_sampler(dataset, ws):
+        """Build a WeightedRandomSampler that rebalances task families.
+
+        Two modes (config ``weighted_sampler=...``):
+          * ``groups=[dict(name, match=[substr...], frac), ...]`` — each group is
+            matched by substring against each entry's ``subset`` and sampled at
+            its target ``frac``; unmatched entries share ``1 - sum(frac)``. Within
+            a group sampling is uniform, so the group hits its fraction exactly.
+          * ``target_editing_frac=f`` — single knob: entries with a
+            ``source_motion_path`` (all editing pairs) are sampled at fraction f.
+        Keeps every entry in the pool (vs. permanently subsampling).
+        """
+        from torch.utils.data import WeightedRandomSampler
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        data_list = getattr(dataset, 'data_list', None)
+        if data_list is None:
+            _log.warning('weighted_sampler set but dataset has no data_list; skipping')
+            return None
+        n_total = len(data_list)
+
+        def subset_of(e):
+            return str(e.get('subset', '')) if isinstance(e, dict) else ''
+
+        weights = [0.0] * n_total
+        groups = ws.get('groups', None)
+        if groups:
+            assigned = [None] * n_total
+            counts = {}
+            for gi, g in enumerate(groups):
+                matches = g.get('match', [])
+                for i, e in enumerate(data_list):
+                    if assigned[i] is not None:
+                        continue
+                    if any(m in subset_of(e) for m in matches):
+                        assigned[i] = gi
+                        counts[gi] = counts.get(gi, 0) + 1
+            n_other = sum(1 for a in assigned if a is None)
+            frac_sum = sum(float(g['frac']) for g in groups)
+            other_frac = max(0.0, 1.0 - frac_sum)
+            for i, a in enumerate(assigned):
+                if a is None:
+                    weights[i] = (other_frac / n_other) if n_other else 0.0
+                else:
+                    c = counts.get(a, 0)
+                    weights[i] = (float(groups[a]['frac']) / c) if c else 0.0
+            report = ', '.join(
+                f"{g.get('name', g['match'])}={counts.get(gi, 0)}@{100 * float(g['frac']):.1f}%"
+                for gi, g in enumerate(groups))
+            _log.info(f"[weighted_sampler] {report}; other={n_other}@{100 * other_frac:.1f}%")
+        else:
+            target_frac = float(ws.get('target_editing_frac', 0.2))
+            flags = [bool(isinstance(e, dict) and e.get('source_motion_path'))
+                     for e in data_list]
+            n_edit = sum(flags)
+            n_oth = n_total - n_edit
+            if n_edit == 0 or n_oth == 0 or not (0.0 < target_frac < 1.0):
+                _log.warning(f'weighted_sampler degenerate (edit={n_edit}); skipping')
+                return None
+            w_edit = (target_frac / (1.0 - target_frac)) * (n_oth / n_edit)
+            weights = [w_edit if f else 1.0 for f in flags]
+            _log.info(f'[weighted_sampler] editing {n_edit}/{n_total} -> '
+                      f'{100 * target_frac:.0f}%, w_edit={w_edit:.4f}')
+
+        if sum(weights) <= 0:
+            _log.warning('weighted_sampler: all-zero weights; skipping')
+            return None
+        num_samples = int(ws.get('num_samples', n_total))
+        return WeightedRandomSampler(
+            weights=weights, num_samples=num_samples, replacement=True)
+
+    @staticmethod
     def _build_dataloader(dl_cfg) -> Optional[DataLoader]:
         """Build DataLoader from config."""
         if dl_cfg is None:
@@ -837,8 +909,16 @@ class AccelerateRunner:
         persistent_workers = dl_cfg.pop('persistent_workers', False)
         prefetch_factor = dl_cfg.pop('prefetch_factor', None)
         sampler = dl_cfg.pop('sampler', None)
+        # Opt-in editing-balance sampler: down-weight editing pairs (entries with
+        # a ``source_motion_path``) to a target fraction while keeping ALL pairs
+        # in the pool (vs. permanently subsampling the annotation).
+        weighted_sampler_cfg = dl_cfg.pop('weighted_sampler', None)
 
         dataset = DATASETS.build(dataset_cfg)
+
+        if weighted_sampler_cfg is not None and sampler is None:
+            sampler = AccelerateRunner._build_weighted_sampler(
+                dataset, dict(weighted_sampler_cfg))
         if collate_fn is None and hasattr(dataset, 'collate_fn'):
             collate_fn = dataset.collate_fn
 

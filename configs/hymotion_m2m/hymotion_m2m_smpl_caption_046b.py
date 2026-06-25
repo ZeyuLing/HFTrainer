@@ -53,8 +53,32 @@ train_dataloader = dict(
     batch_size=20,  # Reduce batch size for caption config (higher memory)
     num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
     persistent_workers=True,  # Avoid per-epoch worker restart overhead
+    # 2026-06-25 EDIT-BALANCE: the *_full_20260625 annotation adds 253k PerMo
+    # editing pairs (Task2 same-style content edit + Task3 any-to-any style
+    # transfer), pushing editing-pair share to ~38.6%. Keep ALL pairs in the
+    # pool but down-weight them to ~20% per step via WeightedRandomSampler so
+    # the other 7 task families (T2M / completion / trajectory / ...) are not
+    # drowned out. (editing_prob=0.15 below is unrelated repair-style synthetic
+    # editing, left untouched.) See scripts/data/build_permo_editing_full.py.
+    #
+    # Per-group fractions (not a flat editing %): MotionFix has only 6.7k pairs
+    # vs 197k styleedit, so a flat 20% editing share would starve MotionFix
+    # (Task1) to ~0.5%/step — worse than before. We pin each editing family
+    # explicitly so all three editing tasks get adequate exposure:
+    #   MotionFix (Task1 semantic edit)        6%
+    #   PerMo styleedit (Task3 style transfer) 7%
+    #   PerMo contentedit (Task2 content edit) 7%   -> editing total 20%, other 80%.
+    weighted_sampler=dict(groups=[
+        dict(name='motionfix', match=['MotionFix'], frac=0.06),
+        dict(name='style_edit', match=['styleedit'], frac=0.07),
+        dict(name='content_edit', match=['contentedit'], frac=0.07),
+    ]),
     dataset=dict(
-        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_editing_20260527.json',
+        # 2026-06-25 FULL EDITING ANNOTATION: MotionFix path-prefix fix (see
+        # scripts/data/fix_motionfix_path_prefix.py) + full PerMo Task2/Task3
+        # editing pairs with deduplicated templated instructions (embeddings in
+        # qwen3_editing/, built by scripts/data/extract_permo_embeddings.py).
+        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_editing_full_20260625.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
             dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
