@@ -5,10 +5,30 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+
+def _load_json_retry(path: Path) -> Any:
+    last_error: json.JSONDecodeError | None = None
+    for _ in range(40):
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            time.sleep(0.25)
+    raise last_error  # type: ignore[misc]
+
+
+def _write_json_atomic(path: Path, payload: Any) -> None:
+    tmp = path.with_name(f".{path.name}.{os.uname().nodename}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
 
 
 def _summarize(raw: dict[str, Any], complete_thresh: float) -> dict[str, float]:
@@ -33,6 +53,26 @@ def _summarize(raw: dict[str, Any], complete_thresh: float) -> dict[str, float]:
         "root_pos_err_mm": mean("root_pos_err_mm"),
         "root_vel_err_mmps": mean("root_vel_err_mms"),
         "root_yaw_err_rad": mean("root_yaw_err"),
+        "raw_body_err_mean": mean("raw_body_err_mean"),
+        "body_err_mean": mean("body_err_mean"),
+        "xy_aligned_body_err_mean": mean("xy_aligned_body_err_mean"),
+        "local_body_err_mean": mean("local_body_err_mean"),
+        "body_vel_err_mean": mean("body_vel_err_mean"),
+        "local_body_vel_err_mean": mean("local_body_vel_err_mean"),
+        "body_acc_err_mean": mean("body_acc_err_mean"),
+        "local_body_acc_err_mean": mean("local_body_acc_err_mean"),
+        "raw_global_mpjpe_m": mean("raw_global_mpjpe_m"),
+        "raw_global_mpjpe_mm": mean("raw_global_mpjpe_mm"),
+        "xy_aligned_mpjpe_m": mean("xy_aligned_mpjpe_m"),
+        "xy_aligned_mpjpe_mm": mean("xy_aligned_mpjpe_mm"),
+        "mpjpe_m": mean("mpjpe_m"),
+        "mpjpe_mm": mean("mpjpe_mm"),
+        "local_mpjpe_m": mean("local_mpjpe_m"),
+        "local_mpjpe_mm": mean("local_mpjpe_mm"),
+        "mpjve_mps": mean("mpjve_mps"),
+        "local_mpjve_mps": mean("local_mpjve_mps"),
+        "mpjae_mps2": mean("mpjae_mps2"),
+        "local_mpjae_mps2": mean("local_mpjae_mps2"),
     }
 
 
@@ -45,7 +85,7 @@ def main() -> None:
     motions: dict[str, Any] = {}
     input_info: dict[str, Any] = {"kept": [], "skipped": {}, "conversions": {}}
     for path in sorted(args.eval_root.glob("shard_*/summary.json")):
-        data = json.loads(path.read_text())
+        data = _load_json_retry(path)
         shard = path.parent.name
         for name, row in data.get("motions", {}).items():
             motions[name] = {**row, "shard": shard} if isinstance(row, dict) else row
@@ -62,7 +102,7 @@ def main() -> None:
         "motions": motions,
         "input": input_info,
     }
-    (args.eval_root / "summary.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    _write_json_atomic(args.eval_root / "summary.json", payload)
     lines = ["# Humanoid-GPT Table-2 Evaluation", ""]
     for key, value in payload["summary"].items():
         lines.append(f"- {key}: {value:.6g}")

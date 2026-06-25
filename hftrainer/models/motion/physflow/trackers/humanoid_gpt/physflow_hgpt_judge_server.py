@@ -33,6 +33,8 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
@@ -167,6 +169,125 @@ def _write_robot_frames_from_state_history(history, model, out_path, fps):
     )
 
 
+def _quat_to_mat(q):
+    q = np.outer(q, q)
+    return np.array(
+        [
+            [
+                q[0, 0] + q[1, 1] - q[2, 2] - q[3, 3],
+                2 * (q[1, 2] - q[0, 3]),
+                2 * (q[1, 3] + q[0, 2]),
+            ],
+            [
+                2 * (q[1, 2] + q[0, 3]),
+                q[0, 0] - q[1, 1] + q[2, 2] - q[3, 3],
+                2 * (q[2, 3] - q[0, 1]),
+            ],
+            [
+                2 * (q[1, 3] - q[0, 2]),
+                2 * (q[2, 3] + q[0, 1]),
+                q[0, 0] - q[1, 1] - q[2, 2] + q[3, 3],
+            ],
+        ],
+        dtype=np.float32,
+    )
+
+
+def _mean_norm(x):
+    return float(np.mean(np.linalg.norm(x, axis=-1)))
+
+
+def _rollout_body_tracking_metrics(history, ref_traj, model, fps):
+    import mujoco
+
+    if not history or "qpos" not in ref_traj:
+        return {}
+
+    first_xpos = np.asarray(history[0]["xpos"])
+    num_bodies = min(int(first_xpos.shape[0]), int(model.nbody))
+    if num_bodies <= 1:
+        return {}
+    body_ids = np.arange(1, num_bodies, dtype=np.int32)
+
+    ref_qpos_all = np.asarray(ref_traj["qpos"], dtype=np.float32)
+    ref_qvel_all = np.asarray(ref_traj.get("qvel", np.zeros((len(ref_qpos_all), model.nv))), dtype=np.float32)
+    num_steps = min(len(history), len(ref_qpos_all))
+    if num_steps <= 0:
+        return {}
+
+    exec_qpos = np.asarray([np.asarray(state["qpos"], dtype=np.float32) for state in history[:num_steps]])
+    exec_pos = np.asarray([np.asarray(state["xpos"], dtype=np.float32)[body_ids] for state in history[:num_steps]])
+    ref_qpos = ref_qpos_all[:num_steps]
+    ref_pos = np.zeros_like(exec_pos, dtype=np.float32)
+    ref_data = mujoco.MjData(model)
+    for t in range(num_steps):
+        ref_data.qpos[:] = ref_qpos_all[t]
+        if t < len(ref_qvel_all) and ref_qvel_all.shape[1] == model.nv:
+            ref_data.qvel[:] = ref_qvel_all[t]
+        mujoco.mj_forward(model, ref_data)
+        ref_pos[t] = ref_data.xpos[body_ids]
+
+    local_exec_pos = np.zeros_like(exec_pos, dtype=np.float32)
+    local_ref_pos = np.zeros_like(ref_pos, dtype=np.float32)
+    for t in range(num_steps):
+        local_exec_pos[t] = (exec_pos[t] - exec_qpos[t, :3][None]) @ _quat_to_mat(exec_qpos[t, 3:7])
+        local_ref_pos[t] = (ref_pos[t] - ref_qpos[t, :3][None]) @ _quat_to_mat(ref_qpos[t, 3:7])
+
+    ref_xy_aligned = ref_pos.copy()
+    ref_xy_aligned[:, :, :2] += exec_qpos[:, None, :2] - ref_qpos[:, None, :2]
+    out = {
+        "raw_body_err_mean": _mean_norm(exec_pos - ref_pos),
+        "body_err_mean": _mean_norm(exec_pos - ref_xy_aligned),
+        "xy_aligned_body_err_mean": _mean_norm(exec_pos - ref_xy_aligned),
+        "local_body_err_mean": _mean_norm(local_exec_pos - local_ref_pos),
+    }
+    out.update(
+        {
+            "raw_global_mpjpe_m": out["raw_body_err_mean"],
+            "raw_global_mpjpe_mm": out["raw_body_err_mean"] * 1000.0,
+            "xy_aligned_mpjpe_m": out["xy_aligned_body_err_mean"],
+            "xy_aligned_mpjpe_mm": out["xy_aligned_body_err_mean"] * 1000.0,
+            "mpjpe_m": out["xy_aligned_body_err_mean"],
+            "mpjpe_mm": out["xy_aligned_body_err_mean"] * 1000.0,
+            "local_mpjpe_m": out["local_body_err_mean"],
+            "local_mpjpe_mm": out["local_body_err_mean"] * 1000.0,
+        }
+    )
+
+    if num_steps >= 2:
+        dt = 1.0 / float(fps)
+        body_vel = np.diff(exec_pos, axis=0) / dt
+        ref_body_vel = np.diff(ref_pos, axis=0) / dt
+        local_body_vel = np.zeros_like(body_vel, dtype=np.float32)
+        ref_local_body_vel = np.zeros_like(ref_body_vel, dtype=np.float32)
+        for t in range(1, num_steps):
+            local_body_vel[t - 1] = ((exec_pos[t] - exec_pos[t - 1]) / dt) @ _quat_to_mat(exec_qpos[t, 3:7])
+            ref_local_body_vel[t - 1] = ((ref_pos[t] - ref_pos[t - 1]) / dt) @ _quat_to_mat(ref_qpos[t, 3:7])
+        out.update(
+            {
+                "body_vel_err_mean": _mean_norm(body_vel - ref_body_vel),
+                "local_body_vel_err_mean": _mean_norm(local_body_vel - ref_local_body_vel),
+                "mpjve_mps": _mean_norm(body_vel - ref_body_vel),
+                "local_mpjve_mps": _mean_norm(local_body_vel - ref_local_body_vel),
+            }
+        )
+
+        if num_steps >= 3:
+            body_acc = np.diff(body_vel, axis=0) / dt
+            ref_body_acc = np.diff(ref_body_vel, axis=0) / dt
+            local_body_acc = np.diff(local_body_vel, axis=0) / dt
+            ref_local_body_acc = np.diff(ref_local_body_vel, axis=0) / dt
+            out.update(
+                {
+                    "body_acc_err_mean": _mean_norm(body_acc - ref_body_acc),
+                    "local_body_acc_err_mean": _mean_norm(local_body_acc - ref_local_body_acc),
+                    "mpjae_mps2": _mean_norm(body_acc - ref_body_acc),
+                    "local_mpjae_mps2": _mean_norm(local_body_acc - ref_local_body_acc),
+                }
+            )
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--load_path", required=True, help="HGPT tracker .onnx")
@@ -247,9 +368,11 @@ def main():
                         args=args,
                         env_cfg=env_cfg,
                         policy=policy,
-                        capture_state_history=frames_out_dir is not None,
+                        capture_state_history=True,
                     )
                 state_history = m.pop("state_history", None)
+                if state_history is not None:
+                    m.update(_rollout_body_tracking_metrics(state_history, ref, convert_mj_model, args.freq))
                 if frames_out_dir is not None and state_history is not None:
                     _write_robot_frames_from_state_history(
                         state_history,

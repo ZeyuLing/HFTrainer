@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -249,6 +250,13 @@ def _write_manifest_from_recursive_npz(root: Path, out_path: Path) -> None:
     out_path.write_text(json.dumps(names, indent=2) + "\n")
 
 
+def _write_json_atomic(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.uname().nodename}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
 def _run_worker(
     hgpt_python: Path,
     job_dir: Path,
@@ -334,6 +342,26 @@ def _summarize(raw: dict[str, Any], complete_thresh: float) -> dict[str, float]:
         "root_pos_err_mm": mean("root_pos_err_mm"),
         "root_vel_err_mmps": mean("root_vel_err_mms"),
         "root_yaw_err_rad": mean("root_yaw_err"),
+        "raw_body_err_mean": mean("raw_body_err_mean"),
+        "body_err_mean": mean("body_err_mean"),
+        "xy_aligned_body_err_mean": mean("xy_aligned_body_err_mean"),
+        "local_body_err_mean": mean("local_body_err_mean"),
+        "body_vel_err_mean": mean("body_vel_err_mean"),
+        "local_body_vel_err_mean": mean("local_body_vel_err_mean"),
+        "body_acc_err_mean": mean("body_acc_err_mean"),
+        "local_body_acc_err_mean": mean("local_body_acc_err_mean"),
+        "raw_global_mpjpe_m": mean("raw_global_mpjpe_m"),
+        "raw_global_mpjpe_mm": mean("raw_global_mpjpe_mm"),
+        "xy_aligned_mpjpe_m": mean("xy_aligned_mpjpe_m"),
+        "xy_aligned_mpjpe_mm": mean("xy_aligned_mpjpe_mm"),
+        "mpjpe_m": mean("mpjpe_m"),
+        "mpjpe_mm": mean("mpjpe_mm"),
+        "local_mpjpe_m": mean("local_mpjpe_m"),
+        "local_mpjpe_mm": mean("local_mpjpe_mm"),
+        "mpjve_mps": mean("mpjve_mps"),
+        "local_mpjve_mps": mean("local_mpjve_mps"),
+        "mpjae_mps2": mean("mpjae_mps2"),
+        "local_mpjae_mps2": mean("local_mpjae_mps2"),
     }
 
 
@@ -393,7 +421,7 @@ def main() -> None:
             "device": args.device,
         },
     }
-    (args.out_dir / "summary.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    _write_json_atomic(args.out_dir / "summary.json", payload)
     lines = ["# Humanoid-GPT Table-2 Evaluation", ""]
     for key, value in payload["summary"].items():
         lines.append(f"- {key}: {value:.6g}")
