@@ -6,9 +6,9 @@
 #   outputs/evaluation/t2m/humanml3d_official_test/motion135/motiongpt3
 #   outputs/evaluation/t2m/humanml3d_official_test/ms272/motiongpt3
 #
-# This script intentionally starts from empty canonical method directories. The
-# old MotionGPT3 runs were contaminated by legacy/mixed outputs and
-# --skip-existing, so reuse is more dangerous than recomputation here.
+# This script intentionally starts from empty canonical method directories and
+# runs the HML263 generation stage through the hftrainer MotionGPT3
+# ModelBundle/Pipeline implementation.
 set -euo pipefail
 
 ROOT="${ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
@@ -26,11 +26,11 @@ export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 
 BASE="outputs/evaluation/t2m/humanml3d_official_test"
 ANNO="${ANNO:-$BASE/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json}"
-SPLIT="${SPLIT:-ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt}"
 RUN_TAG="${RUN_TAG:-motiongpt3_clean_20260624}"
 RUN_ROOT="$BASE/_runs/$RUN_TAG"
 LOG_DIR="$RUN_ROOT/logs"
 RUNTIME_DIR="$RUN_ROOT/runtime"
+SPLIT="${SPLIT:-$RUN_ROOT/test_ids.txt}"
 
 HML_DIR="${HML_DIR:-$BASE/hml263/motiongpt3}"
 M135_DIR="${M135_DIR:-$BASE/motion135/motiongpt3}"
@@ -46,10 +46,12 @@ REFINE_LR="${REFINE_LR:-0.02}"
 GUIDANCE_SCALE="${GUIDANCE_SCALE:-3.0}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 CLEAN="${CLEAN:-1}"
-HML263_MEAN_PATH="${HML263_MEAN_PATH:-ref_repo/MotionGPT3/assets/meta/mean.npy}"
-HML263_STD_PATH="${HML263_STD_PATH:-ref_repo/MotionGPT3/assets/meta/std.npy}"
+MOTIONGPT3_ARTIFACT_DIR="${MOTIONGPT3_ARTIFACT_DIR:-checkpoints/baselines/motiongpt3}"
+HML263_MEAN_PATH="${HML263_MEAN_PATH:-$MOTIONGPT3_ARTIFACT_DIR/assets/meta/mean.npy}"
+HML263_STD_PATH="${HML263_STD_PATH:-$MOTIONGPT3_ARTIFACT_DIR/assets/meta/std.npy}"
 export ROOT RUN_TAG TOTAL_SHARDS LOCAL_SHARDS NUM_GPUS GUIDANCE_SCALE REFINE_ITERS REFINE_LR
 export HML263_MEAN_PATH HML263_STD_PATH HML_DIR M135_DIR MS272_DIR
+export MOTIONGPT3_ARTIFACT_DIR
 
 if [[ "$NUM_GPUS" -lt 1 ]]; then
   NUM_GPUS=1
@@ -63,6 +65,20 @@ if [[ "$CLEAN" == "1" ]]; then
   rm -rf "$HML_DIR" "$M135_DIR" "$MS272_DIR"
 fi
 mkdir -p "$HML_DIR" "$M135_DIR" "$MS272_DIR"
+
+prepare_split() {
+  "$PY_BIN" - <<'PY' "$ANNO" "$SPLIT"
+import json
+import sys
+from pathlib import Path
+
+anno, split = map(Path, sys.argv[1:])
+data = json.loads(anno.read_text())["data_list"]
+split.parent.mkdir(parents=True, exist_ok=True)
+split.write_text("".join(f"{sid}\n" for sid in sorted(data)))
+print(f"[split] wrote {len(data)} ids -> {split}")
+PY
+}
 
 pick_python() {
   local candidates=()
@@ -141,6 +157,9 @@ cfg = {
     "dataset": "humanml3d_official_test",
     "method": "motiongpt3",
     "representation": rep,
+    "model_bundle": "hftrainer.models.motion.motiongpt3.MotionGPT3Bundle",
+    "pipeline": "hftrainer.pipelines.motiongpt3.MotionGPT3Pipeline",
+    "artifact_dir": os.environ.get("MOTIONGPT3_ARTIFACT_DIR", ""),
     "caption_protocol": "motionclip_selected_official_humanml3d_caption",
     "annotation": anno,
     "hml263_dir": hml_dir,
@@ -161,7 +180,7 @@ cfg = {
     },
     "total_shards": int(total_shards),
     "runner": run_root,
-    "created_by": "scripts/eval/run_t2m_motiongpt3_clean_20260624.sh",
+    "created_by": "scripts/eval/run_t2m_motiongpt3_clean_20260624.sh + scripts/eval/framework_t2m_hml263_infer.py",
 }
 path = Path(rep_dir)
 path.mkdir(parents=True, exist_ok=True)
@@ -194,6 +213,7 @@ run_shards() {
     fi
     gpu=$((local_idx % NUM_GPUS))
     log="$LOG_DIR/${phase}_s$(printf '%02d' "$shard")_of_$(printf '%02d' "$TOTAL_SHARDS").log"
+    rm -f "${log}.status"
     (
       set +e
       export CUDA_VISIBLE_DEVICES="$gpu"
@@ -222,18 +242,19 @@ run_shards() {
 
 run_motiongpt3() {
   local shards="$1" shard="$2"
-  "$PY_BIN" scripts/eval/motiongpt3_infer_hml3d263.py \
-    --anno_file "$ANNO" \
-    --anno_data_dir "." \
-    --caption_protocol original \
-    --out_dir "$HML_DIR" \
-    --runtime_dir "$RUNTIME_DIR/shard_${shard}" \
-    --mean_path "$HML263_MEAN_PATH" \
-    --std_path "$HML263_STD_PATH" \
-    --num_shards "$shards" \
-    --shard_index "$shard" \
-    --batch_size "$BATCH_SIZE" \
-    --guidance_scale "$GUIDANCE_SCALE"
+  "$PY_BIN" scripts/eval/framework_t2m_hml263_infer.py \
+    --method motiongpt3 \
+    --artifact-dir "$MOTIONGPT3_ARTIFACT_DIR" \
+    --anno-file "$ANNO" \
+    --caption-file "$ANNO" \
+    --anno-data-dir "." \
+    --out-dir "$HML_DIR" \
+    --motiongpt3-runtime-dir "$RUNTIME_DIR/shard_${shard}" \
+    --motiongpt3-guidance-scale "$GUIDANCE_SCALE" \
+    --num-shards "$shards" \
+    --shard-index "$shard" \
+    --batch-size "$BATCH_SIZE" \
+    --device cuda
 }
 
 run_ik() {
@@ -363,6 +384,7 @@ PY
 echo "[start] clean MotionGPT3 rerun $(date -Is)" | tee "$LOG_DIR/motiongpt3.log"
 echo "[paths] hml=$HML_DIR motion135=$M135_DIR ms272=$MS272_DIR anno=$ANNO" | tee -a "$LOG_DIR/motiongpt3.log"
 ensure_python_deps
+prepare_split
 write_meta "$HML_DIR" hml263
 write_meta "$M135_DIR" motion135
 write_meta "$MS272_DIR" ms272

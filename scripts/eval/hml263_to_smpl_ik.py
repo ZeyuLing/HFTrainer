@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -49,17 +48,7 @@ def _patch_numpy_chumpy_aliases() -> None:
 
 _patch_numpy_chumpy_aliases()
 
-REPO = Path(__file__).resolve().parents[2]
-MS272_ROOT = REPO / "ref_repo" / "MotionStreamer" / "272-dim-Motion-Representation"
-VENDORED_SMPLX = MS272_ROOT / "utils" / "smplx"
-try:
-    import smplx  # noqa: E402
-except ModuleNotFoundError:
-    if MS272_ROOT.exists():
-        sys.path.insert(0, str(MS272_ROOT))
-    if VENDORED_SMPLX.exists():
-        sys.path.insert(0, str(VENDORED_SMPLX))
-    import smplx  # noqa: E402
+import smplx  # noqa: E402
 
 
 # HumanML3D 22-joint skeleton order follows the first 22 SMPL joints.
@@ -595,7 +584,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in-dir", required=True)
     ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--model-dir", default="ref_repo/MDM/body_models")
+    ap.add_argument("--model-dir", default="checkpoints/baselines/body_models")
     ap.add_argument("--ids", default=None)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--num-shards", type=int, default=1)
@@ -644,11 +633,11 @@ def main():
     )
     ap.add_argument(
         "--mean-path",
-        default="ref_repo/Momask/weights/t2m/rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/mean.npy",
+        default="checkpoints/baselines/motiongpt3/assets/meta/mean.npy",
     )
     ap.add_argument(
         "--std-path",
-        default="ref_repo/Momask/weights/t2m/rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/std.npy",
+        default="checkpoints/baselines/motiongpt3/assets/meta/std.npy",
     )
     args = ap.parse_args()
 

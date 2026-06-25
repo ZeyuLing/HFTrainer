@@ -151,6 +151,20 @@ def calculate_top_k(mat, top_k):
     return np.concatenate(top_k_list, axis=1)
 
 
+def calculate_top_k_relevance(mat, relevance, top_k):
+    """Top-k hit where a query may have multiple correct retrieval targets."""
+    size = mat.shape[0]
+    if relevance.shape != (size, mat.shape[1]):
+        raise ValueError(f"bad relevance shape {relevance.shape} for ranked matrix {mat.shape}")
+    correct_vec = np.zeros(size, dtype=bool)
+    rows = np.arange(size)
+    top_k_list = []
+    for i in range(top_k):
+        correct_vec = correct_vec | relevance[rows, mat[:, i]]
+        top_k_list.append(correct_vec[:, None])
+    return np.concatenate(top_k_list, axis=1)
+
+
 def calculate_R_precision(embedding1, embedding2, top_k, sum_all=False):
     dist_mat = euclidean_distance_matrix(embedding1, embedding2)
     matching_score = dist_mat.trace()
@@ -402,12 +416,11 @@ def encode_items(items, textencoder, motionencoder, device, rng, batch_size=32,
                  dedup=False, batch_mode="random"):
     """Embed (caption, motion, len) items and compute R-precision / MM-Dist.
 
-    ``dedup=True`` applies FlowMDM-style per-batch caption deduplication: within
-    each batch the R-precision retrieval matrix is restricted to *unique*
-    captions (so two segments sharing the same terse BABEL label, e.g. "walk",
-    do not penalise each other), then rescaled by ``len(texts)/n_unique`` so the
-    metric stays comparable across batches. GT (val_stream sub-segments) has the
-    highest duplicate rate and is otherwise unfairly deflated.
+    ``dedup=True`` makes R-precision label-aware: if several items in the same
+    batch share the same caption (common for terse BABEL labels such as "walk"),
+    retrieving any motion with that caption counts as a hit. MM-Dist remains the
+    paired diagonal distance. With ``dedup=False`` the legacy MS/Guo index-based
+    hit rule is used.
     """
     batches = _build_rprecision_batches(items, rng, batch_size=batch_size,
                                         mode=batch_mode)
@@ -432,10 +445,10 @@ def encode_items(items, textencoder, motionencoder, device, rng, batch_size=32,
         dist = euclidean_distance_matrix(et_np, em_np)
         match_sum += dist.trace()  # MM-Dist over full batch (paired)
         if dedup:
-            uniq = np.unique(np.asarray(texts), return_index=True)[1]
-            argm = np.argsort(dist[uniq][:, uniq], axis=1)
-            tk = calculate_top_k(argm, 3)
-            R_sum += tk.sum(axis=0) * (len(texts) / tk.shape[0])
+            labels = np.asarray(texts)
+            relevance = labels[:, None] == labels[None, :]
+            argm = np.argsort(dist, axis=1)
+            R_sum += calculate_top_k_relevance(argm, relevance, 3).sum(axis=0)
         else:
             argm = np.argsort(dist, axis=1)
             R_sum += calculate_top_k(argm, 3).sum(axis=0)
