@@ -23,6 +23,7 @@ _BUNDLE_IMPORTS = {
     'MotionGPT3Bundle': ('hftrainer.models.motion.motiongpt3.bundle', 'MotionGPT3Bundle'),
     'MoMaskBundle': ('hftrainer.models.motion.momask.bundle', 'MoMaskBundle'),
     'MoGenTSBundle': ('hftrainer.models.motion.mogents.bundle', 'MoGenTSBundle'),
+    'MLDBundle': ('hftrainer.models.motion.mld.bundle', 'MLDBundle'),
     'MotionLCMBundle': ('hftrainer.models.motion.motionlcm.bundle', 'MotionLCMBundle'),
     'KIMODOBundle': ('hftrainer.models.motion.kimodo.bundle', 'KIMODOBundle'),
     'InterGenBundle': ('hftrainer.models.motion.intergen.bundle', 'InterGenBundle'),
@@ -48,6 +49,6 @@ __all__ = [
     'MotionCLIPBundle',
     'MDMBundle', 'MotionStreamerBundle', 'FlowMDMBundle', 'MotionLabBundle',
     'MotionMillionBundle', 'T2MGPTBundle', 'MotionGPT3Bundle',
-    'MoMaskBundle', 'MoGenTSBundle', 'MotionLCMBundle', 'KIMODOBundle',
+    'MoMaskBundle', 'MoGenTSBundle', 'MLDBundle', 'MotionLCMBundle', 'KIMODOBundle',
     'InterGenBundle', 'InterMaskBundle',
 ]

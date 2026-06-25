@@ -93,6 +93,7 @@ inference instead of importing the original repository at runtime.
 | [T2M-GPT](docs/model_zoo/t2mgpt.md) | Text-to-motion | HumanML3D-263 | `T2MGPTBundle` / `T2MGPTPipeline` | [`ZeyuLing/hftrainer-t2mgpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-t2mgpt-humanml3d) |
 | [MoMask](docs/model_zoo/momask.md) | Text-to-motion | HumanML3D-263 | `MoMaskBundle` / `MoMaskPipeline` | [`ZeyuLing/hftrainer-momask-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-momask-humanml3d) |
 | [MoGenTS](docs/model_zoo/mogents.md) | Text-to-motion | HumanML3D-263 | `MoGenTSBundle` / `MoGenTSPipeline` | [`ZeyuLing/hftrainer-mogents-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mogents-humanml3d) |
+| [MLD](docs/model_zoo/mld.md) | Text-to-motion | HumanML3D-263 | `MLDBundle` / `MLDPipeline` | [`ZeyuLing/hftrainer-mld-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mld-humanml3d) |
 | [FlowMDM](docs/model_zoo/flowmdm.md) | Text-to-motion / motion composition | HumanML3D-263 | `FlowMDMBundle` / `FlowMDMPipeline` | [`ZeyuLing/hftrainer-flowmdm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-flowmdm-humanml3d) |
 | [MotionLab](docs/model_zoo/motionlab.md) | Text-to-motion / motion editing | HumanML3D-263 | `MotionLabBundle` / `MotionLabPipeline` | [`ZeyuLing/hftrainer-motionlab-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlab-humanml3d) |
 | [MotionGPT3](docs/model_zoo/motiongpt3.md) | Text-to-motion / motion-language generation | HumanML3D-263 | `MotionGPT3Bundle` / `MotionGPT3Pipeline` | [`ZeyuLing/hftrainer-motiongpt3-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motiongpt3-humanml3d) |
@@ -152,7 +153,7 @@ The repository currently uses these motion spaces:
 
 | Representation | FPS | Shape | Used by |
 |---|---:|---|---|
-| HumanML3D-263 | 20 | `(T, 263)` | MDM, T2M-GPT, MoMask, MoGenTS, FlowMDM, MotionLab, MotionGPT3, MotionLCM, HumanML evaluator |
+| HumanML3D-263 | 20 | `(T, 263)` | MDM, T2M-GPT, MoMask, MoGenTS, MLD, FlowMDM, MotionLab, MotionGPT3, MotionLCM, HumanML evaluator |
 | MotionStreamer-272 | 30 | `(T, 272)` | MotionStreamer, Go to Zero, MS272 evaluator |
 | SMPL `motion_135` | usually 30 | root translation + 22 row-major rot6d joints | mesh rendering, HY-Motion scoring bridge, retargeting |
 | HY-Motion 201 | 30 | SMPL 135 + joint-position features | HY-Motion T2M |

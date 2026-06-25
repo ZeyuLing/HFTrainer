@@ -17,7 +17,8 @@ python3 scripts/eval/verify_evaluators.py --which both --gt-only
 python3 scripts/eval/verify_evaluators.py --which ms272 \
     --ms272-pred outputs/evaluation/mdm_h3d272_repro_1000s/mdm_272
 python3 scripts/eval/verify_evaluators.py --which hml263 \
-    --hml263-pred outputs/evaluation/mdm_h3d272_repro_1000s/mdm_263
+    --hml263-pred outputs/evaluation/mdm_h3d272_repro_1000s/mdm_263 \
+    --hml263-texts-dir ref_repo/CondMDI/dataset/HumanML3D/texts
 """
 from __future__ import annotations
 
@@ -45,18 +46,40 @@ def _fmt(x):
     return f"{x:.4f}" if isinstance(x, float) else str(x)
 
 
-def verify_hml263(pred_dir, n_repeats, out_json):
+def verify_hml263(
+    pred_dir,
+    n_repeats,
+    out_json,
+    *,
+    gt_root,
+    texts_dir,
+    split_file,
+    caption_selection,
+):
     from hftrainer.evaluation.evaluators.humanml3d_263 import HumanML263Evaluator
 
     ev = HumanML263Evaluator(device="cuda")
     res = ev.evaluate_dir(
-        gt_root=str(REPO / "ref_repo/CondMDI/dataset/HumanML3D"),
-        texts_dir=str(REPO / "ref_repo/CondMDI/dataset/HumanML3D/texts"),
+        gt_root=str(gt_root),
+        texts_dir=str(texts_dir),
         pred_dir=pred_dir,
-        split_file=str(REPO / "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt"),
+        split_file=str(split_file),
         n_repeats=n_repeats,
-        caption_selection="first",
+        caption_selection=caption_selection,
     )
+    res.setdefault("config", {})
+    res["config"].update({
+        "gt_root": str(gt_root),
+        "texts_dir": str(texts_dir),
+        "split_file": str(split_file),
+        "caption_selection": caption_selection,
+        "caption_protocol_note": (
+            "Semantic metrics require texts_dir to match the captions used for "
+            "generation. For selected-caption official272 runs, pass "
+            "outputs/evaluation/t2m/humanml3d_official_test/captions/"
+            "gt_motionclip_selected_20260622/texts."
+        ),
+    })
     print("\n[HumanML3D-263 evaluator]")
     print(f"  n_samples = {res['n_samples']}")
     print(f"  GT(real)  R-Prec={res['r_precision_real']['mean']}  "
@@ -102,6 +125,27 @@ def main():
     p.add_argument("--gt-only", action="store_true", help="skip baseline pred dirs")
     p.add_argument("--hml263-pred", default=None)
     p.add_argument("--ms272-pred", default=None)
+    p.add_argument(
+        "--hml263-gt-root",
+        default=str(REPO / "ref_repo/CondMDI/dataset/HumanML3D"),
+        help="HumanML3D-263 GT root containing new_joint_vecs/ and test.txt.",
+    )
+    p.add_argument(
+        "--hml263-texts-dir",
+        default=str(REPO / "ref_repo/CondMDI/dataset/HumanML3D/texts"),
+        help="Caption texts used by the HumanML263 evaluator. Must match the generation captions.",
+    )
+    p.add_argument(
+        "--hml263-split-file",
+        default=str(REPO / "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt"),
+        help="Split id list for HumanML263 evaluation.",
+    )
+    p.add_argument(
+        "--hml263-caption-selection",
+        default="first",
+        choices=["first", "random"],
+        help="Caption selection inside each HumanML3D text file.",
+    )
     p.add_argument("--n-repeats", type=int, default=20)
     p.add_argument("--out-dir", default=None)
     args = p.parse_args()
@@ -115,6 +159,10 @@ def main():
             None if args.gt_only else args.hml263_pred,
             args.n_repeats,
             str(out / "verify_hml263.json") if out else None,
+            gt_root=Path(args.hml263_gt_root),
+            texts_dir=Path(args.hml263_texts_dir),
+            split_file=Path(args.hml263_split_file),
+            caption_selection=args.hml263_caption_selection,
         )
     if args.which in ("both", "ms272"):
         verify_ms272(

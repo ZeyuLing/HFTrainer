@@ -1,42 +1,30 @@
 #!/usr/bin/env python3
-"""Generate MotionLCM HumanML3D-263 T2M outputs under the *official* HumanML3D protocol.
+"""Generate MLD HumanML3D-263 T2M outputs under the official HumanML3D protocol.
 
-For each id in the standard HumanML3D test split (263-dim @ 20 fps native), we
-read the GT length and the primary caption, generate one motion with the
-hftrainer-native vendored ``MotionLCMPipeline`` (sentence-t5-large text ->
-latent consistency sampling -> MLD VAE decode), and save the un-standardized
-HumanML3D-263 features keyed by id.
-
-The saved 263 files are scored with ``HumanML263Evaluator`` (caption='first',
-i.e. gen-caption == retrieval-caption) against the same split, reproducing the
-MotionLCM paper HumanML3D row (FID / R-Precision / MM-Dist / Diversity). Report
-the NFE (``--num_inference_steps``) alongside the metrics.
-
-Example
--------
-python3 scripts/eval/motionlcm_t2m_h3d263.py \
-    --data_root ref_repo/CondMDI/dataset/HumanML3D \
-    --model_path checkpoints/motionlcm/humanml3d \
-    --num_inference_steps 1 \
-    --out_dir outputs/evaluation/motionlcm_h3d263_official/motionlcm_263
+This is the hftrainer-native path: standard HumanML3D test split, one generated
+motion per id, first caption, and unstandardized 263-dim output files.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import random
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from hftrainer.models.motion.motionlcm import MotionLCMBundle
-from hftrainer.pipelines.motionlcm import MotionLCMPipeline
-
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
+
+from hftrainer.models.motion.mld import MLDBundle  # noqa: E402
+from hftrainer.pipelines.mld import MLDPipeline  # noqa: E402
+
 DEFAULT_DATA_ROOT = REPO / "ref_repo/CondMDI/dataset/HumanML3D"
-DEFAULT_MODEL = REPO / "checkpoints/motionlcm/humanml3d"
+DEFAULT_MODEL = REPO / "checkpoints/mld/humanml3d"
 DEFAULT_BASE = REPO / "outputs/evaluation/t2m/humanml3d_official_test"
 DEFAULT_SELECTED_ANNO = (
     DEFAULT_BASE
@@ -170,11 +158,10 @@ def main():
     p.add_argument("--gt_fps", type=float, default=30.0)
     p.add_argument("--model_fps", type=float, default=20.0)
     p.add_argument("--model_path", default=str(DEFAULT_MODEL),
-                   help="hftrainer MotionLCM artifact dir OR raw experiments_t2m dir")
+                   help="hftrainer MLD artifact dir or HuggingFace repo id")
     p.add_argument("--out_dir", required=True)
     p.add_argument("--guidance_scale", type=float, default=7.5)
-    p.add_argument("--num_inference_steps", type=int, default=1,
-                   help="LCM steps (NFE); 1/2/4 are typical")
+    p.add_argument("--num_inference_steps", type=int, default=50)
     p.add_argument("--batch_size", type=int, default=32)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda")
@@ -213,17 +200,13 @@ def main():
     print(f"[setup] shard={args.shard_index}/{args.num_shards} items={len(items)} "
           f"steps={args.num_inference_steps} out={out_dir} (resolve {time.time() - t0:.1f}s)", flush=True)
 
-    mp = Path(args.model_path)
-    print(f"[setup] building MotionLCM bundle/pipeline from {mp} ...", flush=True)
-    if (mp / "motionlcm_config.json").exists():
-        bundle = MotionLCMBundle.from_pretrained(
-            str(mp), guidance_scale=args.guidance_scale,
-            num_inference_steps=args.num_inference_steps)
-    else:
-        bundle = MotionLCMBundle(
-            guidance_scale=args.guidance_scale,
-            num_inference_steps=args.num_inference_steps)
-    pipe = MotionLCMPipeline(bundle, device=args.device)
+    print(f"[setup] building MLD bundle/pipeline from {args.model_path} ...", flush=True)
+    bundle = MLDBundle.from_pretrained(
+        args.model_path,
+        guidance_scale=args.guidance_scale,
+        num_inference_steps=args.num_inference_steps,
+    )
+    pipe = MLDPipeline(bundle, device=args.device)
 
     written = skipped = failed = 0
     bs = args.batch_size
@@ -234,7 +217,7 @@ def main():
             if args.skip_existing and (out_dir / f"{name}.npy").exists():
                 skipped += 1
                 continue
-            todo.append((name, caption, pipe.clamp_length(gt_len)))  # 20 fps native
+            todo.append((name, caption, pipe.clamp_length(gt_len)))
         if not todo:
             continue
         names_b = [t[0] for t in todo]
@@ -242,7 +225,8 @@ def main():
         lengths = [t[2] for t in todo]
         try:
             motions = pipe.infer_t2m(
-                captions, lengths,
+                captions,
+                lengths,
                 guidance_scale=args.guidance_scale,
                 num_inference_steps=args.num_inference_steps,
             )

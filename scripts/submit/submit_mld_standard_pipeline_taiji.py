@@ -16,7 +16,11 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[2]
-OPS = REPO / ".claude" / "skills" / "taiji" / "taiji_ops.py"
+_OPS_CANDIDATES = (
+    REPO / ".claude" / "skills" / "taiji" / "taiji_ops.py",
+    Path("/root/.codex/skills/taiji/taiji_ops.py"),
+)
+OPS = next((p for p in _OPS_CANDIDATES if p.exists()), _OPS_CANDIDATES[0])
 NODE_PROJ = "/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer"
 
 
@@ -33,6 +37,7 @@ def write_script(path: Path, body: str) -> None:
 def build_script(args, out_root: str) -> str:
     max_samples_arg = f"--max_samples {args.max_samples}" if args.max_samples else ""
     skip_evals = "1" if args.skip_evals else "0"
+    run_name = args.run_name
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 cd {q(NODE_PROJ)}
@@ -46,14 +51,24 @@ export TRANSFORMERS_CACHE="$HF_HOME/hub"
 export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
 
 OUT_ROOT={q(out_root)}
-HML263="$OUT_ROOT/predictions/hml263"
-MOTION135="$OUT_ROOT/conversions/hml263_to_motion135"
-MS272="$OUT_ROOT/conversions/motion135_to_ms272"
-LOGDIR="$OUT_ROOT/logs"
-METRICS="$OUT_ROOT/metrics"
+RUN_ROOT="$OUT_ROOT/_runs/{run_name}"
+HML263="$OUT_ROOT/hml263/mld"
+MOTION135="$OUT_ROOT/motion135/mld"
+MS272="$OUT_ROOT/ms272/mld"
+ANNO="$OUT_ROOT/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json"
+CAPTION_TEXTS="$OUT_ROOT/captions/gt_motionclip_selected_20260622/texts"
+if [ ! -f "$ANNO" ]; then
+  ANNO="data/annotation/test_hml3d_official272_gtlen.json"
+fi
+if [ ! -d "$CAPTION_TEXTS" ]; then
+  CAPTION_TEXTS="ref_repo/CondMDI/dataset/HumanML3D/texts"
+fi
+export ANNO
+LOGDIR="$RUN_ROOT/logs"
+METRICS="$RUN_ROOT/metrics"
 mkdir -p "$HML263" "$MOTION135" "$MS272" "$LOGDIR" "$METRICS"
 
-DEPS_STAMP="$OUT_ROOT/_deps_ok_$(hostname).stamp"
+DEPS_STAMP="$RUN_ROOT/_deps_ok_$(hostname).stamp"
 if [ ! -f "$DEPS_STAMP" ]; then
   python3 - <<'PY' > /tmp/mld_standard_missing_deps.txt
 mods = {{
@@ -91,7 +106,8 @@ fi
 echo "[mld] Stage A generate HML263 total_shards={args.num_shards} $(date -Is)" | tee "$LOGDIR/run.log"
 expected263=$(python3 - <<'PY'
 import json
-data = json.load(open("data/annotation/test_hml3d_official272_gtlen.json"))
+import os
+data = json.load(open(os.environ["ANNO"]))
 if isinstance(data, dict) and isinstance(data.get("data_list"), (list, dict)):
     print(len(data["data_list"]))
 elif isinstance(data, list):
@@ -109,17 +125,18 @@ else
     gpu=$((i % {args.num_gpus}))
     (
       set +e
-      CUDA_VISIBLE_DEVICES=$gpu python3 -u scripts/eval/mld_infer_hml3d263.py \\
-        --anno_file data/annotation/test_hml3d_official272_gtlen.json \\
+      CUDA_VISIBLE_DEVICES=$gpu python3 -u scripts/eval/mld_t2m_h3d263.py \\
+        --anno_file "$ANNO" \\
         --anno_data_dir . \\
-        --caption_protocol original \\
+        --model_path checkpoints/mld/humanml3d \\
         --out_dir "$HML263" \\
         --num_shards {args.num_shards} \\
         --shard_index "$i" \\
         --batch_size {args.batch_size} \\
         --seed {args.seed} \\
         --guidance_scale {args.guidance_scale} \\
-        --num_inference_timesteps {args.num_inference_timesteps} \\
+        --num_inference_steps {args.num_inference_timesteps} \\
+        --device cuda \\
         --skip_existing \\
         {max_samples_arg} \\
         > "$LOGDIR/generate_shard_$i.log" 2>&1
@@ -142,6 +159,7 @@ else
   CUDA_VISIBLE_DEVICES=0 python3 -u scripts/eval/verify_evaluators.py \\
     --which hml263 \\
     --hml263-pred "$HML263" \\
+    --hml263-texts-dir "$CAPTION_TEXTS" \\
     --n-repeats {args.n_repeats} \\
     --out-dir "$METRICS" \\
     > "$LOGDIR/hml263_eval.log" 2>&1
@@ -159,6 +177,7 @@ for i in $(seq 0 $(({args.num_shards}-1))); do
       --model-dir ref_repo/MDM/body_models \\
       --source-fps 20 \\
       --target-fps 30 \\
+      --target-length-anno "$ANNO" \\
       --floor-align \\
       --refine-iters {args.refine_iters} \\
       --refine-lr {args.refine_lr} \\
@@ -182,8 +201,6 @@ test "$n135" -gt 0
 echo "[mld] Stage D motion135 -> MS272 $(date -Is)" | tee -a "$LOGDIR/run.log"
 python3 -u scripts/data/convert_motion135_to_h3d272.py \\
   --in-dir "$MOTION135" \\
-  --anno-file data/annotation/test_hml3d_official272_gtlen.json \\
-  --data-dir . \\
   --out-dir "$MS272" \\
   --rotation-space local \\
   --workers {args.convert_workers} \\
@@ -205,25 +222,31 @@ else
     > "$LOGDIR/ms272_eval.log" 2>&1
 fi
 
-python3 - "$OUT_ROOT" <<'PY'
+python3 - "$OUT_ROOT" "$ANNO" <<'PY'
 import json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
+anno = sys.argv[2]
 summary = {{
     "method": "MLD",
     "task": "t2m",
     "dataset": "humanml3d_official_test",
     "native_representation": "hml263",
     "runner": "scripts/submit/submit_mld_standard_pipeline_taiji.py",
-    "annotation": "data/annotation/test_hml3d_official272_gtlen.json",
-    "hml263": len(list((root / "predictions" / "hml263").glob("*.npy"))),
-    "motion135": len(list((root / "conversions" / "hml263_to_motion135").glob("*.npz"))),
-    "ms272": len(list((root / "conversions" / "motion135_to_ms272").glob("*.npy"))),
-    "metric_json_hml263": str(root / "metrics" / "verify_hml263.json"),
-    "metric_json_ms272": str(root / "metrics" / "verify_ms272.json"),
+    "annotation": anno,
+    "caption_protocol": "gt_motionclip_selected_20260622",
+    "hml263_texts_dir": str(root / "captions" / "gt_motionclip_selected_20260622" / "texts"),
+    "hml263_dir": str(root / "hml263" / "mld"),
+    "motion135_dir": str(root / "motion135" / "mld"),
+    "ms272_dir": str(root / "ms272" / "mld"),
+    "hml263": len(list((root / "hml263" / "mld").glob("*.npy"))),
+    "motion135": len(list((root / "motion135" / "mld").glob("*.npz"))),
+    "ms272": len(list((root / "ms272" / "mld").glob("*.npy"))),
+    "metric_json_hml263": str(root / "_runs" / "{run_name}" / "metrics" / "verify_hml263.json"),
+    "metric_json_ms272": str(root / "_runs" / "{run_name}" / "metrics" / "verify_ms272.json"),
 }}
-(root / "run_config.json").write_text(json.dumps(summary, indent=2))
-(root / "metrics" / "run_summary.json").write_text(json.dumps(summary, indent=2))
+(root / "_runs" / "{run_name}" / "run_config.json").write_text(json.dumps(summary, indent=2))
+(root / "_runs" / "{run_name}" / "metrics" / "run_summary.json").write_text(json.dumps(summary, indent=2))
 print(json.dumps(summary, indent=2))
 PY
 echo "[mld] done $(date -Is)" | tee -a "$LOGDIR/run.log"
@@ -259,22 +282,28 @@ def submit_task(args, script_path: Path) -> None:
         f"bash {script_path}",
         "--no-confirm",
     ]
+    if args.elastic:
+        cmd.append("--elastic")
     print(f"[submit] {args.name}: {args.gpu}x{args.num_gpus} cmd=bash {script_path}")
-    subprocess.run(cmd, check=True)
+    ret = subprocess.run(cmd, check=False)
+    if ret.returncode != 0:
+        raise SystemExit(f"Taiji submit failed with exit code {ret.returncode}")
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument(
         "--out-root",
-        default="outputs/evaluation/t2m/humanml3d_official_test/hml263/mld_standard_pipeline_20260621",
+        default="outputs/evaluation/t2m/humanml3d_official_test",
     )
+    p.add_argument("--run-name", default="mld_framework_native_20260625")
     p.add_argument("--name", default="mld_standard_h3d")
     p.add_argument("--gpu", default="V100")
     p.add_argument("--num-gpus", type=int, default=8)
     p.add_argument("--num-shards", type=int, default=8)
     p.add_argument("--business", default="AILab_DHA")
     p.add_argument("--docker", default="t2m3")
+    p.add_argument("--elastic", action="store_true")
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--seed", type=int, default=1234)
     p.add_argument("--guidance-scale", type=float, default=7.5)

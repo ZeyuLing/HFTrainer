@@ -68,6 +68,13 @@ CARDS: tuple[ModelZooCard, ...] = (
         license="mit",
     ),
     ModelZooCard(
+        slug="mld",
+        doc_path=Path("docs/model_zoo/mld.md"),
+        local_dirs=(Path("checkpoints/mld/humanml3d"),),
+        hub_repos=("ZeyuLing/hftrainer-mld-humanml3d",),
+        tags=("motion-generation", "text-to-motion", "humanml3d", "mld", "latent-diffusion"),
+    ),
+    ModelZooCard(
         slug="flowmdm",
         doc_path=Path("docs/model_zoo/flowmdm.md"),
         local_dirs=(Path("checkpoints/baselines/flowmdm"),),

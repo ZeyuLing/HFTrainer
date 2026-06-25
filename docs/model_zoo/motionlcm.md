@@ -58,10 +58,11 @@ inside the artifact. For fully offline use, snapshot the text encoder into the
 local Hugging Face cache before calling `from_pretrained`.
 
 The published artifact uses the upstream v1 benchmark checkpoints:
-`mld_humanml_v1.ckpt` and `motionlcm_humanml_v1.ckpt`. The non-v1 files in the
-same upstream folder are a different latent-shape family and produced collapsed
-dynamic features in the hftrainer evaluator (`FID=44.24`, `Diversity=5.70` on
-HML3D-263); do not use those numbers as model-card metrics.
+`mld_humanml_v1.ckpt` and `motionlcm_humanml_v1.ckpt`. These are the one-token
+latent checkpoints (`latent_dim=[1, 256]`) compatible with the official T2M
+test config. The non-v1 files in the same upstream folder are a different
+sixteen-token latent family and should not be treated as the model-card
+benchmark artifact.
 
 ---
 
@@ -89,58 +90,60 @@ another evaluator space.
 
 ## Evaluation
 
-Generation follows the official HumanML3D protocol: standard test split,
-native 263-dim @ 20 fps, first caption, and one prediction per test id.
+Generation follows the shared HumanML3D official-test protocol used by the
+leaderboard: 4042 official test ids, corrected selected captions under
+`outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/`,
+native 263-dim at 20 fps, and one prediction per test id.
 
 ```bash
-# 1) generate
 python3 scripts/eval/motionlcm_t2m_h3d263.py \
-    --data_root ref_repo/CondMDI/dataset/HumanML3D \
+    --anno_file outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json \
+    --anno_data_dir . \
     --model_path checkpoints/motionlcm/humanml3d \
     --num_inference_steps 1 \
-    --out_dir outputs/evaluation/motionlcm_h3d263_official/motionlcm_263
+    --out_dir outputs/evaluation/t2m/humanml3d_official_test/hml263/motionlcm
+```
 
-# 2) score with the HumanML3D-263 evaluator
-python3 scripts/eval/verify_evaluators.py --which hml263 \
-    --hml263-pred outputs/evaluation/motionlcm_h3d263_official/motionlcm_263
+The full reproduction pipeline writes the canonical outputs:
+
+| Representation | Canonical path |
+|---|---|
+| HML263 | `outputs/evaluation/t2m/humanml3d_official_test/hml263/motionlcm` |
+| SMPL motion_135 | `outputs/evaluation/t2m/humanml3d_official_test/motion135/motionlcm` |
+| MotionStreamer-272 | `outputs/evaluation/t2m/humanml3d_official_test/ms272/motionlcm` |
+
+Run the Taiji wrapper for full generation, conversion, and evaluators:
+
+```bash
+python3 scripts/submit/submit_motionlcm_hml3d_full_taiji.py \
+    --gpu V100 \
+    --num-gpus 8 \
+    --num-inference-steps 1 \
+    --elastic
 ```
 
 Report the LCM step count (`--num_inference_steps`) alongside any metrics. The
-model-zoo table should use metrics copied from the generated evaluator JSON,
+model-zoo table should use metrics copied from the generated evaluator JSONs
+under `outputs/evaluation/t2m/humanml3d_official_test/_runs/<run>/metrics/`,
 not handwritten values.
+For HumanML3D-263 semantic metrics, the evaluator `texts_dir` must match the
+captions used for generation. The selected-caption official-test run is scored
+with
+`outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/texts`;
+scoring these outputs against the older CondMDI text files produces mismatched
+R-Precision / MM-Dist.
 
-### HumanML3D-263 evaluator (fixed v1 artifact, n=3970)
+Current HumanML3D official-test metrics (4042 generated motions, selected
+caption protocol, NFE=1):
 
-Metric JSON:
-`outputs/evaluation/motionlcm_hml3d_v1_fixed_20260617/metrics/verify_hml263.json`.
+| Evaluator | R@1 | R@2 | R@3 | FID | MM-Dist | Diversity |
+|---|---:|---:|---:|---:|---:|---:|
+| HumanML3D-263 (selected captions) | 0.5093 | 0.7080 | 0.8108 | 0.3396 | 2.9694 | 9.6407 |
+| MotionStreamer-272 (HML roundtrip GT) | 0.5657 | 0.7346 | 0.8075 | 44.0549 | 19.4543 | 24.6395 |
+| MotionCLIP-135 no-L2 (HML roundtrip GT) | 0.3620 | 0.5157 | 0.6078 | 146.7212 | 42.6430 | 22.9160 |
 
-| Metric | hftrainer |
-|---|---:|
-| FID ↓ | 0.2921 |
-| R-Precision Top-1 / 2 / 3 ↑ | 0.4958 / 0.6906 / 0.7883 |
-| Diversity → | 9.5662 |
-| MM-Dist ↓ | 3.0813 |
-| GT(real) R-Precision Top-1 / 2 / 3 | 0.5135 / 0.7108 / 0.8069 |
-| GT(real) Diversity / MM-Dist | 9.4527 / 2.9323 |
-
-The debug sanity check that made the previous metrics untrusted was feature
-distribution collapse: the old non-v1 artifact produced root/velocity features
-with order-of-magnitude smaller variance and almost-always-on foot contacts.
-The fixed v1 artifact restores root velocity, local velocity, root height and
-foot-contact statistics close to the HumanML3D test distribution before metric
-evaluation.
-
-### MotionStreamer-272 evaluator (cross-representation, n=7392)
-
-Metric JSON:
-`outputs/evaluation/motionlcm_hml3d_v1_fixed_ms272_ik8_20260617/metrics/verify_ms272.json`.
-
-| Metric | MotionLCM HML263→SMPL135→MS272 | MS272 GT(real) |
-|---|---:|---:|
-| FID ↓ | 149.9622 | 0.0 |
-| R-Precision Top-1 / 2 / 3 ↑ | 0.4428 / 0.6059 / 0.6904 | 0.7059 / 0.8569 / 0.9106 |
-| Diversity → | 24.7223 | 27.2813 |
-| MM-Dist ↓ | 20.3028 | 15.0066 |
+Physical diagnostics on SMPL motion_135: Slide 4.2898, Float 19.1150, Jitter
+3.2493, Dynamic 19.8250.
 
 As with other native HML263 baselines, the MS272 row includes a representation
 bridge (`HML263 -> SMPL motion_135 via IK refine-80 -> MotionStreamer-272`) and
