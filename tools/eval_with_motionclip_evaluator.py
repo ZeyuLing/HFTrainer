@@ -69,6 +69,7 @@ def load_motionclip(ckpt_dir: Path,
         <ckpt_dir>/bundle_config.json
     """
     from safetensors.torch import load_file
+    from hftrainer.motion.processing.smpl_processor import SMPLPoseProcessor  # noqa: F401
     from hftrainer.models.motion.motion_clip import MotionCLIPBundle
 
     cfg_path = ckpt_dir / 'bundle_config.json'
@@ -204,6 +205,47 @@ def _load_smpl22_motion(motion_path: Path) -> Optional[np.ndarray]:
     if motion135.shape[-1] != 135:
         return None
     return motion135.astype(np.float32)
+
+
+def _load_pred_motion(
+    motion_path: Path,
+    rot6d_convention: str = "column",
+) -> Optional[np.ndarray]:
+    """Load evaluator-ready prediction motion.
+
+    Prediction directories used by the leaderboard usually contain annotation-keyed
+    ``.npy`` files in MotionCLIP's column-major 135D layout.  Some diagnostics
+    still point at NPZ files with either ``motion_135`` or raw SMPL-X fields, so
+    this compatibility loader accepts all three forms.
+    """
+    if not motion_path.exists():
+        return None
+    try:
+        if motion_path.suffix == ".npy":
+            motion = np.asarray(np.load(str(motion_path)), dtype=np.float32)
+        else:
+            npz = np.load(str(motion_path), allow_pickle=True)
+            keys = list(npz.keys()) if hasattr(npz, "keys") else []
+            if "motion_135" in keys:
+                motion = np.asarray(npz["motion_135"], dtype=np.float32)
+            else:
+                return _load_smpl22_motion(motion_path)
+    except Exception:
+        return None
+
+    if motion.ndim != 2 or motion.shape[-1] != 135:
+        return None
+
+    if rot6d_convention == "row":
+        # Row/interleaved 6D: [R00, R01, R10, R11, R20, R21].
+        # MotionCLIP uses column-major 6D: [R00, R10, R20, R01, R11, R21].
+        out = motion.copy()
+        r6 = out[:, 3:].reshape(len(out), 22, 6)
+        out[:, 3:] = r6[:, :, [0, 2, 4, 1, 3, 5]].reshape(len(out), 132)
+        return out.astype(np.float32)
+    if rot6d_convention != "column":
+        raise ValueError(f"unsupported rot6d_convention: {rot6d_convention}")
+    return motion.astype(np.float32)
 
 
 def load_test_pairs(anno_file: Path,

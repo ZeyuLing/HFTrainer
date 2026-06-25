@@ -23,6 +23,7 @@ import torch
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts" / "eval"))
+sys.path.insert(0, str(REPO / "tools"))
 
 from eval_with_motionclip_evaluator import (  # noqa: E402
     _activation_stats,
