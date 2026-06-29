@@ -97,7 +97,7 @@ PRISM raw SMPL params -> motion_135 -> MotionStreamer-272
 ## HumanML3D Evaluation
 
 PRISM 1.0 was evaluated on the HumanML3D official test split with the corrected
-official-length generation protocol and selected GT captions.
+official-length generation protocol and corrected official GT captions.
 
 | Metric set | Samples | R@1 | R@2 | R@3 | FID | MM-Dist | Diversity |
 |---|---:|---:|---:|---:|---:|---:|---:|

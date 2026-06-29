@@ -10,7 +10,7 @@ work_dir = 'work_dirs/table2_g1_generator_physical_style'
 
 load_from = dict(
     _delete_=True,
-    path='work_dirs/hymotion_g1_t2m_38dim/checkpoint-iter_339000',
+    path='work_dirs/hymotion_g1_t2m_38dim_scene_clean_minus_heldout/checkpoint-g1base',
     load_scope='model',
 )
 
@@ -21,7 +21,7 @@ trainer = dict(
     diffusion_steps=50,
     reward_weighted=False,
     enable_reward=True,
-    style_reward_bank='data/g1_style_bank/train_minus_heldout_20k.npz',
+    style_reward_bank='data/g1_style_bank/train_minus_heldout_scene_clean_20k.npz',
     style_reward_weight=0.5,
     keep_rollouts=False,
     judge_backend='protomotions',

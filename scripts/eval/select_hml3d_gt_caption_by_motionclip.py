@@ -180,13 +180,13 @@ def _write_caption_artifacts(
             if cid not in data_list:
                 continue
             data_list[cid]["hierarchical_caption_path"] = rec["annotation_caption_path"]
-            data_list[cid]["caption_source"] = "motionclip_selected_official_humanml3d_caption"
+            data_list[cid]["caption_source"] = "humanml3d_official_corrected_caption"
             data_list[cid]["caption_selection_policy"] = "best_motionclip_distance_over_official_full_captions"
         anno.setdefault("meta", {})
-        anno["meta"]["caption_source"] = "motionclip_selected_official_humanml3d_caption"
+        anno["meta"]["caption_source"] = "humanml3d_official_corrected_caption"
         anno["meta"]["caption_selection_policy"] = "best_motionclip_distance_over_official_full_captions"
         anno["meta"]["caption_root"] = _rel_or_abs(out_root)
-        annotation_path = out_root / "test_hml3d_official272_gtlen_motionclip_selected_caption.json"
+        annotation_path = out_root / "test_hml3d_official272_gtlen_official_caption.json"
         annotation_path.write_text(json.dumps(anno, ensure_ascii=False, indent=2), encoding="utf-8")
 
     stats["annotation_path"] = _rel_or_abs(annotation_path) if annotation_path else None
@@ -233,7 +233,7 @@ def main() -> None:
     ap.add_argument("--src-root", default="ref_repo/MotionStreamer/MotionStreamer/humanml3d_272")
     ap.add_argument("--real-motionclip-dir", default="outputs/evaluation/t2m/humanml3d_official_test/motionclip_table1_20260619/motionclip135/real")
     ap.add_argument("--source-annotation", default="data/annotation/test_hml3d_official272_gtlen.json")
-    ap.add_argument("--out-root", default="outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622")
+    ap.add_argument("--out-root", default="outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected")
     ap.add_argument("--evaluator-ckpt", default="checkpoints/motion_clip/motionclip_base_1p_aug_hq")
     ap.add_argument("--clip-pretrained", default="checkpoints/clip-vit-base-patch32")
     ap.add_argument("--stats-file", default="data/statistic/smplx55_stats_hymotion_aug.json")

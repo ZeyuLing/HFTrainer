@@ -38,8 +38,8 @@ DEFAULT_TEXT_MODEL = "google/flan-t5-xl"
 DEFAULT_BASE = REPO / "outputs/evaluation/t2m/humanml3d_official_test"
 DEFAULT_SELECTED_ANNO = (
     DEFAULT_BASE
-    / "captions/gt_motionclip_selected_20260622"
-    / "test_hml3d_official272_gtlen_motionclip_selected_caption.json"
+    / "captions/humanml3d_official_corrected"
+    / "test_hml3d_official272_gtlen_official_caption.json"
 )
 
 
@@ -224,7 +224,7 @@ def main():
     p.add_argument(
         "--anno_file",
         default=str(DEFAULT_SELECTED_ANNO) if DEFAULT_SELECTED_ANNO.exists() else None,
-        help="Annotation JSON for selected-caption HumanML3D official-test generation.",
+        help="Annotation JSON for corrected HumanML3D official-test generation.",
     )
     p.add_argument("--anno_data_dir", default=str(REPO))
     p.add_argument("--humanml3d_272", default="ref_repo/MotionStreamer/MotionStreamer/humanml3d_272")

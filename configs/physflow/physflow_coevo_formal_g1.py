@@ -14,11 +14,12 @@ _base_ = 'physflow_online_adv_g1_38dim.py'
 
 work_dir = 'work_dirs/physflow_coevo_formal_g1'
 
-# Full diverse prompt bank MINUS the held-out agile eval clips.
+# Full diverse prompt bank MINUS the held-out agile eval clips and high-
+# confidence scene-interaction clips.
 train_dataloader = dict(
     batch_size=2,
     num_workers=4,
-    dataset=dict(anno_file='data/annotation/train_g1_t2m_emb_minus_heldout.json'),
+    dataset=dict(anno_file='data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json'),
 )
 
 # Formal online fine-tune lr (same as the validated v6 generator run).

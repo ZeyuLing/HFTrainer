@@ -256,11 +256,38 @@ class PrismARPipeline(DiffusionPipeline):
             raise ValueError(f"Unknown KAFS mode: {mode}. Choose from: none, depth_driven, uniform, random, custom")
 
 
+    @staticmethod
+    def _load_condition_smplx_dict(motion_path: str) -> Dict[str, np.ndarray]:
+        """Load a prefix-condition motion from SMPL-X npz or official 272 npy."""
+        if str(motion_path).endswith(".npy"):
+            motion_272 = np.load(motion_path)
+            if motion_272.ndim != 2 or motion_272.shape[-1] != 272:
+                raise ValueError(
+                    f"Expected official MotionStreamer-272 array for {motion_path}, "
+                    f"got shape={motion_272.shape}"
+                )
+            from hftrainer.datasets.motion.representation.humanml_repr import (
+                recover_local_rotations_and_root,
+            )
+            from hftrainer.motion.representation.rotation import matrix_to_axis_angle
+
+            rot, root = recover_local_rotations_and_root(motion_272)
+            axis_angle = matrix_to_axis_angle(rot.reshape(-1, 3, 3)).reshape(
+                rot.shape[0], 22, 3
+            )
+            return {
+                "transl": root.astype(np.float32),
+                "global_orient": axis_angle[:, 0].astype(np.float32),
+                "body_pose": axis_angle[:, 1:].reshape(rot.shape[0], -1).astype(np.float32),
+                "mocap_framerate": np.asarray(30.0, dtype=np.float32),
+            }
+        return dict(np.load(motion_path))
+
     def load_condition_pose(self, motion_path: str, condition_num_frames: int = 1) -> torch.Tensor:
-        """Load and process condition pose from npz file.
+        """Load and process a condition pose from SMPL-X npz or official 272 npy.
 
         Args:
-            motion_path: Path to the npz file containing motion data.
+            motion_path: Path to the motion file containing condition data.
             condition_num_frames: Number of observed prefix frames to use.
 
         Returns:
@@ -272,7 +299,7 @@ class PrismARPipeline(DiffusionPipeline):
         device = self.vae.device
         dtype = self.vae.dtype
 
-        smplx_dict = self.smpl_processor.load_smplx_dict_from_npz(motion_path)
+        smplx_dict = self._load_condition_smplx_dict(motion_path)
         # [T, D] where D = J * 6
         motion = (
             self.smpl_processor.smplx_dict_to_motion_vector(smplx_dict)
@@ -364,6 +391,7 @@ class PrismARPipeline(DiffusionPipeline):
         negative_prompt: Optional[str] = None,
         first_frame_motion: Optional[torch.Tensor] = None,
         num_frames: int = 129,
+        valid_num_frames: Optional[int] = None,
         num_joints: int = 23,
         num_inference_steps: int = 50,
         guidance_scale: float = 2.0,
@@ -377,6 +405,9 @@ class PrismARPipeline(DiffusionPipeline):
             negative_prompt: Negative prompt for classifier-free guidance.
             first_frame_motion: First frame condition tensor [B, 1, J, C] or None.
             num_frames: Number of frames to generate.
+            valid_num_frames: Optional pre-pad valid motion length. When set,
+                self-attention masks out latent tokens beyond this length while
+                still denoising the full generated latent canvas.
             num_joints: Number of joints.
             num_inference_steps: Number of denoising steps.
             guidance_scale: Classifier-free guidance scale.
@@ -450,12 +481,28 @@ class PrismARPipeline(DiffusionPipeline):
             first_frame_latents=first_frame_latents,
         )
 
-        # Create motion padding mask (for attention masking of padded positions)
-        # During inference, all positions are valid (no padding), so use all-ones mask
-        # This matches PrismBundle.create_padding_mask(num_frames=None, ...)
-        motion_mask = torch.ones(
-            batch_size, latents.shape[2], latents.shape[3], device=latents.device
-        )
+        # Create motion padding mask (for attention masking of padded positions).
+        # Standard inference treats all generated tokens as valid. Benchmark runs
+        # can instead generate a training-length canvas (e.g. 360 frames) while
+        # masking latent tokens beyond the official sample length.
+        if valid_num_frames is None:
+            motion_mask = torch.ones(
+                batch_size, latents.shape[2], latents.shape[3], device=latents.device
+            )
+        else:
+            valid_num_frames_t = torch.tensor(
+                [int(valid_num_frames)], device=latents.device, dtype=torch.long
+            )
+            scale = int(self.vae_scale_factor_temporal)
+            valid_latent_frames = (valid_num_frames_t + scale - 1) // scale
+            valid_latent_frames = torch.clamp(
+                valid_latent_frames, min=0, max=latents.shape[2]
+            )
+            frame_idx = torch.arange(latents.shape[2], device=latents.device).unsqueeze(0)
+            motion_mask = frame_idx < valid_latent_frames.unsqueeze(1)
+            motion_mask = motion_mask.unsqueeze(-1).expand(
+                batch_size, latents.shape[2], latents.shape[3]
+            ).float()
 
         # Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -551,6 +598,10 @@ class PrismARPipeline(DiffusionPipeline):
         ar_condition_frames: int = 5,
         use_rollout_trans: bool = True,
         preserve_segment_lengths: bool = False,
+        generation_num_frames_per_segment: Optional[Union[int, List[int]]] = None,
+        valid_num_frames_per_segment: Optional[Union[int, List[int]]] = None,
+        allow_segment_padding: bool = True,
+        align_generation_frames: bool = True,
     ) -> Dict:
         """Generate long motion autoregressively from multiple prompts.
 
@@ -580,6 +631,20 @@ class PrismARPipeline(DiffusionPipeline):
                 segment to survive autoregressive prefix removal, then trim each
                 segment contribution back to its requested length.  Use this for
                 fixed-boundary evaluation protocols.
+            generation_num_frames_per_segment: Optional generation canvas length
+                per segment. Defaults to ``num_frames_per_segment``. Benchmark
+                runs use this to generate a 360-frame canvas and crop back to
+                official lengths.
+            valid_num_frames_per_segment: Optional valid length per segment for
+                motion self-attention masking. Defaults to the generation length.
+            allow_segment_padding: Whether ``preserve_segment_lengths`` may
+                repeat the last generated frame when a segment decodes shorter
+                than requested. Benchmark protocols should set this false so
+                length bugs fail visibly.
+            align_generation_frames: Whether to snap generation lengths to the
+                historical PRISM VAE alignment heuristic before preparing
+                latents. Benchmark protocols set this false to pass exact
+                official/padded frame counts into ``prepare_latents``.
 
         Returns:
             smplx_dict: Dictionary containing SMPL-X parameters for the full motion.
@@ -617,6 +682,15 @@ class PrismARPipeline(DiffusionPipeline):
             return [int(v)] * num_segments
 
         requested_segment_lengths = _as_segment_list(num_frames_per_segment)
+        generation_requested_lengths = _as_segment_list(
+            generation_num_frames_per_segment
+            if generation_num_frames_per_segment is not None
+            else num_frames_per_segment
+        )
+        if valid_num_frames_per_segment is None:
+            valid_requested_lengths = generation_requested_lengths
+        else:
+            valid_requested_lengths = _as_segment_list(valid_num_frames_per_segment)
 
         # Number of trailing frames carried across the autoregressive boundary.
         # Snap to scale*n+1 so the VAE encode/decode of the carried clip is exact
@@ -624,23 +698,27 @@ class PrismARPipeline(DiffusionPipeline):
         k_carry = max(1, int(ar_condition_frames))
         k_carry = ((k_carry - 1) // scale) * scale + 1
 
-        if isinstance(num_frames_per_segment, list):
-            if preserve_segment_lengths:
-                num_frames_per_segment_list = [
-                    _ceil_frames(n + (k_carry if i > 0 else 0))
-                    for i, n in enumerate(requested_segment_lengths)
-                ]
-            else:
-                num_frames_per_segment_list = [_round_frames(n) for n in requested_segment_lengths]
+        if preserve_segment_lengths:
+            num_frames_per_segment_list = [
+                int(n) + (k_carry if i > 0 else 0)
+                for i, n in enumerate(generation_requested_lengths)
+            ]
         else:
+            num_frames_per_segment_list = [int(n) for n in generation_requested_lengths]
+        if align_generation_frames:
             if preserve_segment_lengths:
                 num_frames_per_segment_list = [
-                    _ceil_frames(n + (k_carry if i > 0 else 0))
-                    for i, n in enumerate(requested_segment_lengths)
+                    _ceil_frames(n) for n in num_frames_per_segment_list
                 ]
             else:
-                single = _round_frames(num_frames_per_segment)
-                num_frames_per_segment_list = [single] * num_segments
+                num_frames_per_segment_list = [
+                    _round_frames(n) for n in num_frames_per_segment_list
+                ]
+
+        valid_num_frames_list = [
+            int(n) + (k_carry if preserve_segment_lengths and i > 0 else 0)
+            for i, n in enumerate(valid_requested_lengths)
+        ]
 
         # Load first frame condition if provided
         first_frame_motion = None
@@ -652,6 +730,8 @@ class PrismARPipeline(DiffusionPipeline):
 
         # Store all motion segments
         all_motion_segments = []
+        raw_decoded_segment_lengths = []
+        pretrim_segment_lengths = []
 
         # Generate each segment
         with self.progress_bar(total=num_segments) as progress_bar:
@@ -662,17 +742,20 @@ class PrismARPipeline(DiffusionPipeline):
 
                 # Generate single segment
                 num_frames_this = num_frames_per_segment_list[seg_idx]
+                valid_num_frames_this = valid_num_frames_list[seg_idx]
                 motion_vec = self.generate_single_segment(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     first_frame_motion=first_frame_motion,
                     num_frames=num_frames_this,
+                    valid_num_frames=valid_num_frames_this,
                     num_joints=num_joints,
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
                     max_sequence_length=max_sequence_length,
                     attention_kwargs=attention_kwargs,
                 )
+                raw_decoded_segment_lengths.append(int(motion_vec.shape[1]))
 
                 # Store segment. For seg>0 the first k_carry frames reproduce the
                 # carried tail of the previous segment (the prefix condition), so
@@ -682,6 +765,7 @@ class PrismARPipeline(DiffusionPipeline):
                 else:
                     skip = min(k_carry, motion_vec.shape[1] - 1)
                     contrib = motion_vec[:, skip:]
+                pretrim_segment_lengths.append(int(contrib.shape[1]))
 
                 if preserve_segment_lengths:
                     target_len = int(requested_segment_lengths[seg_idx])
@@ -689,6 +773,12 @@ class PrismARPipeline(DiffusionPipeline):
                         contrib = contrib[:, :target_len]
                     else:
                         pad_n = target_len - int(contrib.shape[1])
+                        if not allow_segment_padding:
+                            raise ValueError(
+                                f"Decoded segment shorter than target: "
+                                f"segment={seg_idx}, decoded={contrib.shape[1]}, "
+                                f"target={target_len}, generation_frames={num_frames_this}"
+                            )
                         pad = contrib[:, -1:].repeat(1, pad_n, 1, 1)
                         contrib = torch.cat([contrib, pad], dim=1)
                 all_motion_segments.append(contrib)
@@ -758,6 +848,25 @@ class PrismARPipeline(DiffusionPipeline):
             mocap_framerate=mocap_framerate,
             gender=gender,
             use_rollout_trans=use_rollout_trans,
+        )
+
+        smplx_dict["_prism_requested_num_frames"] = np.asarray(
+            requested_segment_lengths, dtype=np.int32
+        )
+        smplx_dict["_prism_generation_num_frames"] = np.asarray(
+            num_frames_per_segment_list, dtype=np.int32
+        )
+        smplx_dict["_prism_valid_num_frames"] = np.asarray(
+            valid_num_frames_list, dtype=np.int32
+        )
+        smplx_dict["_prism_raw_decoded_num_frames"] = np.asarray(
+            raw_decoded_segment_lengths, dtype=np.int32
+        )
+        smplx_dict["_prism_pretrim_num_frames"] = np.asarray(
+            pretrim_segment_lengths, dtype=np.int32
+        )
+        smplx_dict["_prism_final_num_frames"] = np.asarray(
+            [smplx_dict["transl"].shape[0]], dtype=np.int32
         )
 
         return smplx_dict

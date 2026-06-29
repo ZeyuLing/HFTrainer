@@ -91,13 +91,13 @@ another evaluator space.
 ## Evaluation
 
 Generation follows the shared HumanML3D official-test protocol used by the
-leaderboard: 4042 official test ids, corrected selected captions under
-`outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/`,
+leaderboard: 4042 official test ids, corrected official captions under
+`outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected/`,
 native 263-dim at 20 fps, and one prediction per test id.
 
 ```bash
 python3 scripts/eval/motionlcm_t2m_h3d263.py \
-    --anno_file outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json \
+    --anno_file outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected/test_hml3d_official272_gtlen_official_caption.json \
     --anno_data_dir . \
     --model_path checkpoints/motionlcm/humanml3d \
     --num_inference_steps 1 \
@@ -127,18 +127,18 @@ model-zoo table should use metrics copied from the generated evaluator JSONs
 under `outputs/evaluation/t2m/humanml3d_official_test/_runs/<run>/metrics/`,
 not handwritten values.
 For HumanML3D-263 semantic metrics, the evaluator `texts_dir` must match the
-captions used for generation. The selected-caption official-test run is scored
+captions used for generation. The corrected official-test run is scored
 with
-`outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/texts`;
+`outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected/texts`;
 scoring these outputs against the older CondMDI text files produces mismatched
 R-Precision / MM-Dist.
 
-Current HumanML3D official-test metrics (4042 generated motions, selected
-caption protocol, NFE=1):
+Current HumanML3D official-test metrics (4042 generated motions, corrected
+official caption protocol, NFE=1):
 
 | Evaluator | R@1 | R@2 | R@3 | FID | MM-Dist | Diversity |
 |---|---:|---:|---:|---:|---:|---:|
-| HumanML3D-263 (selected captions) | 0.5093 | 0.7080 | 0.8108 | 0.3396 | 2.9694 | 9.6407 |
+| HumanML3D-263 (corrected official captions) | 0.5093 | 0.7080 | 0.8108 | 0.3396 | 2.9694 | 9.6407 |
 | MotionStreamer-272 (HML roundtrip GT) | 0.5657 | 0.7346 | 0.8075 | 44.0549 | 19.4543 | 24.6395 |
 | MotionCLIP-135 no-L2 (HML roundtrip GT) | 0.3620 | 0.5157 | 0.6078 | 146.7212 | 42.6430 | 22.9160 |
 

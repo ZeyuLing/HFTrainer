@@ -57,7 +57,7 @@ export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
   --num-envs 512 --batch-size 4096 \
   --gpu 0 \
   --gen-config configs/physflow/physflow_coevo_overfit_g1.py \
-  --gen-init-ckpt work_dirs/hymotion_g1_t2m_38dim/checkpoint-g1base \
+  --gen-init-ckpt work_dirs/hymotion_g1_t2m_38dim_scene_clean_minus_heldout/checkpoint-g1base \
   --trainee-init-ckpt ref_repo/ProtoMotions/data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt \
   --trainee-exp data/pretrained_models/motion_tracker/g1-bones-deploy/experiment_config.py \
   --py310 /usr/local/bin/python3 \

@@ -125,6 +125,8 @@ def worker_fn(
     output_dir: str,
     num_inference_steps: int,
     guidance_scale: float,
+    length_policy: str,
+    pad_to_frames: int,
     seed: int,
     result_queue: Queue,
 ):
@@ -171,6 +173,9 @@ def worker_fn(
                         num_frames_per_segment=num_frames,
                         num_inference_steps=num_inference_steps,
                         guidance_scale=guidance_scale,
+                        length_policy=length_policy,
+                        pad_to_frames=pad_to_frames,
+                        strict_length=True,
                     )
 
                 save_smplx_npz(str(out_path), smplx_dict)
@@ -228,6 +233,12 @@ def main():
     parser.add_argument('--max-samples', type=int, default=None)
     parser.add_argument('--num-inference-steps', type=int, default=50)
     parser.add_argument('--guidance-scale', type=float, default=5.0)
+    parser.add_argument('--length-policy', choices=['direct_len', 'pad360_crop', 'legacy'],
+                        default='pad360_crop',
+                        help='PRISM generation length policy. pad360_crop is the training-aligned '
+                             'default: generate on a 360-frame canvas and crop to GT length. '
+                             'direct_len is kept for ablations.')
+    parser.add_argument('--pad-to-frames', type=int, default=360)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--min-frames', type=int, default=24)
     parser.add_argument('--max-frames', type=int, default=300)
@@ -277,6 +288,8 @@ def main():
         'anno_file': args.anno_file,
         'num_inference_steps': args.num_inference_steps,
         'guidance_scale': args.guidance_scale,
+        'length_policy': args.length_policy,
+        'pad_to_frames': args.pad_to_frames,
         'seed': args.seed,
         'total_samples': len(samples),
         'gpus': args.gpus,
@@ -309,6 +322,8 @@ def main():
                 args.output_dir,
                 args.num_inference_steps,
                 args.guidance_scale,
+                args.length_policy,
+                args.pad_to_frames,
                 args.seed,
                 result_queue,
             ),

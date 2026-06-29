@@ -1,15 +1,17 @@
-# Text-to-Motion Evaluators
+# Motion Evaluators
 
-Retrieval-based T2M evaluators are persisted under
-`hftrainer.evaluation.evaluators`. They are **fully independent of `ref_repo`**:
-network code lives in `hftrainer/evaluation/evaluators/networks/`, weights under
-`checkpoints/evaluators/`, and GT data under `data/evaluators/`.
+Retrieval-based T2M and M2T evaluators are persisted under
+`hftrainer.evaluation.evaluators`. Runtime evaluator code should not import
+baseline code from `ref_repo`: framework-owned network code lives in
+`hftrainer/evaluation/evaluators/networks/`, and weights / GT data are loaded
+from the asset paths listed below.
 
 | Evaluator | Class | Feature | Weights | GT data |
 |---|---|---|---|---|
 | HumanML3D-263 (Guo et al. / MoMask) | `HumanML263Evaluator` | 263-dim @20fps | `checkpoints/evaluators/humanml3d_263/` | `ref_repo/CondMDI/.../HumanML3D` (`new_joint_vecs` + `texts`) |
+| HumanML3D M2T captioning | `HumanMLM2TEvaluator` | generated text + GT HML263 motion | `checkpoints/evaluators/humanml3d_263/` for semantic matching | `ref_repo/CondMDI/.../HumanML3D` (`new_joint_vecs` + `texts`) |
 | MotionStreamer-272 | `MotionStreamer272Evaluator` | 272-dim @30fps | `checkpoints/evaluators/motionstreamer_272/epoch99.ckpt` | `data/evaluators/humanml3d_272/` |
-| MotionCLIP-135 | `MotionCLIP135Evaluator` | SMPL-22 135-dim @30fps | `checkpoints/motion_clip/motionclip_base_1p_aug_hq/` | selected-caption HumanML3D official-test annotation |
+| MotionCLIP-135 | `MotionCLIP135Evaluator` | SMPL-22 135-dim @30fps | `checkpoints/motion_clip/motionclip_base_1p_aug_hq/` | corrected HumanML3D official-test annotation |
 | InterHuman / InterGen-262 | `InterHuman262Evaluator` | two-person native 262 @30fps | `checkpoints/evaluators/interhuman_262/interclip.ckpt` | native `.npz` packs (`m1`, `m2`, `lens`, `texts`) |
 | Inter-X official T2M | `InterXText2MotionEvaluator` | two-person HHI `(T,56,12)` | `checkpoints/evaluators/interx_text2motion/checkpoints/hhi/text_mot_match/model/finest.tar` | Inter-X official processed split / arrays |
 
@@ -22,6 +24,12 @@ network code lives in `hftrainer/evaluation/evaluators/networks/`, weights under
 Every text-to-motion model added to this repository must report **both**
 retrieval evaluators unless the model cannot be converted to the required
 representation:
+
+For HumanML3D T2M, "official" means the corrected official-test caption
+annotation under
+`outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected/`.
+The older first-full-caption annotation is a legacy/invalid protocol and should
+not be used as a separate leaderboard setting.
 
 1. **HumanML3D-263 evaluator** for native Guo/MoMask protocol numbers.
 2. **MotionStreamer-272 evaluator** for the SMPL/canon272 retrieval protocol
@@ -44,11 +52,21 @@ Do not compare models across evaluators. The numeric scales are different:
 HML3D-263 FID for good T2M baselines is often around `0.05-0.6`, while MS-272
 FID for the same baseline after SMPL retargeting can be around `100+`.
 
+For motion-to-text captioning on HumanML3D, use
+`HumanMLM2TEvaluator`. It reports the MotionGPT-style M2T metric set:
+`Bleu_1`/`Bleu_2`/`Bleu_3`/`Bleu_4`, `ROUGE_L`, `CIDEr`, optional
+`Bert_F1`, plus semantic `Matching_score` and `R_precision_top_1/2/3` for
+generated text versus GT motion. It also reports `gt_Matching_score` and
+`gt_R_precision_top_1/2/3` for GT text versus GT motion as a reference row.
+`Bert_F1` is off by default because it requires the optional `bert_score`
+package and a downloaded language model; pass `--bert-score` to enable it.
+
 ### Required Prediction Layouts
 
 | Evaluator | Prediction directory | Filename convention | Motion format |
 |---|---|---|---|
 | `HumanML263Evaluator` | `<pred_263_dir>` | `<HumanML3D id>.npy`; sub-clips may use `<id>__sub<k>.npy` | unnormalized HML263 `(T,263)`, 20 fps |
+| `HumanMLM2TEvaluator` | `<pred_m2t_dir>` or `<pred_m2t_dir>/predictions` | `<HumanML3D id>.json` with `id`, `prediction`, `references`, `length`, `motion_path` | generated caption text; semantic matching loads GT HML263 motion |
 | `MotionStreamer272Evaluator` | `<pred_272_dir>` | `<HumanML3D id>.npy` for name-based eval, or `<idx:06d>.npy` for pair-index scripts | raw MS272 `(T,272)`, 30 fps |
 | `MotionCLIP135Evaluator` | `<pred_motionclip135_dir>` | annotation-keyed `<HumanML3D id>.npy` | SMPL-22 135D: translation + column-major 6D rotations, 30 fps |
 | `InterHuman262Evaluator` | native pack file | `.npz` with `m1`, `m2`, `lens`, `texts` | per-person InterHuman/InterGen 262, 30 fps |
@@ -97,6 +115,7 @@ around a few centimetres, not hundreds of millimetres.
 
 ```python
 from hftrainer.evaluation.evaluators.humanml3d_263 import HumanML263Evaluator
+from hftrainer.evaluation.evaluators.humanml3d_m2t import HumanMLM2TEvaluator
 from hftrainer.evaluation.evaluators.interhuman_262 import InterHuman262Evaluator
 from hftrainer.evaluation.evaluators.motionclip_135 import MotionCLIP135Evaluator
 from hftrainer.evaluation.evaluators.motionstreamer_272 import MotionStreamer272Evaluator
@@ -124,6 +143,12 @@ m_clip = c.evaluate_dir(
     method="MyMethod",
 )
 
+# HumanML3D M2T captioning: predictions/<id>.json from an M2T pipeline
+m2t = HumanMLM2TEvaluator(device="cuda", n_repeats=20)
+m_caption = m2t.evaluate_dir(
+    "outputs/evaluation/m2t/humanml3d_official_test/hml263/motiongpt",
+)
+
 # InterHuman / InterGen-262: native two-person packs
 i = InterHuman262Evaluator(device="cuda")
 m_2p = i.evaluate_npz(
@@ -141,6 +166,7 @@ The metrics return mean (+std) for FID, R-Precision Top-1/2/3, Matching-Score
 |---|---|
 | Verify both GT rows | `python3 scripts/eval/verify_evaluators.py --which both --gt-only` |
 | Score an HML263 dir | `python3 scripts/eval/verify_evaluators.py --which hml263 --hml263-pred <pred_263_dir> --out-dir <metrics_dir>` |
+| Score HumanML3D M2T captions | `python3 scripts/eval/eval_m2t_humanml3d.py --pred-dir <pred_m2t_dir> --out-file <metrics.json>` |
 | Score an MS272 dir | `python3 scripts/eval/verify_evaluators.py --which ms272 --ms272-pred <pred_272_dir> --out-dir <metrics_dir>` |
 | Score indexed HYMotion/MS272 output on HML263 | `python3 scripts/eval/eval_272dir_h3d263.py --pred_dir <idx_272_dir> --out_json <out.json>` |
 | Score InterHuman native-262 2P packs | `python3 tools/eval_interclip_2p_native262.py --gt <gt.npz> --pred InterGen=<pred.npz> --out-json <out.json>` |

@@ -5,8 +5,9 @@
 # round), so we fill the node by running several independent arms in parallel,
 # each pinned to its own GPU.  This yields the main result + the paper ablations
 # in one shot.  The 80 held-out AGILE clips are EXCLUDED from every arm's prompt
-# bank (data/annotation/train_g1_t2m_emb_minus_heldout.json) so the tracker
-# key-capability eval (frozen baseline vs co-evolved) is truly held out.
+# bank (data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json) so the
+# tracker key-capability eval (frozen baseline vs co-evolved) is truly held out,
+# and no training arm learns flat-ground-invalid platform/stair/object-support clips.
 #
 # Arms (default single-node set):
 #   gpu0  formal_ours       anchor judge (alpha .5) + judge warm-start + GT-mix
@@ -71,7 +72,7 @@ NUM_ENVS="${NUM_ENVS:-512}"
 BATCH="${BATCH:-4096}"
 ROOT=work_dirs/physflow_coevolve_formal
 GENCFG=configs/physflow/physflow_coevo_formal_g1.py
-GENCKPT=work_dirs/hymotion_g1_t2m_38dim/checkpoint-g1base
+GENCKPT=work_dirs/hymotion_g1_t2m_38dim_scene_clean_minus_heldout/checkpoint-g1base
 TR_CKPT="$PROTO_ROOT/data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt"
 TR_EXP="$PROTO_ROOT/data/pretrained_models/motion_tracker/g1-bones-deploy/experiment_config.py"
 

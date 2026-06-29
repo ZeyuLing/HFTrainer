@@ -28,8 +28,8 @@ DEFAULT_MODEL = REPO / "checkpoints/mld/humanml3d"
 DEFAULT_BASE = REPO / "outputs/evaluation/t2m/humanml3d_official_test"
 DEFAULT_SELECTED_ANNO = (
     DEFAULT_BASE
-    / "captions/gt_motionclip_selected_20260622"
-    / "test_hml3d_official272_gtlen_motionclip_selected_caption.json"
+    / "captions/humanml3d_official_corrected"
+    / "test_hml3d_official272_gtlen_official_caption.json"
 )
 DEFAULT_OFFICIAL_ANNO = REPO / "data/annotation/test_hml3d_official272_gtlen.json"
 DEFAULT_ANNO = DEFAULT_SELECTED_ANNO if DEFAULT_SELECTED_ANNO.exists() else DEFAULT_OFFICIAL_ANNO

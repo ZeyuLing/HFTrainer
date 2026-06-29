@@ -133,6 +133,18 @@ def load_test_samples(
     else:
         raise ValueError(f'Unrecognized annotation format in {anno_file}')
 
+    def resolve_data_path(rel_path: str) -> Path:
+        raw_path = Path(rel_path)
+        if raw_path.is_absolute():
+            return raw_path
+        data_path = Path(data_dir) / raw_path
+        if data_path.exists():
+            return data_path
+        repo_path = HF_ROOT / raw_path
+        if repo_path.exists():
+            return repo_path
+        return data_path
+
     samples = []
     candidate_idx = 0
     for name, entry in entries:
@@ -156,8 +168,8 @@ def load_test_samples(
                 continue
             candidate_idx += 1
 
-        m_path = Path(data_dir) / m_rel
-        c_path = Path(data_dir) / c_rel
+        m_path = resolve_data_path(m_rel)
+        c_path = resolve_data_path(c_rel)
 
         caption = _load_caption(c_path)
         if caption is None:
@@ -198,6 +210,14 @@ def load_prism_bundle(config_path: str, checkpoint_dir: str, device: torch.devic
     from hftrainer.registry import MODEL_BUNDLES
 
     hftrainer.register_all_modules()
+    # Some Taiji V100 images are intentionally thin.  The package-level
+    # auto-registration swallows optional import failures, so explicitly import
+    # the modules required by the PRISM config before building the bundle.
+    import hftrainer.motion.processing.smpl_processor  # noqa: F401
+    import hftrainer.models.motion.prism.autoencoder_kl_2d  # noqa: F401
+    import hftrainer.models.motion.prism.network.transformer_prism  # noqa: F401
+    import hftrainer.models.motion.prism.bundle  # noqa: F401
+
     cfg = Config.fromfile(config_path)
     bundle = MODEL_BUNDLES.build(cfg.model)
 
@@ -236,14 +256,33 @@ def generate_motion(
     num_inference_steps: int = 50,
     guidance_scale: float = 5.0,
     use_rollout_trans: bool = True,
+    length_policy: str = 'pad360_crop',
+    pad_to_frames: int = 360,
 ) -> Dict:
     """Generate a single motion sample via the PRISM pipeline.
 
     Returns the smplx_dict from pipeline output.
     """
+    if length_policy == 'direct_len':
+        generation_num_frames = num_frames
+        valid_num_frames = num_frames
+    elif length_policy == 'pad360_crop':
+        generation_num_frames = pad_to_frames
+        valid_num_frames = num_frames
+    else:
+        raise ValueError(f'Unsupported length_policy: {length_policy}')
+
     output = pipeline(
         prompts=caption,
         num_frames_per_segment=num_frames,
+        generation_num_frames_per_segment=generation_num_frames,
+        valid_num_frames_per_segment=valid_num_frames,
+        preserve_segment_lengths=True,
+        allow_segment_padding=False,
+        # Direct-length still needs the minimal VAE-compatible canvas.  The
+        # valid mask stays at the official length and the decoded result is
+        # cropped back to GT length, with no last-frame repair.
+        align_generation_frames=(length_policy == 'direct_len'),
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
         use_rollout_trans=use_rollout_trans,
@@ -261,9 +300,13 @@ def save_smplx_npz(out_path: str, smplx_dict: Dict):
     pack = {}
     for k, v in smplx_dict.items():
         if isinstance(v, np.ndarray):
-            pack[k] = v.astype(np.float32, copy=False)
+            if k.startswith('_prism_'):
+                pack[k] = v
+            else:
+                pack[k] = v.astype(np.float32, copy=False)
         elif isinstance(v, torch.Tensor):
-            pack[k] = v.detach().cpu().numpy().astype(np.float32)
+            arr = v.detach().cpu().numpy()
+            pack[k] = arr if k.startswith('_prism_') else arr.astype(np.float32)
         else:
             pack[k] = v
     np.savez_compressed(out_path, **pack)
@@ -302,6 +345,42 @@ def enforce_smplx_num_frames(smplx_dict: Dict, target_len: int) -> Dict:
     for key, value in list(out.items()):
         out[key] = _fit_first_dim(value, target_len)
     return out
+
+
+def _time_len(value) -> int:
+    if isinstance(value, np.ndarray):
+        return int(value.shape[0])
+    if isinstance(value, torch.Tensor):
+        return int(value.shape[0])
+    return -1
+
+
+def get_smplx_num_frames(smplx_dict: Dict) -> int:
+    for key in ('transl', 'trans', 'global_orient', 'body_pose', 'poses'):
+        if key in smplx_dict:
+            n = _time_len(smplx_dict[key])
+            if n >= 0:
+                return n
+    return -1
+
+
+def _meta_int(smplx_dict: Dict, key: str, default: int = -1) -> int:
+    value = smplx_dict.get(key)
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu().numpy()
+    if isinstance(value, np.ndarray) and value.size:
+        return int(value.reshape(-1)[0])
+    return default
+
+
+def validate_smplx_length(smplx_dict: Dict, target_len: int, sample_name: str) -> int:
+    out_len = get_smplx_num_frames(smplx_dict)
+    if out_len != int(target_len):
+        raise ValueError(
+            f'Length mismatch for {sample_name}: final_len={out_len}, '
+            f'official_gt_len={target_len}. Refusing to save benchmark output.'
+        )
+    return out_len
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +517,20 @@ def main():
              'initial absolute translation plus cumulative relative deltas '
              '(previous default); absolute uses decoded absolute channels directly.',
     )
+    parser.add_argument(
+        '--length-policy',
+        choices=['direct_len', 'pad360_crop'],
+        default='pad360_crop',
+        help='Official benchmark length policy. pad360_crop generates a fixed '
+             '360-frame training canvas and masks/crops back to the official '
+             'length. direct_len is retained only for exact-length ablations.',
+    )
+    parser.add_argument(
+        '--pad-to-frames',
+        type=int,
+        default=360,
+        help='Generation canvas length for --length-policy pad360_crop.',
+    )
     args = parser.parse_args()
 
     # ---- Seed ----
@@ -451,6 +544,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'[+] Device: {device}')
     print(f'[+] KAFS mode: {args.kafs_mode}')
+    print(f'[+] Length policy: {args.length_policy} (pad_to_frames={args.pad_to_frames})')
     if args.smooth_output:
         print('[+] Output smoothing: HY-Motion-style temporal smoothing enabled')
 
@@ -576,10 +670,16 @@ def main():
         'guidance_scale': args.guidance_scale,
         'smooth_output': bool(args.smooth_output),
         'translation_decode_mode': args.translation_decode_mode,
+        'length_policy': args.length_policy,
+        'pad_to_frames': args.pad_to_frames,
+        'strict_length': True,
         'seed': args.seed,
         'num_samples': len(samples),
     }
-    meta_path = out_dir / 'run_meta.json'
+    if args.num_shards > 1:
+        meta_path = out_dir / f'run_meta_shard{args.shard_idx}of{args.num_shards}.json'
+    else:
+        meta_path = out_dir / 'run_meta.json'
     meta_path.write_text(json.dumps(meta, indent=2))
     print(f'    Saved run metadata to {meta_path}')
 
@@ -595,9 +695,51 @@ def main():
         sample_name = sample['name']
         caption = sample['caption']
         num_frames = sample['num_frames']
+        out_path = out_dir / f'{sample_name}.npz'
 
-        if args.skip_existing and (out_dir / f'{sample_name}.npz').exists():
-            n_success += 1
+        if args.skip_existing and out_path.exists():
+            try:
+                existing = np.load(out_path, allow_pickle=True)
+                existing_dict = {k: existing[k] for k in existing.files}
+                out_frames = validate_smplx_length(existing_dict, num_frames, sample_name)
+                results_manifest.append({
+                    'name': sample_name,
+                    'caption': caption,
+                    'official_gt_num_frames': num_frames,
+                    'requested_num_frames': _meta_int(existing_dict, '_prism_requested_num_frames', num_frames),
+                    'generation_num_frames': _meta_int(existing_dict, '_prism_generation_num_frames', num_frames),
+                    'valid_num_frames': _meta_int(existing_dict, '_prism_valid_num_frames', num_frames),
+                    'raw_decoded_num_frames': _meta_int(existing_dict, '_prism_raw_decoded_num_frames', out_frames),
+                    'pretrim_num_frames': _meta_int(existing_dict, '_prism_pretrim_num_frames', out_frames),
+                    'final_num_frames': out_frames,
+                    'length_policy': args.length_policy,
+                    'npz_path': str(out_path),
+                    'status': 'skipped_existing',
+                })
+                n_success += 1
+                continue
+            except Exception as e:
+                print(f'  [!] Existing output invalid for {sample_name}: {e}; regenerating')
+
+        if args.length_policy == 'pad360_crop' and num_frames > args.pad_to_frames:
+            results_manifest.append({
+                'name': sample_name,
+                'caption': caption,
+                'official_gt_num_frames': num_frames,
+                'requested_num_frames': num_frames,
+                'generation_num_frames': args.pad_to_frames,
+                'valid_num_frames': num_frames,
+                'raw_decoded_num_frames': -1,
+                'pretrim_num_frames': -1,
+                'final_num_frames': -1,
+                'length_policy': args.length_policy,
+                'npz_path': '',
+                'status': (
+                    f'error: official length {num_frames} exceeds '
+                    f'pad_to_frames={args.pad_to_frames}'
+                ),
+            })
+            n_fail += 1
             continue
 
         try:
@@ -608,32 +750,34 @@ def main():
                 num_inference_steps=args.num_inference_steps,
                 guidance_scale=args.guidance_scale,
                 use_rollout_trans=(args.translation_decode_mode == 'rollout'),
+                length_policy=args.length_policy,
+                pad_to_frames=args.pad_to_frames,
             )
             if args.smooth_output:
                 from hftrainer.motion.processing.temporal_smoothing import (
                     smooth_smplx_dict_hymotion,
                 )
                 smplx_dict = smooth_smplx_dict_hymotion(smplx_dict)
-            smplx_dict = enforce_smplx_num_frames(smplx_dict, num_frames)
+            out_frames = validate_smplx_length(smplx_dict, num_frames, sample_name)
 
             # Save output NPZ
-            out_path = out_dir / f'{sample_name}.npz'
             save_smplx_npz(str(out_path), smplx_dict)
-
-            # Determine output frame count
-            out_frames = -1
-            if 'transl' in smplx_dict:
-                v = smplx_dict['transl']
-                if isinstance(v, np.ndarray):
-                    out_frames = v.shape[0]
-                elif isinstance(v, torch.Tensor):
-                    out_frames = v.shape[0]
 
             results_manifest.append({
                 'name': sample_name,
                 'caption': caption,
-                'gt_num_frames': num_frames,
-                'gen_num_frames': out_frames,
+                'official_gt_num_frames': num_frames,
+                'requested_num_frames': _meta_int(smplx_dict, '_prism_requested_num_frames', num_frames),
+                'generation_num_frames': _meta_int(
+                    smplx_dict,
+                    '_prism_generation_num_frames',
+                    args.pad_to_frames if args.length_policy == 'pad360_crop' else num_frames,
+                ),
+                'valid_num_frames': _meta_int(smplx_dict, '_prism_valid_num_frames', num_frames),
+                'raw_decoded_num_frames': _meta_int(smplx_dict, '_prism_raw_decoded_num_frames', out_frames),
+                'pretrim_num_frames': _meta_int(smplx_dict, '_prism_pretrim_num_frames', out_frames),
+                'final_num_frames': out_frames,
+                'length_policy': args.length_policy,
                 'npz_path': str(out_path),
                 'status': 'success',
             })
@@ -644,8 +788,14 @@ def main():
             results_manifest.append({
                 'name': sample_name,
                 'caption': caption,
-                'gt_num_frames': num_frames,
-                'gen_num_frames': -1,
+                'official_gt_num_frames': num_frames,
+                'requested_num_frames': num_frames,
+                'generation_num_frames': args.pad_to_frames if args.length_policy == 'pad360_crop' else num_frames,
+                'valid_num_frames': num_frames,
+                'raw_decoded_num_frames': -1,
+                'pretrim_num_frames': -1,
+                'final_num_frames': -1,
+                'length_policy': args.length_policy,
                 'npz_path': '',
                 'status': f'error: {e}',
             })

@@ -12,7 +12,8 @@ import argparse
 import json
 import math
 import os
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -29,6 +30,108 @@ CAPTION_TO_QWEN3_DIR = {
     "editing_caption": "qwen3_editing",
     "raw_caption": "qwen3_raw_short",
 }
+
+
+SCENE_SUPPORT_OK_RE = re.compile(
+    r"\b(floor|ground|mat)\b.{0,45}\b(sit|sits|sitting|sat|seated|lie|lies|lying|lay|lays|laid)\b"
+    r"|\b(sit|sits|sitting|sat|seated|lie|lies|lying|lay|lays|laid)\b.{0,45}\b(floor|ground|mat)\b"
+)
+
+
+SCENE_CAPTION_HARD_RULES: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "caption:stairs_ladder_platform",
+        re.compile(
+            r"\b(stair|stairs|staircase|stairway|upstairs|downstairs|ladder|ladders|"
+            r"ramp|ramps|platform|platforms|ledge|ledges|slope|slopes|incline|inclines)\b"
+        ),
+    ),
+    (
+        "caption:climb_elevation",
+        re.compile(
+            r"\b(climb|climbs|climbed|climbing|ascend|ascends|ascended|ascending|"
+            r"descend|descends|descended|descending)\b"
+            r".{0,55}\b(up|down|onto|off|over|stair|stairs|step|steps|ladder|"
+            r"platform|ledge|obstacle|wall|slope|ramp)\b"
+        ),
+    ),
+    (
+        "caption:step_on_or_over_scene",
+        re.compile(
+            r"\b(step|steps|stepped|stepping)\s+(up|down|onto|off)\s+"
+            r"(a\s+|the\s+)?(step|steps|stair|stairs|platform|ledge|box|block|obstacle)\b"
+            r"|\b(step|steps|stepped|stepping)\s+over\s+"
+            r"(a\s+|the\s+)?(object|obstacle|box|block|hurdle|step|steps|stair|stairs)\b"
+        ),
+    ),
+    (
+        "caption:object_manipulation",
+        re.compile(
+            r"\b(pick|picks|picked|picking|lift|lifts|lifted|lifting|place|places|placed|placing|"
+            r"put|puts|putting|grab|grabs|grabbing|hold|holds|holding)\b"
+            r".{0,45}\b(box|boxes|object|objects|phone|suitcase|bag|bags)\b"
+            r"|\b(box|boxes|object|objects|phone|suitcase|bag|bags)\b"
+            r".{0,45}\b(pick|picks|picked|picking|lift|lifts|lifted|lifting|place|places|placed|placing|"
+            r"put|puts|putting|grab|grabs|grabbing|hold|holds|holding)\b"
+        ),
+    ),
+    (
+        "caption:fixed_scene_support",
+        re.compile(
+            r"\b(support|supports|supporting|grab|grabs|grabbing|brace|braces|bracing|"
+            r"hold|holds|holding|lean|leans|leaning|push|pushes|pushing|pull|pulls|pulling|"
+            r"open|opens|opening|close|closes|closing)\b"
+            r".{0,60}\b(platform|ledge|rail|railing|handrail|wall|door|fence|shelf|"
+            r"pole|window|counter|countertop|table|desk|chair|bench|sofa|bed|obstacle|ladder)\b"
+            r"|\b(platform|ledge|rail|railing|handrail|wall|door|fence|shelf|pole|window|"
+            r"counter|countertop|table|desk|chair|bench|sofa|bed|obstacle|ladder)\b"
+            r".{0,60}\b(support|supports|supporting|grab|grabs|grabbing|brace|braces|bracing|"
+            r"hold|holds|holding|lean|leans|leaning|push|pushes|pushing|pull|pulls|pulling|"
+            r"open|opens|opening|close|closes|closing)\b"
+        ),
+    ),
+    (
+        "caption:furniture_or_nonfloor_support",
+        re.compile(
+            r"\b(sit|sits|sitting|sat|seated|lie|lies|lying|lay|lays|laid|rest|rests|"
+            r"resting|perch|perches|perching)\b"
+            r".{0,55}\b(chair|chairs|stool|stools|bench|benches|sofa|couch|seat|seats|"
+            r"table|desk|bed|beds|ledge|countertop)\b"
+            r"|\b(chair|chairs|stool|stools|bench|benches|sofa|couch|seat|seats|table|"
+            r"desk|bed|beds|ledge|countertop)\b"
+            r".{0,55}\b(sit|sits|sitting|sat|seated|lie|lies|lying|lay|lays|laid|rest|"
+            r"rests|resting|perch|perches|perching)\b"
+        ),
+    ),
+    (
+        "caption:vehicle_or_device",
+        re.compile(
+            r"\b(ride|rides|riding|drive|drives|driving)\s+(a\s+|the\s+)?"
+            r"(car|cars|vehicle|vehicles|bicycle|bike|motorcycle|skateboard|paraglider)\b"
+        ),
+    ),
+]
+
+
+SCENE_CAPTION_REVIEW_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("caption:generic_obstacle", re.compile(r"\b(obstacle|obstacles|hurdle|hurdles|vault|vaults|vaulting)\b")),
+    ("caption:generic_crawl", re.compile(r"\b(crawl|crawls|crawling)\b")),
+    ("caption:nonfloor_sit_or_lie", re.compile(r"\b(sit|sits|sitting|sat|seated|lie|lies|lying|lay|lays|laid)\b")),
+]
+
+
+SCENE_PATH_HARD_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("path:platform", re.compile(r"\b(platform|ptfm)\b")),
+    ("path:stairs_steps_ladder", re.compile(r"\b(stair|stairs|staircase|upstairs|downstairs|ladder|ldr|ascd|dscd)\b")),
+    ("path:slope_ramp", re.compile(r"\b(slope|ramp|incline)\b")),
+    ("path:obstacle", re.compile(r"\b(obstacle|obstacles|hurdle|hurdles)\b")),
+]
+
+
+SCENE_PATH_REVIEW_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("path:crawl", re.compile(r"\bcrawl\b")),
+    ("path:chair_table_bed", re.compile(r"\b(chair|table|desk|bench|bed|sofa|stool)\b")),
+]
 
 
 def _caption_dir(caption_rel: str) -> Optional[str]:
@@ -57,26 +160,115 @@ def _load_caption_from_embedding(data_dir: Path, emb_rel: str) -> str:
     return str(result[0].get("caption", ""))
 
 
+def _caption_from_json_obj(blob: Any) -> str:
+    if isinstance(blob, str):
+        return blob
+    if isinstance(blob, list):
+        for value in blob:
+            caption = _caption_from_json_obj(value)
+            if caption:
+                return caption
+        return ""
+    if not isinstance(blob, dict):
+        return ""
+
+    # Common HYMotion caption schema: result is a list of candidate caption dicts.
+    result = blob.get("result")
+    if isinstance(result, list):
+        for entry in result:
+            if not isinstance(entry, dict):
+                continue
+            for key in (
+                "short_caption",
+                "caption",
+                "text",
+                "simple_caption",
+                "improved_simple_caption",
+                "long_caption",
+            ):
+                value = entry.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            rewritten = entry.get("short_caption_rewritten")
+            if isinstance(rewritten, list):
+                for value in rewritten:
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
+
+    for key in (
+        "caption",
+        "text",
+        "simple_caption",
+        "improved_simple_caption",
+        "short_caption",
+        "long_caption",
+    ):
+        value = blob.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _load_caption_from_json(data_dir: Path, caption_rel: str) -> str:
     try:
         blob = json.loads((data_dir / caption_rel).read_text())
     except Exception:
         return ""
-    if isinstance(blob, str):
-        return blob
-    if isinstance(blob, dict):
-        for key in ("caption", "text", "simple_caption", "improved_simple_caption"):
-            value = blob.get(key)
-            if isinstance(value, str):
-                return value
-        for value in blob.values():
-            if isinstance(value, str):
-                return value
-            if isinstance(value, list) and value and isinstance(value[0], str):
-                return value[0]
-    if isinstance(blob, list) and blob and isinstance(blob[0], str):
-        return blob[0]
-    return ""
+    return _caption_from_json_obj(blob)
+
+
+def _scene_normalize(text: str) -> str:
+    text = str(text or "").lower()
+    text = re.sub(r"[_/\\.\-]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _scene_decision(
+    item: Dict[str, Any],
+    *,
+    caption: str,
+    quality: Dict[str, Any],
+) -> Dict[str, Any]:
+    caption_text = _scene_normalize(caption)
+    path_text = _scene_normalize(
+        " ".join(
+            str(item.get(k, ""))
+            for k in ("g1_path", "caption_rel", "emb_rel", "motion_path")
+        )
+    )
+    hard: list[str] = []
+    review: list[str] = []
+    for name, pattern in SCENE_CAPTION_HARD_RULES:
+        if pattern.search(caption_text):
+            hard.append(name)
+    for name, pattern in SCENE_CAPTION_REVIEW_RULES:
+        if pattern.search(caption_text):
+            review.append(name)
+    if "caption:nonfloor_sit_or_lie" in review and SCENE_SUPPORT_OK_RE.search(caption_text):
+        review.remove("caption:nonfloor_sit_or_lie")
+
+    for name, pattern in SCENE_PATH_HARD_RULES:
+        if pattern.search(path_text):
+            hard.append(name)
+    for name, pattern in SCENE_PATH_REVIEW_RULES:
+        if pattern.search(path_text):
+            review.append(name)
+
+    if quality:
+        root_z = None
+        if "root_height_min" in quality and "root_height_max" in quality:
+            root_z = float(quality["root_height_max"]) - float(quality["root_height_min"])
+        if root_z is not None and root_z > 0.75:
+            review.append("motion:large_root_height_excursion")
+
+    # Hard evidence wins, but keep review tags for audit.
+    return {
+        "hard_reasons": sorted(set(hard)),
+        "review_reasons": sorted(set(review)),
+        "caption": caption,
+        "path_text": path_text[:240],
+    }
 
 
 def _caption_ok(
@@ -88,6 +280,7 @@ def _caption_ok(
     max_words: int,
     max_chars: int,
     caption_source: str,
+    allow_empty_caption: bool,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     cap_dir = _caption_dir(item.get("caption_rel", ""))
     if not cap_dir:
@@ -106,6 +299,8 @@ def _caption_ok(
             return False, f"caption:embedding_error:{type(exc).__name__}", {"caption_dir": cap_dir}
     elif caption_source == "json":
         caption = _load_caption_from_json(data_dir, item.get("caption_rel", ""))
+    if not caption and allow_empty_caption:
+        return True, "ok", {"caption_dir": cap_dir, "caption": "", "words": 0, "chars": 0}
     if not caption:
         return False, "caption:empty", {"caption_dir": cap_dir}
 
@@ -228,6 +423,7 @@ def _process_one(args_tuple):
         max_words=cfg["max_words"],
         max_chars=cfg["max_chars"],
         caption_source=cfg["caption_source"],
+        allow_empty_caption=cfg["allow_empty_caption"],
     )
     if not ok:
         return idx, None, reason, cmeta
@@ -247,6 +443,29 @@ def _process_one(args_tuple):
         )
         if not ok:
             return idx, None, reason, {**cmeta, **qmeta}
+    if cfg["scene_filter_mode"] != "off":
+        scene = _scene_decision(item, caption=cmeta.get("caption", ""), quality=qmeta)
+        hard = scene["hard_reasons"]
+        review = scene["review_reasons"]
+        if hard or (cfg["scene_filter_mode"] == "hard_and_review" and review):
+            reasons = hard or review
+            return idx, None, "scene:" + "+".join(reasons[:3]), {
+                **cmeta,
+                **qmeta,
+                "scene_hard_reasons": hard,
+                "scene_review_reasons": review,
+                "scene_caption": scene["caption"],
+                "scene_path_text": scene["path_text"],
+                "g1_path": item.get("g1_path"),
+                "caption_rel": item.get("caption_rel"),
+            }
+        if review:
+            qmeta = {
+                **qmeta,
+                "scene_review_reasons": review,
+                "scene_caption": scene["caption"],
+                "scene_path_text": scene["path_text"],
+            }
     out_item = dict(item)
     if cfg["rewrite_emb_rel"]:
         emb_rel = _caption_rel_to_emb_rel(out_item.get("caption_rel", ""))
@@ -279,6 +498,11 @@ def main() -> None:
     ap.add_argument("--g1-dir", default="data/g1")
     ap.add_argument("--allowed-caption-dirs", default="improved_simple_augmented_caption,improved_simple_caption")
     ap.add_argument("--caption-source", choices=["embedding", "json"], default="embedding")
+    ap.add_argument(
+        "--allow-empty-caption",
+        action="store_true",
+        help="Keep rows whose caption text cannot be loaded; scene filtering then falls back to path evidence.",
+    )
     ap.add_argument("--min-words", type=int, default=3)
     ap.add_argument("--max-words", type=int, default=20)
     ap.add_argument("--max-chars", type=int, default=120)
@@ -295,6 +519,16 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--store-caption", action="store_true")
     ap.add_argument("--rewrite-emb-rel", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument(
+        "--scene-filter-mode",
+        choices=["off", "hard", "hard_and_review"],
+        default="off",
+        help=(
+            "Filter scene-interaction clips. 'hard' removes only high-confidence "
+            "caption/path evidence; 'hard_and_review' also removes review-only "
+            "candidates such as generic crawl or large vertical motion."
+        ),
+    )
     args = ap.parse_args()
 
     anno_path = Path(args.anno)
@@ -309,6 +543,7 @@ def main() -> None:
         "g1_dir": Path(args.g1_dir),
         "allowed_dirs": allowed_dirs,
         "caption_source": args.caption_source,
+        "allow_empty_caption": args.allow_empty_caption,
         "min_words": args.min_words,
         "max_words": args.max_words,
         "max_chars": args.max_chars,
@@ -323,19 +558,41 @@ def main() -> None:
         "max_root_speed_p95": args.max_root_speed_p95,
         "store_caption": args.store_caption,
         "rewrite_emb_rel": args.rewrite_emb_rel,
+        "scene_filter_mode": args.scene_filter_mode,
     }
 
     kept: list[Dict[str, Any]] = []
     reject = Counter()
+    reject_examples: dict[str, list[Dict[str, Any]]] = defaultdict(list)
     kept_meta: list[Dict[str, Any]] = []
+    scene_review = Counter()
+    scene_review_examples: dict[str, list[Dict[str, Any]]] = defaultdict(list)
     jobs = [(i, it, cfg) for i, it in enumerate(items)]
     def consume(iterator):
         for n, (_idx, out_item, reason, meta) in enumerate(iterator, 1):
             if out_item is None:
                 reject[reason] += 1
+                if len(reject_examples[reason]) < 8:
+                    reject_examples[reason].append({
+                        "index": _idx,
+                        "g1_path": meta.get("g1_path"),
+                        "caption_rel": meta.get("caption_rel"),
+                        "caption": meta.get("caption") or meta.get("scene_caption"),
+                        "scene_hard_reasons": meta.get("scene_hard_reasons"),
+                        "scene_review_reasons": meta.get("scene_review_reasons"),
+                    })
             else:
                 kept.append(out_item)
                 kept_meta.append(meta)
+                for scene_reason in meta.get("scene_review_reasons", []) or []:
+                    scene_review[scene_reason] += 1
+                    if len(scene_review_examples[scene_reason]) < 8:
+                        scene_review_examples[scene_reason].append({
+                            "index": _idx,
+                            "g1_path": out_item.get("g1_path"),
+                            "caption_rel": out_item.get("caption_rel"),
+                            "caption": meta.get("scene_caption") or meta.get("caption"),
+                        })
             if n % 5000 == 0:
                 print(f"[filter] processed {n}/{len(items)} kept={len(kept)} reject={sum(reject.values())}", flush=True)
 
@@ -354,6 +611,7 @@ def main() -> None:
             "filters": {
                 "allowed_caption_dirs": sorted(allowed_dirs),
                 "caption_source": args.caption_source,
+                "allow_empty_caption": args.allow_empty_caption,
                 "min_words": args.min_words,
                 "max_words": args.max_words,
                 "max_chars": args.max_chars,
@@ -366,7 +624,11 @@ def main() -> None:
                 "min_body_z": args.min_body_z,
                 "max_frame_disp": args.max_frame_disp,
                 "max_root_speed_p95": args.max_root_speed_p95,
+                "scene_filter_mode": args.scene_filter_mode,
             },
+            "reject_examples": dict(reject_examples),
+            "scene_review_counts": dict(scene_review.most_common()),
+            "scene_review_examples": dict(scene_review_examples),
             "kept_numeric_summary": _summarize_numeric(
                 kept_meta,
                 [

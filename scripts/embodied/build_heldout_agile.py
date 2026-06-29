@@ -47,7 +47,7 @@ def agility(npz_path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb.json")
+    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb_scene_clean.json")
     ap.add_argument("--sample", type=int, default=5000, help="random items to scan")
     ap.add_argument("--topk", type=int, default=80)
     ap.add_argument("--out", default="data/annotation/_heldout_agile.json")

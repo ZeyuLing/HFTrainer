@@ -34,13 +34,15 @@ These entries are expected to be usable as model-zoo baselines.
 | MLD | Text-to-motion | HumanML3D-263 | `MLDBundle` / `MLDPipeline` | [`ZeyuLing/hftrainer-mld-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mld-humanml3d) | [mld.md](mld.md) |
 | FlowMDM | Text-to-motion / motion composition | HumanML3D-263 | `FlowMDMBundle` / `FlowMDMPipeline` | [`ZeyuLing/hftrainer-flowmdm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-flowmdm-humanml3d) | [flowmdm.md](flowmdm.md) |
 | MotionLab | Text-to-motion / motion editing | HumanML3D-263 | `MotionLabBundle` / `MotionLabPipeline` | [`ZeyuLing/hftrainer-motionlab-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlab-humanml3d) | [motionlab.md](motionlab.md) |
+| MotionGPT | Text-to-motion / motion-language generation | HumanML3D-263 | `MotionGPTBundle` / `MotionGPTPipeline` | [`ZeyuLing/hftrainer-motiongpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motiongpt-humanml3d) | [motiongpt.md](motiongpt.md) |
 | MotionGPT3 | Text-to-motion / motion-language generation | HumanML3D-263 | `MotionGPT3Bundle` / `MotionGPT3Pipeline` | [`ZeyuLing/hftrainer-motiongpt3-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motiongpt3-humanml3d) | [motiongpt3.md](motiongpt3.md) |
+| ViMoGen | Text-to-motion | DART276 / SMPL motion_135 | `ViMoGenBundle` / `ViMoGenPipeline` | [`ZeyuLing/hftrainer-vimogen-1.3b-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-vimogen-1.3b-humanml3d) | [vimogen.md](vimogen.md) |
 | PRISM 1.0 | Text-to-motion | PRISM `motion_138` / SMPL motion_135 | `PrismBundle` / `PrismPipeline` | [`ZeyuLing/hftrainer-prism-1.0-humanml3d-iter15000`](https://huggingface.co/ZeyuLing/hftrainer-prism-1.0-humanml3d-iter15000) (raw checkpoint package) | [prism.md](prism.md) |
 | InterGen | Two-person text-to-motion | InterHuman native-262 | `InterGenBundle` | [`ZeyuLing/hftrainer-intergen-interhuman`](https://huggingface.co/ZeyuLing/hftrainer-intergen-interhuman) | [intergen.md](intergen.md) |
 | InterMask | Two-person / InterX text-to-motion | InterHuman native-262 / InterX `(T,56,12)` | `InterMaskBundle` | [`InterHuman`](https://huggingface.co/ZeyuLing/hftrainer-intermask-interhuman), [`InterX`](https://huggingface.co/ZeyuLing/hftrainer-intermask-interx) | [intermask.md](intermask.md) |
 | MotionLCM | Text-to-motion | HumanML3D latent / HML263 bridge | `MotionLCMBundle` / `MotionLCMPipeline` | [`ZeyuLing/hftrainer-motionlcm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlcm-humanml3d) | [motionlcm.md](motionlcm.md) |
 | MotionStreamer | Streaming text-to-motion | MotionStreamer-272 | `MotionStreamerBundle` / `MotionStreamerPipeline` | [`ZeyuLing/hftrainer-motionstreamer-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-motionstreamer-humanml272) | [motionstreamer.md](motionstreamer.md) |
-| Go to Zero / MotionMillion | Zero-shot text-to-motion | MotionStreamer-272 | `MotionMillionBundle` / `MotionMillionPipeline` | [`ZeyuLing/hftrainer-gotozero-7b-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-humanml272) | [gotozero.md](gotozero.md) |
+| Go to Zero / MotionMillion | Zero-shot text-to-motion | MotionStreamer-272 | `MotionMillionBundle` / `MotionMillionPipeline` | [`7B-train`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-train-humanml272), [`3B-train`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-3b-train-humanml272) | [gotozero.md](gotozero.md) |
 | HY-Motion T2M 1.0 | Text-to-motion | HY-Motion 201 / SMPL motion_135 | `HyMotionT2MBundle` / `HyMotionT2MPipeline` | [`full`](https://huggingface.co/ZeyuLing/hftrainer-hymotion-t2m-1.0), [`lite`](https://huggingface.co/ZeyuLing/hftrainer-hymotion-t2m-1.0-lite) | [hymotion_t2m.md](hymotion_t2m.md) |
 | KIMODO | Text + kinematic control | SOMA / G1 / SMPL-X | `KIMODOBundle` / `KIMODOPipeline` | [`SOMA-RP`](https://huggingface.co/ZeyuLing/hftrainer-kimodo-soma-rp), [`G1-RP`](https://huggingface.co/ZeyuLing/hftrainer-kimodo-g1-rp), [`G1-SEED`](https://huggingface.co/ZeyuLing/hftrainer-kimodo-g1-seed), [`SMPLX-RP`](https://huggingface.co/ZeyuLing/hftrainer-kimodo-smplx-rp) (private / license review) | [kimodo.md](kimodo.md) |
 | ProtoMotions G1 Tracker | Unitree G1 motion tracking | G1 motion library / robot frames | `PhysicsJudgeReward` / ProtoMotions eval scripts | local bundle under `hftrainer/models/motion/physflow/trackers/protomotions/` | [protomotions_g1_tracker.md](protomotions_g1_tracker.md) |
@@ -68,7 +70,9 @@ not require importing upstream implementation code unless explicitly noted.
 | MotionStreamer | `hftrainer.models.motion.motionstreamer.network` native TAE + AR + diffusion head | No | raw checkpoints must be passed explicitly outside artifact inference |
 | FlowMDM | `hftrainer.models.motion.flowmdm.network` vendored FlowMDM runtime + BPE diffusion wrapper | No | `FlowMDMPipeline.infer_sequential_t2m` supports BABEL-style multi-prompt generation |
 | MotionLab | `hftrainer.models.motion.motionlab.network` vendored RFMotion / MotionFlow runtime | No | config namespaces are rewritten into the hftrainer package before construction |
+| MotionGPT | `hftrainer.models.motion.motiongpt.network` vendored MotionGPT runtime | No | FLAN-T5-base config/tokenizer and HML263 stats are packaged in the artifact |
 | MotionGPT3 | `hftrainer.models.motion.motiongpt3.network` vendored MotionGPT3 / MoT runtime | No | local `mot-gpt2` adapter is packaged in the artifact |
+| ViMoGen | `hftrainer.models.motion.vimogen.network` vendored ViMoGen runtime + public DART276 bridge | No | Wan2.1 base assets are resolved through `wan_repo_id` when not present locally |
 | Go to Zero / MotionMillion | `hftrainer.models.motion.motionmillion.network` native FSQ VAE + LLaMA AR | No | text encoder is packaged in the hftrainer artifact |
 | HY-Motion T2M 1.0 | `hftrainer.models.motion.hymotion_t2m` + shared HunyuanMotion MMDiT modules | No | shared component shim preserves HYMotion M2M compatibility; text encoders are packaged in artifacts |
 | KIMODO | `hftrainer.models.motion.kimodo.network` native model / motion representation / skeleton runtime | No | four checkpoint variants pass seeded parity against the previous package path |
@@ -116,7 +120,7 @@ published as model-zoo cards yet.
 
 | Task family | Model-zoo coverage | Evaluation / conversion |
 |---|---|---|
-| Text-to-motion | MDM, T2M-GPT, MoMask, MoGenTS, MLD, FlowMDM, MotionLab, MotionGPT3, MotionLCM, MotionStreamer, Go to Zero, HY-Motion T2M | HumanML3D-263 and/or MotionStreamer-272 evaluators |
+| Text-to-motion | MDM, T2M-GPT, MoMask, MoGenTS, MLD, FlowMDM, MotionLab, MotionGPT, MotionGPT3, ViMoGen, MotionLCM, MotionStreamer, Go to Zero, HY-Motion T2M | HumanML3D-263 and/or MotionStreamer-272 evaluators |
 | Two-person / interaction T2M | InterGen, InterMask | InterHuman-262 / InterCLIP evaluator; InterX official HHI text-mot-match evaluator |
 | Streaming / autoregressive T2M | MotionStreamer, Go to Zero, T2M-GPT | native model cards plus MS272 evaluator where applicable |
 | Text + kinematic control | KIMODO | SOMA/G1/SMPL-X runtime; SMPL mesh bridge via `hftrainer.motion.retarget` |

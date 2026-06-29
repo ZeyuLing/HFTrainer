@@ -16,8 +16,8 @@ from build_heldout_agile import agility, REPO, G1_ROOT
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb.json")
-    ap.add_argument("--heldout", default="data/annotation/_heldout_agile.json")
+    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json")
+    ap.add_argument("--heldout", default="data/annotation/_heldout_agile_ground_only.json")
     ap.add_argument("--sample", type=int, default=5000)
     ap.add_argument("--topk", type=int, default=24)
     ap.add_argument("--out", default="data/annotation/_coevo_hardovf_agile.json")

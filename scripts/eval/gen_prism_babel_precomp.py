@@ -47,6 +47,10 @@ def main():
     ap.add_argument("--steps", type=int, default=50)
     ap.add_argument("--guidance", type=float, default=5.0)
     ap.add_argument("--ar-cond-frames", type=int, default=5)
+    ap.add_argument("--length-policy", choices=["direct_len", "pad360_crop", "legacy"], default="pad360_crop",
+                    help="PRISM generation length policy. pad360_crop is the training-aligned default: "
+                         "use a 360-frame canvas per segment and crop. direct_len is kept for ablations.")
+    ap.add_argument("--pad-to-frames", type=int, default=360)
     ap.add_argument("--up-fix", default="y2z", choices=["none", "y2z", "z2y"],
                     help="Global up-axis remap applied to root orient+transl before encoding.")
     ap.add_argument("--no-rewrite", action="store_true")
@@ -89,7 +93,10 @@ def main():
         prompts = texts if args.no_rewrite else [rewrite_caption(t) for t in texts]
         sm = pipeline(prompts=prompts, num_frames_per_segment=lengths,
                       num_inference_steps=args.steps, guidance_scale=args.guidance,
-                      ar_condition_frames=args.ar_cond_frames, use_blend=False)
+                      ar_condition_frames=args.ar_cond_frames, use_blend=False,
+                      length_policy=args.length_policy,
+                      pad_to_frames=args.pad_to_frames,
+                      strict_length=True)
         go = torch.as_tensor(np.asarray(sm["global_orient"]), dtype=torch.float32)  # [T,3]
         bp = torch.as_tensor(np.asarray(sm["body_pose"]), dtype=torch.float32)      # [T,63]
         tr = torch.as_tensor(np.asarray(sm["transl"]), dtype=torch.float32)         # [T,3]

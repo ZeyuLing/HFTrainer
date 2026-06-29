@@ -12,7 +12,7 @@ Two metric blocks (per the paper / FlowMDM protocol, 30-frame transition window)
 
 Inputs
 ------
---manifest   data/babel/babel_seq_val_manifest.jsonl   (build_babel_seq_manifest.py)
+--manifest   outputs/evaluation/sequential_t2m/babel_official_val_30fps/manifest.jsonl
 --pred-dir   dir of <id>.npz with motion_272 (or motion_135) full sequences,
              OR omit / --real to evaluate the GT val_stream as the Real row.
 The BABEL t2m mean/std are used (NOT HumanML3D).
@@ -65,7 +65,8 @@ BABEL_MEAN_STD = os.path.join(REPO, "data/babel/babel_272/t2m_babel_mean_std")
 # evaluator input distribution consistent (required to match the MS paper GT).
 HUMANML_MEAN_STD = os.path.join(REPO, "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/mean_std")
 # Allow pointing GT at a /dev/shm cache to bypass CephFS contention.
-GT_STREAM = os.environ.get("BABEL_GT_STREAM", os.path.join(REPO, "data/babel_272_stream/val_stream"))
+CANON_BABEL = os.path.join(REPO, "outputs/evaluation/sequential_t2m/babel_official_val_30fps")
+GT_STREAM = os.environ.get("BABEL_GT_STREAM", os.path.join(CANON_BABEL, "ms272/gt_0beta"))
 TRANSITION_LEN = 30
 MAX_LEN = 300
 MIN_SEG = 16          # relaxed (BABEL sub-actions are often <60 frames)
@@ -122,7 +123,7 @@ def per_frame_jerk(pos):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default="data/babel/babel_seq_val_manifest.jsonl")
+    ap.add_argument("--manifest", default="outputs/evaluation/sequential_t2m/babel_official_val_30fps/manifest.jsonl")
     ap.add_argument("--pred-dir", default=None,
                     help="dir of <id>.npz (motion_272 or motion_135); omit/--real for GT")
     ap.add_argument("--real", action="store_true", help="evaluate GT val_stream (Real row)")
@@ -296,6 +297,16 @@ def main():
     print(f"[pred] ep={pstat[0]} seg={pstat[1]} trans={pstat[2]}", flush=True)
     gt_sub, gt_tr, gt_jerk, gstat = collect(load_seq_gt)
     print(f"[gt]   ep={gstat[0]} seg={gstat[1]} trans={gstat[2]}", flush=True)
+    if not pred_sub:
+        raise RuntimeError(
+            f"No prediction subsequences collected; check pred_dir={pred_dir} "
+            f"and manifest={args.manifest}"
+        )
+    if not gt_sub:
+        raise RuntimeError(
+            f"No GT subsequences collected; check gt_stream_dir={gt_stream_dir} "
+            f"and manifest={args.manifest}"
+        )
 
     # ---- Subseq Quality (text-conditioned) ----
     pred_enc = E.encode_items(pred_sub, textenc, motionenc, device,

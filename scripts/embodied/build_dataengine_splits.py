@@ -29,8 +29,8 @@ from scripts.embodied.build_heldout_agile import agility  # noqa
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb.json")
-    ap.add_argument("--agile", default="data/annotation/_heldout_agile.json")
+    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json")
+    ap.add_argument("--agile", default="data/annotation/_heldout_agile_ground_only.json")
     ap.add_argument("--scan", type=int, default=12000)
     ap.add_argument("--n-hbench", type=int, default=120)
     ap.add_argument("--n-narrow", type=int, default=300)

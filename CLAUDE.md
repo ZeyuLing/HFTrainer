@@ -159,9 +159,9 @@ outputs/evaluation/{task}/{test_dataset}/{motion_representation}/{method}/
 
 命名规则：
 
-- `{task}` 使用稳定任务族名：`t2m`、`m2m`、`semantic_edit`、`repair`、`control`、`interaction_t2m`、`retarget`、`embodied_tracking`、`physics_eval`。
-- `{test_dataset}` 使用数据集与 split/protocol：`humanml3d_test`、`humanml3d_official_test`、`motionstreamer_h3d272_test`、`motionfix_test`、`interhuman_test`、`interx_test`、`kimodo_hml3d_test`、`amass_g1_test`。
-- `{motion_representation}` 使用当前目录中**直接存储的动作表示**：`motion135`（SMPL motion_135）、`hml263`（HumanML3D-263）、`ms272`（MotionStreamer-272）、`motion201`、`soma`、`g1`、`interhuman262`、`interx_hhi`。正式结果不要再用 `multi_rep`；如果一个 run 产生多种表示，必须拆到多个 representation 目录下。
+- `{task}` 使用稳定任务族名：`t2m`、`tp2m`、`sequential_t2m`、`m2m`、`semantic_edit`、`repair`、`control`、`interaction_t2m`、`retarget`、`embodied_tracking`、`physics_eval`。
+- `{test_dataset}` 使用数据集与 split/protocol：`humanml3d_test`、`humanml3d_official_test`、`humanml3d_official_test_c1`、`humanml3d_official_test_c5`、`humanml3d_official_test_c9`、`babel_official_val_30fps`、`motionstreamer_h3d272_test`、`motionfix_test`、`interhuman_test`、`interx_test`、`kimodo_hml3d_test`、`amass_g1_test`。
+- `{motion_representation}` 使用当前目录中**直接存储的动作表示**：`motion135`（SMPL motion_135）、`hml263`（HumanML3D-263）、`ms272`（MotionStreamer-272）、`smplh`、`smplx`、`dart276`（DART / ViMoGen 276-dim）、`motion201`、`soma`、`g1`、`interhuman262`、`interx_hhi`。正式结果不要再用 `multi_rep`；如果一个 run 产生多种表示，必须拆到多个 representation 目录下。
 - 每个 T2M method 至少要保存一份 SMPL 结果：`motion135/{method}/`。为了方便 MotionStreamer Evaluator / HumanML3D evaluator，可以额外保存 `ms272/{method}/` 和 `hml263/{method}/`。这些是同一个 method 的不同表示，不是不同 method。
 - `{method}` 是 debug 完成后的稳定方法名，越短越好，使用 lower snake case。只有真实长期版本差异才进入方法名，例如 `hymotion_1b`、`hymotion_lite`；普通运行设置不进入目录名。
 - 禁止在正式 method 目录名中使用这些后缀：`selected_caption`、`official_test`、`exactlen`、日期、`from_motion135`、`prep`、`predictions`、`mdmstats`、`fix`、`smoke`、`debug`、`rerun`、`vermo`。这些信息写入 `run_config.json` / `command.txt` / `metrics/*.json`。

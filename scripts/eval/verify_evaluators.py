@@ -75,9 +75,9 @@ def verify_hml263(
         "caption_selection": caption_selection,
         "caption_protocol_note": (
             "Semantic metrics require texts_dir to match the captions used for "
-            "generation. For selected-caption official272 runs, pass "
+            "generation. For corrected HumanML3D official-test runs, pass "
             "outputs/evaluation/t2m/humanml3d_official_test/captions/"
-            "gt_motionclip_selected_20260622/texts."
+            "humanml3d_official_corrected/texts."
         ),
     })
     print("\n[HumanML3D-263 evaluator]")

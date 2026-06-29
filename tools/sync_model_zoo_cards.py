@@ -89,11 +89,25 @@ CARDS: tuple[ModelZooCard, ...] = (
         tags=("motion-generation", "text-to-motion", "humanml3d", "motionlab", "motion-editing"),
     ),
     ModelZooCard(
+        slug="motiongpt",
+        doc_path=Path("docs/model_zoo/motiongpt.md"),
+        local_dirs=(Path("checkpoints/baselines/motiongpt"),),
+        hub_repos=("ZeyuLing/hftrainer-motiongpt-humanml3d",),
+        tags=("motion-generation", "text-to-motion", "humanml3d", "motiongpt", "motion-language"),
+    ),
+    ModelZooCard(
         slug="motiongpt3",
         doc_path=Path("docs/model_zoo/motiongpt3.md"),
         local_dirs=(Path("checkpoints/baselines/motiongpt3"),),
         hub_repos=("ZeyuLing/hftrainer-motiongpt3-humanml3d",),
         tags=("motion-generation", "text-to-motion", "humanml3d", "motiongpt3", "motion-language"),
+    ),
+    ModelZooCard(
+        slug="vimogen",
+        doc_path=Path("docs/model_zoo/vimogen.md"),
+        local_dirs=(Path("checkpoints/vimogen/hftrainer_1_3b"),),
+        hub_repos=("ZeyuLing/hftrainer-vimogen-1.3b-humanml3d",),
+        tags=("motion-generation", "text-to-motion", "humanml3d", "vimogen", "dart276", "smpl"),
     ),
     ModelZooCard(
         slug="prism",
@@ -136,8 +150,14 @@ CARDS: tuple[ModelZooCard, ...] = (
     ModelZooCard(
         slug="gotozero",
         doc_path=Path("docs/model_zoo/gotozero.md"),
-        local_dirs=(Path("checkpoints/gotozero/hftrainer_7b_humanml272"),),
-        hub_repos=("ZeyuLing/hftrainer-gotozero-7b-humanml272",),
+        local_dirs=(
+            Path("checkpoints/gotozero/hftrainer_7b_train_humanml272"),
+            Path("checkpoints/gotozero/hftrainer_3b_train_humanml272"),
+        ),
+        hub_repos=(
+            "ZeyuLing/hftrainer-gotozero-7b-train-humanml272",
+            "ZeyuLing/hftrainer-gotozero-3b-train-humanml272",
+        ),
         tags=("motion-generation", "text-to-motion", "motionmillion", "humanml3d-272"),
     ),
     ModelZooCard(

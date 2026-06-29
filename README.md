@@ -96,10 +96,12 @@ inference instead of importing the original repository at runtime.
 | [MLD](docs/model_zoo/mld.md) | Text-to-motion | HumanML3D-263 | `MLDBundle` / `MLDPipeline` | [`ZeyuLing/hftrainer-mld-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-mld-humanml3d) |
 | [FlowMDM](docs/model_zoo/flowmdm.md) | Text-to-motion / motion composition | HumanML3D-263 | `FlowMDMBundle` / `FlowMDMPipeline` | [`ZeyuLing/hftrainer-flowmdm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-flowmdm-humanml3d) |
 | [MotionLab](docs/model_zoo/motionlab.md) | Text-to-motion / motion editing | HumanML3D-263 | `MotionLabBundle` / `MotionLabPipeline` | [`ZeyuLing/hftrainer-motionlab-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlab-humanml3d) |
+| [MotionGPT](docs/model_zoo/motiongpt.md) | Text-to-motion / motion-language generation | HumanML3D-263 | `MotionGPTBundle` / `MotionGPTPipeline` | [`ZeyuLing/hftrainer-motiongpt-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motiongpt-humanml3d) |
 | [MotionGPT3](docs/model_zoo/motiongpt3.md) | Text-to-motion / motion-language generation | HumanML3D-263 | `MotionGPT3Bundle` / `MotionGPT3Pipeline` | [`ZeyuLing/hftrainer-motiongpt3-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motiongpt3-humanml3d) |
+| [ViMoGen](docs/model_zoo/vimogen.md) | Text-to-motion | DART276 / SMPL motion_135 | `ViMoGenBundle` / `ViMoGenPipeline` | [`ZeyuLing/hftrainer-vimogen-1.3b-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-vimogen-1.3b-humanml3d) |
 | [MotionLCM](docs/model_zoo/motionlcm.md) | Text-to-motion | HumanML3D latent / 263 bridge | `MotionLCMBundle` / `MotionLCMPipeline` | [`ZeyuLing/hftrainer-motionlcm-humanml3d`](https://huggingface.co/ZeyuLing/hftrainer-motionlcm-humanml3d) |
 | [MotionStreamer](docs/model_zoo/motionstreamer.md) | Streaming text-to-motion | MotionStreamer-272 | `MotionStreamerBundle` / `MotionStreamerPipeline` | [`ZeyuLing/hftrainer-motionstreamer-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-motionstreamer-humanml272) |
-| [Go to Zero / MotionMillion](docs/model_zoo/gotozero.md) | Zero-shot text-to-motion | MotionStreamer-272 | `MotionMillionBundle` / `MotionMillionPipeline` | [`ZeyuLing/hftrainer-gotozero-7b-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-humanml272) |
+| [Go to Zero / MotionMillion](docs/model_zoo/gotozero.md) | Zero-shot text-to-motion | MotionStreamer-272 | `MotionMillionBundle` / `MotionMillionPipeline` | [`7B-train`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-train-humanml272), [`3B-train`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-3b-train-humanml272) |
 | [HY-Motion T2M 1.0](docs/model_zoo/hymotion_t2m.md) | Text-to-motion | HY-Motion 201 / SMPL motion_135 | `HyMotionT2MBundle` / `HyMotionT2MPipeline` | [`full`](https://huggingface.co/ZeyuLing/hftrainer-hymotion-t2m-1.0), [`lite`](https://huggingface.co/ZeyuLing/hftrainer-hymotion-t2m-1.0-lite) |
 | [KIMODO](docs/model_zoo/kimodo.md) | Text + kinematic control | SOMA / G1 / SMPL-X | `KIMODOBundle` / `KIMODOPipeline` | [`ZeyuLing/hftrainer-kimodo-soma-rp`](https://huggingface.co/ZeyuLing/hftrainer-kimodo-soma-rp) (private / license review) |
 
@@ -153,9 +155,10 @@ The repository currently uses these motion spaces:
 
 | Representation | FPS | Shape | Used by |
 |---|---:|---|---|
-| HumanML3D-263 | 20 | `(T, 263)` | MDM, T2M-GPT, MoMask, MoGenTS, MLD, FlowMDM, MotionLab, MotionGPT3, MotionLCM, HumanML evaluator |
+| HumanML3D-263 | 20 | `(T, 263)` | MDM, T2M-GPT, MoMask, MoGenTS, MLD, FlowMDM, MotionLab, MotionGPT, MotionGPT3, MotionLCM, HumanML evaluator |
 | MotionStreamer-272 | 30 | `(T, 272)` | MotionStreamer, Go to Zero, MS272 evaluator |
 | SMPL `motion_135` | usually 30 | root translation + 22 row-major rot6d joints | mesh rendering, HY-Motion scoring bridge, retargeting |
+| DART-276 | 20 | `(T, 276)` | ViMoGen / DART-style models; bridge through `dart276 -> motion135 -> ms272` |
 | HY-Motion 201 | 30 | SMPL 135 + joint-position features | HY-Motion T2M |
 | SOMA30 / SOMA77 | model dependent | KIMODO skeleton rotations and joints | KIMODO |
 | Unitree G1 | model dependent | 29-DOF robot qpos/qpos-like output | embodied retargeting |

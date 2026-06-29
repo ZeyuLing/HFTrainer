@@ -20,12 +20,24 @@ pick_py() {
       /usr/local/miniconda3/bin/python "$HOME/miniconda3/bin/python"; do
     [ -n "$c" ] || continue
     command -v "$c" >/dev/null 2>&1 || [ -x "$c" ] || continue
-    "$c" -c 'import sys; import numpy; import torch; import mmengine; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' 2>/dev/null && { echo "$c"; return 0; }
+    "$c" -c 'import sys; import numpy; import torch; sys.exit(0 if sys.version_info[:2]>=(3,8) else 1)' 2>/dev/null && { echo "$c"; return 0; }
   done
   return 1
 }
 PY=$(pick_py) || { echo "[error] Python >=3.8 with numpy+torch not found"; exit 2; }
 echo "[python] $(command -v "$PY") $("$PY" --version 2>&1)"
+
+ensure_py_dep() {
+  local import_name="$1"
+  local package_spec="$2"
+  "$PY" -c "import ${import_name}" >/dev/null 2>&1 && return 0
+  echo "[deps] installing missing ${package_spec}"
+  PIP_ROOT_USER_ACTION=ignore "$PY" -m pip install --quiet "$package_spec"
+  "$PY" -c "import ${import_name}" >/dev/null 2>&1
+}
+ensure_py_dep mmengine "mmengine>=0.10"
+ensure_py_dep einops "einops>=0.7"
+ensure_py_dep smplx "smplx>=0.1.28"
 
 NGPU=${NGPU:-8}
 TOTAL_SHARDS=${TOTAL_SHARDS:-}
@@ -44,6 +56,8 @@ GUIDANCE=${GUIDANCE:-5.0}
 SEED=${SEED:-42}
 SMOOTH_OUTPUT=${SMOOTH_OUTPUT:-0}
 TRANSLATION_DECODE_MODE=${TRANSLATION_DECODE_MODE:-rollout}
+LENGTH_POLICY=${LENGTH_POLICY:-pad360_crop}
+PAD_TO_FRAMES=${PAD_TO_FRAMES:-360}
 SKIP_MOTION_EXISTENCE_CHECK=${SKIP_MOTION_EXISTENCE_CHECK:-0}
 MIN_FRAMES=${MIN_FRAMES:-24}
 MAX_FRAMES=${MAX_FRAMES:-360}
@@ -90,7 +104,7 @@ rewrite_flag=()
 SUB=${OUT_SUBDIR:-$KAFS_MODE}
 mkdir -p "$OUT/$SUB" "$OUT/_logs"
 echo "[genonly] $(date) CKPT=$CKPT SUB=$SUB mode=$KAFS_MODE alpha=[$KAFS_ALPHA] seed=$SEED TOTAL_SHARDS=$TOTAL_SHARDS SHARD_BASE=$SHARD_BASE min/max=$MIN_FRAMES/$MAX_FRAMES rewritten=[$REWRITTEN] -> $OUT/$SUB"
-echo "[genonly] translation_decode_mode=$TRANSLATION_DECODE_MODE smooth=$SMOOTH_OUTPUT"
+echo "[genonly] translation_decode_mode=$TRANSLATION_DECODE_MODE length_policy=$LENGTH_POLICY pad_to_frames=$PAD_TO_FRAMES smooth=$SMOOTH_OUTPUT"
 
 pids=()
 for g in $(seq 0 $((NGPU-1))); do
@@ -103,9 +117,10 @@ for g in $(seq 0 $((NGPU-1))); do
     --data-dir "$DATA_DIR" --output-dir "$OUT" \
     "${id_file_flag[@]}" \
     --min-frames "$MIN_FRAMES" --max-frames "$MAX_FRAMES" \
-    --num-inference-steps $STEPS --guidance-scale $GUIDANCE \
-    --translation-decode-mode "$TRANSLATION_DECODE_MODE" \
-    --seed "$SEED" \
+	    --num-inference-steps $STEPS --guidance-scale $GUIDANCE \
+	    --translation-decode-mode "$TRANSLATION_DECODE_MODE" \
+	    --length-policy "$LENGTH_POLICY" --pad-to-frames "$PAD_TO_FRAMES" \
+	    --seed "$SEED" \
     --num-shards $TOTAL_SHARDS --shard-idx $gidx --skip-existing \
     $smooth_flag $skip_motion_flag \
     > "$OUT/_logs/${SUB}_g${gidx}of${TOTAL_SHARDS}.log" 2>&1 &

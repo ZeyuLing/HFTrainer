@@ -36,6 +36,10 @@ def main() -> None:
     ap.add_argument("--num-inference-steps", type=int, default=50)
     ap.add_argument("--guidance-scale", type=float, default=5.0)
     ap.add_argument("--kafs-mode", default="none", choices=["none", "depth_driven", "uniform", "random"])
+    ap.add_argument("--length-policy", choices=["direct_len", "pad360_crop", "legacy"], default="pad360_crop",
+                    help="PRISM generation length policy. pad360_crop is the training-aligned default: "
+                         "use a 360-frame canvas per segment and crop. direct_len is kept for ablations.")
+    ap.add_argument("--pad-to-frames", type=int, default=360)
     ap.add_argument("--rewrite-captions", action="store_true",
                     help="Rewrite terse BABEL labels into grammatical 'a person ...' captions (HumanML3D-style, in-distribution for PRISM).")
     ap.add_argument("--ar-cond-frames", type=int, default=5,
@@ -84,6 +88,8 @@ def main() -> None:
         "num_inference_steps": args.num_inference_steps,
         "guidance_scale": args.guidance_scale,
         "kafs_mode": args.kafs_mode,
+        "length_policy": args.length_policy,
+        "pad_to_frames": args.pad_to_frames,
         "rewrite_captions": bool(args.rewrite_captions),
         "ar_cond_frames": args.ar_cond_frames,
         "blend": bool(args.blend),
@@ -120,6 +126,9 @@ def main() -> None:
                 guidance_scale=args.guidance_scale,
                 ar_condition_frames=args.ar_cond_frames,
                 use_blend=args.blend,
+                length_policy=args.length_policy,
+                pad_to_frames=args.pad_to_frames,
+                strict_length=True,
             )
             save_smplx_npz(str(out_path), smplx_dict)
             ok += 1

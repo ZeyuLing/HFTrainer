@@ -131,8 +131,19 @@ class SMPLPoseProcessor(nn.Module):
             mean_list = stats[key]["mean"]
             std_list = stats[key]["std"]
         else:
-            mean_list = stats[key][subkey]["mean"]
-            std_list = stats[key][subkey]["std"]
+            block = stats[key]
+            if subkey not in block:
+                alias = {
+                    "rotation_6d": "rot6d",
+                    "rot6d": "rotation_6d",
+                    "matrix": "rotmat",
+                    "rotmat": "matrix",
+                }.get(subkey)
+                if alias is None or alias not in block:
+                    raise KeyError(f"missing stats block {key}.{subkey}")
+                subkey = alias
+            mean_list = block[subkey]["mean"]
+            std_list = block[subkey]["std"]
         mean = _ensure_tensor_1d(mean_list)
         std = _ensure_tensor_1d(std_list)
         return mean, std
@@ -353,7 +364,7 @@ class SMPLPoseProcessor(nn.Module):
         if smpl_type == "smplx_55":
             poses += [jaw, le, re]
 
-        if smpl_type == "smplh":
+        if smpl_type in {"smplh", "smplx_55"}:
             poses += [lhp, rhp]
 
         poses = np.concatenate(poses, axis=-1)  # (T, J*3).

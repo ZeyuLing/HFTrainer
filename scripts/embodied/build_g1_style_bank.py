@@ -25,7 +25,7 @@ from hftrainer.models.motion.physflow.g1_style_reward import (
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--anno", default="data/annotation/train_g1_t2m_emb_minus_heldout.json")
+    parser.add_argument("--anno", default="data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json")
     parser.add_argument("--g1-dir", default="data/g1")
     parser.add_argument("--out", required=True)
     parser.add_argument("--max-items", type=int, default=20000)
@@ -63,4 +63,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

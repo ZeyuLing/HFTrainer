@@ -23,6 +23,7 @@ import shutil
 import sys
 import types
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -32,10 +33,21 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 DEFAULT_FSQ = "checkpoints/motionmillion/pretrained_models/fsq.zip"
-DEFAULT_AR = "checkpoints/motionmillion/pretrained_models/t2m_7B_all.zip"
+DEFAULT_AR = "checkpoints/motionmillion/pretrained_models/motionmillion_7B.pth"
 DEFAULT_MEAN = "checkpoints/motionmillion/mean_std/vector_272/mean.npy"
 DEFAULT_STD = "checkpoints/motionmillion/mean_std/vector_272/std.npy"
 DEFAULT_TEXT = "google/flan-t5-xl"
+
+
+def _infer_ar_config_name(ar_path: str, requested: str) -> str:
+    if requested != "auto":
+        return requested
+    name = Path(ar_path).name.lower()
+    if "3b" in name:
+        return "3B"
+    if "7b" in name:
+        return "7B"
+    return str(_AR_DEFAULTS["config_name"])
 
 
 def _has_files(path: Path) -> bool:
@@ -120,7 +132,8 @@ def _copy_text_encoder(src_name: str, dst: Path) -> None:
     shutil.copytree(src, dst, symlinks=False, ignore=ignore)
 
 
-def _write_readme(path: Path) -> None:
+def _write_readme(path: Path, repo_id: Optional[str] = None) -> None:
+    load_target = repo_id or "<local-artifact-dir-or-hf-repo-id>"
     path.write_text(
         "---\n"
         "library_name: hftrainer\n"
@@ -132,7 +145,7 @@ def _write_readme(path: Path) -> None:
         "```python\n"
         "from hftrainer.pipelines.motionmillion import MotionMillionPipeline\n\n"
         "pipe = MotionMillionPipeline.from_pretrained(\n"
-        "    \"ZeyuLing/hftrainer-gotozero-7b-humanml272\",\n"
+        f"    \"{load_target}\",\n"
         "    device=\"cuda\",\n"
         ")\n"
         "motions = pipe([\"a person walks forward.\"], lengths=[120])\n"
@@ -146,6 +159,12 @@ def main() -> None:
     p.add_argument("--ar", default=DEFAULT_AR)
     p.add_argument("--mean", default=DEFAULT_MEAN)
     p.add_argument("--std", default=DEFAULT_STD)
+    p.add_argument(
+        "--ar_config_name",
+        default="auto",
+        choices=["auto", "3B", "7B"],
+        help="MotionMillion LLaMA size. 'auto' infers 3B/7B from --ar filename.",
+    )
     p.add_argument("--text_model", default=DEFAULT_TEXT)
     p.add_argument(
         "--text_model_source",
@@ -155,6 +174,7 @@ def main() -> None:
     p.add_argument("--out_dir", required=True)
     p.add_argument("--device", default=None)
     p.add_argument("--no_text_encoder", action="store_true")
+    p.add_argument("--repo_id", default=None, help="Optional HF repo id to write into the generated README example.")
     p.add_argument("--verify", action="store_true")
     args = p.parse_args()
 
@@ -167,6 +187,7 @@ def main() -> None:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     text_source = _resolve_text_source(args.text_model_source or args.text_model)
+    ar_config_name = _infer_ar_config_name(args.ar, args.ar_config_name)
     print(f"[convert] saving FSQ -> {out / 'fsq.safetensors'}", flush=True)
     save_file(_load_state(REPO / args.fsq, "net"), str(out / "fsq.safetensors"))
     print(f"[convert] saving AR -> {out / 'ar.safetensors'}", flush=True)
@@ -188,7 +209,7 @@ def main() -> None:
         },
         "config": {
             "vqvae": dict(_VQVAE_DEFAULTS),
-            "ar": dict(_AR_DEFAULTS),
+            "ar": {**dict(_AR_DEFAULTS), "config_name": ar_config_name},
         },
     }
     (out / "mm_config.json").write_text(json.dumps(cfg, indent=2))
@@ -212,7 +233,7 @@ def main() -> None:
         },
     }
     (out / "model_index.json").write_text(json.dumps(model_index, indent=2))
-    _write_readme(out / "README.md")
+    _write_readme(out / "README.md", repo_id=args.repo_id)
     print(f"[convert] wrote MotionMillion artifact -> {args.out_dir}", flush=True)
 
     if args.verify:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Score the 80 held-out AGILE clips under the FROZEN g1-bones judge to find
+# Score the flat-ground held-out AGILE clips under the FROZEN g1-bones judge to find
 # head-room (clips the baseline tracker drops). Runs in the py3.10 judge env;
 # CSV->.motion conversion uses the py3.8 IsaacGym env (PHYSFLOW_CONVERT_PYTHON).
 set -uo pipefail
@@ -9,8 +9,9 @@ cd "$REPO"
 echo "[heldout-score] $(date) host=$(hostname)"
 
 OUT="${1:-output/heldout_frozen_score}"
+HELDOUT="${HELDOUT:-data/annotation/_heldout_agile_ground_only.json}"
 # Optional: re-score under a CO-EVOLVED round's exported tracker ONNX. When set,
-# the make-or-break paired comparison vs the frozen baseline on the SAME 80 clips.
+# the make-or-break paired comparison vs the frozen baseline on the same clips.
 SCORE_ONNX="${SCORE_ONNX:-${2:-}}"
 
 ln -sfn "$ENVDIR/isaacgym" /root/isaacgym
@@ -37,12 +38,12 @@ export PHYSFLOW_CONVERT_PYTHON=/root/physflow_isaacgym_py38_cu118/bin/python
 
 ONNX_ARG=()
 if [ -n "$SCORE_ONNX" ]; then
-  echo "[heldout-score] scoring held-out agile clips under CO-EVOLVED tracker: $SCORE_ONNX -> $OUT"
+  echo "[heldout-score] scoring held-out agile clips under CO-EVOLVED tracker: $HELDOUT $SCORE_ONNX -> $OUT"
   ONNX_ARG=(--onnx "$SCORE_ONNX")
 else
-  echo "[heldout-score] scoring held-out agile clips under FROZEN judge -> $OUT"
+  echo "[heldout-score] scoring held-out agile clips under FROZEN judge: $HELDOUT -> $OUT"
 fi
 /usr/local/bin/python3 scripts/embodied/score_heldout_frozen.py \
-  --heldout data/annotation/_heldout_agile.json \
+  --heldout "$HELDOUT" \
   --out "$OUT" "${ONNX_ARG[@]}"
 echo "[heldout-score] exit=$?  result=$OUT/heldout_score.json"

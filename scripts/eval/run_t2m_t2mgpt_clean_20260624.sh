@@ -16,7 +16,7 @@ export HF_HOME="${HF_HOME:-$ROOT/.cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 
 BASE="outputs/evaluation/t2m/humanml3d_official_test"
-ANNO="${ANNO:-$BASE/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json}"
+ANNO="${ANNO:-$BASE/captions/humanml3d_official_corrected/test_hml3d_official272_gtlen_official_caption.json}"
 SPLIT="${SPLIT:-ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt}"
 RUN_TAG="${RUN_TAG:-t2mgpt_clean_20260624}"
 RUN_ROOT="$BASE/_runs/$RUN_TAG"
@@ -64,7 +64,7 @@ cfg = {
     "dataset": "humanml3d_official_test",
     "method": "t2mgpt",
     "representation": rep,
-    "caption_protocol": "motionclip_selected_official_humanml3d_caption",
+    "caption_protocol": "humanml3d_official_corrected_caption",
     "annotation": anno,
     "hml263_dir": hml_dir,
     "motion135_dir": m135_dir,

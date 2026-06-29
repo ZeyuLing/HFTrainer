@@ -169,12 +169,21 @@ def _import_task_modules():
         # T2M-GPT (VQ-VAE + GPT; open-source T2M baseline; vendored, ref_repo-free)
         'hftrainer.models.motion.t2mgpt.bundle',
         'hftrainer.pipelines.t2mgpt.pipeline',
+        # MotionGPT (FLAN-T5 + VQ-VAE; open-source T2M baseline; vendored)
+        'hftrainer.models.motion.motiongpt.bundle',
+        'hftrainer.pipelines.motiongpt.pipeline',
         # MoMask (RVQ + masked/residual transformer; vendored, ref_repo-independent)
         'hftrainer.models.motion.momask.bundle',
         'hftrainer.pipelines.momask.pipeline',
         # MoGenTS (dual spatial-temporal RVQ + masked/residual transformers)
         'hftrainer.models.motion.mogents.bundle',
         'hftrainer.pipelines.mogents.pipeline',
+        # ViMoGen (Wan-based flow matching T2M; vendored, ref_repo-independent)
+        'hftrainer.models.motion.vimogen.bundle',
+        'hftrainer.pipelines.vimogen.pipeline',
+        # DART / DartControl (motion primitive rollout; vendored, ref_repo-independent)
+        'hftrainer.models.motion.dart.bundle',
+        'hftrainer.pipelines.dart.pipeline',
         # MotionLCM (latent consistency model; vendored, ref_repo-independent)
         'hftrainer.models.motion.motionlcm.bundle',
         'hftrainer.pipelines.motionlcm.pipeline',

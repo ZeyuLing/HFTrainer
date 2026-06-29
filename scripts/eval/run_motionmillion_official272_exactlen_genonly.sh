@@ -24,15 +24,15 @@ echo "[python] $(command -v "$PY") $("$PY" --version 2>&1)"
 NGPU=${NGPU:-8}
 TOTAL_SHARDS=${TOTAL_SHARDS:-32}
 SHARD_BASE=${SHARD_BASE:-0}
-OUT=${OUT:-outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero}
+OUT=${OUT:-outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero_7b_train}
 DTYPE=${DTYPE:-bf16}
 STEPS=${STEPS:-150}
 LIMIT=${LIMIT:-0}
-ARTIFACT=${ARTIFACT:-checkpoints/gotozero/hftrainer_7b_humanml272}
+ARTIFACT=${ARTIFACT:-checkpoints/gotozero/hftrainer_7b_train_humanml272}
 FSQ=${FSQ:-}
-AR=${AR:-checkpoints/motionmillion/pretrained_models/t2m_7B_all.zip}
+AR=${AR:-checkpoints/motionmillion/pretrained_models/motionmillion_7B.pth}
 TEXT=${TEXT:-}
-ANNO=${ANNO:-outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json}
+ANNO=${ANNO:-outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected/test_hml3d_official272_gtlen_official_caption.json}
 
 ckpt_args=()
 if [ -n "$ARTIFACT" ]; then
@@ -44,8 +44,8 @@ fi
 text_args=()
 [ -n "$TEXT" ] && text_args+=(--text_model_name "$TEXT")
 
-mkdir -p "$OUT" "$(dirname "$OUT")/_logs"
-LOGDIR="$(dirname "$OUT")/_logs"
+LOGDIR="${LOGDIR:-$(dirname "$OUT")/_logs}"
+mkdir -p "$OUT" "$LOGDIR"
 echo "[mm-exactlen] $(date) TOTAL_SHARDS=$TOTAL_SHARDS SHARD_BASE=$SHARD_BASE STEPS=$STEPS LIMIT=$LIMIT ANNO=$ANNO ARTIFACT=${ARTIFACT:-<raw>} -> $OUT"
 
 pids=()

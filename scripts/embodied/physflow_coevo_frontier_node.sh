@@ -65,7 +65,7 @@ TR_EPOCHS="${TR_EPOCHS:-40}"
 NUM_ENVS="${NUM_ENVS:-512}"
 BATCH="${BATCH:-4096}"
 ROOT=work_dirs/physflow_coevolve_frontier
-GENCKPT=work_dirs/hymotion_g1_t2m_38dim/checkpoint-g1base
+GENCKPT=work_dirs/hymotion_g1_t2m_38dim_scene_clean_minus_heldout/checkpoint-g1base
 TR_CKPT="$PROTO_ROOT/data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt"
 TR_EXP="$PROTO_ROOT/data/pretrained_models/motion_tracker/g1-bones-deploy/experiment_config.py"
 

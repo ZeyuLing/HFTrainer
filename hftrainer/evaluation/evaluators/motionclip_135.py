@@ -34,8 +34,8 @@ _DEFAULT_STATS = _REPO / "data/statistic/smplx55_stats_hymotion_aug.json"
 _DEFAULT_ANNO = (
     _REPO
     / "outputs/evaluation/t2m/humanml3d_official_test/captions/"
-    "gt_motionclip_selected_20260622/"
-    "test_hml3d_official272_gtlen_motionclip_selected_caption.json"
+    "humanml3d_official_corrected/"
+    "test_hml3d_official272_gtlen_official_caption.json"
 )
 
 
@@ -192,4 +192,3 @@ class MotionCLIP135Evaluator:
             )
             for method, pred_dir in pred_dirs.items()
         }
-

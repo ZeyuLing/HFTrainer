@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import sys
@@ -19,6 +20,35 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from eval_prism_kafs_ablation import load_prism_bundle, load_test_samples, save_smplx_npz
 
+DEFAULT_SELECTED_ANNO = (
+    "outputs/evaluation/t2m/humanml3d_official_test/captions/"
+    "gt_motionclip_selected_20260622/"
+    "test_hml3d_official272_gtlen_motionclip_selected_caption.json"
+)
+
+
+def _set_seed(seed: int) -> None:
+    seed = int(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _sample_seed(base_seed: int, sample_name: str, condition_num_frames: int) -> int:
+    key = f"{sample_name}|cond{condition_num_frames}".encode("utf-8")
+    digest = hashlib.blake2b(key, digest_size=4).digest()
+    return (int(base_seed) + int.from_bytes(digest, "little")) % (2**31)
+
+
+def _meta_int(smplx_dict: dict, key: str, default: int) -> int:
+    value = smplx_dict.get(key, default)
+    try:
+        return int(np.asarray(value).reshape(-1)[0])
+    except Exception:
+        return int(default)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -27,13 +57,17 @@ def main() -> None:
     )
     parser.add_argument("--config", default="configs/prism/prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached.py")
     parser.add_argument("--checkpoint", default="work_dirs/prism_1b_tp2m_multiframe_kt_spectral_unified_t5cached/checkpoint-epoch_7")
-    parser.add_argument("--anno-file", default="data/annotation/test_hml3d.json")
+    parser.add_argument("--anno-file", default=DEFAULT_SELECTED_ANNO)
     parser.add_argument("--data-dir", default="data/motionhub")
     parser.add_argument("--output-dir", default="outputs/evaluation/prism_tp2m_prefix_0605/h3d")
     parser.add_argument("--condition-num-frames", type=int, default=1)
     parser.add_argument("--kafs-mode", default="depth_driven", choices=["none", "depth_driven", "uniform", "random"])
     parser.add_argument("--num-inference-steps", type=int, default=50)
     parser.add_argument("--guidance-scale", type=float, default=5.0)
+    parser.add_argument("--length-policy", choices=["direct_len", "pad360_crop", "legacy"], default="pad360_crop",
+                        help="PRISM generation length policy. pad360_crop is the training-aligned default: "
+                             "generate on a 360-frame canvas and crop to GT length. direct_len is kept for ablations.")
+    parser.add_argument("--pad-to-frames", type=int, default=360)
     parser.add_argument("--motion-key", default="smplx")
     parser.add_argument("--caption-key", default="hierarchical_caption")
     parser.add_argument("--min-frames", type=int, default=24)
@@ -51,11 +85,7 @@ def main() -> None:
     if args.num_shards < 1 or not (0 <= args.shard_idx < args.num_shards):
         raise ValueError(f"invalid shard args: {args.shard_idx}/{args.num_shards}")
 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+    _set_seed(args.seed)
 
     samples = load_test_samples(
         anno_file=Path(args.anno_file),
@@ -75,7 +105,11 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[setup] device={device} samples={len(samples)} shard={args.shard_idx}/{args.num_shards}", flush=True)
-    print(f"[setup] cond_frames={args.condition_num_frames} kafs={args.kafs_mode}", flush=True)
+    print(
+        f"[setup] cond_frames={args.condition_num_frames} kafs={args.kafs_mode} "
+        f"length_policy={args.length_policy} pad_to_frames={args.pad_to_frames}",
+        flush=True,
+    )
 
     bundle = load_prism_bundle(args.config, args.checkpoint, device)
     from hftrainer.pipelines.motion.prism_pipeline import PrismPipeline
@@ -94,9 +128,12 @@ def main() -> None:
         "kafs_mode": args.kafs_mode,
         "num_inference_steps": args.num_inference_steps,
         "guidance_scale": args.guidance_scale,
+        "length_policy": args.length_policy,
+        "pad_to_frames": args.pad_to_frames,
         "num_shards": args.num_shards,
         "shard_idx": args.shard_idx,
         "num_samples": len(samples),
+        "seed_mode": "per_sample_blake2b_name_condition",
     }
     (out_dir / f"run_meta_shard{args.shard_idx}of{args.num_shards}.json").write_text(json.dumps(meta, indent=2))
 
@@ -108,9 +145,33 @@ def main() -> None:
         name = sample["name"]
         out_path = out_dir / f"{name}.npz"
         if args.skip_existing and out_path.exists():
+            manifest.append({
+                "name": name,
+                "caption": sample["caption"],
+                "motion_path": sample["motion_path"],
+                "gt_num_frames": sample["num_frames"],
+                "requested_len": int(sample["num_frames"]),
+                "official_gt_len": int(sample["num_frames"]),
+                "length_policy": args.length_policy,
+                "pad_to_frames": args.pad_to_frames,
+                "npz_path": str(out_path),
+                "status": "skipped_existing",
+            })
             n_success += 1
             continue
+        sample_seed = None
+        length_meta = {
+            "requested_len": int(sample["num_frames"]),
+            "official_gt_len": int(sample["num_frames"]),
+            "generation_len": None,
+            "valid_len": None,
+            "raw_decoded_len": None,
+            "pretrim_len": None,
+            "final_len": None,
+        }
         try:
+            sample_seed = _sample_seed(args.seed, name, args.condition_num_frames)
+            _set_seed(sample_seed)
             smplx_dict = pipeline(
                 prompts=sample["caption"],
                 first_frame_motion_path=sample["motion_path"],
@@ -118,7 +179,25 @@ def main() -> None:
                 num_frames_per_segment=sample["num_frames"],
                 num_inference_steps=args.num_inference_steps,
                 guidance_scale=args.guidance_scale,
+                length_policy=args.length_policy,
+                pad_to_frames=args.pad_to_frames,
+                strict_length=True,
             )
+            final_len = int(np.asarray(smplx_dict["transl"]).shape[0])
+            length_meta = {
+                "requested_len": _meta_int(smplx_dict, "_prism_requested_num_frames", sample["num_frames"]),
+                "official_gt_len": int(sample["num_frames"]),
+                "generation_len": _meta_int(smplx_dict, "_prism_generation_num_frames", args.pad_to_frames),
+                "valid_len": _meta_int(smplx_dict, "_prism_valid_num_frames", sample["num_frames"]),
+                "raw_decoded_len": _meta_int(smplx_dict, "_prism_raw_decoded_num_frames", final_len),
+                "pretrim_len": _meta_int(smplx_dict, "_prism_pretrim_num_frames", final_len),
+                "final_len": _meta_int(smplx_dict, "_prism_final_num_frames", final_len),
+            }
+            if final_len != int(sample["num_frames"]) or length_meta["final_len"] != int(sample["num_frames"]):
+                raise ValueError(
+                    f"length mismatch: final={final_len} meta_final={length_meta['final_len']} "
+                    f"official_gt={sample['num_frames']}"
+                )
             save_smplx_npz(str(out_path), smplx_dict)
             n_success += 1
             status = "success"
@@ -131,6 +210,10 @@ def main() -> None:
             "caption": sample["caption"],
             "motion_path": sample["motion_path"],
             "gt_num_frames": sample["num_frames"],
+            **length_meta,
+            "length_policy": args.length_policy,
+            "pad_to_frames": args.pad_to_frames,
+            "seed": sample_seed if status == "success" else None,
             "npz_path": str(out_path) if out_path.exists() else "",
             "status": status,
         })

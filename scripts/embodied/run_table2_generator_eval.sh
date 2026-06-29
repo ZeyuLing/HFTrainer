@@ -5,10 +5,12 @@ set -euo pipefail
 CHECKPOINT="${CHECKPOINT:?CHECKPOINT is required}"
 OUT="${OUT:?OUT is required}"
 CONFIG="${CONFIG:-configs/physflow/hymotion_g1_t2m_38dim_long.py}"
-ANNO="${ANNO:-data/annotation/_heldout_agile.json}"
-STYLE_BANK="${STYLE_BANK:-data/g1_style_bank/heldout_agile_80.npz}"
-NUM_SAMPLES="${NUM_SAMPLES:-80}"
-MAX_ITEMS="${MAX_ITEMS:-80}"
+ANNO="${ANNO:-data/annotation/_heldout_agile_ground_only.json}"
+# Style-bank diagnostics are optional; do not enable the custom robot-style FID
+# by default because it is not a main-paper distribution metric.
+STYLE_BANK="${STYLE_BANK:-}"
+NUM_SAMPLES="${NUM_SAMPLES:-60}"
+MAX_ITEMS="${MAX_ITEMS:-60}"
 SAMPLE_STEPS="${SAMPLE_STEPS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
 GUIDANCE="${GUIDANCE:-1.0}"

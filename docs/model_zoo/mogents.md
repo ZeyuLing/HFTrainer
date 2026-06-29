@@ -148,24 +148,27 @@ python3 scripts/data/convert_motion135_to_h3d272.py \
 
 python3 scripts/eval/eval_motionstreamer_272.py \
     --pred-dir outputs/evaluation/t2m/humanml3d_official_test/ms272/mogents \
-    --tag mogents --also-refk \
-    --out-json outputs/evaluation/t2m/humanml3d_official_test/ms272/_suites/leaderboard_add_mogents_prism10_20260624/results/mogents_ms272.json
+    --gt-272-dir outputs/evaluation/t2m/humanml3d_official_test/_runs/noncanonical_legacy_20260623/ms272/gt_hml263_roundtrip_20260623_rootfix/predictions/ms272 \
+    --text-dir outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/texts \
+    --tag mogents_hmlroundtrip_fix_20260629 \
+    --min-motion-len 1 \
+    --out-json outputs/evaluation/t2m/humanml3d_official_test/ms272/_suites/hmlroundtrip_fix_20260629/results/mogents_motionstreamer272_hmlroundtrip.json
 ```
 
 Metric JSON:
-`outputs/evaluation/t2m/humanml3d_official_test/ms272/_suites/leaderboard_add_mogents_prism10_20260624/results/mogents_ms272.json`.
+`outputs/evaluation/t2m/humanml3d_official_test/ms272/_suites/hmlroundtrip_fix_20260629/results/mogents_motionstreamer272_hmlroundtrip.json`.
 
 Run summary:
 `outputs/evaluation/t2m/humanml3d_official_test/ms272/_suites/table1_mogents_exact_20260624/logs/mogents.run.log`.
 
 | Metric | MoGenTS HML263 -> SMPL135 -> MS272 | MS272 GT(real) |
 |---|---:|---:|
-| FID_refk down | 109.8191 | 0.0 |
-| R-Precision Top-1 / 2 / 3 up | 0.5910 / 0.7523 / 0.8138 | 0.7135 / 0.8521 / 0.9045 |
-| Diversity -> | 25.3317 | 27.5911 |
-| MM-Dist down | 18.6038 | 15.7095 |
+| FID down | 20.1861 | 0.0 |
+| R-Precision Top-1 / 2 / 3 up | 0.4993 / 0.6520 / 0.7354 | 0.7173 / 0.8720 / 0.9219 |
+| Diversity -> | 25.6972 | 26.6252 |
+| MM-Dist down | 19.5354 | 16.7867 |
 | Samples present | 4042 | 4042 |
-| Eval batches / nb | 124 / 3968 | 124 / 3968 |
+| Eval batches / nb | 126 / 4032 | 126 / 4032 |
 
 Canonical bridge outputs contain 4042 HML263 predictions, 4042 SMPL
 `motion_135` files, and 4042 MotionStreamer-272 files. The SMPL IK shard

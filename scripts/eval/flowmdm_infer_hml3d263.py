@@ -54,6 +54,22 @@ def _install_unused_rotation2xyz_module():
     sys.modules["model.rotation2xyz"] = module
 
 
+def _configure_stable_cuda_kernels() -> None:
+    """Prefer deterministic math kernels over fragile SDPA/cuDNN fast paths."""
+    torch.backends.cudnn.enabled = False
+    for name in (
+        "enable_flash_sdp",
+        "enable_mem_efficient_sdp",
+        "enable_cudnn_sdp",
+    ):
+        fn = getattr(torch.backends.cuda, name, None)
+        if fn is not None:
+            fn(False)
+    enable_math_sdp = getattr(torch.backends.cuda, "enable_math_sdp", None)
+    if enable_math_sdp is not None:
+        enable_math_sdp(True)
+
+
 def _resolve(path: str | Path) -> Path:
     path = Path(path)
     return path if path.is_absolute() else (REPO / path)
@@ -411,12 +427,46 @@ def _clear_flowmdm_embedding_cache(sampler) -> None:
             setattr(model, attr, torch.tensor(-1, device=device, dtype=torch.long))
 
 
+def _precompute_clip_text_cpu(sampler, raw_text: str, device: torch.device) -> torch.Tensor:
+    """Encode FlowMDM text with CLIP on CPU and pass the embedding to diffusion.
+
+    On some Taiji hosts, concurrent GPU CLIP attention in PyTorch SDPA/cuDNN can
+    fail with ``CUDNN_STATUS_NOT_INITIALIZED``. FlowMDM already accepts
+    ``text_embeddings`` in ``model_kwargs['y']``, so we keep the motion model on
+    GPU and move only the frozen CLIP text encoder to CPU for this one-time
+    caption embedding.
+    """
+    model = getattr(sampler, "model", None)
+    if model is None or not hasattr(model, "clip_model"):
+        raise RuntimeError("FlowMDM sampler does not expose clip_model for CPU precompute")
+    import clip  # noqa: WPS433
+
+    clip_model = model.clip_model.to("cpu")
+    clip_model.eval()
+    max_text_len = 20 if getattr(model, "dataset", None) in ["humanml", "kit"] else None
+    if max_text_len is not None:
+        default_context_length = 77
+        context_length = max_text_len + 2
+        tokens = clip.tokenize([raw_text], context_length=context_length, truncate=True)
+        zero_pad = torch.zeros(
+            [tokens.shape[0], default_context_length - context_length],
+            dtype=tokens.dtype,
+        )
+        tokens = torch.cat([tokens, zero_pad], dim=1)
+    else:
+        tokens = clip.tokenize([raw_text], truncate=True)
+    with torch.no_grad():
+        embedding = clip_model.encode_text(tokens).float()
+    return embedding.to(device)
+
+
 def _sample_one(
     sampler,
     caption: str,
     length: int,
     device: torch.device,
     inpainting: tuple[torch.Tensor, torch.Tensor] | None = None,
+    text_embedding: torch.Tensor | None = None,
 ) -> torch.Tensor:
     mask = torch.ones((1, length), device=device, dtype=torch.bool)
     y = {
@@ -429,6 +479,14 @@ def _sample_one(
         inpainting_mask, inpainted_motion = inpainting
         y["inpainting_mask"] = inpainting_mask
         y["inpainted_motion"] = inpainted_motion
+    if text_embedding is not None:
+        # DiffusionWrapper_FlowMDM converts even a single text prompt to
+        # all_texts=[["caption"]], so the fast path expects (I, N, D).
+        y["text_embeddings"] = (
+            text_embedding.unsqueeze(0)
+            if text_embedding.ndim == 2
+            else text_embedding
+        )
     model_kwargs = {
         "y": {
             **y,
@@ -487,6 +545,16 @@ def main():
     parser.add_argument("--load-only", action="store_true")
     parser.add_argument("--load-model-only", action="store_true")
     parser.add_argument(
+        "--stable-cuda-kernels",
+        action="store_true",
+        help="Disable fragile GPU SDPA/cuDNN fast paths for Taiji inference stability.",
+    )
+    parser.add_argument(
+        "--precompute-clip-text-cpu",
+        action="store_true",
+        help="Precompute frozen CLIP text embeddings on CPU and feed them to FlowMDM.",
+    )
+    parser.add_argument(
         "--only-ids",
         default=None,
         help="Optional comma-separated id list or text file. Useful for targeted reruns.",
@@ -529,6 +597,8 @@ def main():
              "Required with --condition-num-frames when --anno-file is set.",
     )
     args = parser.parse_args()
+    if args.stable_cuda_kernels:
+        _configure_stable_cuda_kernels()
 
     args.model_path = _resolve(args.model_path)
     recon_root = _resolve(args.recon_root)
@@ -581,6 +651,9 @@ def main():
         return
 
     sampler, device = _load_sampler(args)
+    if args.precompute_clip_text_cpu:
+        sampler.model.clip_model.to("cpu")
+        sampler.model.clip_model.eval()
     if args.load_model_only:
         print("[+] model load check complete")
         return
@@ -623,7 +696,19 @@ def main():
                     std,
                     device,
                 )
-            pred_norm = _sample_one(sampler, caption, length, device, inpainting=inpainting)
+            text_embedding = (
+                _precompute_clip_text_cpu(sampler, caption, device)
+                if args.precompute_clip_text_cpu
+                else None
+            )
+            pred_norm = _sample_one(
+                sampler,
+                caption,
+                length,
+                device,
+                inpainting=inpainting,
+                text_embedding=text_embedding,
+            )
             pred = (pred_norm * std + mean).detach().cpu().numpy().astype(np.float32)
             np.save(out_dir / f"{_safe_name(sid)}.npy", pred)
             written += 1

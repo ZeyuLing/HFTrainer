@@ -26,6 +26,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from hftrainer.datasets.motion.representation.humanml_repr import (  # noqa: E402
+    humanml272_to_humanml263,
     motion198_to_humanml263,
     setup_process_globals,
 )
@@ -49,6 +50,8 @@ def _load_smpl22_row135(path: Path) -> np.ndarray | None:
         z = np.load(str(path), allow_pickle=True)
     except Exception:
         return None
+    if not hasattr(z, "files"):
+        return None
     if "transl" not in z.files or "global_orient" not in z.files or "body_pose" not in z.files:
         return None
     import torch
@@ -64,6 +67,19 @@ def _load_smpl22_row135(path: Path) -> np.ndarray | None:
     return torch.cat([torch.from_numpy(transl), rot6d], dim=1).numpy().astype(np.float32)
 
 
+def _load_motion272(path: Path) -> np.ndarray | None:
+    try:
+        arr = np.load(str(path), allow_pickle=True)
+    except Exception:
+        return None
+    if hasattr(arr, "files"):
+        return None
+    arr = np.asarray(arr, dtype=np.float32)
+    if arr.ndim != 2 or arr.shape[1] != 272:
+        return None
+    return arr
+
+
 def _worker(task):
     key, entry, data_dir, out_dir, src_fps, dst_fps, min_hml_len, layout, skip_existing = task
     out_dir = Path(out_dir)
@@ -76,20 +92,33 @@ def _worker(task):
     if not rel:
         return key, "missing_smplx_path"
     motion_path = Path(data_dir) / rel
-    m135 = _load_smpl22_row135(motion_path)
-    if m135 is None:
-        return key, f"load_failed:{motion_path}"
-    if len(m135) < 4:
-        return key, f"too_short:{len(m135)}"
     try:
         setup_process_globals()
-        m263, _ = motion198_to_humanml263(
-            m135,
-            rotation_space="local",
-            src_fps=float(entry.get("fps") or src_fps),
-            dst_fps=dst_fps,
-            ensure_globals=False,
-        )
+        fps = float(entry.get("fps") or src_fps)
+        m135 = _load_smpl22_row135(motion_path)
+        if m135 is not None:
+            if len(m135) < 4:
+                return key, f"too_short:{len(m135)}"
+            m263, _ = motion198_to_humanml263(
+                m135,
+                rotation_space="local",
+                src_fps=fps,
+                dst_fps=dst_fps,
+                ensure_globals=False,
+            )
+        else:
+            m272 = _load_motion272(motion_path)
+            if m272 is None:
+                return key, f"load_failed:{motion_path}"
+            if len(m272) < 4:
+                return key, f"too_short:{len(m272)}"
+            m263, _ = humanml272_to_humanml263(
+                m272,
+                src_fps=fps,
+                dst_fps=dst_fps,
+                joints_from="smpl_fk",
+                ensure_globals=False,
+            )
     except Exception as exc:  # noqa: BLE001
         return key, f"convert_failed:{type(exc).__name__}:{exc}"
     if len(m263) < min_hml_len or not np.isfinite(m263).all():

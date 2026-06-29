@@ -5,11 +5,50 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import traceback
 from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
 import torch
+
+
+def _install_from_numpy_fallback() -> None:
+    """Work around Taiji hosts where torch's NumPy C-API binding is broken.
+
+    A small subset of long-lived A100PRO containers reports
+    ``TypeError: expected np.ndarray (got numpy.ndarray)`` for every
+    ``torch.from_numpy`` call. MotionStreamer inference only converts small
+    arrays in this wrapper/model path, so falling back to a copied Python-list
+    tensor is much cheaper than leaving an otherwise idle 8-GPU host unusable.
+    """
+    original = torch.from_numpy
+
+    def safe_from_numpy(array):  # noqa: ANN001
+        try:
+            return original(array)
+        except (TypeError, RuntimeError):
+            if not isinstance(array, np.ndarray):
+                raise
+            dtype_map = {
+                np.dtype("float16"): torch.float16,
+                np.dtype("float32"): torch.float32,
+                np.dtype("float64"): torch.float64,
+                np.dtype("int16"): torch.int16,
+                np.dtype("int32"): torch.int32,
+                np.dtype("int64"): torch.int64,
+                np.dtype("uint8"): torch.uint8,
+                np.dtype("bool"): torch.bool,
+            }
+            dtype = dtype_map.get(array.dtype)
+            if dtype is None:
+                return torch.tensor(array.tolist())
+            return torch.tensor(array.tolist(), dtype=dtype)
+
+    torch.from_numpy = safe_from_numpy
+
+
+_install_from_numpy_fallback()
 
 from gen_motionstreamer_smpl_npz import (
     _build_gt_path_map,
@@ -51,6 +90,17 @@ def _build_gt272_map(anno_file: Optional[Path], gt_272_dir: Path) -> Dict[str, P
     for path in gt_272_dir.glob("*.npy"):
         out.setdefault(path.stem, path)
     return out
+
+
+def _load_only_ids(value: Optional[str]) -> Optional[set[str]]:
+    if not value:
+        return None
+    path = Path(value)
+    if path.exists():
+        ids = [line.strip() for line in path.read_text().splitlines()]
+    else:
+        ids = [part.strip() for part in value.split(",")]
+    return {sid for sid in ids if sid}
 
 
 def _encode_prefix_latents(
@@ -112,6 +162,16 @@ def main():
     parser.add_argument("--mean", default="ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/mean_std/Mean.npy")
     parser.add_argument("--std", default="ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/mean_std/Std.npy")
     parser.add_argument("--max-motion-length", type=int, default=300)
+    parser.add_argument(
+        "--only-ids",
+        default=None,
+        help="Optional comma-separated id list or newline text file for targeted TP2M reruns.",
+    )
+    parser.add_argument(
+        "--flat-out-dir",
+        action="store_true",
+        help="Write files directly into --out-dir instead of --out-dir/condX_latent_prefix.",
+    )
     parser.add_argument("--align-to-gt-root", action="store_true")
     parser.add_argument("--align-root-mode", choices=["yaw", "full"], default="yaw")
     parser.add_argument("--prefix-latent-source", choices=["sample", "mu"], default="sample",
@@ -158,7 +218,10 @@ def main():
             data_dir=Path(args.data_dir),
             caption_protocol=args.caption_protocol,
             min_length=min_length,
-            max_length_exclusive=args.max_motion_length,
+            # _load_h3d_pairs uses an exclusive upper bound. The official
+            # HumanML3D selected split contains many 300-frame clips, so keep
+            # MotionStreamer's 300-frame cap inclusive here.
+            max_length_exclusive=args.max_motion_length + 1,
             limit=0,
         )
     else:
@@ -171,12 +234,15 @@ def main():
             caption_protocol=args.caption_protocol,
         )
         pairs = [p for p in pairs if p[2] >= args.condition_num_frames + 4]
+    only_ids = _load_only_ids(args.only_ids)
+    if only_ids is not None:
+        pairs = [p for p in pairs if str(p[0]) in only_ids]
     pairs = _select_shard(pairs, args.num_shards, args.shard_index)
     if args.max_samples:
         pairs = pairs[: args.max_samples]
     print(f"[setup] device={device} dataset={args.dataset} cond={args.condition_num_frames} pairs={len(pairs)}", flush=True)
 
-    out_dir = Path(args.out_dir) / f"cond{args.condition_num_frames}_latent_prefix"
+    out_dir = Path(args.out_dir) if args.flat_out_dir else Path(args.out_dir) / f"cond{args.condition_num_frames}_latent_prefix"
     out_dir.mkdir(parents=True, exist_ok=True)
     gt272_map = _build_gt272_map(anno_file, Path(args.gt_272_dir))
     gt_path_map = _build_gt_path_map(anno_file, Path(args.data_dir)) if args.align_to_gt_root else {}
@@ -276,6 +342,8 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 print(f"[fail] {name}: {type(exc).__name__}: {exc}", flush=True)
+                if failed <= 3:
+                    traceback.print_exc()
                 manifest.append({"sample_id": name, "status": f"{type(exc).__name__}: {exc}"})
             if (idx + 1) % 25 == 0 or idx + 1 == len(pairs):
                 print(f"[progress] {idx + 1}/{len(pairs)} ok={ok} skipped={skipped} failed={failed}", flush=True)

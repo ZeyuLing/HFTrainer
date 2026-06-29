@@ -37,8 +37,8 @@ G1_ROOT = os.path.join(REPO, "data/g1")
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb.json")
-    ap.add_argument("--heldout", default="data/annotation/_heldout_agile.json",
+    ap.add_argument("--anno", default="data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json")
+    ap.add_argument("--heldout", default="data/annotation/_heldout_agile_ground_only.json",
                     help="excluded from replay (eval set)")
     ap.add_argument("--pool", required=True, help="trainee pool dir to inject into")
     ap.add_argument("--scan", type=int, default=6000, help="random items to score")

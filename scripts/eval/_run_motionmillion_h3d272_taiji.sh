@@ -12,12 +12,12 @@ export HFTRAINER_SKIP_AUTOREGISTER=1
 export TOKENIZERS_PARALLELISM=false
 export HF_HUB_OFFLINE=1
 
-OUT=outputs/evaluation/motionmillion_h3d272/mm_272
+OUT=${OUT:-outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero_7b_train}
 LOGDIR=outputs/evaluation/motionmillion_h3d272/logs
 N=${N:-8}
 DTYPE=${DTYPE:-bf16}
 STEPS=${STEPS:-50}
-AR=${AR:-checkpoints/motionmillion/pretrained_models/t2m_7B_all.zip}
+AR=${AR:-checkpoints/motionmillion/pretrained_models/motionmillion_7B.pth}
 TEXT=${TEXT:-checkpoints/flan-t5-xl}
 LIMIT=${LIMIT:-0}
 mkdir -p "$OUT" "$LOGDIR"

@@ -33,11 +33,12 @@ _base_ = 'physflow_online_adv_g1_38dim.py'
 
 work_dir = 'work_dirs/physflow_coevo_frontier_g1'
 
-# Full diverse prompt bank MINUS the held-out agile eval clips.
+# Full diverse prompt bank MINUS the held-out agile eval clips and high-
+# confidence scene-interaction clips.
 train_dataloader = dict(
     batch_size=2,
     num_workers=4,
-    dataset=dict(anno_file='data/annotation/train_g1_t2m_emb_minus_heldout.json'),
+    dataset=dict(anno_file='data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json'),
 )
 
 optimizer = dict(type='AdamW', lr=5e-6, betas=[0.9, 0.99], weight_decay=0.0)

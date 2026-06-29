@@ -33,6 +33,7 @@ if [[ -z "${NUM_ENVS+x}" ]]; then
   fi
 fi
 MAX_EVAL_JOBS="${MAX_EVAL_JOBS:-1}"
+EVAL_GPU_LIST="${EVAL_GPU_LIST:-0 1 2 3 4 5 6 7}"
 FORCE_CONVERT="${FORCE_CONVERT:-0}"
 FORCE_PACK="${FORCE_PACK:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
@@ -51,6 +52,7 @@ echo "[unified-proto] start $(date)"
 echo "[unified-proto] host=$(hostname) shard_start=${SHARD_START} local_shards=${LOCAL_SHARDS} total_shards=${TOTAL_SHARDS}"
 echo "[unified-proto] splits=${SPLITS}"
 echo "[unified-proto] simulator=${PROTO_SIMULATOR} num_envs=${NUM_ENVS} max_eval_steps=${MAX_EVAL_STEPS} output_fps=${OUTPUT_FPS} reference_fps=${REFERENCE_FPS} tracker_control_fps=${TRACKER_CONTROL_FPS} max_reference_frames=${MAX_REFERENCE_FRAMES} max_eval_jobs=${MAX_EVAL_JOBS}"
+echo "[unified-proto] eval_gpu_list=${EVAL_GPU_LIST}"
 echo "[unified-proto] checkpoints=${CHECKPOINT_SPECS}"
 
 wait_for_background() {
@@ -260,6 +262,11 @@ eval_split() {
     mkdir -p "${eval_dir}"
     echo "[unified-proto] evaluating split=${split} method=${name}"
     local pids=()
+    read -r -a EVAL_GPUS <<< "${EVAL_GPU_LIST}"
+    if [[ "${#EVAL_GPUS[@]}" -eq 0 ]]; then
+      echo "[unified-proto] ERROR: EVAL_GPU_LIST is empty" >&2
+      exit 5
+    fi
     for shard in $(seq "${SHARD_START}" $((SHARD_START + LOCAL_SHARDS - 1))); do
       local shard_pt="${motion_base}/${split}_g1_shard_${shard}.pt"
       if [[ ! -s "${shard_pt}" ]]; then
@@ -276,7 +283,7 @@ eval_split() {
         continue
       fi
       (
-        export CUDA_VISIBLE_DEVICES="$(( (shard - SHARD_START) % 8 ))"
+        export CUDA_VISIBLE_DEVICES="${EVAL_GPUS[$(( (shard - SHARD_START) % ${#EVAL_GPUS[@]} ))]}"
         local save_override="agent.evaluator.save_predicted_motion_lib_every=None"
         local root_args=()
         if [[ "${SAVE_PREDICTED_MOTION_LIB}" == "1" ]]; then

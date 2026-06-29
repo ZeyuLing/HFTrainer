@@ -32,8 +32,8 @@ trainer = dict(
     enable_reward=True,
     # Optional G1/HYMotion style reward. Build once with:
     #   python3 scripts/embodied/build_g1_style_bank.py \
-    #     --anno data/annotation/train_g1_t2m_emb_minus_heldout.json \
-    #     --out data/g1_style_bank/train_minus_heldout_20k.npz --max-items 20000
+    #     --anno data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json \
+    #     --out data/g1_style_bank/train_minus_heldout_scene_clean_20k.npz --max-items 20000
     # Then set style_reward_bank to that path and tune style_reward_weight.
     style_reward_bank=None,
     style_reward_weight=0.0,
@@ -66,10 +66,13 @@ trainer = dict(
 
 # ----- Data: prompt corpus = the G1 dataset (dual CLIP+Qwen3 embeddings) -----
 # We override only the loader-level knobs; the dataset definition (type, anno,
-# embeddings) is inherited from the base config.  GT motion is ignored online.
+# embeddings) is inherited from the base config.  Use the scene-clean, heldout-
+# excluded prompt bank so online GT anchoring and tracker replay do not learn
+# platform/stair/object-support clips that require unavailable 3D scene geometry.
 train_dataloader = dict(
     batch_size=2,
     num_workers=4,
+    dataset=dict(anno_file='data/annotation/train_g1_t2m_emb_minus_heldout_scene_clean.json'),
 )
 
 # ----- Optimizer: low lr for online fine-tune -----
@@ -98,7 +101,7 @@ default_hooks = dict(
 # Warm-start from the supervised G1-native generator (NOT HY-Motion-Lite).
 load_from = dict(
     _delete_=True,
-    path='work_dirs/hymotion_g1_t2m_38dim/checkpoint-g1base',
+    path='work_dirs/hymotion_g1_t2m_38dim_scene_clean_minus_heldout/checkpoint-g1base',
     load_scope='model',
 )
 

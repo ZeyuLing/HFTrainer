@@ -117,6 +117,111 @@ class MotionStreamerPipeline(BasePipeline):
 
         return outputs
 
+    def _encode_prefix_latents(
+        self,
+        motion_272: np.ndarray,
+        condition_num_frames: int,
+        latent_source: str = "sample",
+    ) -> tuple[torch.Tensor, int]:
+        """Encode the observed TP2M prefix with the same TAE used by T2M."""
+        if int(condition_num_frames) < 1:
+            raise ValueError("condition_num_frames must be >= 1")
+        n = min(int(condition_num_frames), int(motion_272.shape[0]))
+        if n <= 0:
+            raise ValueError("empty TP2M prefix")
+        prefix = np.asarray(motion_272[:n], dtype=np.float32)
+        encoded_frames = n
+        if encoded_frames < MS_UNIT_LENGTH:
+            pad = np.repeat(prefix[-1:], MS_UNIT_LENGTH - encoded_frames, axis=0)
+            prefix = np.concatenate([prefix, pad], axis=0)
+            encoded_frames = MS_UNIT_LENGTH
+
+        device = self.device
+        x = torch.as_tensor(prefix, dtype=torch.float32, device=device).unsqueeze(0)
+        x = (x - self.bundle.mean.to(x)) / self.bundle.std.to(x)
+        latents, mu, _ = self.bundle.tae.encode(x)
+        if latent_source == "mu":
+            latents = mu
+        elif latent_source != "sample":
+            raise ValueError(f"unsupported latent_source={latent_source!r}")
+        latents = _to_2d_latents(latents)
+        return latents, encoded_frames
+
+    @torch.no_grad()
+    def infer_tp2m(
+        self,
+        captions: Sequence[str],
+        lengths: Sequence[int],
+        gt_motions_272: Sequence[np.ndarray],
+        condition_num_frames: int,
+        guidance_param: Optional[float] = None,
+        temperature: float = 1.0,
+        prefix_latent_source: str = "sample",
+        sampling_method: str = "new_demo",
+        max_motion_length: int = 300,
+        progress: bool = False,
+    ) -> List[np.ndarray]:
+        """Generate TP2M continuations from text plus GT MotionStreamer-272 prefix."""
+        if not (len(captions) == len(lengths) == len(gt_motions_272)):
+            raise ValueError("captions, lengths, and gt_motions_272 must have equal length")
+        if self.bundle.text_model is None:
+            raise RuntimeError(
+                "MotionStreamerBundle was built with load_text_model=False; "
+                "the SentenceT5 text encoder is required for generation."
+            )
+        if sampling_method not in {"new_demo", "new"}:
+            raise ValueError(f"unsupported sampling_method={sampling_method!r}")
+
+        scale = self.bundle.guidance_param if guidance_param is None else float(guidance_param)
+        device = self.device
+        outputs: List[np.ndarray] = []
+        for i, (caption, raw_len, gt_motion) in enumerate(
+            zip(captions, lengths, gt_motions_272)
+        ):
+            prefix_latents, _encoded_frames = self._encode_prefix_latents(
+                gt_motion,
+                condition_num_frames,
+                prefix_latent_source,
+            )
+            prefix_tokens = int(prefix_latents.shape[0])
+            eval_len = (min(int(raw_len), int(max_motion_length)) // MS_UNIT_LENGTH) * MS_UNIT_LENGTH
+            sample_total_frames = max(eval_len, (prefix_tokens + 1) * MS_UNIT_LENGTH)
+            if sampling_method == "new_demo":
+                _xs, new_latents = self.bundle.ar.sample_for_eval_CFG_babel_inference_new_demo(
+                    B_text=str(caption),
+                    A_motion=prefix_latents,
+                    length=sample_total_frames,
+                    clip_model=self.bundle.text_model,
+                    device=device,
+                    tokenizer="t5-xxl",
+                    unit_length=MS_UNIT_LENGTH,
+                    cfg=scale,
+                    temperature=float(temperature),
+                )
+            else:
+                continuation_frames = max(eval_len - prefix_tokens * MS_UNIT_LENGTH, MS_UNIT_LENGTH)
+                _xs, new_latents = self.bundle.ar.sample_for_eval_CFG_babel_inference_new(
+                    B_text=[str(caption)],
+                    A_motion=prefix_latents,
+                    length=continuation_frames,
+                    clip_model=self.bundle.text_model,
+                    device=device,
+                    tokenizer="t5-xxl",
+                    unit_length=MS_UNIT_LENGTH,
+                    cfg=scale,
+                )
+            full_latents = torch.cat([prefix_latents.unsqueeze(0), new_latents], dim=1)
+            motion = self.bundle.tae.forward_decoder(full_latents).squeeze(0)
+            motion = self.bundle.denormalize(motion)[:eval_len]
+            outputs.append(motion.detach().cpu().numpy().astype(np.float32))
+            if progress:
+                print(
+                    f"[ms-tp2m] {i + 1}/{len(captions)} "
+                    f"cond={condition_num_frames} len={eval_len}",
+                    flush=True,
+                )
+        return outputs
+
     @torch.no_grad()
     def infer_sequential_t2m(
         self,

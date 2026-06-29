@@ -1,6 +1,6 @@
 # Go to Zero (MotionMillion)
 
-Million-scale, 7B-parameter autoregressive text-to-motion model ("Go to Zero",
+Million-scale, 3B/7B-parameter autoregressive text-to-motion model ("Go to Zero",
 ICCV 2025 **Highlight**) integrated into the hftrainer Model Zoo. Our
 reproduction is **fully self-contained and independent of the original
 repository** at runtime: the HumanVQVAE (FSQ tokenizer) and the LLaMA
@@ -12,10 +12,10 @@ exercised.
 |---|---|
 | **Task** | Text-to-Motion (T2M), zero-shot |
 | **Bundle / Pipeline** | `MotionMillionBundle` / `MotionMillionPipeline` |
-| **Processed HF artifact** | [`ZeyuLing/hftrainer-gotozero-7b-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-humanml272) |
+| **Processed HF artifact** | [`7B-train`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-train-humanml272), [`3B-train`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-3b-train-humanml272) |
 | **Motion representation** | **humanml3d_272** (272-dim, 30 fps) — *identical layout to MotionStreamer-272* |
 | **Tokenizer** | HumanVQVAE + **FSQ** (levels `[8,8,8,5,5,5]`, codebook 64000) |
-| **AR model** | LLaMA 7B (n_layer=36, n_head=32, n_embd=4096, RoPE, length-causal text cross-attn) |
+| **AR model** | LLaMA-style 3B / 7B AR transformer (RoPE, length-causal text cross-attn) |
 | **Text encoder** | Flan-T5-XL (`google/flan-t5-xl`, frozen, hidden 2048) |
 | **Paper** | *Go to Zero: Towards Zero-shot Motion Generation with Million-scale Data*, ICCV 2025 — [arXiv:2507.07095](https://arxiv.org/abs/2507.07095) |
 | **Project page** | https://vankouf.github.io/MotionMillion/ |
@@ -30,8 +30,14 @@ Current hftrainer artifact (diffusers-style `from_pretrained`):
 
 | Artifact | Location | Contents | Status |
 |---|---|---|---|
-| Go-to-Zero 7B HumanML3D-272 | [`ZeyuLing/hftrainer-gotozero-7b-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-humanml272) | `fsq.safetensors` + `ar.safetensors` + `mm_config.json` + `model_index.json` + `mean.npy` / `std.npy` + `text_encoder/` | public Hub artifact; Flan-T5-XL is packaged as safetensors |
-| local mirror | `checkpoints/gotozero/hftrainer_7b_humanml272` | same layout | optional local cache |
+| Go-to-Zero 7B train-only HumanML3D-272 | [`ZeyuLing/hftrainer-gotozero-7b-train-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-7b-train-humanml272) | `fsq.safetensors` + `ar.safetensors` + `mm_config.json` + `model_index.json` + `mean.npy` / `std.npy` + `text_encoder/` | public Hub artifact; Flan-T5-XL is packaged as safetensors |
+| Go-to-Zero 3B train-only HumanML3D-272 | [`ZeyuLing/hftrainer-gotozero-3b-train-humanml272`](https://huggingface.co/ZeyuLing/hftrainer-gotozero-3b-train-humanml272) | same layout | public Hub artifact; Flan-T5-XL is packaged as safetensors |
+| local mirror, 7B | `checkpoints/gotozero/hftrainer_7b_train_humanml272` | same layout | optional local cache |
+| local mirror, 3B | `checkpoints/gotozero/hftrainer_3b_train_humanml272` | same layout | optional local cache |
+
+The public leaderboard uses the **train-only** checkpoints for both 7B and 3B.
+The older `t2m_*_all.zip` checkpoints were trained with all HumanML3D splits and
+should not be used for HumanML3D test-set leaderboard rows.
 
 **Use directly from the Hub (recommended):**
 
@@ -39,22 +45,23 @@ Current hftrainer artifact (diffusers-style `from_pretrained`):
 from hftrainer.pipelines.motionmillion import MotionMillionPipeline
 
 pipe = MotionMillionPipeline.from_pretrained(
-    "ZeyuLing/hftrainer-gotozero-7b-humanml272",
+    "ZeyuLing/hftrainer-gotozero-7b-train-humanml272",
     device="cuda",
 )
-# cast the 7B AR to bf16 for a 32 GB GPU:
+# Use "ZeyuLing/hftrainer-gotozero-3b-train-humanml272" for the 3B train-only artifact.
+# Cast the AR to bf16 for memory-efficient inference:
 import torch
 pipe.bundle.ar.to(dtype=torch.bfloat16)
 motions = pipe.infer_t2m(["a person swings a golf club"])  # list of (T, 272)
 ```
 
 Converter/debug code can also load explicit released upstream checkpoints
-(`fsq.zip`, `t2m_7B_all.zip`) directly:
+(`fsq.zip`, `motionmillion_7B.pth`) directly:
 
 ```python
 bundle = MotionMillionBundle(
     fsq_path="checkpoints/motionmillion/pretrained_models/fsq.zip",
-    ar_path="checkpoints/motionmillion/pretrained_models/t2m_7B_all.zip",
+    ar_path="checkpoints/motionmillion/pretrained_models/motionmillion_7B.pth",
     text_model_name="checkpoints/flan-t5-xl",
 )
 ```
@@ -63,10 +70,16 @@ Package the hftrainer artifact from local upstream weights:
 
 ```bash
 python3 scripts/eval/convert_motionmillion_checkpoint.py \
-  --out_dir checkpoints/gotozero/hftrainer_7b_humanml272 \
+  --ar checkpoints/motionmillion/pretrained_models/motionmillion_7B.pth \
+  --out_dir checkpoints/gotozero/hftrainer_7b_train_humanml272 \
+  --repo_id ZeyuLing/hftrainer-gotozero-7b-train-humanml272 \
   --text_model_source checkpoints/flan-t5-xl \
   --verify
 ```
+
+Use the same converter with the 3B train-only checkpoint and
+`--out_dir checkpoints/gotozero/hftrainer_3b_train_humanml272 --repo_id
+ZeyuLing/hftrainer-gotozero-3b-train-humanml272` for the 3B artifact.
 
 ---
 
@@ -80,7 +93,7 @@ into the `MotionStreamer272Evaluator` — no rotation re-encoding required.
 Generation path:
 
 ```
-text -> Flan-T5-XL -> LLaMA 7B AR (greedy, EOS-stopped, ≤150 tokens)
+text -> Flan-T5-XL -> LLaMA-style AR (greedy, EOS-stopped, ≤150 tokens)
      -> FSQ de-quantize -> HumanVQVAE decoder (×2 upsample) -> 272-dim motion
 ```
 
@@ -96,39 +109,44 @@ Convert to HumanML3D-263 with `hftrainer.motion.representation.convert`
 
 ## Evaluation
 
-Generation uses the shared HumanML3D official-test selected-caption protocol
+Generation uses the shared corrected HumanML3D official-test caption protocol
 (`4042` clips, one verified caption per motion) and writes canonical-id MS272
 files to:
 
 ```
-outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero
+outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero_7b_train
+outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero_3b_train
 ```
 
 Reproduce generation with the packaged artifact:
 
 ```bash
 NGPU=6 TOTAL_SHARDS=6 LIMIT=0 \
-OUT=outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero \
+OUT=outputs/evaluation/t2m/humanml3d_official_test/ms272/gotozero_7b_train \
+ARTIFACT=checkpoints/gotozero/hftrainer_7b_train_humanml272 \
 STEPS=150 DTYPE=bf16 \
 bash scripts/eval/run_motionmillion_official272_exactlen_genonly.sh
 ```
 
+Swap `OUT` and `ARTIFACT` to the `gotozero_3b_train` / `hftrainer_3b_train_humanml272`
+paths for the 3B train-only row.
+
 ### MotionStreamer-272 evaluator (native space)
 
-HumanML3D official test, selected captions, `n=4042` files (`nb=4032` after
+HumanML3D official test, corrected official captions, `n=4042` files (`nb=4032` after
 32-way R-Precision batching):
 
-| Metric | hftrainer (Go-to-Zero 7B) | GT (real) |
-|---|---|---|
-| FID ↓ | **3.065** | 0.0 |
-| FID-refk ↓ | 5.071 | - |
-| R-Precision Top-1 / 2 / 3 ↑ | 0.749 / 0.883 / 0.924 | 0.778 / 0.906 / 0.946 |
-| MM-Dist ↓ | 15.287 | 14.820 |
-| Diversity → | 27.528 | 27.853 |
+| Metric | 7B train-only | 3B train-only | GT (real) |
+|---|---:|---:|---:|
+| FID ↓ | **3.081** | **3.066** | 0.0 |
+| FID-refk ↓ | 4.957 | 4.981 | - |
+| R-Precision Top-1 / 2 / 3 ↑ | 0.740 / 0.878 / 0.924 | 0.740 / 0.877 / 0.923 | 0.778 / 0.906 / 0.946 |
+| MM-Dist ↓ | 15.371 | 15.381 | 14.820 |
+| Diversity → | 27.575 | 27.560 | 27.853 |
 
-Go-to-Zero remains very close to GT in the native MS272 evaluator: the semantic
-retrieval gap is small (R@1 0.749 vs GT 0.778), MM-Dist is near-real, and the
-motion activation distribution has low FID.
+Both train-only Go-to-Zero checkpoints remain very close to GT in the native
+MS272 evaluator: the semantic retrieval gap is small, MM-Dist is near-real, and
+the motion activation distribution has low FID.
 
 ### MotionCLIP and physical metrics
 
@@ -138,16 +156,16 @@ with **raw, non-L2-normalized** MotionCLIP projection embeddings. This metric is
 more sensitive to representation conversion than the native MS272 evaluator, so
 use it as a secondary diagnostic.
 
-| Metric | Go-to-Zero 7B |
-|---|---:|
-| MotionCLIP R-Precision Top-1 / 2 / 3 ↑ | 0.695 / 0.832 / 0.888 |
-| MotionCLIP FID ↓ | 303.328 |
-| MotionCLIP MM-Dist ↓ | 42.464 |
-| MotionCLIP Diversity → | 23.072 |
-| Slide ↓ | 4.447 |
-| Float ↓ | 20.303 |
-| Jitter ↓ | 9.810 |
-| Dynamic → | 21.192 |
+| Metric | 7B train-only | 3B train-only |
+|---|---:|---:|
+| MotionCLIP R-Precision Top-1 / 2 / 3 ↑ | 0.689 / 0.827 / 0.881 | 0.689 / 0.827 / 0.881 |
+| MotionCLIP FID ↓ | 299.617 | 298.933 |
+| MotionCLIP MM-Dist ↓ | 42.537 | 42.528 |
+| MotionCLIP Diversity → | 23.092 | 23.117 |
+| Slide ↓ | 4.441 | 4.440 |
+| Float ↓ | 20.060 | 20.093 |
+| Jitter ↓ | 9.906 | 9.886 |
+| Dynamic → | 21.324 | 21.327 |
 
 #### Sampler / evaluation protocol (important reproduction notes)
 
@@ -161,10 +179,10 @@ use it as a secondary diagnostic.
   **token-for-token identical** to the un-cached sampler while running ~7× faster
   (≈5 s vs ≈40 s per sample at 150 tokens), making full-set evaluation tractable.
 - **Length alignment**: the wrapper writes one `<HumanML3D id>.npy` file per
-  selected-caption official-test motion, exactly cropped/padded to the GT
+  corrected official-test motion, exactly cropped/padded to the GT
   `num_frames`.
 - **Caption source**: generation and evaluation use
-  `outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/`.
+  `outputs/evaluation/t2m/humanml3d_official_test/captions/humanml3d_official_corrected/`.
   Do not fall back to the first raw HumanML3D caption, because several raw first
   captions are known mismatches.
 

@@ -162,7 +162,7 @@ fi
   --gen-config configs/physflow/physflow_coevo_hardovf_frontier_g1.py \
   --gen-cfg-options "$EXTRA_GEN_CFG_OPTIONS" \
   --gen-cfg-options-by-round "$EXTRA_GEN_CFG_OPTIONS_BY_ROUND" \
-  --gen-init-ckpt work_dirs/hymotion_g1_t2m_38dim/checkpoint-g1base \
+  --gen-init-ckpt work_dirs/hymotion_g1_t2m_38dim_scene_clean_minus_heldout/checkpoint-g1base \
   --trainee-init-ckpt "$RELEASE_CKPT" \
   --trainee-exp "$REPO/ref_repo/ProtoMotions/data/pretrained_models/motion_tracker/g1-bones-deploy/experiment_config.py" \
   --trainee-overrides "agent.model.actor_optimizer.lr=2e-6,agent.model.critic_optimizer.lr=1e-5,agent.model.discriminator_optimizer.lr=1e-5,agent.num_mini_epochs=1,agent.gradient_clip_val=10.0,agent.action_distill.enabled=True,agent.action_distill.coeff=${ACTION_DISTILL_COEFF},agent.action_distill.reference_checkpoint=$REPO/$RELEASE_CKPT${EXTRA_TRAINEE_OVERRIDES:+,$EXTRA_TRAINEE_OVERRIDES}" \
