@@ -303,6 +303,8 @@ class MotionStreamerPipeline(BasePipeline):
     infer_multi_prompt_t2m = infer_sequential_t2m
 
     def __call__(self, captions, lengths, **kwargs):
+        if kwargs.pop("tp2m", False):
+            return self.infer_tp2m(captions, lengths, **kwargs)
         if kwargs.pop("sequential", False):
             return self.infer_sequential_t2m(captions, lengths, **kwargs)
         if len(captions) > 0 and not isinstance(captions[0], str):

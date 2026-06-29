@@ -304,10 +304,6 @@ def _build_prefix_hint(
     hint_lengths = torch.zeros((bsz, max_len), device=device, dtype=torch.bool)
     hint_masks = torch.zeros((bsz, max_len, 22, 3), device=device, dtype=torch.bool)
     for i, (arr, length) in enumerate(zip(gt_features, lengths)):
-        if arr.shape[0] < condition_num_frames:
-            raise ValueError(
-                f"GT HML263 clip too short for prefix: {arr.shape[0]} < {condition_num_frames}"
-            )
         clip = torch.from_numpy(arr[:length].astype(np.float32)).to(device).unsqueeze(0)
         joints = _hml263_to_motionlab_joints(clip)
         joints = (joints - mean_motion.to(joints)) / std_motion.to(joints)
@@ -1046,13 +1042,6 @@ def main():
                         f"missing GT HML263 path for hint-conditioned sample {sid}"
                     )
                 arr = np.load(gt_path).astype(np.float32)
-                if (
-                    args.condition_num_frames > 0
-                    and arr.shape[0] < args.condition_num_frames
-                ):
-                    raise ValueError(
-                        f"{sid} is too short for {args.condition_num_frames} prefix frames"
-                    )
                 gt_features.append(arr[:length])
         if args.mask_mode in ("keyframe", "trajectory"):
             keyframe_obs = []
