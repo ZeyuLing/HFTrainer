@@ -2,8 +2,9 @@
 
 Web leaderboard: [T2M HumanML3D](t2m_humanml3d.html).
 
-Default protocol: HumanML3D official test split with the selected ground-truth
-caption for each clip. `MS` is the MotionStreamer-272 evaluator and `MC` is
+Default protocol: HumanML3D official test split with the corrected official
+caption for each clip. The older first-full-caption annotation is treated as
+invalid for leaderboard generation/evaluation. `MS` is the MotionStreamer-272 evaluator and `MC` is
 the MotionCLIP evaluator. MC metrics use raw MotionCLIP projection embeddings
 without L2 normalization. The `Ref` column records the motion reference used for
 FID-style metrics, because raw SMPL references and HML263 round-trip references
@@ -19,13 +20,17 @@ should not be mixed.
 | PRISM | KAFS cfg5 | raw/refk | 4042 | 0.7408 | 0.8619 | 0.9050 | 19.9682 | 15.8072 | 27.2536 | 0.7929 | 0.9049 | 0.9396 | 533.2368 | 39.2818 | 22.1162 |
 | PRISM | 1.0 | raw/refk | 4042 | 0.5967 | 0.7376 | 0.8016 | 22.0451 | 17.6505 | 27.3301 | 0.5965 | 0.7245 | 0.7820 | 543.0059 | 41.5320 | 21.9960 |
 | MotionStreamer | official | raw/refk | 4042 | 0.6303 | 0.7865 | 0.8498 | 12.2110 | 16.5810 | 27.4637 | 0.3960 | 0.5460 | 0.6324 | 46.0066 | 44.9556 | 23.0713 |
-| GoToZero | 7B-all | raw/refk | 4042 | 0.7490 | 0.8829 | 0.9244 | 3.0648 | 15.2866 | 27.5283 | 0.6952 | 0.8321 | 0.8876 | 303.3284 | 42.4641 | 23.0716 |
+| GoToZero | 7B-train | raw/refk | 4042 | 0.7403 | 0.8777 | 0.9236 | 3.0807 | 15.3706 | 27.5748 | 0.6889 | 0.8274 | 0.8811 | 299.6173 | 42.5373 | 23.0922 |
+| GoToZero | 3B-train | raw/refk | 4042 | 0.7401 | 0.8772 | 0.9229 | 3.0658 | 15.3806 | 27.5604 | 0.6891 | 0.8271 | 0.8812 | 298.9327 | 42.5283 | 23.1172 |
+| ViMoGen | 1.3B prompt-rewrite | HML263 round-trip | 4042 | 0.4291 | 0.5687 | 0.6518 | 152.2095 | 21.0737 | 24.1803 | 0.3572 | 0.4992 | 0.5893 | 457.5443 | 44.4103 | 21.6806 |
+| DART | official | HML263 round-trip | 4042 | 0.5476 | 0.7245 | 0.7937 | 127.8302 | 18.5312 | 26.2611 | 0.4072 | 0.5746 | 0.6675 | 480.0985 | 44.8325 | 22.1887 |
 | FlowMDM | official | HML263 round-trip | 4042 | 0.4737 | 0.6496 | 0.7312 | 36.3767 | 20.0018 | 25.1783 | 0.3317 | 0.4795 | 0.5737 | 131.9653 | 43.0012 | 22.9482 |
 | MotionLab | official | HML263 round-trip | 4042 | 0.6367 | 0.7882 | 0.8529 | 25.4469 | 17.9756 | 25.5355 | 0.4807 | 0.6457 | 0.7353 | 102.7770 | 41.5472 | 23.0179 |
 | T2M-GPT | official | HML263 round-trip | 4042 | 0.5516 | 0.7056 | 0.7788 | 25.4913 | 19.0912 | 25.5949 | 0.3978 | 0.5505 | 0.6400 | 378.1520 | 42.4744 | 23.0833 |
 | MDM | official | HML263 round-trip | 4042 | 0.5208 | 0.6937 | 0.7701 | 35.5169 | 19.4246 | 25.3383 | 0.3520 | 0.5087 | 0.6085 | 429.1679 | 42.9340 | 22.8710 |
 | MoMask | official | HML263 round-trip | 4042 | 0.6404 | 0.7974 | 0.8609 | 21.0729 | 18.1216 | 25.9789 | 0.4661 | 0.6336 | 0.7230 | 372.0083 | 41.7063 | 23.2418 |
-| MoGenTS | official | HML263 round-trip | 4042 | 0.5910 | 0.7523 | 0.8138 | 109.8191 | 18.6038 | 25.3317 | 0.3575 | 0.5095 | 0.5995 | 350.6024 | 42.6554 | 23.4597 |
+| MoGenTS | official | HML263 round-trip | 4042 | 0.4993 | 0.6520 | 0.7354 | 20.1861 | 19.5354 | 25.6972 | 0.3575 | 0.5095 | 0.5995 | 350.6024 | 42.6554 | 23.4597 |
+| MotionGPT | official | HML263 round-trip | 4042 | 0.4940 | 0.6352 | 0.6944 | 23.6811 | 19.6781 | 25.5410 | 0.3688 | 0.5049 | 0.5828 | 84.8756 | 42.8579 | 23.2174 |
 | MotionGPT3 | official | HML263 round-trip | 4042 | 0.6709 | 0.8242 | 0.8817 | 20.9913 | 17.5664 | 25.6889 | 0.4894 | 0.6570 | 0.7455 | 91.0385 | 41.5060 | 23.0747 |
 | KIMODO | SMPL-X RP | raw/refk | 4042 | 0.3646 | 0.4998 | 0.5818 | 117.0279 | 21.4102 | 25.3629 | 0.2943 | 0.4305 | 0.5215 | 290.6178 | 44.9244 | 23.1677 |
 
@@ -39,13 +44,17 @@ should not be mixed.
 | PRISM | KAFS cfg5 | 4042 | 3.4524 | 7.7084 | 6.4377 | 27.6258 |
 | PRISM | 1.0 | 4042 | 3.6746 | 7.8379 | 6.1307 | 27.7158 |
 | MotionStreamer | official | 4042 | 5.0011 | 17.0663 | 11.0975 | 23.6778 |
-| GoToZero | 7B-all | 4042 | 4.4468 | 20.3035 | 9.8098 | 21.1916 |
+| GoToZero | 7B-train | 4042 | 4.4411 | 20.0600 | 9.9057 | 21.3236 |
+| GoToZero | 3B-train | 4042 | 4.4398 | 20.0928 | 9.8859 | 21.3268 |
+| ViMoGen | 1.3B prompt-rewrite | 4042 | 6.9485 | 23.7270 | 4.4370 | 16.3838 |
+| DART | official | 4042 | 3.2958 | 5.9494 | 4.4701 | 17.9559 |
 | FlowMDM | official | 4042 | 3.0452 | 7.4055 | 5.0130 | 22.3205 |
 | MotionLab | official | 4042 | 2.4231 | 4.0795 | 5.8493 | 24.3519 |
 | T2M-GPT | official | 4042 | 3.7598 | 11.1799 | 4.9000 | 19.3651 |
 | MDM | official | 4042 | 2.5318 | 4.9987 | 4.7034 | 22.1361 |
 | MoMask | official | 4042 | 3.7319 | 9.5021 | 5.7226 | 23.4879 |
 | MoGenTS | official | 4042 | 4.1508 | 12.3141 | 5.1289 | 23.0138 |
+| MotionGPT | official | 4042 | 3.8783 | 10.8835 | 5.1680 | 21.0609 |
 | MotionGPT3 | official | 4042 | 3.8137 | 9.6933 | 4.7599 | 23.1948 |
 | KIMODO | SMPL-X RP | 4042 | 3.5414 | 2.7151 | 6.3208 | 29.9568 |
 
