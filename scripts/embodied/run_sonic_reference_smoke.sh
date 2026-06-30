@@ -32,6 +32,9 @@ if [[ -z "$SONIC_DEPS_ROOT" ]]; then
   fi
 fi
 SONIC_DEPS_ROOT="$(cd "$SONIC_DEPS_ROOT" && pwd)"
+CMEEL_LIB_ROOT="${CMEEL_LIB_ROOT:-$(
+  python -c 'import pathlib, sysconfig; p = pathlib.Path(sysconfig.get_paths()["purelib"]) / "cmeel.prefix" / "lib"; print(p if p.exists() else "")' 2>/dev/null || true
+)}"
 
 if [[ "$KILL_LARGE_OCCUPANTS" == "1" ]]; then
   mapfile -t large_pids < <(
@@ -57,7 +60,7 @@ export SONIC_QPOS_LOGFILE="$OUT_DIR/sim_qpos.csv"
 export SONIC_AUTO_START="${SONIC_AUTO_START:-1}"
 export SONIC_AUTO_PLAY="${SONIC_AUTO_PLAY:-1}"
 export PYTHONPATH="$SONIC_REPO:$SONIC_REPO/external_dependencies/unitree_sdk2_python:${PYTHONPATH:-}"
-export LD_LIBRARY_PATH="$SONIC_DEPS_ROOT/install/zeromq/lib:$SONIC_DEPS_ROOT/install/conda-runtime/lib:$SONIC_DEPS_ROOT/install/tensorrt-10.0.1-cu11/lib:$SONIC_DEPS_ROOT/install/onnxruntime/lib:$SONIC_DEPS_ROOT/install/yaml-cpp/lib64:/usr/local/cuda-11.8/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${CMEEL_LIB_ROOT:+$CMEEL_LIB_ROOT:}$SONIC_DEPS_ROOT/install/zeromq/lib:$SONIC_DEPS_ROOT/install/conda-runtime/lib:$SONIC_DEPS_ROOT/install/tensorrt-10.0.1-cu11/lib:$SONIC_DEPS_ROOT/install/onnxruntime/lib:$SONIC_DEPS_ROOT/install/yaml-cpp/lib64:/usr/local/cuda-11.8/lib64:${LD_LIBRARY_PATH:-}"
 
 rm -f "$OUT_DIR/deploy.stdin"
 rm -rf "$OUT_DIR/deploy_logs"
