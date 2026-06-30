@@ -277,12 +277,15 @@ class SMPLPoseProcessor(nn.Module):
         self,
         transl: np.ndarray,
         transl_type: Optional[str] = None,
-        use_rollout: bool = True,
+        use_rollout: Union[bool, str] = True,
     ) -> Union[np.ndarray, torch.Tensor]:
         """Convert translation back to raw SMPL global translation vector.
         transl: np.ndarray. [T, 3] or [T, 6] or [B, T, 3] or [B, T, 6]. Global translation vector.
         transl_type: str. Any in self.SUPPORTED_TRANSL. Default: self.transl_type.
-        use_rollout: bool. Only used when transl_type is "abs_rel". Whether to use rollout to convert translation. Default: True.
+        use_rollout: bool or str. Only used when transl_type is "abs_rel".
+            True/"rollout" reconstructs from the relative velocity channels,
+            False/"absolute" uses decoded absolute translation directly, and
+            "xz_rollout_y_absolute" uses rollout for x/z and absolute for y.
         """
         transl_type = transl_type or self.transl_type
         assert transl_type in self.SUPPORTED_TRANSL
@@ -294,17 +297,26 @@ class SMPLPoseProcessor(nn.Module):
                 return transl.cumsum(dim=-2)
             return np.cumsum(transl, axis=-2)
         elif transl_type == "abs_rel":
-            if use_rollout:
-                pos0 = transl[..., :1, :3]
-                rel_t = transl[..., 1:, 3:]
-                if isinstance(transl, torch.Tensor):
-                    abs_t = torch.cumsum(torch.cat([pos0, rel_t], dim=-2), dim=-2)
-                else:
-                    abs_t = np.cumsum(np.concatenate([pos0, rel_t], axis=-2), axis=-2)
-                return abs_t
-            else:
+            mode = use_rollout
+            if isinstance(mode, str):
+                mode = mode.lower().replace("-", "_")
+            if mode is False or mode == "absolute":
                 # directly return the absolute translation
                 return transl[..., :3]
+            pos0 = transl[..., :1, :3]
+            rel_t = transl[..., 1:, 3:]
+            if isinstance(transl, torch.Tensor):
+                abs_t = torch.cumsum(torch.cat([pos0, rel_t], dim=-2), dim=-2)
+            else:
+                abs_t = np.cumsum(np.concatenate([pos0, rel_t], axis=-2), axis=-2)
+            if mode in (True, "rollout"):
+                return abs_t
+            if mode in {"xz_rollout_y_absolute", "xz_rollout_y_abs", "hybrid"}:
+                direct = transl[..., :3]
+                mixed = abs_t.clone() if isinstance(abs_t, torch.Tensor) else abs_t.copy()
+                mixed[..., 1] = direct[..., 1]
+                return mixed
+            raise ValueError(f"Unsupported abs_rel translation decode mode: {use_rollout}")
         else:
             raise ValueError(f"Unsupported transl_type: {transl_type}")
 
