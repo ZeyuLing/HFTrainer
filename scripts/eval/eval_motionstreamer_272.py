@@ -107,7 +107,7 @@ NUM_JOINTS = 22
 # Evaluator
 # ---------------------------------------------------------------------------
 
-def load_evaluator(device):
+def load_evaluator(device, max_motion_length=MAX_MOTION_LENGTH):
     from mld.models.architectures.temos.textencoder.distillbert_actor import (
         DistilbertActorAgnosticEncoder,
     )
@@ -118,7 +118,8 @@ def load_evaluator(device):
     textencoder = DistilbertActorAgnosticEncoder(
         "distilbert-base-uncased", num_layers=4, latent_dim=256)
     motionencoder = ActorAgnosticEncoder(
-        nfeats=272, vae=True, num_layers=4, latent_dim=256, max_len=300)
+        nfeats=272, vae=True, num_layers=4, latent_dim=256,
+        max_len=max_motion_length)
 
     ckpt = torch.load(CKPT, map_location="cpu")
     sd = ckpt["state_dict"]
@@ -585,7 +586,8 @@ def main():
         ids = ids[:args.max_samples]
     print(f"#ids (with required files) = {len(ids)}")
 
-    textencoder, motionencoder = load_evaluator(device)
+    textencoder, motionencoder = load_evaluator(
+        device, max_motion_length=args.max_motion_length)
     print("evaluator loaded")
 
     # --- build GT-real items -------------------------------------------
