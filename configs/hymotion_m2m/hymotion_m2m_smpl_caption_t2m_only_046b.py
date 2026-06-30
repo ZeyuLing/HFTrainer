@@ -8,13 +8,13 @@
 #
 # Launch (local):
 #   bash tools/dist_train.sh configs/hymotion_m2m/hymotion_m2m_smpl_caption_t2m_only_046b.py 8 --auto-resume
-# Launch (Taiji, 64 GPUs):
-#   python tools/taiji_submit.py m2m_v2_smpl_caption_t2m_only \
-#     configs/hymotion_m2m/hymotion_m2m_smpl_caption_t2m_only_046b.py --host_num 8
+# Launch (Taiji H20, 64 GPUs):
+#   NNODES=8 NODE_RANK=<rank> MASTER_ADDR=<rank0-ip> MASTER_PORT=29630 \
+#     bash tools/dist_train.sh configs/hymotion_m2m/hymotion_m2m_smpl_caption_t2m_only_046b.py 8 --auto-resume
 
 _base_ = './_base_hymotion_m2m_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_20260630'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_h20x64_20260630'
 
 # Start from the HY-Motion T2M text prior, not from a mixed-task M2M checkpoint.
 load_from = dict(
@@ -43,7 +43,11 @@ trainer = dict(
 )
 
 train_dataloader = dict(
-    batch_size=20,
+    # H20 has ~96GB/card. Caption configs use bs=20 on 32GB V100; bs=56 is
+    # the high-utilisation H20 starting point with a little headroom for NCCL
+    # and checkpoint/resume buffers. Raise to 64 only after the first epoch
+    # confirms stable memory.
+    batch_size=56,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
