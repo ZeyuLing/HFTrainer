@@ -13,8 +13,25 @@ OUT_DIR="${OUT_DIR:-$PROJECT_ROOT/outputs/evaluation/physflow/sonic_smoke_gpu${G
 INTERFACE="${INTERFACE:-bond1}"
 RUN_SECONDS="${RUN_SECONDS:-75}"
 KILL_LARGE_OCCUPANTS="${KILL_LARGE_OCCUPANTS:-1}"
+SONIC_DEPS_ROOT="${SONIC_DEPS_ROOT:-}"
 
 mkdir -p "$OUT_DIR"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+SONIC_REPO="$(cd "$SONIC_REPO" && pwd)"
+REFERENCE_DIR="$(cd "$REFERENCE_DIR" && pwd)"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+
+if [[ -z "$SONIC_DEPS_ROOT" ]]; then
+  if [[ -d "$SONIC_REPO/tools/sonic_deps/install" ]]; then
+    SONIC_DEPS_ROOT="$SONIC_REPO/tools/sonic_deps"
+  elif [[ -d "$PROJECT_ROOT/tools/sonic_deps/install" ]]; then
+    SONIC_DEPS_ROOT="$PROJECT_ROOT/tools/sonic_deps"
+  else
+    echo "[sonic-smoke] cannot locate sonic_deps/install under SONIC_REPO or PROJECT_ROOT" >&2
+    exit 2
+  fi
+fi
+SONIC_DEPS_ROOT="$(cd "$SONIC_DEPS_ROOT" && pwd)"
 
 if [[ "$KILL_LARGE_OCCUPANTS" == "1" ]]; then
   mapfile -t large_pids < <(
@@ -36,7 +53,7 @@ cd "$SONIC_REPO"
 export CUDA_VISIBLE_DEVICES="$GPU_ID"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export SONIC_QPOS_LOGFILE="$OUT_DIR/sim_qpos.csv"
-export LD_LIBRARY_PATH="$PROJECT_ROOT/tools/sonic_deps/install/zeromq/lib:$PROJECT_ROOT/tools/sonic_deps/install/conda-runtime/lib:$PROJECT_ROOT/tools/sonic_deps/install/tensorrt-10.0.1-cu11/lib:$PROJECT_ROOT/tools/sonic_deps/install/onnxruntime/lib:$PROJECT_ROOT/tools/sonic_deps/install/yaml-cpp/lib64:/usr/local/cuda-11.8/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$SONIC_DEPS_ROOT/install/zeromq/lib:$SONIC_DEPS_ROOT/install/conda-runtime/lib:$SONIC_DEPS_ROOT/install/tensorrt-10.0.1-cu11/lib:$SONIC_DEPS_ROOT/install/onnxruntime/lib:$SONIC_DEPS_ROOT/install/yaml-cpp/lib64:/usr/local/cuda-11.8/lib64:${LD_LIBRARY_PATH:-}"
 
 rm -f "$OUT_DIR/deploy.stdin"
 rm -rf "$OUT_DIR/deploy_logs"
