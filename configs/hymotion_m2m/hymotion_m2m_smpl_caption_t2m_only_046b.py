@@ -43,11 +43,9 @@ trainer = dict(
 )
 
 train_dataloader = dict(
-    # H20 has ~96GB/card. Caption configs use bs=20 on 32GB V100; bs=56 is
-    # the high-utilisation H20 starting point with a little headroom for NCCL
-    # and checkpoint/resume buffers. Raise to 64 only after the first epoch
-    # confirms stable memory.
-    batch_size=56,
+    # H20 has ~96GB/card. Batch 56 reaches the first forward but OOMs on
+    # the 0.46B M2M path; bs=48 is the high-utilisation stable retry point.
+    batch_size=48,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
