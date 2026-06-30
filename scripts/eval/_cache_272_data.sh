@@ -2,10 +2,17 @@
 # Cache MotionStreamer-272 test-set GT + texts (and optionally a pred npz dir)
 # from slow CephFS into /dev/shm for fast repeated evaluation.
 set -e
-MS=/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer/ref_repo/MotionStreamer/MotionStreamer
-SHM=/dev/shm/ms272_data
-SPLIT=$MS/humanml3d_272/split/test.txt
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+MS=${MS:-$REPO_ROOT/ref_repo/MotionStreamer/MotionStreamer}
+SHM=${SHM:-/dev/shm/ms272_data}
+SPLIT=${SPLIT:-$MS/humanml3d_272/split/test.txt}
 mkdir -p "$SHM/motion_data" "$SHM/texts"
+
+if [ ! -f "$SPLIT" ]; then
+  echo "[cache] missing split file: $SPLIT" >&2
+  exit 1
+fi
 
 echo "[cache] copying test GT npy + texts ..."
 copy_one() {
@@ -20,7 +27,7 @@ echo "[cache] GT npy: $(ls $SHM/motion_data | wc -l), texts: $(ls $SHM/texts | w
 
 # Optional: cache a prediction npz dir, e.g.
 #   bash _cache_272_data.sh PRED /abs/path/to/npz tag
-if [ "$1" = "PRED" ]; then
+if [ "${1:-}" = "PRED" ]; then
   PRED_SRC="$2"; TAG="$3"
   DST="/dev/shm/ms272_pred_$TAG"
   mkdir -p "$DST"

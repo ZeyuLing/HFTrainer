@@ -60,6 +60,10 @@ if [ ! -f "$TEXT_CACHE" ]; then
     --text-cache "$TEXT_CACHE" \
     --min-len "$MIN_LEN" --max-len "$MAX_LEN" \
     > "$LOG_ROOT/text_cache.log" 2>&1
+  if [ ! -s "$TEXT_CACHE" ]; then
+    echo "[watch] text cache build failed; see $LOG_ROOT/text_cache.log" >&2
+    exit 1
+  fi
 fi
 
 if [ -f scripts/eval/_cache_272_data.sh ]; then
