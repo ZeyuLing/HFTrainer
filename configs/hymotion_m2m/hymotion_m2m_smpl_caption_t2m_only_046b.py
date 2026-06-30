@@ -54,7 +54,10 @@ train_dataloader = dict(
         # Pure 400h HQ caption data only: no MotionFix/PerMo source-edit pairs.
         anno_file='data/annotation/train_hymotion_400h_hq_20260403.json',
         pipeline=[
-            dict(type='LoadCompatibleCaption', allow_none=False),
+            # The 400h HQ annotation contains caption-less clips. Keep them in
+            # the pool and let LoadPreExtractedTextEmbedding provide learned-null
+            # text conditioning, matching the T2M CFG/null-text path.
+            dict(type='LoadCompatibleCaption', allow_none=True),
             dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
             dict(
                 type='LoadSmplx55',
@@ -78,9 +81,11 @@ train_dataloader = dict(
                 keys=[
                     'src_motion', 'tgt_motion', 'src_mask',
                     'tgt_length', 'src_length', 'edit_mode',
+                    'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
                 ],
                 meta_keys=['motion_path', 'fps', 'caption'],
-                set_dummy_value=False,
+                set_dummy_value=True,
+                dummy_value=None,
             ),
         ],
     ),
