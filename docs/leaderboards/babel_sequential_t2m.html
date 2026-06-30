@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BABEL Sequential T2M Leaderboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f4;
+      --panel: #ffffff;
+      --ink: #17212b;
+      --muted: #667284;
+      --line: #d9e0df;
+      --strong: #0c766e;
+      --warn: #99610b;
+      --shadow: 0 10px 24px rgba(33, 45, 57, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Aptos, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    .page { width: min(1280px, calc(100vw - 32px)); margin: 0 auto; padding: 28px 0 42px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.16; letter-spacing: 0; }
+    .sub { max-width: 920px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+    .badge { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 10px; color: #39485a; font-size: 12px; }
+    .notice {
+      border: 1px solid #ead09d; background: #fff8e8; color: #573a09; border-radius: 8px;
+      padding: 12px 14px; margin: 18px 0; box-shadow: var(--shadow); font-size: 13px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+    .card { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
+    .value { margin-top: 6px; font-size: 21px; font-weight: 760; }
+    .note { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .table-shell { overflow: auto; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); margin-top: 14px; }
+    table { width: 100%; min-width: 1120px; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 9px; white-space: nowrap; text-align: right; }
+    th { background: #edf2f1; color: #415064; font-weight: 700; }
+    th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: inherit; min-width: 170px; }
+    th:first-child { background: #edf2f1; }
+    tr:nth-child(even) td { background: #fbfcfa; }
+    .ok { color: var(--strong); font-weight: 760; }
+    .pending { color: var(--warn); font-weight: 720; }
+    .caption { color: var(--muted); font-size: 12px; margin: 10px 2px 0; }
+    code { color: var(--strong); }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>Multi-Prompt Sequential T2M · BABEL Val</h1>
+    <p class="sub">
+      Corrected official-BABEL long-motion protocol. This page intentionally does not mix in the older
+      two-action MotionStreamer BABEL-stream subset.
+    </p>
+    <div class="badges">
+      <span class="badge">1295 official-val sequences</span>
+      <span class="badge">8441 subsequences</span>
+      <span class="badge">8114 transition windows</span>
+      <span class="badge">max 82 prompts/sequence</span>
+      <span class="badge">30 fps Y-up MS272 evaluator input</span>
+    </div>
+    <div class="notice">
+      The previous <code>outputs/evaluation/babel_seq/standard_random_seed1_20260625</code> rows were generated
+      from 1204 two-segment samples and are not valid for this leaderboard. Viewer, evaluator, and leaderboard
+      code should read only <code>outputs/evaluation/sequential_t2m/babel_official_val_30fps</code>.
+    </div>
+    <section class="grid" aria-label="headline metrics">
+      <div class="card"><div class="label">Real GT R@3</div><div class="value">0.6523</div><div class="note">label-aware batch-32</div></div>
+      <div class="card"><div class="label">Real GT FID</div><div class="value">-0.0000</div><div class="note">Y-up corrected MS272</div></div>
+      <div class="card"><div class="label">Sequences</div><div class="value">1295</div><div class="note">after protocol filtering</div></div>
+      <div class="card"><div class="label">Method Rows</div><div class="value">5/5</div><div class="note">canonical metrics available</div></div>
+    </section>
+    <section class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Method</th><th>Status</th><th>Episodes</th><th>Segments</th><th>Transitions</th>
+            <th>R@1</th><th>R@2</th><th>R@3</th><th>FID</th><th>MM-Dist</th><th>Diversity</th>
+            <th>Trans FID</th><th>Peak Jerk</th><th>Area Jerk</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Real GT</td><td class="ok">complete</td><td>1295</td><td>8441</td><td>8114</td><td>0.3996</td><td>0.5585</td><td>0.6523</td><td>-0.0000</td><td>19.7315</td><td>26.2738</td><td>-0.0000</td><td>0.0121</td><td>0.0000</td></tr>
+          <tr><td>PRISM</td><td class="ok">complete</td><td>1295</td><td>8441</td><td>8114</td><td>0.3776</td><td>0.5260</td><td>0.6159</td><td>46.5869</td><td>20.1368</td><td>25.3178</td><td>66.9425</td><td>0.0559</td><td>0.2794</td></tr>
+          <tr><td>MotionStreamer</td><td class="ok">complete</td><td>1295</td><td>8441</td><td>8114</td><td>0.1951</td><td>0.3110</td><td>0.3971</td><td>51.2604</td><td>22.2087</td><td>25.5003</td><td>67.9967</td><td>0.0529</td><td>0.2130</td></tr>
+          <tr><td>FlowMDM</td><td class="ok">complete</td><td>1295</td><td>8441</td><td>8114</td><td>0.2982</td><td>0.4325</td><td>0.5223</td><td>29.2921</td><td>21.0398</td><td>25.7800</td><td>33.4513</td><td>0.0260</td><td>0.0220</td></tr>
+          <tr><td>DoubleTake</td><td class="ok">complete</td><td>1295</td><td>8441</td><td>8114</td><td>0.2609</td><td>0.3800</td><td>0.4482</td><td>63.3962</td><td>22.4709</td><td>26.0062</td><td>61.4145</td><td>0.0475</td><td>0.4522</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <p class="caption">
+      Source: <code>outputs/evaluation/sequential_t2m/babel_official_val_30fps</code>.
+      Viewers: <code>motion_annot_web/babel_official_mesh_viewer</code> and
+      <code>motion_annot_web/m2m_eval_viewer/babel_seq_ms272_multi_app.py</code>.
+    </p>
+  </main>
+</body>
+</html>

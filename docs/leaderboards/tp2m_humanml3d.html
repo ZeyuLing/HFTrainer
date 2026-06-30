@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TP2M HumanML3D Leaderboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #18202b;
+      --muted: #667284;
+      --line: #dde3ea;
+      --ok: #087f7a;
+      --warn: #a86705;
+      --shadow: 0 10px 26px rgba(31, 42, 55, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    .page { width: min(1280px, calc(100vw - 32px)); margin: 0 auto; padding: 28px 0 42px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: 0; }
+    .sub { max-width: 920px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+    .badge { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 10px; color: #39485a; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+    .card { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
+    .value { margin-top: 6px; font-size: 21px; font-weight: 740; }
+    .note { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .table-shell { overflow: auto; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); margin-top: 14px; }
+    table { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 9px; white-space: nowrap; text-align: right; }
+    th { background: #edf2f6; color: #415064; font-weight: 700; }
+    th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: inherit; min-width: 160px; }
+    th:first-child { background: #edf2f6; }
+    tr:nth-child(even) td { background: #fbfcfe; }
+    .ok { color: var(--ok); font-weight: 760; }
+    .warn { color: var(--warn); font-weight: 720; }
+    code { color: var(--ok); }
+    .caption { color: var(--muted); font-size: 12px; margin: 10px 2px 0; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>TP2M · HumanML3D Official Test</h1>
+    <p class="sub">
+      Canonical storage for text-plus-pose-to-motion evaluation. Condition frames live at the protocol layer:
+      <code>humanml3d_official_test_c1</code>, <code>humanml3d_official_test_c5</code>, and
+      <code>humanml3d_official_test_c9</code>.
+    </p>
+    <div class="badges">
+      <span class="badge">4042 clips per condition</span>
+      <span class="badge">motion135 / ms272 / hml263 / smplx</span>
+      <span class="badge">official-ID filtered</span>
+      <span class="badge">canonical paths only</span>
+    </div>
+    <section class="grid" aria-label="coverage summary">
+      <div class="card"><div class="label">Complete Rows</div><div class="value">GT, PRISM</div><div class="note">all c1/c5/c9 canonical files present</div></div>
+      <div class="card"><div class="label">Incomplete Rows</div><div class="value">3</div><div class="note">MotionStreamer, FlowMDM, MotionLab</div></div>
+      <div class="card"><div class="label">KIMODO</div><div class="value">pending</div><div class="note">requires native SMPL-X rerun</div></div>
+      <div class="card"><div class="label">Validator</div><div class="value">strict</div><div class="note">blocks legacy path fragments and method suffixes</div></div>
+    </section>
+    <section class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Method</th><th>Status</th><th>c1 motion135</th><th>c1 ms272</th>
+            <th>c5 motion135</th><th>c5 ms272</th><th>c9 motion135</th><th>c9 ms272</th><th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>GT</td><td class="ok">complete</td><td>-</td><td>4042</td><td>-</td><td>4042</td><td>-</td><td>4042</td><td>Official MS272 GT, gt_0beta</td></tr>
+          <tr><td>PRISM</td><td class="ok">complete</td><td>4042</td><td>4042</td><td>4042</td><td>4042</td><td>4042</td><td>4042</td><td>Epoch 43 pad360/crop selected-caption protocol</td></tr>
+          <tr><td>MotionStreamer</td><td class="warn">incomplete</td><td>2688</td><td>2688</td><td>2684</td><td>2684</td><td>2684</td><td>2684</td><td>Legacy source incomplete after official-ID filtering</td></tr>
+          <tr><td>FlowMDM</td><td class="warn">incomplete</td><td>3818</td><td>3818</td><td>3818</td><td>3818</td><td>3814</td><td>3814</td><td>Legacy source incomplete after official-ID filtering</td></tr>
+          <tr><td>MotionLab</td><td class="warn">incomplete</td><td>3852</td><td>3852</td><td>3852</td><td>3852</td><td>3852</td><td>3852</td><td>Legacy 4046 rows filtered to official IDs</td></tr>
+          <tr><td>KIMODO</td><td class="warn">pending SMPL-X rerun</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>Old SMPL result discarded for leaderboard</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <p class="caption">
+      Manifest: <code>docs/leaderboards/tp2m_humanml3d.json</code>.
+      Validator: <code>scripts/eval/validate_leaderboard_paths.py</code>.
+      Root: <code>outputs/evaluation/tp2m/humanml3d_official_test_c{1,5,9}</code>.
+    </p>
+  </main>
+</body>
+</html>

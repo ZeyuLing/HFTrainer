@@ -1,0 +1,443 @@
+{
+  "leaderboard": "tp2m_humanml3d",
+  "task": "tp2m",
+  "created_by": "scripts/eval/materialize_leaderboard_canonical_paths.py",
+  "path_policy": "outputs/evaluation/{task}/{test_dataset}/{motion_representation}/{method}/",
+  "forbidden_path_parts": [
+    "/prep/",
+    "/_suites/",
+    "/_runs/",
+    "/predictions/motion135/"
+  ],
+  "protocols": [
+    {
+      "test_dataset": "humanml3d_official_test_c1",
+      "condition_frames": 1,
+      "expected_count": 4042,
+      "methods": [
+        {
+          "method": "gt_0beta",
+          "status": "complete",
+          "version": "raw official MS272",
+          "representations": {
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/gt_0beta",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            }
+          },
+          "metrics": {}
+        },
+        {
+          "method": "prism",
+          "status": "complete",
+          "version": "epoch43 pad360_crop selected-caption canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/prism",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/prism",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/prism/metrics/motionstreamer.json",
+            "physics": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/prism/metrics/physics.json"
+          }
+        },
+        {
+          "method": "motionstreamer",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/motionstreamer",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/motionstreamer",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/motionstreamer/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "flowmdm",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/flowmdm",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/flowmdm",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/flowmdm/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "motionlab",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/motionlab",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/motionlab",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/motionlab/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "kimodo",
+          "status": "complete",
+          "version": "SMPL-X RP canonical TP2M run",
+          "representations": {
+            "smplx": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/smplx/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/kimodo/metrics/motionstreamer.json"
+          }
+        }
+      ]
+    },
+    {
+      "test_dataset": "humanml3d_official_test_c5",
+      "condition_frames": 5,
+      "expected_count": 4042,
+      "methods": [
+        {
+          "method": "gt_0beta",
+          "status": "complete",
+          "version": "raw official MS272",
+          "representations": {
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/gt_0beta",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            }
+          },
+          "metrics": {}
+        },
+        {
+          "method": "prism",
+          "status": "complete",
+          "version": "epoch43 pad360_crop selected-caption canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/prism",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/prism",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/prism/metrics/motionstreamer.json",
+            "physics": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/prism/metrics/physics.json"
+          }
+        },
+        {
+          "method": "motionstreamer",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/motionstreamer",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/motionstreamer",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/motionstreamer/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "flowmdm",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/flowmdm",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/flowmdm",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/flowmdm/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "motionlab",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/motionlab",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/motionlab",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/motionlab/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "kimodo",
+          "status": "complete",
+          "version": "SMPL-X RP canonical TP2M run",
+          "representations": {
+            "smplx": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/smplx/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/kimodo/metrics/motionstreamer.json"
+          }
+        }
+      ]
+    },
+    {
+      "test_dataset": "humanml3d_official_test_c9",
+      "condition_frames": 9,
+      "expected_count": 4042,
+      "methods": [
+        {
+          "method": "gt_0beta",
+          "status": "complete",
+          "version": "raw official MS272",
+          "representations": {
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/gt_0beta",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            }
+          },
+          "metrics": {}
+        },
+        {
+          "method": "prism",
+          "status": "complete",
+          "version": "epoch43 pad360_crop selected-caption canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/prism",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/prism",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/prism/metrics/motionstreamer.json",
+            "physics": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/prism/metrics/physics.json"
+          }
+        },
+        {
+          "method": "motionstreamer",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/motionstreamer",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/motionstreamer",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/motionstreamer/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "flowmdm",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/flowmdm",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/flowmdm",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/flowmdm/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "motionlab",
+          "status": "complete",
+          "version": "hftrainer-native canonical TP2M run",
+          "representations": {
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/motionlab",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/motionlab",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/motionlab/metrics/motionstreamer.json"
+          }
+        },
+        {
+          "method": "kimodo",
+          "status": "complete",
+          "version": "SMPL-X RP canonical TP2M run",
+          "representations": {
+            "smplx": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/smplx/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "motion135": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0
+            },
+            "ms272": {
+              "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/kimodo",
+              "count": 4042,
+              "new_files": 0,
+              "missing": 0,
+              "failed": 0
+            }
+          },
+          "metrics": {
+            "motionstreamer": "outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/kimodo/metrics/motionstreamer.json"
+          }
+        }
+      ]
+    }
+  ]
+}

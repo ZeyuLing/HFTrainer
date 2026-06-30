@@ -1,0 +1,149 @@
+{
+  "leaderboard": "babel_sequential_t2m",
+  "task": "sequential_t2m",
+  "test_dataset": "babel_official_val_30fps",
+  "created_by": "scripts/eval/materialize_leaderboard_canonical_paths.py",
+  "path_policy": "outputs/evaluation/{task}/{test_dataset}/{motion_representation}/{method}/",
+  "forbidden_path_parts": [
+    "/prep/",
+    "/_suites/",
+    "/_runs/",
+    "/predictions/motion135/"
+  ],
+  "expected_episodes": 1295,
+  "expected_segments": 8441,
+  "expected_transitions": 8114,
+  "protocol_manifest": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/manifest.jsonl",
+  "canonical_gt_source": "outputs/evaluation/babel/official_val/msstyle_30fps_gt",
+  "methods": [
+    {
+      "method": "gt_0beta",
+      "version": "official-BABEL val GT, MS-style 30fps",
+      "status": "complete",
+      "representations": {
+        "motion135": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/motion135/gt_0beta",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/gt_0beta",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {
+        "motionstreamer": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/gt_0beta/metrics/motionstreamer.json",
+        "subclip_ranks_labelaware_b32_yup": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/gt_0beta/metrics/subclip_ranks_labelaware_b32_yup.json"
+      }
+    },
+    {
+      "method": "prism",
+      "version": "epoch43 pad360_crop arcond5 depth_driven",
+      "status": "complete",
+      "representations": {
+        "smplh": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/smplh/prism",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "motion135": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/motion135/prism",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/prism",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {
+        "motionstreamer": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/prism/metrics/motionstreamer.json"
+      }
+    },
+    {
+      "method": "motionstreamer",
+      "version": "official corrected protocol",
+      "status": "complete",
+      "representations": {
+        "motion135": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/motion135/motionstreamer",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/motionstreamer",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {
+        "motionstreamer": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/motionstreamer/metrics/motionstreamer.json"
+      }
+    },
+    {
+      "method": "flowmdm",
+      "version": "official corrected protocol",
+      "status": "complete",
+      "representations": {
+        "smplh": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/smplh/flowmdm",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "motion135": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/motion135/flowmdm",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/flowmdm",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {
+        "motionstreamer": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/flowmdm/metrics/motionstreamer.json"
+      }
+    },
+    {
+      "method": "doubletake",
+      "version": "official corrected protocol",
+      "status": "complete",
+      "representations": {
+        "smplh": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/smplh/doubletake",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "motion135": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/motion135/doubletake",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/doubletake",
+          "count": 1295,
+          "new_files": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {
+        "motionstreamer": "outputs/evaluation/sequential_t2m/babel_official_val_30fps/ms272/doubletake/metrics/motionstreamer.json"
+      }
+    }
+  ]
+}
