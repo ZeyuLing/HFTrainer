@@ -119,6 +119,34 @@ shift for several methods.
 | Jitter | 7.4677 |
 | Dynamic penetration | 28.4771 |
 
+## TP2M HumanML3D Metrics
+
+These rows score PRISM on the canonical HumanML3D TP2M protocols
+`humanml3d_official_test_c1/c5/c9` with the MotionStreamer-272 evaluator
+and the selected-caption text directory used by the T2M leaderboard. Each
+condition has `ids_with_required_files=4042`; `nb` is the evaluator-consumed
+count after the standard min/max motion-length filter.
+
+Note: the TP2M rows below are for the PRISM paper checkpoint `checkpoint-epoch_43` canonical pad360/crop run, not the older iter15000 PRISM 1.0 T2M checkpoint described above.
+
+| Cond frames | nb | FID native | FID refk | R@1 | R@2 | R@3 | MM-Dist | Diversity | Metric JSON |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 3968 | 18.8091 | 20.9285 | 0.7800 | 0.9037 | 0.9383 | 15.1968 | 27.4104 | `outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/prism/metrics/motionstreamer.json` |
+| 5 | 3968 | 17.0997 | 19.0724 | 0.7780 | 0.9047 | 0.9433 | 15.1085 | 27.3803 | `outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/prism/metrics/motionstreamer.json` |
+| 9 | 3968 | 16.4208 | 18.4227 | 0.7926 | 0.9090 | 0.9395 | 15.0505 | 27.4121 | `outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/prism/metrics/motionstreamer.json` |
+
+Recompute command:
+
+```bash
+env RUN_ROOT=outputs/evaluation/tp2m/_runs/ms272_metrics_20260629 \
+    GPU_LIST=0,1,2,3,4,5,6,7 SKIP_CACHE=1 \
+    TEXT_DIR=outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/texts \
+    bash scripts/eval/run_tp2m_ms272_metrics_remote.sh
+```
+
+Latest Taiji recompute: `tp2m_ms272_metrics_eval272_v100_0629_2124` plus
+`tp2m_ms272_metrics_fill3-V100-1x8-2139` for the no-cache fill run.
+
 ## Implementation Notes
 
 - **Checkpoint identity**: `work_dirs/prism_1b_tp2m_multiframe/checkpoint-iter_15000`,

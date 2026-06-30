@@ -106,6 +106,7 @@ class PrismPipeline(BasePipeline):
         **kwargs,
     ) -> Dict[str, Any]:
         backend_kwargs = dict(kwargs)
+        backend_kwargs.setdefault("use_rollout_trans", "xz_rollout_y_absolute")
         for key, value in self._length_policy_kwargs(
             length_policy=length_policy,
             num_frames_per_segment=num_frames_per_segment,
@@ -132,6 +133,9 @@ class PrismPipeline(BasePipeline):
         The default length policy is ``pad360_crop``: generate on the same
         360-frame training canvas, mask tokens beyond the requested valid
         length, then crop the decoded motion back to the requested length.
+        The default translation decode is ``xz_rollout_y_absolute``: root x/z
+        use rollout from relative channels, while root y uses the decoded
+        absolute channel to reduce height drift.
         Pass ``length_policy="direct_len"`` only for exact-length ablations, or
         ``length_policy="legacy"`` for old behavior.
         """

@@ -32,7 +32,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -248,6 +248,19 @@ def load_prism_bundle(config_path: str, checkpoint_dir: str, device: torch.devic
 # Generation
 # ---------------------------------------------------------------------------
 
+TRANSLATION_DECODE_MODES = ['rollout', 'absolute', 'xz_rollout_y_absolute']
+
+
+def _translation_decode_arg(mode: str):
+    if mode == 'rollout':
+        return True
+    if mode == 'absolute':
+        return False
+    if mode == 'xz_rollout_y_absolute':
+        return mode
+    raise ValueError(f'Unsupported translation decode mode: {mode}')
+
+
 @torch.no_grad()
 def generate_motion(
     pipeline,
@@ -255,9 +268,10 @@ def generate_motion(
     num_frames: int,
     num_inference_steps: int = 50,
     guidance_scale: float = 5.0,
-    use_rollout_trans: bool = True,
+    use_rollout_trans: Union[bool, str] = "xz_rollout_y_absolute",
     length_policy: str = 'pad360_crop',
     pad_to_frames: int = 360,
+    return_motion_vec: bool = False,
 ) -> Dict:
     """Generate a single motion sample via the PRISM pipeline.
 
@@ -286,8 +300,36 @@ def generate_motion(
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
         use_rollout_trans=use_rollout_trans,
+        return_motion_vec=return_motion_vec,
     )
     return output
+
+
+def _copy_prism_metadata(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in src.items():
+        if key.startswith('_prism_'):
+            dst[key] = value
+    return dst
+
+
+@torch.no_grad()
+def postprocess_cached_motion(
+    pipeline,
+    motion_vec: torch.Tensor,
+    metadata_source: Dict[str, Any],
+    translation_decode_mode: str,
+) -> Dict:
+    device = next(pipeline.backend.transformer.parameters()).device
+    smplx_dict = pipeline.backend.post_process_motion(
+        motion_vec.to(device),
+        use_static=False,
+        use_smooth=False,
+        normalize=True,
+        mocap_framerate=30.0,
+        gender='neutral',
+        use_rollout_trans=_translation_decode_arg(translation_decode_mode),
+    )
+    return _copy_prism_metadata(smplx_dict, metadata_source)
 
 
 # ---------------------------------------------------------------------------
@@ -511,11 +553,13 @@ def main():
     )
     parser.add_argument(
         '--translation-decode-mode',
-        choices=['rollout', 'absolute'],
-        default='rollout',
+        choices=TRANSLATION_DECODE_MODES + ['all'],
+        default='xz_rollout_y_absolute',
         help='How to decode PRISM abs_rel translation channels. rollout uses '
              'initial absolute translation plus cumulative relative deltas '
-             '(previous default); absolute uses decoded absolute channels directly.',
+             '(legacy default); absolute uses decoded absolute channels directly; '
+             'xz_rollout_y_absolute uses rollout for x/z and decoded absolute y '
+             '(current default). all samples once and writes all three decode variants.',
     )
     parser.add_argument(
         '--length-policy',
@@ -539,6 +583,9 @@ def main():
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
+    if os.environ.get('PRISM_DISABLE_CUDNN') == '1':
+        torch.backends.cudnn.enabled = False
+        print('[+] cuDNN disabled via PRISM_DISABLE_CUDNN=1')
 
     # ---- Device ----
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -654,10 +701,21 @@ def main():
         pipeline.backend.set_kafs_alpha(mode=args.kafs_mode)
 
     # ---- Output directory ----
-    _subdir = args.out_subdir if args.out_subdir else args.kafs_mode
-    out_dir = Path(args.output_dir) / _subdir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    print(f'[+] Output directory: {out_dir}')
+    decode_modes = (
+        list(TRANSLATION_DECODE_MODES)
+        if args.translation_decode_mode == 'all'
+        else [args.translation_decode_mode]
+    )
+    if args.translation_decode_mode == 'all':
+        out_dirs = {mode: Path(args.output_dir) / mode for mode in decode_modes}
+    else:
+        _subdir = args.out_subdir if args.out_subdir else args.kafs_mode
+        out_dirs = {decode_modes[0]: Path(args.output_dir) / _subdir}
+    for out_dir in out_dirs.values():
+        out_dir.mkdir(parents=True, exist_ok=True)
+    print('[+] Output directories:')
+    for mode, out_dir in out_dirs.items():
+        print(f'    {mode}: {out_dir}')
 
     # Save run metadata
     meta = {
@@ -676,12 +734,16 @@ def main():
         'seed': args.seed,
         'num_samples': len(samples),
     }
-    if args.num_shards > 1:
-        meta_path = out_dir / f'run_meta_shard{args.shard_idx}of{args.num_shards}.json'
-    else:
-        meta_path = out_dir / 'run_meta.json'
-    meta_path.write_text(json.dumps(meta, indent=2))
-    print(f'    Saved run metadata to {meta_path}')
+    for mode, out_dir in out_dirs.items():
+        mode_meta = dict(meta)
+        mode_meta['resolved_translation_decode_mode'] = mode
+        mode_meta['single_sample_multi_decode'] = args.translation_decode_mode == 'all'
+        if args.num_shards > 1:
+            meta_path = out_dir / f'run_meta_shard{args.shard_idx}of{args.num_shards}.json'
+        else:
+            meta_path = out_dir / 'run_meta.json'
+        meta_path.write_text(json.dumps(mode_meta, indent=2))
+        print(f'    Saved run metadata to {meta_path}')
 
     # ---- Generate motions ----
     print(f'[+] Generating {len(samples)} motions (steps={args.num_inference_steps}, '
@@ -689,116 +751,157 @@ def main():
     t_start = time.time()
     n_success = 0
     n_fail = 0
-    results_manifest = []
+    results_manifests = {mode: [] for mode in decode_modes}
 
     for i, sample in enumerate(samples):
         sample_name = sample['name']
         caption = sample['caption']
         num_frames = sample['num_frames']
-        out_path = out_dir / f'{sample_name}.npz'
+        out_paths = {mode: out_dirs[mode] / f'{sample_name}.npz' for mode in decode_modes}
 
-        if args.skip_existing and out_path.exists():
+        if args.skip_existing and all(path.exists() for path in out_paths.values()):
             try:
-                existing = np.load(out_path, allow_pickle=True)
-                existing_dict = {k: existing[k] for k in existing.files}
-                out_frames = validate_smplx_length(existing_dict, num_frames, sample_name)
-                results_manifest.append({
-                    'name': sample_name,
-                    'caption': caption,
-                    'official_gt_num_frames': num_frames,
-                    'requested_num_frames': _meta_int(existing_dict, '_prism_requested_num_frames', num_frames),
-                    'generation_num_frames': _meta_int(existing_dict, '_prism_generation_num_frames', num_frames),
-                    'valid_num_frames': _meta_int(existing_dict, '_prism_valid_num_frames', num_frames),
-                    'raw_decoded_num_frames': _meta_int(existing_dict, '_prism_raw_decoded_num_frames', out_frames),
-                    'pretrim_num_frames': _meta_int(existing_dict, '_prism_pretrim_num_frames', out_frames),
-                    'final_num_frames': out_frames,
-                    'length_policy': args.length_policy,
-                    'npz_path': str(out_path),
-                    'status': 'skipped_existing',
-                })
+                for mode, out_path in out_paths.items():
+                    existing = np.load(out_path, allow_pickle=True)
+                    existing_dict = {k: existing[k] for k in existing.files}
+                    out_frames = validate_smplx_length(existing_dict, num_frames, sample_name)
+                    results_manifests[mode].append({
+                        'name': sample_name,
+                        'caption': caption,
+                        'official_gt_num_frames': num_frames,
+                        'requested_num_frames': _meta_int(existing_dict, '_prism_requested_num_frames', num_frames),
+                        'generation_num_frames': _meta_int(existing_dict, '_prism_generation_num_frames', num_frames),
+                        'valid_num_frames': _meta_int(existing_dict, '_prism_valid_num_frames', num_frames),
+                        'raw_decoded_num_frames': _meta_int(existing_dict, '_prism_raw_decoded_num_frames', out_frames),
+                        'pretrim_num_frames': _meta_int(existing_dict, '_prism_pretrim_num_frames', out_frames),
+                        'final_num_frames': out_frames,
+                        'length_policy': args.length_policy,
+                        'npz_path': str(out_path),
+                        'translation_decode_mode': mode,
+                        'status': 'skipped_existing',
+                    })
                 n_success += 1
                 continue
             except Exception as e:
                 print(f'  [!] Existing output invalid for {sample_name}: {e}; regenerating')
 
         if args.length_policy == 'pad360_crop' and num_frames > args.pad_to_frames:
-            results_manifest.append({
-                'name': sample_name,
-                'caption': caption,
-                'official_gt_num_frames': num_frames,
-                'requested_num_frames': num_frames,
-                'generation_num_frames': args.pad_to_frames,
-                'valid_num_frames': num_frames,
-                'raw_decoded_num_frames': -1,
-                'pretrim_num_frames': -1,
-                'final_num_frames': -1,
-                'length_policy': args.length_policy,
-                'npz_path': '',
-                'status': (
-                    f'error: official length {num_frames} exceeds '
-                    f'pad_to_frames={args.pad_to_frames}'
-                ),
-            })
+            for mode in decode_modes:
+                results_manifests[mode].append({
+                    'name': sample_name,
+                    'caption': caption,
+                    'official_gt_num_frames': num_frames,
+                    'requested_num_frames': num_frames,
+                    'generation_num_frames': args.pad_to_frames,
+                    'valid_num_frames': num_frames,
+                    'raw_decoded_num_frames': -1,
+                    'pretrim_num_frames': -1,
+                    'final_num_frames': -1,
+                    'length_policy': args.length_policy,
+                    'npz_path': '',
+                    'translation_decode_mode': mode,
+                    'status': (
+                        f'error: official length {num_frames} exceeds '
+                        f'pad_to_frames={args.pad_to_frames}'
+                    ),
+                })
             n_fail += 1
             continue
 
         try:
-            smplx_dict = generate_motion(
-                pipeline=pipeline,
-                caption=caption,
-                num_frames=num_frames,
-                num_inference_steps=args.num_inference_steps,
-                guidance_scale=args.guidance_scale,
-                use_rollout_trans=(args.translation_decode_mode == 'rollout'),
-                length_policy=args.length_policy,
-                pad_to_frames=args.pad_to_frames,
-            )
-            if args.smooth_output:
-                from hftrainer.motion.processing.temporal_smoothing import (
-                    smooth_smplx_dict_hymotion,
+            if len(decode_modes) > 1:
+                generated = generate_motion(
+                    pipeline=pipeline,
+                    caption=caption,
+                    num_frames=num_frames,
+                    num_inference_steps=args.num_inference_steps,
+                    guidance_scale=args.guidance_scale,
+                    use_rollout_trans=True,
+                    length_policy=args.length_policy,
+                    pad_to_frames=args.pad_to_frames,
+                    return_motion_vec=True,
                 )
-                smplx_dict = smooth_smplx_dict_hymotion(smplx_dict)
-            out_frames = validate_smplx_length(smplx_dict, num_frames, sample_name)
+                base_smplx_dict = generated['smplx_dict']
+                motion_vec = generated['motion_vec']
+                smplx_by_mode = {
+                    mode: (
+                        base_smplx_dict
+                        if mode == 'rollout'
+                        else postprocess_cached_motion(
+                            pipeline=pipeline,
+                            motion_vec=motion_vec,
+                            metadata_source=base_smplx_dict,
+                            translation_decode_mode=mode,
+                        )
+                    )
+                    for mode in decode_modes
+                }
+            else:
+                mode = decode_modes[0]
+                smplx_by_mode = {
+                    mode: generate_motion(
+                        pipeline=pipeline,
+                        caption=caption,
+                        num_frames=num_frames,
+                        num_inference_steps=args.num_inference_steps,
+                        guidance_scale=args.guidance_scale,
+                        use_rollout_trans=_translation_decode_arg(mode),
+                        length_policy=args.length_policy,
+                        pad_to_frames=args.pad_to_frames,
+                    )
+                }
 
-            # Save output NPZ
-            save_smplx_npz(str(out_path), smplx_dict)
+            for mode, smplx_dict in smplx_by_mode.items():
+                if args.smooth_output:
+                    from hftrainer.motion.processing.temporal_smoothing import (
+                        smooth_smplx_dict_hymotion,
+                    )
+                    smplx_dict = smooth_smplx_dict_hymotion(smplx_dict)
+                out_frames = validate_smplx_length(smplx_dict, num_frames, sample_name)
 
-            results_manifest.append({
-                'name': sample_name,
-                'caption': caption,
-                'official_gt_num_frames': num_frames,
-                'requested_num_frames': _meta_int(smplx_dict, '_prism_requested_num_frames', num_frames),
-                'generation_num_frames': _meta_int(
-                    smplx_dict,
-                    '_prism_generation_num_frames',
-                    args.pad_to_frames if args.length_policy == 'pad360_crop' else num_frames,
-                ),
-                'valid_num_frames': _meta_int(smplx_dict, '_prism_valid_num_frames', num_frames),
-                'raw_decoded_num_frames': _meta_int(smplx_dict, '_prism_raw_decoded_num_frames', out_frames),
-                'pretrim_num_frames': _meta_int(smplx_dict, '_prism_pretrim_num_frames', out_frames),
-                'final_num_frames': out_frames,
-                'length_policy': args.length_policy,
-                'npz_path': str(out_path),
-                'status': 'success',
-            })
+                # Save output NPZ
+                out_path = out_paths[mode]
+                save_smplx_npz(str(out_path), smplx_dict)
+
+                results_manifests[mode].append({
+                    'name': sample_name,
+                    'caption': caption,
+                    'official_gt_num_frames': num_frames,
+                    'requested_num_frames': _meta_int(smplx_dict, '_prism_requested_num_frames', num_frames),
+                    'generation_num_frames': _meta_int(
+                        smplx_dict,
+                        '_prism_generation_num_frames',
+                        args.pad_to_frames if args.length_policy == 'pad360_crop' else num_frames,
+                    ),
+                    'valid_num_frames': _meta_int(smplx_dict, '_prism_valid_num_frames', num_frames),
+                    'raw_decoded_num_frames': _meta_int(smplx_dict, '_prism_raw_decoded_num_frames', out_frames),
+                    'pretrim_num_frames': _meta_int(smplx_dict, '_prism_pretrim_num_frames', out_frames),
+                    'final_num_frames': out_frames,
+                    'length_policy': args.length_policy,
+                    'npz_path': str(out_path),
+                    'translation_decode_mode': mode,
+                    'status': 'success',
+                })
             n_success += 1
 
         except Exception as e:
             print(f'  [!] Failed on sample {sample_name}: {e}')
-            results_manifest.append({
-                'name': sample_name,
-                'caption': caption,
-                'official_gt_num_frames': num_frames,
-                'requested_num_frames': num_frames,
-                'generation_num_frames': args.pad_to_frames if args.length_policy == 'pad360_crop' else num_frames,
-                'valid_num_frames': num_frames,
-                'raw_decoded_num_frames': -1,
-                'pretrim_num_frames': -1,
-                'final_num_frames': -1,
-                'length_policy': args.length_policy,
-                'npz_path': '',
-                'status': f'error: {e}',
-            })
+            for mode in decode_modes:
+                results_manifests[mode].append({
+                    'name': sample_name,
+                    'caption': caption,
+                    'official_gt_num_frames': num_frames,
+                    'requested_num_frames': num_frames,
+                    'generation_num_frames': args.pad_to_frames if args.length_policy == 'pad360_crop' else num_frames,
+                    'valid_num_frames': num_frames,
+                    'raw_decoded_num_frames': -1,
+                    'pretrim_num_frames': -1,
+                    'final_num_frames': -1,
+                    'length_policy': args.length_policy,
+                    'npz_path': '',
+                    'translation_decode_mode': mode,
+                    'status': f'error: {e}',
+                })
             n_fail += 1
 
         # Progress report every 10 samples
@@ -822,16 +925,17 @@ def main():
     print(f'  Total time:     {total_time:.1f}s')
     if n_success > 0:
         print(f'  Avg time/sample: {total_time / n_success:.2f}s')
-    print(f'  Output dir:     {out_dir}')
+    print(f'  Output dirs:    {", ".join(str(p) for p in out_dirs.values())}')
     print('=' * 60)
 
     # Save manifest (shard-aware to avoid collisions across parallel shards)
-    if args.num_shards > 1:
-        manifest_path = out_dir / f'manifest_shard{args.shard_idx}of{args.num_shards}.json'
-    else:
-        manifest_path = out_dir / 'manifest.json'
-    manifest_path.write_text(json.dumps(results_manifest, indent=2))
-    print(f'[+] Saved manifest ({len(results_manifest)} entries) to {manifest_path}')
+    for mode, out_dir in out_dirs.items():
+        if args.num_shards > 1:
+            manifest_path = out_dir / f'manifest_shard{args.shard_idx}of{args.num_shards}.json'
+        else:
+            manifest_path = out_dir / 'manifest.json'
+        manifest_path.write_text(json.dumps(results_manifests[mode], indent=2))
+        print(f'[+] Saved manifest ({len(results_manifests[mode])} entries) to {manifest_path}')
 
 
 if __name__ == '__main__':

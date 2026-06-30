@@ -64,6 +64,18 @@ def main() -> None:
     parser.add_argument("--kafs-mode", default="depth_driven", choices=["none", "depth_driven", "uniform", "random"])
     parser.add_argument("--num-inference-steps", type=int, default=50)
     parser.add_argument("--guidance-scale", type=float, default=5.0)
+    parser.add_argument(
+        "--translation-decode-mode",
+        choices=["rollout", "absolute", "xz_rollout_y_absolute"],
+        default="xz_rollout_y_absolute",
+        help=(
+            "How to decode PRISM abs_rel translation channels. rollout uses "
+            "initial absolute translation plus cumulative relative deltas; "
+            "absolute uses decoded absolute channels directly; "
+            "xz_rollout_y_absolute uses rollout for x/z and decoded absolute y "
+            "(current default)."
+        ),
+    )
     parser.add_argument("--length-policy", choices=["direct_len", "pad360_crop", "legacy"], default="pad360_crop",
                         help="PRISM generation length policy. pad360_crop is the training-aligned default: "
                              "generate on a 360-frame canvas and crop to GT length. direct_len is kept for ablations.")
@@ -74,6 +86,11 @@ def main() -> None:
     parser.add_argument("--max-frames", type=int, default=360)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--num-samples", type=int, default=None)
+    parser.add_argument(
+        "--id-file",
+        default=None,
+        help="Optional newline-separated official sample ids to keep.",
+    )
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--shard-idx", type=int, default=0)
     parser.add_argument("--skip-existing", action="store_true")
@@ -87,6 +104,15 @@ def main() -> None:
 
     _set_seed(args.seed)
 
+    keep_ids = None
+    if args.id_file:
+        keep_ids = {
+            line.strip()
+            for line in Path(args.id_file).read_text().splitlines()
+            if line.strip()
+        }
+        print(f"[setup] id filter: {len(keep_ids)} ids from {args.id_file}", flush=True)
+
     samples = load_test_samples(
         anno_file=Path(args.anno_file),
         data_dir=Path(args.data_dir),
@@ -95,6 +121,7 @@ def main() -> None:
         min_frames=max(args.min_frames, args.condition_num_frames + 1),
         max_frames=args.max_frames,
         max_samples=args.max_samples,
+        keep_ids=keep_ids,
     )
     if args.num_shards > 1:
         samples = samples[args.shard_idx::args.num_shards]
@@ -128,6 +155,7 @@ def main() -> None:
         "kafs_mode": args.kafs_mode,
         "num_inference_steps": args.num_inference_steps,
         "guidance_scale": args.guidance_scale,
+        "translation_decode_mode": args.translation_decode_mode,
         "length_policy": args.length_policy,
         "pad_to_frames": args.pad_to_frames,
         "num_shards": args.num_shards,
@@ -179,6 +207,11 @@ def main() -> None:
                 num_frames_per_segment=sample["num_frames"],
                 num_inference_steps=args.num_inference_steps,
                 guidance_scale=args.guidance_scale,
+                use_rollout_trans=(
+                    True if args.translation_decode_mode == "rollout"
+                    else False if args.translation_decode_mode == "absolute"
+                    else args.translation_decode_mode
+                ),
                 length_policy=args.length_policy,
                 pad_to_frames=args.pad_to_frames,
                 strict_length=True,

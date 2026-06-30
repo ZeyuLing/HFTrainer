@@ -596,12 +596,13 @@ class PrismARPipeline(DiffusionPipeline):
         attention_kwargs: Optional[Dict[str, Any]] = None,
         overlap_frames: int = 1,
         ar_condition_frames: int = 5,
-        use_rollout_trans: bool = True,
+        use_rollout_trans: Union[bool, str] = "xz_rollout_y_absolute",
         preserve_segment_lengths: bool = False,
         generation_num_frames_per_segment: Optional[Union[int, List[int]]] = None,
         valid_num_frames_per_segment: Optional[Union[int, List[int]]] = None,
         allow_segment_padding: bool = True,
         align_generation_frames: bool = True,
+        return_motion_vec: bool = False,
     ) -> Dict:
         """Generate long motion autoregressively from multiple prompts.
 
@@ -645,6 +646,11 @@ class PrismARPipeline(DiffusionPipeline):
                 historical PRISM VAE alignment heuristic before preparing
                 latents. Benchmark protocols set this false to pass exact
                 official/padded frame counts into ``prepare_latents``.
+            return_motion_vec: When true, return both the SMPL-X dictionary and
+                the decoded normalized motion tensor before translation
+                post-processing. This is used by decode-only ablations so the
+                same sampled motion can be converted with multiple translation
+                policies.
 
         Returns:
             smplx_dict: Dictionary containing SMPL-X parameters for the full motion.
@@ -869,6 +875,12 @@ class PrismARPipeline(DiffusionPipeline):
             [smplx_dict["transl"].shape[0]], dtype=np.int32
         )
 
+        if return_motion_vec:
+            return {
+                "smplx_dict": smplx_dict,
+                "motion_vec": full_motion.detach().cpu(),
+            }
+
         return smplx_dict
 
     def decode_motion(self, latents: torch.Tensor) -> torch.Tensor:
@@ -896,7 +908,7 @@ class PrismARPipeline(DiffusionPipeline):
         normalize: bool = True,
         mocap_framerate: float = 30.0,
         gender: str = "neutral",
-        use_rollout_trans: bool = True,
+        use_rollout_trans: Union[bool, str] = "xz_rollout_y_absolute",
     ) -> Dict:
         """Post-process decoded motion to SMPL-X format.
 
@@ -907,9 +919,10 @@ class PrismARPipeline(DiffusionPipeline):
             normalize: Whether to normalize facing direction and ground plane.
             mocap_framerate: Frame rate of the motion.
             gender: Gender for SMPL model.
-            use_rollout_trans: For ``abs_rel`` translation, reconstruct absolute
-                translation by cumulative relative deltas when true, otherwise
-                use the decoded absolute translation channels directly.
+            use_rollout_trans: For ``abs_rel`` translation, reconstruct x/z by
+                cumulative relative deltas and y from the decoded absolute
+                channel by default. Passing true uses full rollout; passing
+                false uses decoded absolute translation directly.
 
         Returns:
             Dictionary containing SMPL-X parameters.
