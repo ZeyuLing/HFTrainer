@@ -91,3 +91,9 @@ train_dataloader = dict(
         ],
     ),
 )
+
+accelerator = dict(
+    # T2M-only exercises a conditional M2M graph; let DDP mark unused
+    # parameters explicitly instead of letting buckets wait forever.
+    ddp_kwargs=dict(find_unused_parameters=True),
+)

@@ -20,7 +20,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from accelerate import Accelerator
-from accelerate.utils import DistributedType
+from accelerate.utils import DistributedDataParallelKwargs, DistributedType
 from mmengine.config import Config
 
 from hftrainer.utils.logger import get_logger, add_file_handler
@@ -267,6 +267,15 @@ class AccelerateRunner:
                 ds_cfg = ds_cfg.to_dict()
             deepspeed_plugin = DeepSpeedPlugin(**ds_cfg)
 
+        kwargs_handlers = []
+        ddp_kwargs_cfg = accel_cfg.pop('ddp_kwargs', None)
+        if ddp_kwargs_cfg is not None:
+            if hasattr(ddp_kwargs_cfg, 'to_dict'):
+                ddp_kwargs_cfg = ddp_kwargs_cfg.to_dict()
+            kwargs_handlers.append(
+                DistributedDataParallelKwargs(**ddp_kwargs_cfg)
+            )
+
         # Auto-fallback: bf16 → fp16 if device doesn't support bf16
         requested_mp = accel_cfg.get('mixed_precision', 'no')
         if requested_mp == 'bf16':
@@ -285,6 +294,7 @@ class AccelerateRunner:
             project_dir=run_dir,
             fsdp_plugin=fsdp_plugin,
             deepspeed_plugin=deepspeed_plugin,
+            kwargs_handlers=kwargs_handlers,
         )
 
         # ── File logging, config dump, env info (main process only) ──
