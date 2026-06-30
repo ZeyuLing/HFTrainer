@@ -38,8 +38,15 @@ import codecs as cs
 import numpy as np
 import torch
 
-REPO = "/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer"
-MS = os.path.join(REPO, "ref_repo/MotionStreamer/MotionStreamer")
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO = os.environ.get(
+    "HFTRAINER_REPO",
+    os.path.abspath(os.path.join(_SCRIPT_DIR, os.pardir, os.pardir)),
+)
+MS = os.environ.get(
+    "MOTIONSTREAMER_ROOT",
+    os.path.join(REPO, "ref_repo/MotionStreamer/MotionStreamer"),
+)
 EVAL_DIR = os.path.join(MS, "Evaluator_272")
 # CephFS is extremely slow (~1.4 MB/s cold); prefer a local /dev/shm copy of the
 # 518 MB checkpoint if present (see scripts/eval/_cache_272_data.sh).
