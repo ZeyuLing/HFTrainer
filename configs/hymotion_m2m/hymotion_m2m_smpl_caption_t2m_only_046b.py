@@ -83,7 +83,10 @@ train_dataloader = dict(
                     'tgt_length', 'src_length', 'edit_mode',
                     'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
                 ],
-                meta_keys=['motion_path', 'fps', 'caption'],
+                # Some HQ clips intentionally have no raw caption. Training
+                # consumes the packed text embeddings, so keep metadata keys
+                # uniform and avoid collate failures on optional captions.
+                meta_keys=['motion_path', 'fps'],
                 set_dummy_value=True,
                 dummy_value=None,
             ),
