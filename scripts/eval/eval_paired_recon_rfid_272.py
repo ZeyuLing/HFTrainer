@@ -21,18 +21,21 @@ import torch
 
 
 REPO = Path(__file__).resolve().parents[2]
-MS = REPO / "ref_repo/MotionStreamer/MotionStreamer"
-MEAN_STD = MS / "humanml3d_272/mean_std"
-SPLIT_TEST = MS / "humanml3d_272/split/test.txt"
-GT_MOTION_DIR = MS / "humanml3d_272/motion_data"
+MEAN_STD = REPO / "checkpoints/motionstreamer/t2m_humanml272"
+EVALUATOR_CKPT = REPO / "checkpoints/evaluators/motionstreamer_272/epoch99.ckpt"
+SPLIT_TEST = REPO / "outputs/evaluation/reconstruction/humanml3d_official_test/_meta/test_ids.txt"
+GT_MOTION_DIR = REPO / "outputs/evaluation/t2m/humanml3d_official_test/ms272/gt_0beta"
 
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts/eval"))
 
-from eval_motionstreamer_272 import (  # noqa: E402
-    calculate_activation_statistics,
-    calculate_frechet_distance,
-    load_evaluator,
+from hftrainer.evaluation.evaluators.motionstreamer_272 import (  # noqa: E402
+    _tolerant_pickle_module,
+)
+from hftrainer.evaluation.evaluators.networks import ActorAgnosticEncoder  # noqa: E402
+from hftrainer.evaluation.evaluators.t2m_metrics import (  # noqa: E402
+    activation_stats as calculate_activation_statistics,
+    calc_frechet as calculate_frechet_distance,
 )
 
 
@@ -82,6 +85,32 @@ def _pack_pair(ref: np.ndarray, pred: np.ndarray, mean: np.ndarray, std: np.ndar
     return pack(ref), pack(pred), length
 
 
+def load_motion_encoder(device: torch.device, evaluator_ckpt: Path):
+    motionencoder = ActorAgnosticEncoder(
+        nfeats=272,
+        vae=True,
+        num_layers=4,
+        latent_dim=256,
+        max_len=MAX_MOTION_LENGTH,
+    )
+    ckpt = torch.load(
+        str(evaluator_ckpt),
+        map_location="cpu",
+        pickle_module=_tolerant_pickle_module(),
+        weights_only=False,
+    )
+    state = {
+        k.replace("motionencoder.", ""): v
+        for k, v in ckpt["state_dict"].items()
+        if k.startswith("motionencoder.")
+    }
+    motionencoder.load_state_dict(state, strict=True)
+    motionencoder.eval().to(device)
+    for param in motionencoder.parameters():
+        param.requires_grad = False
+    return motionencoder
+
+
 @torch.no_grad()
 def _embed(motions: np.ndarray, lengths: np.ndarray, motionencoder, device, batch_size: int):
     outs = []
@@ -105,6 +134,8 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--tag", default="paired_recon")
     parser.add_argument("--out-json", default="")
+    parser.add_argument("--mean-std-dir", default=str(MEAN_STD))
+    parser.add_argument("--evaluator-ckpt", default=str(EVALUATOR_CKPT))
     args = parser.parse_args()
 
     ref_dir = Path(args.ref_dir)
@@ -114,8 +145,9 @@ def main() -> None:
     if args.max_samples > 0:
         ids = ids[: args.max_samples]
 
-    mean = np.load(MEAN_STD / "Mean.npy").astype(np.float32)
-    std = np.load(MEAN_STD / "Std.npy").astype(np.float32)
+    mean_std_dir = Path(args.mean_std_dir)
+    mean = np.load(mean_std_dir / "Mean.npy").astype(np.float32)
+    std = np.load(mean_std_dir / "Std.npy").astype(np.float32)
 
     ref_motions, pred_motions, lengths, used = [], [], [], []
     skipped = {"missing": 0, "short": 0, "error": 0}
@@ -164,7 +196,7 @@ def main() -> None:
     len_np = np.asarray(lengths, dtype=np.int64)
 
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
-    _textencoder, motionencoder = load_evaluator(device)
+    motionencoder = load_motion_encoder(device, Path(args.evaluator_ckpt))
     ref_emb = _embed(ref_np, len_np, motionencoder, device, args.batch_size)
     pred_emb = _embed(pred_np, len_np, motionencoder, device, args.batch_size)
 
@@ -180,6 +212,8 @@ def main() -> None:
         "ref_kind": args.ref_kind,
         "pred_dir": str(pred_dir),
         "pred_kind": args.pred_kind,
+        "mean_std_dir": str(mean_std_dir),
+        "evaluator_ckpt": str(Path(args.evaluator_ckpt)),
         "n": int(len(used)),
         "skipped": skipped,
         "length": {

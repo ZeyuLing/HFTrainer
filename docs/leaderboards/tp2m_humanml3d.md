@@ -31,7 +31,7 @@ Rows marked incomplete must not be used as final leaderboard rows.
 | Method | Status | c1 motion135 | c1 ms272 | c5 motion135 | c5 ms272 | c9 motion135 | c9 ms272 | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | GT | complete | - | 4042 | - | 4042 | - | 4042 | Official MotionStreamer-272 GT, `gt_0beta`. |
-| PRISM | complete | 4042 | 4042 | 4042 | 4042 | 4042 | 4042 | Epoch 43, pad360/crop, selected-caption protocol. |
+| PRISM | complete | 4042 | 4042 | 4042 | 4042 | 4042 | 4042 | Epoch 43, pad360/crop, selected-caption protocol, xz rollout + absolute y translation. |
 | MotionStreamer | complete | 4042 | 4042 | 4042 | 4042 | 4042 | 4042 | hftrainer-native TP2M canonical outputs. |
 | FlowMDM | complete | 4042 | 4042 | 4042 | 4042 | 4042 | 4042 | HML263-native pipeline converted to SMPL motion_135 then MS272. |
 | MotionLab | complete | 4042 | 4042 | 4042 | 4042 | 4042 | 4042 | HML263-native pipeline converted to SMPL motion_135 then MS272. |

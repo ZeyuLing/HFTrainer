@@ -41,7 +41,7 @@
     },
     {
       "method": "prism",
-      "version": "epoch43 pad360_crop arcond5 depth_driven",
+      "version": "epoch43 pad360_crop arcond5 depth_driven xz_rollout_y_absolute",
       "status": "complete",
       "representations": {
         "smplh": {

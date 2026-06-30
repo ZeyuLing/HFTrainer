@@ -67,6 +67,11 @@ from hftrainer.evaluation.motion.mbench_physics import (
     evaluate_mbench_physics_dir,
     table_scaled_metrics,
 )
+from hftrainer.evaluation.motion.mbench_body_penetration import (
+    BodyPenetrationConfig,
+    evaluate_body_penetration_dir,
+)
+from hftrainer.evaluation.motion.mbench_poseq import evaluate_poseq_dir
 
 raw = compute_mbench_physics_for_file("outputs/evaluation/.../000000.npz", mode="m135")
 display = table_scaled_metrics(raw)
@@ -75,6 +80,18 @@ summary = evaluate_mbench_physics_dir(
     "outputs/evaluation/ms272_tables_h3d_0607/prep/ours",
     mode="m135",
     workers=16,
+)
+
+poseq = evaluate_poseq_dir(
+    "outputs/evaluation/ms272_tables_h3d_0607/prep/ours",
+    mode="m135",
+)
+
+body_penet = evaluate_body_penetration_dir(
+    "outputs/evaluation/ms272_tables_h3d_0607/prep/ours",
+    mode="m135",
+    cfg=BodyPenetrationConfig(backend="auto"),
+    workers=12,
 )
 ```
 
@@ -132,6 +149,18 @@ capturing the intended artifact.
   metric.
 - `Jitter` and `Dynamic` use frame differences, so they are comparable only when
   methods are evaluated at the same fps and frame count policy.
-- `PoseQ` is computed separately by `scripts/eval/compute_pose_quality_h3d.py`
-  through the MBench NRDF model.  It is not implemented in
-  `mbench_physics.py` because it requires the ViMoGen NRDF checkpoint.
+- `PoseQ` / MBench `Pose_Quality` is computed by the reusable
+  `hftrainer.evaluation.motion.mbench_poseq` API and exposed through the
+  `scripts/eval/compute_pose_quality_h3d.py` CLI.  It is not implemented in
+  `mbench_physics.py` because it requires the ViMoGen NRDF checkpoint.  The
+  evaluator mirrors MBench's actual NRDF input behavior: it scores the first 21
+  SMPL pose parts (`global_orient + body_pose[:20]`) rather than the 21 body
+  joints alone.  It is an NRDF distance / unnaturalness score, so lower is
+  better (`PoseQ ↓`), not closeness-to-GT.
+- `BodyPenetration` / MBench `Body_Penetration` is exposed through
+  `hftrainer.evaluation.motion.mbench_body_penetration` and the
+  `scripts/eval/compute_body_penet_h3d.py` CLI.  The official backend requires
+  `mesh_intersection` / `torch-mesh-isect` to count self-colliding SMPL mesh
+  triangles.  The optional `winding` backend uses libigl winding numbers as a
+  geometry proxy and is not byte-for-byte official MBench.  Lower is better
+  (`Body_Penetration ↓`).

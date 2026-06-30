@@ -327,13 +327,15 @@ def summarize_subset(
 
 def make_table(rows: List[Dict[str, Any]]) -> str:
     header = (
-        "| Dataset | Splits | Clips | Motion files | Frames | Hours | "
-        "Music files | Invalid skipped | Trainable tasks | Text counts | Missing refs |\n"
+        "| Dataset | Splits | Clips | Motion refs | Frames | Hours | "
+        "Music refs | Invalid skipped | Trainable tasks | Text counts | Missing refs |\n"
         "|---|---:|---:|---:|---:|---:|---:|---:|---|---|---:|"
     )
     lines = [header]
     for row in rows:
         texts = row["text_counts"]
+        motion_refs = row["field_counts"].get("smplx_path", 0)
+        music_refs = row["field_counts"].get("music_path", 0)
         motion_missing = row.get("missing_motion_refs", 0)
         music_missing = row.get("missing_music_refs", 0)
         caption_missing = row.get("missing_caption_refs", 0) if row.get("caption_mode") == "exact" else "not checked"
@@ -347,10 +349,10 @@ def make_table(rows: List[Dict[str, Any]]) -> str:
                 name=row["name"],
                 splits=split_counts(row["split_samples"]),
                 clips=fmt_int(row["samples"]),
-                motion_files=fmt_int(row.get("motion_files_checked", 0)),
+                motion_files=fmt_int(motion_refs),
                 frames=fmt_int(row["frames"]),
                 hours=fmt_hours(row["seconds"]),
-                music_files=fmt_int(row.get("music_files_checked", 0)),
+                music_files=fmt_int(music_refs),
                 invalid=fmt_int(row.get("skipped_invalid_rows", 0)),
                 tasks=format_trainable_tasks(row),
                 texts=format_text_counts(texts),
@@ -374,6 +376,8 @@ def make_readme(
     total_annotation_frames = sum(r["annotation_frames"] for r in rows)
     total_motion_files = sum(r.get("motion_files_checked", 0) for r in rows)
     total_music_files = sum(r.get("music_files_checked", 0) for r in rows)
+    total_motion_refs = sum(r["field_counts"].get("smplx_path", 0) for r in rows)
+    total_music_refs = sum(r["field_counts"].get("music_path", 0) for r in rows)
     total_missing_motion_refs = sum(r.get("missing_motion_refs", 0) for r in rows)
     total_missing_music_refs = sum(r.get("missing_music_refs", 0) for r in rows)
     total_skipped_invalid_rows = sum(r.get("skipped_invalid_rows", 0) for r in rows)
@@ -413,8 +417,10 @@ def make_readme(
         f"- Generated on: `{date.today().isoformat()}`",
         f"- Published subsets included: `{len(rows)}`",
         f"- Total clips: `{fmt_int(total_samples)}`",
-        f"- Total motion files checked: `{fmt_int(total_motion_files)}`",
-        f"- Total music files checked: `{fmt_int(total_music_files)}`",
+        f"- Total motion references: `{fmt_int(total_motion_refs)}`",
+        f"- Total music references: `{fmt_int(total_music_refs)}`",
+        f"- Motion files loaded for frame verification: `{fmt_int(total_motion_files)}`",
+        f"- Music files checked for existence: `{fmt_int(total_music_files)}`",
         f"- Total motion frames: `{fmt_int(total_frames)}`",
         f"- Total motion duration: `{fmt_hours(total_seconds)}` hours",
         f"- Annotation/motion frame difference: `{fmt_int(total_frames - total_annotation_frames)}`",
@@ -447,7 +453,9 @@ def make_readme(
         "## Counting Rules",
         "",
         "- Annotation frame counts are read from `num_frames` when available; otherwise duration and fps are used.",
-        "- For published rows, motion volume is cross-checked against referenced `smplx_path` files; frame totals in the public table use motion-file lengths when available.",
+        "- `Motion refs` and `Music refs` count non-empty annotation references.",
+        "- When motion-file checking is enabled, motion volume is cross-checked against referenced `smplx_path` files and frame totals use motion-file lengths when available.",
+        "- When motion-file checking is skipped, frame totals use annotation `num_frames` / duration fields.",
         "- Hours use motion frames divided by each annotation row's fps.",
         "- `macro`, `meso`, and `micro` count non-empty strings parsed from hierarchical-caption JSON files.",
         "- `Missing caption refs` counts annotation references whose hierarchical-caption JSON could not be found.",
@@ -460,7 +468,7 @@ def make_readme(
         "Regenerate this file from the repository root with:",
         "",
         "```bash",
-        "python3 tools/build_motionhub_readme.py --data-root data/motionhub --output data/motionhub/README.md",
+        "python3 tools/build_motionhub_readme.py --data-root data/motionhub --output data/motionhub/README.md --skip-motion-file-check",
         "```",
         "",
         "Unpublished local subsets are intentionally omitted from the public README. For internal inventory previews, add `--include-staged`; do not upload that preview as the public dataset card.",
@@ -490,7 +498,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--caption-workers", type=int, default=min(32, (os.cpu_count() or 8) * 2))
     parser.add_argument(
         "--published-subsets",
-        default="aist",
+        default="aist,finedance,CombatMotion_seperate,fit3d,humansc3d,permo,beat_v2.0.0",
         help="Comma-separated subset directories already published in the public dataset repo.",
     )
     parser.add_argument("--skip-motion-file-check", action="store_true", help="Use annotation frame counts without loading motion files.")

@@ -141,11 +141,53 @@ def validate_babel(manifest: dict[str, Any], errors: list[str], warnings: list[s
                 errors.append(f"{metric_path}: n_transitions={metric['n_transitions']}")
 
 
+def validate_reconstruction(manifest: dict[str, Any], errors: list[str], warnings: list[str]) -> None:
+    official = _official_ids()
+    expected = int(manifest.get("expected_count", 4042))
+    if expected != len(official):
+        errors.append(f"{manifest.get('test_dataset')}: expected_count={expected}, official={len(official)}")
+    for method in manifest.get("methods", []):
+        method_name = str(method.get("method"))
+        status = method.get("status")
+        reps = method.get("representations", {})
+        if "ms272" not in reps:
+            errors.append(f"{method_name}: missing canonical ms272 representation")
+        for rep, info in reps.items():
+            rel_path = info.get("path")
+            if not rel_path:
+                continue
+            _check_path_policy(rel_path, errors)
+            _check_method_segment(rel_path, method_name, errors)
+            path = _path(rel_path)
+            count = _count_files(path)
+            if count != int(info.get("count", -1)):
+                errors.append(f"{rel_path}: manifest count={info.get('count')} actual={count}")
+            if count:
+                stems = _stems(path)
+                extra = sorted(stems - official)[:5]
+                missing = sorted(official - stems)[:5]
+                if extra:
+                    errors.append(f"{rel_path}: non-official ids present, e.g. {extra}")
+                if status == "complete" and rep == "ms272" and missing:
+                    errors.append(f"{rel_path}: complete row missing official ids, e.g. {missing}")
+            if status == "complete" and rep == "ms272" and count != expected:
+                errors.append(f"{rel_path}: complete ms272 row count {count} != {expected}")
+            if status == "pending" and rep == "ms272" and count:
+                warnings.append(f"{method_name} pending ms272 has partial files: {count}/{expected} at {rel_path}")
+        for metric_path in method.get("metrics", {}).values():
+            _check_path_policy(str(metric_path), errors)
+            _check_method_segment(str(metric_path), method_name, errors)
+            path = _path(str(metric_path))
+            if not path.exists():
+                errors.append(f"missing metric file: {metric_path}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("manifests", nargs="*", default=[
         "docs/leaderboards/tp2m_humanml3d.json",
         "docs/leaderboards/babel_sequential_t2m.json",
+        "docs/leaderboards/reconstruction_humanml3d.json",
     ])
     args = ap.parse_args()
     errors: list[str] = []
@@ -157,6 +199,8 @@ def main() -> int:
             validate_tp2m(manifest, errors, warnings)
         elif manifest.get("leaderboard") == "babel_sequential_t2m":
             validate_babel(manifest, errors, warnings)
+        elif manifest.get("leaderboard") == "reconstruction_humanml3d":
+            validate_reconstruction(manifest, errors, warnings)
         else:
             errors.append(f"unknown leaderboard manifest: {rel_manifest}")
     for msg in warnings:

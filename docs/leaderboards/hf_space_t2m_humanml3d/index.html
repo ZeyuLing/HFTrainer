@@ -442,7 +442,7 @@
           <tbody></tbody>
         </table>
       </div>
-      <p class="caption">Slide, Float, Jitter, and Dynamic are reported with the shared joint-level physical metric implementation.</p>
+      <p class="caption">Slide, Float, Jitter, and Dynamic use the shared joint-level physical metric implementation. PoseQ is the MBench NRDF pose-quality score; lower is better.</p>
     </section>
 
     <section id="calibration" class="view hidden" aria-label="calibration metrics">
@@ -480,25 +480,25 @@
     ];
 
     const physicalRows = [
-      {method: "GT", version: "0 beta", n: 4042, slide: 0.0020, float: 0.0264, jitter: 0.0055, dynamic: 0.0232},
-      {method: "HYMotion", version: "1.0B", n: 4042, slide: 2.8324, float: 11.2276, jitter: 6.5152, dynamic: 25.7241},
-      {method: "HYMotion", version: "0.46B", n: 4042, slide: 3.2626, float: 13.5222, jitter: 7.0928, dynamic: 26.9823},
-      {method: "PRISM", version: "KAFS cfg5", n: 4042, slide: 3.4524, float: 7.7084, jitter: 6.4377, dynamic: 27.6258},
-      {method: "PRISM", version: "1.0", n: 4042, slide: 3.6746, float: 7.8379, jitter: 6.1307, dynamic: 27.7158},
-      {method: "MotionStreamer", version: "official", n: 4042, slide: 5.0011, float: 17.0663, jitter: 11.0975, dynamic: 23.6778},
-      {method: "GoToZero", version: "7B-train", n: 4042, slide: 4.4411, float: 20.0600, jitter: 9.9057, dynamic: 21.3236},
-      {method: "GoToZero", version: "3B-train", n: 4042, slide: 4.4398, float: 20.0928, jitter: 9.8859, dynamic: 21.3268},
-      {method: "ViMoGen", version: "1.3B prompt-rewrite", n: 4042, slide: 6.9485, float: 23.7270, jitter: 4.4370, dynamic: 16.3838},
-      {method: "DART", version: "official", n: 4042, slide: 3.2958, float: 5.9494, jitter: 4.4701, dynamic: 17.9559},
-      {method: "FlowMDM", version: "official", n: 4042, slide: 3.0452, float: 7.4055, jitter: 5.0130, dynamic: 22.3205},
-      {method: "MotionLab", version: "official", n: 4042, slide: 2.4231, float: 4.0795, jitter: 5.8493, dynamic: 24.3519},
-      {method: "T2M-GPT", version: "official", n: 4042, slide: 3.7598, float: 11.1799, jitter: 4.9000, dynamic: 19.3651},
-      {method: "MDM", version: "official", n: 4042, slide: 2.5318, float: 4.9987, jitter: 4.7034, dynamic: 22.1361},
-      {method: "MoMask", version: "official", n: 4042, slide: 3.7319, float: 9.5021, jitter: 5.7226, dynamic: 23.4879},
-      {method: "MoGenTS", version: "official", n: 4042, slide: 4.1508, float: 12.3141, jitter: 5.1289, dynamic: 23.0138},
-      {method: "MotionGPT", version: "official", n: 4042, slide: 3.8783, float: 10.8835, jitter: 5.1680, dynamic: 21.0609},
-      {method: "MotionGPT3", version: "official", n: 4042, slide: 3.8137, float: 9.6933, jitter: 4.7599, dynamic: 23.1948},
-      {method: "KIMODO", version: "SMPL-X RP", n: 4042, slide: 3.5414, float: 2.7151, jitter: 6.3208, dynamic: 29.9568}
+      {method: "GT", version: "0 beta", n: 4042, slide: 0.0020, float: 0.0264, jitter: 0.0055, dynamic: 0.0232, poseq: 1.4300},
+      {method: "HYMotion", version: "1.0B", n: 4042, slide: 2.8324, float: 11.2276, jitter: 6.5152, dynamic: 25.7241, poseq: 1.7083},
+      {method: "HYMotion", version: "0.46B", n: 4042, slide: 3.2626, float: 13.5222, jitter: 7.0928, dynamic: 26.9823, poseq: 1.6847},
+      {method: "PRISM", version: "KAFS cfg5", n: 4042, slide: 3.4524, float: 7.7084, jitter: 6.4377, dynamic: 27.6258, poseq: 1.6807},
+      {method: "PRISM", version: "1.0", n: 4042, slide: 3.6746, float: 7.8379, jitter: 6.1307, dynamic: 27.7158, poseq: 1.6854},
+      {method: "MotionStreamer", version: "official", n: 4042, slide: 5.0011, float: 17.0663, jitter: 11.0975, dynamic: 23.6778, poseq: 1.2656},
+      {method: "GoToZero", version: "7B-train", n: 4042, slide: 4.4411, float: 20.0600, jitter: 9.9057, dynamic: 21.3236, poseq: 1.2388},
+      {method: "GoToZero", version: "3B-train", n: 4042, slide: 4.4398, float: 20.0928, jitter: 9.8859, dynamic: 21.3268, poseq: 1.2377},
+      {method: "ViMoGen", version: "1.3B prompt-rewrite", n: 4042, slide: 6.9485, float: 23.7270, jitter: 4.4370, dynamic: 16.3838, poseq: 2.0434},
+      {method: "DART", version: "official", n: 4042, slide: 3.2958, float: 5.9494, jitter: 4.4701, dynamic: 17.9559, poseq: 2.1452},
+      {method: "FlowMDM", version: "official", n: 4042, slide: 3.0452, float: 7.4055, jitter: 5.0130, dynamic: 22.3205, poseq: 1.8526},
+      {method: "MotionLab", version: "official", n: 4042, slide: 2.4231, float: 4.0795, jitter: 5.8493, dynamic: 24.3519, poseq: 1.8781},
+      {method: "T2M-GPT", version: "official", n: 4042, slide: 3.7598, float: 11.1799, jitter: 4.9000, dynamic: 19.3651, poseq: 1.8004},
+      {method: "MDM", version: "official", n: 4042, slide: 2.5318, float: 4.9987, jitter: 4.7034, dynamic: 22.1361, poseq: 1.9613},
+      {method: "MoMask", version: "official", n: 4042, slide: 3.7319, float: 9.5021, jitter: 5.7226, dynamic: 23.4879, poseq: 1.8611},
+      {method: "MoGenTS", version: "official", n: 4042, slide: 4.1508, float: 12.3141, jitter: 5.1289, dynamic: 23.0138, poseq: 1.8073},
+      {method: "MotionGPT", version: "official", n: 4042, slide: 3.8783, float: 10.8835, jitter: 5.1680, dynamic: 21.0609, poseq: 1.8257},
+      {method: "MotionGPT3", version: "official", n: 4042, slide: 3.8137, float: 9.6933, jitter: 4.7599, dynamic: 23.1948, poseq: 1.7930},
+      {method: "KIMODO", version: "SMPL-X RP", n: 4042, slide: 3.5414, float: 2.7151, jitter: 6.3208, dynamic: 29.9568, poseq: 1.6522}
     ];
 
     const calibrationRows = [
@@ -538,7 +538,8 @@
           {key: "slide", label: "Slide", numeric: true, lower: true},
           {key: "float", label: "Float", numeric: true, lower: true},
           {key: "jitter", label: "Jitter", numeric: true, lower: true},
-          {key: "dynamic", label: "Dynamic", numeric: true, lower: true}
+          {key: "dynamic", label: "Dynamic", numeric: true, lower: true},
+          {key: "poseq", label: "PoseQ", numeric: true, lower: true}
         ]
       },
       calibration: {

@@ -127,13 +127,13 @@ and the selected-caption text directory used by the T2M leaderboard. Each
 condition has `ids_with_required_files=4042`; `nb` is the evaluator-consumed
 count after the standard min/max motion-length filter.
 
-Note: the TP2M rows below are for the PRISM paper checkpoint `checkpoint-epoch_43` canonical pad360/crop run, not the older iter15000 PRISM 1.0 T2M checkpoint described above.
+Note: the TP2M rows below are for the PRISM paper checkpoint `checkpoint-epoch_43` canonical pad360/crop run with `xz_rollout_y_absolute` translation decoding, not the older iter15000 PRISM 1.0 T2M checkpoint described above.
 
 | Cond frames | nb | FID native | FID refk | R@1 | R@2 | R@3 | MM-Dist | Diversity | Metric JSON |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 1 | 3968 | 18.8091 | 20.9285 | 0.7800 | 0.9037 | 0.9383 | 15.1968 | 27.4104 | `outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/prism/metrics/motionstreamer.json` |
-| 5 | 3968 | 17.0997 | 19.0724 | 0.7780 | 0.9047 | 0.9433 | 15.1085 | 27.3803 | `outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/prism/metrics/motionstreamer.json` |
-| 9 | 3968 | 16.4208 | 18.4227 | 0.7926 | 0.9090 | 0.9395 | 15.0505 | 27.4121 | `outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/prism/metrics/motionstreamer.json` |
+| 1 | 3968 | 48.4399 | 54.0765 | 0.7467 | 0.8813 | 0.9214 | 16.2216 | 26.7002 | `outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/prism/metrics/motionstreamer.json` |
+| 5 | 3968 | 38.8512 | 44.0105 | 0.7588 | 0.8957 | 0.9330 | 15.8599 | 26.8676 | `outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/prism/metrics/motionstreamer.json` |
+| 9 | 3968 | 36.4133 | 41.3600 | 0.7649 | 0.8942 | 0.9367 | 15.7691 | 26.9763 | `outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/prism/metrics/motionstreamer.json` |
 
 Recompute command:
 

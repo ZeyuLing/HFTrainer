@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize canonical TP2M and BABEL sequential leaderboard paths.
+"""Materialize canonical leaderboard paths.
 
 This script is intentionally conservative: it filters TP2M files to the official
 HumanML3D selected-caption IDs, skips KIMODO TP2M legacy outputs, and records
@@ -36,6 +36,8 @@ TP2M_OLD_BASELINES = ROOT / "outputs/evaluation/ms272_table2_baselines_0608"
 TP2M_OLD_KIMODO = ROOT / "outputs/evaluation/kimodo_tp2m"
 BABEL_OLD = ROOT / "outputs/evaluation/babel/official_val/msstyle_30fps_gt"
 BABEL_NEW = ROOT / "outputs/evaluation/sequential_t2m/babel_official_val_30fps"
+RECON_NEW = ROOT / "outputs/evaluation/reconstruction/humanml3d_official_test"
+H3D272_SPLIT = ROOT / "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt"
 
 FORBIDDEN_PATH_PARTS = (
     "/prep/",
@@ -43,6 +45,85 @@ FORBIDDEN_PATH_PARTS = (
     "/_runs/",
     "/predictions/motion135/",
 )
+
+RECON_METHOD_SPECS = [
+    {
+        "method": "t2mgpt",
+        "aliases": ["T2M-GPT", "MotionGPT"],
+        "tokenizer_family": "T2M-GPT VQVAE",
+        "native_representation": "hml263",
+        "representations": ["hml263", "motion135", "ms272"],
+    },
+    {
+        "method": "tm2t",
+        "aliases": ["TM2T"],
+        "tokenizer_family": "TM2T VQVAE",
+        "native_representation": "hml263",
+        "representations": ["hml263", "motion135", "ms272"],
+    },
+    {
+        "method": "motionstreamer",
+        "aliases": ["MotionStreamer"],
+        "tokenizer_family": "MotionStreamer Causal-TAE",
+        "native_representation": "ms272",
+        "representations": ["ms272", "motion135"],
+    },
+    {
+        "method": "mld",
+        "aliases": ["MLD", "MotionLCM"],
+        "tokenizer_family": "MLD / MotionLCM VAE",
+        "native_representation": "hml263",
+        "representations": ["hml263", "motion135", "ms272"],
+    },
+    {
+        "method": "momask",
+        "aliases": ["MoMask"],
+        "tokenizer_family": "MoMask RVQ-VAE",
+        "native_representation": "hml263",
+        "representations": ["hml263", "motion135", "ms272"],
+    },
+    {
+        "method": "mogents",
+        "aliases": ["MoGenTS"],
+        "tokenizer_family": "MoGenTS tokenizer",
+        "native_representation": "hml263",
+        "representations": ["hml263", "motion135", "ms272"],
+    },
+    {
+        "method": "motiongpt3",
+        "aliases": ["MotionGPT3"],
+        "tokenizer_family": "MotionGPT3 tokenizer",
+        "native_representation": "hml263",
+        "representations": ["hml263", "motion135", "ms272"],
+    },
+    {
+        "method": "prism",
+        "aliases": ["PRISM"],
+        "tokenizer_family": "PRISM tokenizer",
+        "native_representation": "motion135",
+        "representations": ["motion135", "ms272"],
+    },
+    {
+        "method": "vermo",
+        "aliases": ["VerMo"],
+        "tokenizer_family": "VerMo tokenizer",
+        "native_representation": "smplx",
+        "representations": ["smplx", "motion135", "ms272"],
+    },
+]
+
+RECON_PLANNED_METRICS = {
+    "geom": "MPJPE, root-aligned MPJPE, PA-MPJPE, and MPJRE from scripts/eval/eval_paired_recon_geom_272.py",
+    "paired_rfid_emb_l2": "MotionStreamer-272 paired rFID and embedding L2 from scripts/eval/eval_paired_recon_rfid_272.py",
+    "physics": "Slide, Float, Jitter, and Dynamic from scripts/eval/eval_mbench_physics_dir.py",
+    "poseq": "PoseQ from scripts/eval/compute_pose_quality_h3d.py",
+}
+RECON_METRIC_FILES = {
+    "geom": "geom.json",
+    "paired_rfid_emb_l2": "paired_rfid_emb_l2.json",
+    "physics": "physics.json",
+    "poseq": "poseq.json",
+}
 
 
 def rel(path: Path) -> str:
@@ -421,9 +502,78 @@ def materialize_babel() -> dict[str, Any]:
     }
 
 
+def materialize_reconstruction(ids: list[str]) -> dict[str, Any]:
+    """Create the pending HumanML3D tokenizer-reconstruction manifest."""
+
+    methods = []
+    ensure_dir(RECON_NEW)
+    for spec in RECON_METHOD_SPECS:
+        method = spec["method"]
+        reps = {}
+        for rep in spec["representations"]:
+            dst = RECON_NEW / rep / method
+            metadata = {
+                "task": "reconstruction",
+                "test_dataset": "humanml3d_official_test",
+                "representation": rep,
+                "method": method,
+                "aliases": spec["aliases"],
+                "tokenizer_family": spec["tokenizer_family"],
+                "native_representation": spec["native_representation"],
+                "expected_count": len(ids),
+                "canonical_split": rel(H3D272_SPLIT),
+                "canonical_ms272_gt": rel(H3D272),
+                "selected_caption_annotation": rel(ANNO),
+                "planned_metrics": RECON_PLANNED_METRICS,
+            }
+            if rep == "ms272" and spec["native_representation"] != "ms272":
+                motion135_src = RECON_NEW / "motion135" / method
+                if count_rep_files(motion135_src):
+                    reps[rep] = materialize_ms272_from_motion135(motion135_src, dst, ids)
+                    metadata["source_motion135"] = rel(motion135_src)
+                    metadata["motion135_to_ms272"] = "hftrainer.motion.representation.motion272::motion135_to_272"
+                else:
+                    ensure_dir(dst)
+                    reps[rep] = {"path": rel(dst), "count": count_rep_files(dst)}
+            else:
+                ensure_dir(dst)
+                reps[rep] = {"path": rel(dst), "count": count_rep_files(dst)}
+            write_run_metadata(dst, metadata)
+        ms272_count = int(reps.get("ms272", {}).get("count", 0))
+        metrics = {}
+        metric_dir = RECON_NEW / "ms272" / method / "metrics"
+        for metric_name, filename in RECON_METRIC_FILES.items():
+            metric_path = metric_dir / filename
+            if metric_path.exists():
+                metrics[metric_name] = rel(metric_path)
+        methods.append({
+            "method": method,
+            "aliases": spec["aliases"],
+            "tokenizer_family": spec["tokenizer_family"],
+            "native_representation": spec["native_representation"],
+            "status": "complete" if ms272_count == len(ids) else "pending",
+            "representations": reps,
+            "metrics": metrics,
+        })
+    return {
+        "leaderboard": "reconstruction_humanml3d",
+        "task": "reconstruction",
+        "test_dataset": "humanml3d_official_test",
+        "created_by": rel(Path(__file__)),
+        "path_policy": "outputs/evaluation/{task}/{test_dataset}/{motion_representation}/{method}/",
+        "forbidden_path_parts": list(FORBIDDEN_PATH_PARTS),
+        "expected_count": len(ids),
+        "canonical_split": rel(H3D272_SPLIT),
+        "canonical_ms272_gt": rel(H3D272),
+        "canonical_selected_caption_annotation": rel(ANNO),
+        "planned_metrics": RECON_PLANNED_METRICS,
+        "methods": methods,
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["all", "tp2m", "babel"], default="all")
+    ap.add_argument("--only", choices=["all", "tp2m", "babel", "reconstruction"], default="all")
     args = ap.parse_args()
     docs = ROOT / "docs/leaderboards"
     if args.only in {"all", "tp2m"}:
@@ -433,6 +583,10 @@ def main() -> None:
     if args.only in {"all", "babel"}:
         print("[babel] materializing official val 30fps paths", flush=True)
         write_json(docs / "babel_sequential_t2m.json", materialize_babel())
+    if args.only in {"all", "reconstruction"}:
+        ids = load_official_ids()
+        print(f"[reconstruction] official ids={len(ids)}", flush=True)
+        write_json(docs / "reconstruction_humanml3d.json", materialize_reconstruction(ids))
 
 
 if __name__ == "__main__":

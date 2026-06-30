@@ -32,7 +32,7 @@
         {
           "method": "prism",
           "status": "complete",
-          "version": "epoch43 pad360_crop selected-caption canonical TP2M run",
+          "version": "epoch43 pad360_crop xz_rollout_y_absolute selected-caption canonical TP2M run",
           "representations": {
             "motion135": {
               "path": "outputs/evaluation/tp2m/humanml3d_official_test_c1/motion135/prism",
@@ -175,7 +175,7 @@
         {
           "method": "prism",
           "status": "complete",
-          "version": "epoch43 pad360_crop selected-caption canonical TP2M run",
+          "version": "epoch43 pad360_crop xz_rollout_y_absolute selected-caption canonical TP2M run",
           "representations": {
             "motion135": {
               "path": "outputs/evaluation/tp2m/humanml3d_official_test_c5/motion135/prism",
@@ -318,7 +318,7 @@
         {
           "method": "prism",
           "status": "complete",
-          "version": "epoch43 pad360_crop selected-caption canonical TP2M run",
+          "version": "epoch43 pad360_crop xz_rollout_y_absolute selected-caption canonical TP2M run",
           "representations": {
             "motion135": {
               "path": "outputs/evaluation/tp2m/humanml3d_official_test_c9/motion135/prism",

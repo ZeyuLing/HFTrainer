@@ -27,6 +27,7 @@ MANIFEST=${MANIFEST:-${BASE}/manifest.jsonl}
 STEPS=${STEPS:-50}
 GUIDANCE=${GUIDANCE:-5.0}
 ORIENTATION_RETRIES=${ORIENTATION_RETRIES:-4}
+IDFILE=${IDFILE:-}
 
 LOCAL_HOST_RANK=${INDEX:-0}
 if [ -n "${NODE_LIST:-}" ]; then
@@ -43,9 +44,10 @@ JOB_COUNT=${JOB_COUNT:-1}
 TOTAL_SHARDS=$((JOB_COUNT * MACHINE_NUM * NUM_GPUS))
 GLOBAL_HOST_RANK=$((JOB_RANK * MACHINE_NUM + LOCAL_HOST_RANK))
 SHARD_BASE=$((GLOBAL_HOST_RANK * NUM_GPUS))
+RUN_TAG=${RUN_TAG:-job${JOB_RANK}_h${LOCAL_HOST_RANK}}
 
 mkdir -p "$OUT/logs"
-cat > "$OUT/command_job${JOB_RANK}_host${LOCAL_HOST_RANK}.txt" <<EOF
+cat > "$OUT/command_${RUN_TAG}.txt" <<EOF
 ROOT=$ROOT
 CONFIG=$CONFIG
 CHECKPOINT=$CHECKPOINT
@@ -59,6 +61,7 @@ LENGTH_POLICY=$LENGTH_POLICY
 PAD_TO_FRAMES=$PAD_TO_FRAMES
 TRANSLATION_DECODE_MODE=$TRANSLATION_DECODE_MODE
 ORIENTATION_RETRIES=$ORIENTATION_RETRIES
+IDFILE=$IDFILE
 JOB_RANK=$JOB_RANK
 JOB_COUNT=$JOB_COUNT
 LOCAL_HOST_RANK=$LOCAL_HOST_RANK
@@ -67,9 +70,15 @@ MACHINE_NUM=$MACHINE_NUM
 NUM_GPUS=$NUM_GPUS
 TOTAL_SHARDS=$TOTAL_SHARDS
 SHARD_BASE=$SHARD_BASE
+RUN_TAG=$RUN_TAG
 EOF
 
 echo "[start] $(date) out=$OUT ckpt=$CHECKPOINT ar_cond=$AR_COND_FRAMES job=$JOB_RANK/$JOB_COUNT host=$LOCAL_HOST_RANK machines=$MACHINE_NUM total_shards=$TOTAL_SHARDS shard_base=$SHARD_BASE length_policy=$LENGTH_POLICY translation=$TRANSLATION_DECODE_MODE"
+
+ID_ARGS=()
+if [ -n "$IDFILE" ]; then
+  ID_ARGS=(--id-file "$IDFILE")
+fi
 
 for i in $(seq 0 $((NUM_GPUS - 1))); do
   SHARD=$((SHARD_BASE + i))
@@ -85,11 +94,12 @@ for i in $(seq 0 $((NUM_GPUS - 1))); do
     --pad-to-frames "$PAD_TO_FRAMES" \
     --translation-decode-mode "$TRANSLATION_DECODE_MODE" \
     --ar-cond-frames "$AR_COND_FRAMES" \
+    "${ID_ARGS[@]}" \
     --num-shards "$TOTAL_SHARDS" \
     --shard-idx "$SHARD" \
     --orientation-retries "$ORIENTATION_RETRIES" \
     --skip-existing \
-    > "$OUT/logs/gen_job${JOB_RANK}_h${LOCAL_HOST_RANK}_g${i}.log" 2>&1 &
+    > "$OUT/logs/gen_${RUN_TAG}_g${i}.log" 2>&1 &
 done
 wait
 

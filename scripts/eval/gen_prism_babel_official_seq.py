@@ -187,6 +187,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--num-shards", type=int, default=1)
     ap.add_argument("--shard-idx", type=int, default=0)
     ap.add_argument("--max-episodes", type=int, default=0)
+    ap.add_argument(
+        "--id-file",
+        default=None,
+        help="Optional newline-separated BABEL episode ids to keep before sharding.",
+    )
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument(
@@ -226,6 +231,14 @@ def main() -> None:
         rows = [r for r in rows if int(r["total_frames"]) <= int(args.max_total)]
     if args.max_episodes:
         rows = rows[: int(args.max_episodes)]
+    if args.id_file:
+        keep_ids = {
+            line.strip()
+            for line in Path(args.id_file).read_text().splitlines()
+            if line.strip()
+        }
+        rows = [r for r in rows if str(r["id"]) in keep_ids]
+        print(f"[setup] id filter: {len(keep_ids)} ids from {args.id_file}", flush=True)
     rows = rows[int(args.shard_idx) :: int(args.num_shards)]
     if not rows:
         raise RuntimeError("no episodes selected")
@@ -268,6 +281,7 @@ def main() -> None:
         ),
         "num_shards": int(args.num_shards),
         "shard_idx": int(args.shard_idx),
+        "id_file": str(args.id_file) if args.id_file else None,
         "selected_episodes": len(rows),
         "seed": int(args.seed),
     }
