@@ -208,7 +208,7 @@ def main():
     anno_file = Path(args.anno_file) if args.anno_file else None
     rewritten_file = Path(args.rewritten_file) if args.rewritten_file else None
     if args.dataset == "humanml3d":
-        min_length = args.condition_num_frames + 4
+        min_length = args.condition_num_frames + 1
         if anno_file is None and args.humanml3d_min_motion_length > 0:
             min_length = max(min_length, int(args.humanml3d_min_motion_length))
         pairs = _load_h3d_pairs(
@@ -233,7 +233,7 @@ def main():
             rewritten_file=rewritten_file,
             caption_protocol=args.caption_protocol,
         )
-        pairs = [p for p in pairs if p[2] >= args.condition_num_frames + 4]
+        pairs = [p for p in pairs if p[2] > args.condition_num_frames]
     only_ids = _load_only_ids(args.only_ids)
     if only_ids is not None:
         pairs = [p for p in pairs if str(p[0]) in only_ids]
@@ -273,8 +273,8 @@ def main():
                     args.prefix_latent_source,
                 )
                 prefix_tokens = int(prefix_latents.shape[0])
-                eval_len = (min(int(target_len), int(args.max_motion_length)) // 4) * 4
-                sample_total_frames = max(eval_len, (prefix_tokens + 1) * 4)
+                eval_len = min(int(target_len), int(args.max_motion_length))
+                sample_total_frames = max(((eval_len + 3) // 4) * 4, (prefix_tokens + 1) * 4)
                 if args.sampling_method == "new_demo":
                     _xs, b_latents = trans_encoder.sample_for_eval_CFG_babel_inference_new_demo(
                         B_text=caption,
