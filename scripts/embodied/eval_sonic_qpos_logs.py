@@ -78,7 +78,14 @@ def _body_positions(model: mujoco.MjModel, qpos: np.ndarray, body_ids: np.ndarra
 def _metrics(ref_qpos: np.ndarray, exec_qpos: np.ndarray, fps: float, model: mujoco.MjModel) -> dict:
     n = min(len(ref_qpos), len(exec_qpos))
     if n < 2:
-        return {"success": False, "paper_success": False, "strict_success": False, "steps": n}
+        return {
+            "success": False,
+            "paper_success": False,
+            "strict_success": False,
+            "legacy_success": False,
+            "steps": n,
+            "completion": float(n / len(ref_qpos)) if len(ref_qpos) else 0.0,
+        }
     ref = ref_qpos[:n].astype(np.float64)
     exe = exec_qpos[:n].astype(np.float64)
     body_ids = np.array([i for i in range(1, model.nbody)])
@@ -113,15 +120,24 @@ def _metrics(ref_qpos: np.ndarray, exec_qpos: np.ndarray, fps: float, model: muj
     local_m = float(local_body.mean())
     root_m = float(root_err.mean())
     root_h_m = float(root_height_err.mean())
-    paper_failed = (not finite) or local_m > 0.2 or root_h_m > 0.2
+    completion = float(n / len(ref_qpos)) if len(ref_qpos) else 0.0
+    fall_failed = float(exe[:, 2].min()) < 0.25
+    paper_failed = (not finite) or completion < 0.95 or fall_failed or local_m > 0.2 or root_h_m > 0.2
     strict_failed = paper_failed or root_m > 1.0 or float(max_joint.max()) > 0.7
-    failed = (not finite) or float(local_body.max()) > 0.75 or float(exe[:, 2].min()) < 0.25 or float(max_joint.max()) > 2.5
+    legacy_failed = (
+        (not finite)
+        or float(local_body.max()) > 0.75
+        or fall_failed
+        or float(max_joint.max()) > 2.5
+    )
     return {
         "steps": int(n),
-        "completion": float(n / len(ref_qpos)) if len(ref_qpos) else 0.0,
-        "success": bool(not failed),
+        "completion": completion,
+        "success": bool(not paper_failed),
         "paper_success": bool(not paper_failed),
         "strict_success": bool(not strict_failed),
+        "legacy_success": bool(not legacy_failed),
+        "fall": bool(fall_failed),
         "root_err_mean": root_m,
         "root_err_max": float(root_err.max()),
         "root_height_err_mean": root_h_m,

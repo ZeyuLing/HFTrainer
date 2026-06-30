@@ -14,6 +14,8 @@ METRICS = [
     "success",
     "paper_success",
     "strict_success",
+    "legacy_success",
+    "fall",
     "completion",
     "root_err_mean",
     "root_err_max",
@@ -62,7 +64,11 @@ def main() -> None:
         rows.append(row)
     summary = {"num_motions": len(rows)}
     for metric in METRICS:
-        key = f"{metric}_rate" if metric in {"success", "paper_success", "strict_success"} else metric
+        key = (
+            f"{metric}_rate"
+            if metric in {"success", "paper_success", "strict_success", "legacy_success", "fall"}
+            else metric
+        )
         vals = [float(row.get(metric, np.nan)) for row in rows]
         summary[key] = float(np.nanmean(vals)) if vals else float("nan")
     (args.eval_root / "summary.json").write_text(json.dumps({"summary": summary, "motions": rows}, indent=2, sort_keys=True) + "\n")
