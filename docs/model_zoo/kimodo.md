@@ -287,6 +287,31 @@ python3 scripts/submit/submit_kimodo_hml3d_smpl_ms272_taiji.py \
   --no-submit-cache
 ```
 
+## TP2M HumanML3D Metrics
+
+These rows score KIMODO on the canonical HumanML3D TP2M protocols
+`humanml3d_official_test_c1/c5/c9` with the MotionStreamer-272 evaluator
+and the selected-caption text directory used by the T2M leaderboard. Each
+condition has `ids_with_required_files=4042`; `nb` is the evaluator-consumed
+count after the standard min/max motion-length filter.
+
+| Cond frames | nb | FID native | FID refk | R@1 | R@2 | R@3 | MM-Dist | Diversity | Metric JSON |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 3968 | 82.5598 | 85.6194 | 0.5249 | 0.6895 | 0.7692 | 19.3009 | 26.1583 | `outputs/evaluation/tp2m/humanml3d_official_test_c1/ms272/kimodo/metrics/motionstreamer.json` |
+| 5 | 3968 | 80.3807 | 83.5092 | 0.5378 | 0.6991 | 0.7749 | 19.1992 | 26.1540 | `outputs/evaluation/tp2m/humanml3d_official_test_c5/ms272/kimodo/metrics/motionstreamer.json` |
+| 9 | 3968 | 79.1218 | 82.1577 | 0.5305 | 0.7041 | 0.7717 | 19.1658 | 26.2024 | `outputs/evaluation/tp2m/humanml3d_official_test_c9/ms272/kimodo/metrics/motionstreamer.json` |
+
+Recompute command:
+
+```bash
+env RUN_ROOT=outputs/evaluation/tp2m/_runs/ms272_metrics_20260629 \
+    GPU_LIST=0,1,2,3,4,5,6,7 SKIP_CACHE=1 \
+    TEXT_DIR=outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/texts \
+    bash scripts/eval/run_tp2m_ms272_metrics_remote.sh
+```
+
+Latest Taiji recompute: `tp2m_ms272_metrics_eval272_v100_0629_2124` plus
+`tp2m_ms272_metrics_fill3-V100-1x8-2139` for the no-cache fill run.
 
 | Area                                                     | Status                                                                                                      |
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
