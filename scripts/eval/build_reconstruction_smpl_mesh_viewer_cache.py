@@ -90,6 +90,18 @@ METHOD_SPECS: dict[str, dict[str, Any]] = {
         "path": RECON_ROOT / "motion135/vermo",
         "color": "#38bdf8",
     },
+    "t2mgpt_parent": {
+        "label": "T2M-GPT parent-fit",
+        "kind": "motion135",
+        "path": RECON_ROOT / "_debug_motion135/t2mgpt_parent",
+        "color": "#93c5fd",
+    },
+    "momask_parent": {
+        "label": "MoMask parent-fit",
+        "kind": "motion135",
+        "path": RECON_ROOT / "_debug_motion135/momask_parent",
+        "color": "#6ee7b7",
+    },
 }
 
 

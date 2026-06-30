@@ -163,6 +163,7 @@ def main() -> None:
     ap.add_argument("--modes", nargs="*", default=list(MODES))
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--tag-prefix", default="prism_epoch43")
     ap.add_argument(
         "--text-dir",
         default=DEFAULT_TEXT_DIR,
@@ -225,7 +226,7 @@ def main() -> None:
                     "--pred-dir",
                     str(prep_dir),
                     "--tag",
-                    f"prism_epoch43_{policy}_{mode}",
+                    f"{args.tag_prefix}_{policy}_{mode}",
                     "--also-refk",
                     "--min-motion-len",
                     "1",
