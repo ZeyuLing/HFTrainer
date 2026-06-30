@@ -7,14 +7,20 @@ each local file is mapped explicitly to:
 
     {subset}/{motion_dir}/*.npz
     {subset}/stats.json
+
+Optionally pass ``--annotation-splits train,test`` to restrict uploaded motion
+files to the records referenced by the subset annotations.  This is useful for
+subsets that keep raw or uncaptioned motion files locally but only publish the
+trainable split.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional, Set
 
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 from huggingface_hub.utils import HfHubHTTPError
@@ -25,6 +31,47 @@ def chunks(items: List, size: int) -> Iterable[List]:
         yield items[start : start + size]
 
 
+def _iter_annotation_rows(path: Path):
+    obj = json.loads(path.read_text(encoding="utf-8"))
+    data = obj.get("data_list", obj) if isinstance(obj, dict) else obj
+    if isinstance(data, dict):
+        yield from data.values()
+    else:
+        yield from data
+
+
+def _annotation_refs(
+    subset_root: Path,
+    motion_dir: str,
+    splits: Optional[List[str]],
+    exclude_invalid: bool,
+) -> Optional[Set[str]]:
+    if not splits:
+        return None
+    refs: Set[str] = set()
+    for split in splits:
+        split_path = subset_root / f"{split}.json"
+        if not split_path.exists():
+            raise FileNotFoundError(split_path)
+        for row in _iter_annotation_rows(split_path):
+            if not isinstance(row, dict):
+                continue
+            if exclude_invalid and row.get("invalid") is True:
+                continue
+            rel = row.get("smplh_path") or row.get("smplx_path") or row.get("motion_path")
+            if not rel:
+                continue
+            parts = list(Path(str(rel)).parts)
+            if parts and parts[0] == subset_root.name:
+                parts = parts[1:]
+            for idx, part in enumerate(parts):
+                if part in {"smplx_55", "smplh_52"}:
+                    parts[idx] = motion_dir
+                    break
+            refs.add(Path(*parts).as_posix())
+    return refs
+
+
 def subset_add_ops(
     subset_root: Path,
     subset_name: str,
@@ -32,6 +79,8 @@ def subset_add_ops(
     skip_ops: int = 0,
     recursive: bool = False,
     include_root_json: bool = False,
+    annotation_splits: Optional[List[str]] = None,
+    exclude_invalid: bool = False,
 ) -> List[CommitOperationAdd]:
     if recursive:
         files = sorted(
@@ -44,6 +93,21 @@ def subset_add_ops(
     if not files:
         suffix = f"**/{motion_dir}" if recursive else motion_dir
         raise FileNotFoundError(subset_root / suffix)
+    annotation_refs = _annotation_refs(
+        subset_root,
+        motion_dir,
+        annotation_splits,
+        exclude_invalid,
+    )
+    if annotation_refs is not None:
+        files = [
+            path for path in files
+            if path.relative_to(subset_root).as_posix() in annotation_refs
+        ]
+        if not files:
+            raise FileNotFoundError(
+                f"no files under {subset_root}/{motion_dir} are referenced by {annotation_splits}"
+            )
     stats = subset_root / "stats.json"
     if not stats.exists():
         raise FileNotFoundError(stats)
@@ -148,6 +212,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recursive", action="store_true", help="Upload **/{motion_dir}/*.npz recursively.")
     parser.add_argument("--include-root-json", action="store_true", help="Upload root *.json annotations too.")
     parser.add_argument(
+        "--annotation-splits",
+        help="Comma-separated subset split names used to filter uploaded motion files, e.g. train,test.",
+    )
+    parser.add_argument("--exclude-invalid", action="store_true", help="Skip invalid annotation rows when filtering.")
+    parser.add_argument(
         "--skip-upload-ops",
         type=int,
         default=0,
@@ -189,6 +258,11 @@ def main() -> None:
             )
 
     subset_root = Path(args.subset_root)
+    annotation_splits = (
+        [item.strip() for item in args.annotation_splits.split(",") if item.strip()]
+        if args.annotation_splits
+        else None
+    )
     add_ops = subset_add_ops(
         subset_root,
         args.subset_name,
@@ -196,6 +270,8 @@ def main() -> None:
         skip_ops=args.skip_upload_ops,
         recursive=args.recursive,
         include_root_json=args.include_root_json,
+        annotation_splits=annotation_splits,
+        exclude_invalid=args.exclude_invalid,
     )
     print(
         f"[upload] subset={args.subset_name} motion_dir={args.motion_dir} "

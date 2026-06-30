@@ -151,14 +151,15 @@ def format_trainable_tasks(row: Dict[str, Any]) -> str:
     field_counts: Counter = row["field_counts"]
     text_counts: Counter = row["text_counts"]
     total_text = sum(text_counts.get(key, 0) for key in TEXT_GRANULARITIES)
+    caption_motion_rows = int(row.get("caption_motion_rows", field_counts["hierarchical_caption_path"]))
     parts: List[str] = []
-    if field_counts["hierarchical_caption_path"]:
+    if caption_motion_rows:
         if total_text:
             parts.append(f"text-to-motion: {fmt_int(total_text)} prompts")
-            parts.append(f"motion-to-text: {fmt_int(field_counts['hierarchical_caption_path'])} motions / {fmt_int(total_text)} refs")
+            parts.append(f"motion-to-text: {fmt_int(caption_motion_rows)} motions / {fmt_int(total_text)} refs")
         else:
             parts.append(f"text-to-motion: {fmt_int(field_counts['hierarchical_caption_path'])} caption refs")
-            parts.append(f"motion-to-text: {fmt_int(field_counts['hierarchical_caption_path'])} motions")
+            parts.append(f"motion-to-text: {fmt_int(caption_motion_rows)} motions")
     if field_counts["music_path"]:
         parts.append(f"music-to-dance: {fmt_int(field_counts['music_path'])} pairs")
     if field_counts["audio_path"]:
@@ -199,8 +200,9 @@ def task_totals_for_row(row: Dict[str, Any]) -> Dict[str, int]:
     field_counts: Counter = row["field_counts"]
     text_counts: Counter = row["text_counts"]
     total_text = sum(text_counts.get(key, 0) for key in TEXT_GRANULARITIES)
+    caption_motion_rows = int(row.get("caption_motion_rows", field_counts["hierarchical_caption_path"]))
     totals: Dict[str, int] = {}
-    if field_counts["hierarchical_caption_path"]:
+    if caption_motion_rows:
         totals["text-to-motion prompts"] = total_text or field_counts["hierarchical_caption_path"]
         totals["motion-to-text references"] = total_text or field_counts["hierarchical_caption_path"]
     if field_counts["music_path"]:
@@ -229,6 +231,7 @@ def summarize_subset(
     text_counts: Counter = Counter()
     caption_ref_counts: Counter = Counter()
     caption_parent_exists: Dict[str, bool] = {}
+    caption_motion_rows = 0
     missing_caption_refs = 0
     missing_motion_refs = 0
     missing_music_refs = 0
@@ -283,6 +286,7 @@ def summarize_subset(
             if row.get("hierarchical_caption_path"):
                 paths = [str(x) for x in as_list(row.get("hierarchical_caption_path")) if x]
                 if exact_captions:
+                    row_has_existing_caption = False
                     for rel_path in paths:
                         parent_key = rel_path.rsplit("/", 1)[0] if "/" in rel_path else ""
                         parent_exists = caption_parent_exists.get(parent_key)
@@ -291,9 +295,14 @@ def summarize_subset(
                             caption_parent_exists[parent_key] = parent_exists
                         if parent_exists:
                             caption_ref_counts[rel_path] += 1
+                            if (data_root / rel_path).exists():
+                                row_has_existing_caption = True
                         else:
                             missing_caption_refs += 1
+                    if row_has_existing_caption:
+                        caption_motion_rows += 1
                 else:
+                    caption_motion_rows += 1
                     for key in TEXT_GRANULARITIES:
                         text_counts[key] += len(paths)
             if row.get("speech_script_path"):
@@ -319,6 +328,7 @@ def summarize_subset(
         "skipped_invalid_rows": skipped_invalid_rows,
         "field_counts": field_counts,
         "text_counts": text_counts,
+        "caption_motion_rows": caption_motion_rows,
         "missing_caption_refs": missing_caption_refs,
         "unique_genres": sorted(unique_genres),
         "caption_mode": "exact" if exact_captions else "fast",
@@ -498,7 +508,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--caption-workers", type=int, default=min(32, (os.cpu_count() or 8) * 2))
     parser.add_argument(
         "--published-subsets",
-        default="aist,finedance,CombatMotion_seperate,fit3d,humansc3d,permo,beat_v2.0.0",
+        default="aist,finedance,CombatMotion_seperate,fit3d,humansc3d,permo,beat_v2.0.0,amass_sup",
         help="Comma-separated subset directories already published in the public dataset repo.",
     )
     parser.add_argument("--skip-motion-file-check", action="store_true", help="Use annotation frame counts without loading motion files.")

@@ -1,0 +1,255 @@
+{
+  "leaderboard": "reconstruction_humanml3d",
+  "task": "reconstruction",
+  "test_dataset": "humanml3d_official_test",
+  "created_by": "scripts/eval/materialize_leaderboard_canonical_paths.py",
+  "path_policy": "outputs/evaluation/{task}/{test_dataset}/{motion_representation}/{method}/",
+  "forbidden_path_parts": [
+    "/prep/",
+    "/_suites/",
+    "/_runs/",
+    "/predictions/motion135/"
+  ],
+  "expected_count": 4042,
+  "canonical_split": "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt",
+  "canonical_ms272_gt": "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/motion_data",
+  "canonical_selected_caption_annotation": "outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json",
+  "planned_metrics": {
+    "geom": "MPJPE, root-aligned MPJPE, PA-MPJPE, and MPJRE from scripts/eval/eval_paired_recon_geom_272.py",
+    "paired_rfid_emb_l2": "MotionStreamer-272 paired rFID and embedding L2 from scripts/eval/eval_paired_recon_rfid_272.py",
+    "physics": "Slide, Float, Jitter, and Dynamic from scripts/eval/eval_mbench_physics_dir.py",
+    "poseq": "PoseQ from scripts/eval/compute_pose_quality_h3d.py"
+  },
+  "methods": [
+    {
+      "method": "t2mgpt",
+      "aliases": [
+        "T2M-GPT",
+        "MotionGPT"
+      ],
+      "tokenizer_family": "T2M-GPT VQVAE",
+      "native_representation": "hml263",
+      "status": "complete",
+      "representations": {
+        "hml263": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/hml263/t2mgpt",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/t2mgpt",
+          "count": 4042
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/t2mgpt",
+          "count": 4042,
+          "new_files": 1,
+          "missing": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "tm2t",
+      "aliases": [
+        "TM2T"
+      ],
+      "tokenizer_family": "TM2T VQVAE",
+      "native_representation": "hml263",
+      "status": "pending",
+      "representations": {
+        "hml263": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/hml263/tm2t",
+          "count": 0
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/tm2t",
+          "count": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/tm2t",
+          "count": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "motionstreamer",
+      "aliases": [
+        "MotionStreamer"
+      ],
+      "tokenizer_family": "MotionStreamer Causal-TAE",
+      "native_representation": "ms272",
+      "status": "complete",
+      "representations": {
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/motionstreamer",
+          "count": 0
+        }
+      },
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/poseq.json"
+      }
+    },
+    {
+      "method": "mld",
+      "aliases": [
+        "MLD",
+        "MotionLCM"
+      ],
+      "tokenizer_family": "MLD / MotionLCM VAE",
+      "native_representation": "hml263",
+      "status": "complete",
+      "representations": {
+        "hml263": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/hml263/mld",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/mld",
+          "count": 4042
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mld",
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "momask",
+      "aliases": [
+        "MoMask"
+      ],
+      "tokenizer_family": "MoMask RVQ-VAE",
+      "native_representation": "hml263",
+      "status": "complete",
+      "representations": {
+        "hml263": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/hml263/momask",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/momask",
+          "count": 4042
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/momask",
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "mogents",
+      "aliases": [
+        "MoGenTS"
+      ],
+      "tokenizer_family": "MoGenTS tokenizer",
+      "native_representation": "hml263",
+      "status": "complete",
+      "representations": {
+        "hml263": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/hml263/mogents",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/mogents",
+          "count": 4042
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mogents",
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "motiongpt3",
+      "aliases": [
+        "MotionGPT3"
+      ],
+      "tokenizer_family": "MotionGPT3 tokenizer",
+      "native_representation": "hml263",
+      "status": "complete",
+      "representations": {
+        "hml263": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/hml263/motiongpt3",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/motiongpt3",
+          "count": 4042
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motiongpt3",
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "prism",
+      "aliases": [
+        "PRISM"
+      ],
+      "tokenizer_family": "PRISM tokenizer",
+      "native_representation": "motion135",
+      "status": "pending",
+      "representations": {
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/prism",
+          "count": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/prism",
+          "count": 0
+        }
+      },
+      "metrics": {}
+    },
+    {
+      "method": "vermo",
+      "aliases": [
+        "VerMo"
+      ],
+      "tokenizer_family": "VerMo tokenizer",
+      "native_representation": "smplx",
+      "status": "pending",
+      "representations": {
+        "smplx": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/smplx/vermo",
+          "count": 0
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/vermo",
+          "count": 0
+        },
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/vermo",
+          "count": 0
+        }
+      },
+      "metrics": {}
+    }
+  ]
+}

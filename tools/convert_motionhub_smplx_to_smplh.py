@@ -247,6 +247,16 @@ def write_json(path: Path, obj: Dict[str, Any]) -> None:
     path.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def has_current_conversion(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        with np.load(path, allow_pickle=True) as data:
+            return str(data.get("conversion_version", "")) == VERSION
+    except Exception:
+        return False
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subset-root", required=True)
@@ -266,6 +276,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--skip-current-existing",
+        action="store_true",
+        help="When writing, skip outputs that already have the current conversion_version.",
+    )
     return parser.parse_args()
 
 
@@ -295,6 +310,7 @@ def main() -> None:
 
     rows: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
+    skipped_current = 0
     for idx, path in enumerate(files, start=1):
         out_path = output_path_for(
             subset_root,
@@ -303,6 +319,15 @@ def main() -> None:
             args.output_motion_dir,
             recursive=args.recursive,
         )
+        if args.write and args.skip_current_existing and has_current_conversion(out_path):
+            skipped_current += 1
+            if idx % 250 == 0 or idx == len(files):
+                print(
+                    f"[smplx->smplh] {idx}/{len(files)} {subset_root.name} "
+                    f"(skipped_current={skipped_current})",
+                    flush=True,
+                )
+            continue
         if args.write and out_path.exists() and not args.overwrite:
             raise FileExistsError(f"{out_path} exists; pass --overwrite to replace")
         try:
@@ -328,6 +353,7 @@ def main() -> None:
 
     summary = summarize(rows)
     summary["num_errors"] = len(errors)
+    summary["num_skipped_current"] = int(skipped_current)
     payload = {
         "meta": {
             "subset_root": str(subset_root),

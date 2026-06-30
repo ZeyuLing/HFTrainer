@@ -12,6 +12,18 @@
 
 ---
 
+## Taiji zwfy7 代码同步纪律
+
+- zwfy7 机器入口：
+  `taiji_client exec task_zeyuling_20260630162656_1a70818b 8b1d89929f134c2e019f17a3be35055a bash`
+- 在这台机器上执行任何仓库命令前，必须先切到：
+  `/apdcephfs_zwfy7/share_305994131/home/zeyuling/hf_trainer`
+- 这台机器只作为训练/测评执行环境；常规代码修改在当前主开发仓库完成。需要让 zwfy7 看到改动时，先在主开发仓库 commit，并 push 到 `gongfeng`，再登录 zwfy7 到上述路径执行 `git pull gongfeng motion`。
+- 不要把 Taiji token、个人访问令牌或其它凭证明文写进 git。需要登录时由用户提供或通过安全环境变量注入。
+- 如果确实在 zwfy7 临时修了代码，必须把改动同步回主开发仓库或明确记录差异，避免两边代码漂移。
+
+---
+
 ## 仓库方法一览
 
 | 方法 | 论文/代号 | 任务 | ModelBundle | Trainer | Pipeline | 配置目录 |
