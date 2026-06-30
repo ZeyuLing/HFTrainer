@@ -79,12 +79,8 @@ train_dataloader = dict(
                 type='PrepareM2Mv2Condition',
                 key='motion',
                 sampler_version='v3',
-                editing_prob=0.15,
-                corruptor_names=[
-                    'jitter', 'joint_jump', 'sliding',
-                    'limb_candy_wrapper', 'wrist_candy_wrapper',
-                ],
-                max_corruptions=2,
+                editing_prob=0.0,
+                corruptor_names=[],
             ),
             dict(
                 type='PackInputs',

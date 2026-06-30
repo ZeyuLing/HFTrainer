@@ -57,7 +57,7 @@ model = dict(
     pred_type='velocity',
     uncondition_mode=False,  # Enable text conditioning
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
-    motion_cond_mask_prob=0.3,  # 30% motion condition dropout to prevent condition shortcut
+    motion_cond_mask_prob=0.0,  # Keep motion/source conditions intact during M2M training
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim_kimodo_root',
     rotation_space='local',
     text_encoder=dict(),  # Use default QWEN3 + CLIP-L
@@ -109,12 +109,8 @@ train_dataloader = dict(
                 type='PrepareM2Mv2Condition',
                 key='motion',
                 sampler_version='v3',
-                editing_prob=0.15,
-                corruptor_names=[
-                    'jitter', 'joint_jump', 'sliding',
-                    'limb_candy_wrapper', 'wrist_candy_wrapper',
-                ],
-                max_corruptions=2,
+                editing_prob=0.0,
+                corruptor_names=[],
             ),
             # Override synthetic corruption with real Neutral source for
             # PerMo editing pairs (source_motion_path present in annotation).

@@ -36,7 +36,7 @@ model = dict(
     pred_type='velocity',
     uncondition_mode=False,  # Enable text conditioning
     cond_mask_prob=0.1,       # CFG: 10% unconditional during training
-    motion_cond_mask_prob=0.3,  # 30% motion condition dropout to prevent condition shortcut
+    motion_cond_mask_prob=0.0,  # Keep motion/source conditions intact during M2M training
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim',
     rotation_space='local',
     # Freeze vtxt/ctxt/timestep encoders to preserve T2M text understanding.
@@ -58,8 +58,9 @@ train_dataloader = dict(
     # transfer), pushing editing-pair share to ~38.6%. Keep ALL pairs in the
     # pool but down-weight them to ~20% per step via WeightedRandomSampler so
     # the other 7 task families (T2M / completion / trajectory / ...) are not
-    # drowned out. (editing_prob=0.15 below is unrelated repair-style synthetic
-    # editing, left untouched.) See scripts/data/build_permo_editing_full.py.
+    # drowned out. Synthetic repair-style corruptor editing is disabled below
+    # to avoid interfering with the real MotionFix/PerMo edit signal. See
+    # scripts/data/build_permo_editing_full.py.
     #
     # Per-group fractions (not a flat editing %): MotionFix has only 6.7k pairs
     # vs 197k styleedit, so a flat 20% editing share would starve MotionFix
@@ -102,18 +103,16 @@ train_dataloader = dict(
                 type='PrepareM2Mv2Condition',
                 key='motion',
                 sampler_version='v3',
-                editing_prob=0.15,
+                # Disable online synthetic corruptor editing. Real editing pairs
+                # are still injected by LoadEditingSourceMotion below.
+                editing_prob=0.0,
                 # Boost the under-represented pure sparse-XYZ trajectory-control
                 # pattern (was ~0.58% of samples -> model under-learned smooth
                 # sparse-waypoint following -> jitter spikes). 0.12 lifts E5_E
                 # exact coverage to ~3% and pure-XYZ-traj to ~7%.
                 # See docs/temp/traj_jitter_autodebug. 2026-06-22.
                 v3_config=dict(traj_control_prob=0.12),
-                corruptor_names=[
-                    'jitter', 'joint_jump', 'sliding',
-                    'limb_candy_wrapper', 'wrist_candy_wrapper',
-                ],
-                max_corruptions=2,
+                corruptor_names=[],
             ),
             # Override synthetic corruption with real Neutral source for
             # PerMo editing pairs (source_motion_path present in annotation).
