@@ -51,8 +51,11 @@ python "$PROJECT_ROOT/scripts/embodied/patch_sonic_qpos_logger.py" --sonic-repo 
 cd "$SONIC_REPO"
 
 export CUDA_VISIBLE_DEVICES="$GPU_ID"
-export MUJOCO_GL="${MUJOCO_GL:-egl}"
+export MUJOCO_GL="${MUJOCO_GL:-glfw}"
+export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-$MUJOCO_GL}"
 export SONIC_QPOS_LOGFILE="$OUT_DIR/sim_qpos.csv"
+export SONIC_AUTO_START="${SONIC_AUTO_START:-1}"
+export SONIC_AUTO_PLAY="${SONIC_AUTO_PLAY:-1}"
 export PYTHONPATH="$SONIC_REPO:$SONIC_REPO/external_dependencies/unitree_sdk2_python:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$SONIC_DEPS_ROOT/install/zeromq/lib:$SONIC_DEPS_ROOT/install/conda-runtime/lib:$SONIC_DEPS_ROOT/install/tensorrt-10.0.1-cu11/lib:$SONIC_DEPS_ROOT/install/onnxruntime/lib:$SONIC_DEPS_ROOT/install/yaml-cpp/lib64:/usr/local/cuda-11.8/lib64:${LD_LIBRARY_PATH:-}"
 
