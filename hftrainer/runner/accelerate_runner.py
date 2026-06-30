@@ -1601,6 +1601,12 @@ class AccelerateRunner:
         DDP-wrapped sub-module.  Without explicit sync, their gradients diverge
         across ranks during multi-GPU training.
 
+        Every rank must enter the collectives in the same order.  Some orphan
+        parameters are used conditionally (for example CFG/null-text batches),
+        so a rank may see ``grad is None`` while another rank has a real
+        gradient.  Reduce an explicit zero gradient in that case; skipping the
+        collective on only some ranks can deadlock NCCL.
+
         This is a no-op when ``_orphan_trainable_params`` is empty or when
         running on a single device (no distributed backend).
         """
@@ -1615,9 +1621,13 @@ class AccelerateRunner:
 
         world_size = dist.get_world_size()
         for param in self._orphan_trainable_params:
-            if param.grad is not None:
-                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
-                param.grad.div_(world_size)
+            if param.grad is None:
+                param.grad = torch.zeros_like(
+                    param,
+                    memory_format=torch.preserve_format,
+                )
+            dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+            param.grad.div_(world_size)
 
     def _get_module_state_dict(self, module: nn.Module) -> dict:
         """Return a saveable state dict without forcing unnecessary backend imports."""
