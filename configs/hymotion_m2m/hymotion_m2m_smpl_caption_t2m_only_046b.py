@@ -44,8 +44,9 @@ trainer = dict(
 
 train_dataloader = dict(
     # H20 has ~96GB/card. On 2026-07-01, 64-card resume from epoch 180
-    # showed bs=100 OOMs on the first batch; bs=96 is the near-limit setting.
-    batch_size=96,
+    # showed bs=100 OOMs and bs=96 hits NCCL watchdog; bs=88 is the high-util
+    # stability probe.
+    batch_size=88,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
