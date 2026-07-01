@@ -70,7 +70,7 @@ train_dataloader = dict(
     # H20 has ~96GB/card. With NCCL_ALGO=Ring and NCCL_PROTO=Simple the
     # 64-card resume can progress stably, so push the per-GPU batch high enough
     # to use most of the available H20 memory.
-    batch_size=96,
+    batch_size=100,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
