@@ -33,8 +33,18 @@ model = dict(
     caption_freeze_strategy='encoders',
     text_encoder=dict(),       # Use default QWEN3 + CLIP-L embeddings
     losses_cfg=dict(
-        keypoints3d_weight=10.0,
-        velocity_loss_reduction='component_mean',
+        # T2M-only must match the HYMotion T2M objective. Replace the M2M
+        # base loss dict so KIMODO-style aux losses are not inherited.
+        _delete_=True,
+        loss_type='smooth_l1',
+        velocity_weight=1.0,
+        x1_weight=0.0,
+        keypoints3d_weight=0.0,
+        translation_weight=0.0,
+        trans_dim_weight=1.0,
+        motion_smoothness_weight=0.0,
+        fk_consistency_weight=0.0,
+        velocity_loss_reduction='element_mean',
     ),
 )
 
@@ -43,9 +53,10 @@ trainer = dict(
 )
 
 train_dataloader = dict(
-    # H20 has ~96GB/card. On the restarted 20260701 container, bs=100 stalls
-    # after the first batch; bs=88 is the high-util stable resume setting.
-    batch_size=88,
+    # H20 has ~96GB/card. On the restarted 20260701 container, fp32 bs=64 is
+    # the first confirmed clean 64-card resume setting; larger/bf16 probes
+    # either OOMed or were polluted by overlapping stale launches.
+    batch_size=64,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
@@ -93,7 +104,7 @@ train_dataloader = dict(
 )
 
 accelerator = dict(
-    # T2M-only exercises a conditional M2M graph; let DDP mark unused
-    # parameters explicitly instead of letting buckets wait forever.
-    ddp_kwargs=dict(find_unused_parameters=True),
+    # The T2M-only graph uses the motion transformer path consistently; avoid
+    # the extra unused-parameter traversal in the resumed 64-card job.
+    ddp_kwargs=dict(find_unused_parameters=False),
 )
