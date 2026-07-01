@@ -1874,9 +1874,10 @@ class AccelerateRunner:
                         getattr(self.bundle, n) for n in self.bundle._trainable_modules
                         if isinstance(getattr(self.bundle, n), nn.Module)
                     ]):
+                        debug_first_steps = int(os.environ.get('HFTRAINER_DEBUG_FIRST_STEPS', '2'))
                         debug_first_step = (
                             os.environ.get('HFTRAINER_DEBUG_FIRST_STEP') == '1'
-                            and batch_idx < 2
+                            and batch_idx < debug_first_steps
                         )
                         if debug_first_step:
                             logger.info(
