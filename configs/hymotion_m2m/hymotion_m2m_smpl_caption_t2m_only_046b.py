@@ -60,8 +60,9 @@ train_cfg = dict(
 )
 
 optimizer = dict(
-    # AdamW fused stalls in the first distributed backward on the 64-card H20
-    # job. Foreach at small per-rank batch is the current recovery path.
+    # weight_decay=0 makes Adam equivalent to AdamW for this phase, while
+    # avoiding the H20/cu118 AdamW kernel path that stalls after several steps.
+    type='Adam',
     foreach=True,
 )
 
