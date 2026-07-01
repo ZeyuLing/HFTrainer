@@ -287,6 +287,12 @@ class AccelerateRunner:
                 )
                 accel_cfg['mixed_precision'] = 'fp16'
 
+        local_rank_env = os.environ.get('LOCAL_RANK')
+        if local_rank_env is not None and torch.cuda.is_available():
+            device_count = torch.cuda.device_count()
+            if device_count > 0:
+                torch.cuda.set_device(int(local_rank_env) % device_count)
+
         accelerator = Accelerator(
             mixed_precision=accel_cfg.get('mixed_precision', 'no'),
             gradient_accumulation_steps=accel_cfg.get('gradient_accumulation_steps', 1),
@@ -295,6 +301,14 @@ class AccelerateRunner:
             fsdp_plugin=fsdp_plugin,
             deepspeed_plugin=deepspeed_plugin,
             kwargs_handlers=kwargs_handlers,
+        )
+        logger.info(
+            "Accelerator device binding: "
+            f"rank={accelerator.process_index}, "
+            f"local_rank={accelerator.local_process_index}, "
+            f"device={accelerator.device}, "
+            f"cuda_current={torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'}, "
+            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}"
         )
 
         # ── File logging, config dump, env info (main process only) ──
@@ -1860,19 +1874,73 @@ class AccelerateRunner:
                         getattr(self.bundle, n) for n in self.bundle._trainable_modules
                         if isinstance(getattr(self.bundle, n), nn.Module)
                     ]):
+                        debug_first_step = (
+                            os.environ.get('HFTRAINER_DEBUG_FIRST_STEP') == '1'
+                            and batch_idx < 2
+                        )
+                        if debug_first_step:
+                            logger.info(
+                                f"[Rank {rank}] debug first-step epoch={epoch} "
+                                f"batch={batch_idx} global_step={current_step}: before train_step"
+                            )
                         output = self.trainer.train_step(batch)
+                        if debug_first_step:
+                            logger.info(
+                                f"[Rank {rank}] debug first-step epoch={epoch} "
+                                f"batch={batch_idx} global_step={current_step}: after train_step "
+                                f"keys={list(output.keys())}"
+                            )
 
                         if not self.trainer.trainer_controls_optimization:
                             # Runner-controlled optimization (default single-loss path)
                             loss = output.get('loss')
                             if loss is not None:
+                                if debug_first_step:
+                                    logger.info(
+                                        f"[Rank {rank}] debug first-step epoch={epoch} "
+                                        f"batch={batch_idx} global_step={current_step}: before backward"
+                                    )
                                 self.accelerator.backward(loss)
+                                if debug_first_step:
+                                    logger.info(
+                                        f"[Rank {rank}] debug first-step epoch={epoch} "
+                                        f"batch={batch_idx} global_step={current_step}: after backward"
+                                    )
+                                    logger.info(
+                                        f"[Rank {rank}] debug first-step epoch={epoch} "
+                                        f"batch={batch_idx} global_step={current_step}: before orphan grad sync"
+                                    )
                                 self._sync_orphan_param_grads()
+                                if debug_first_step:
+                                    logger.info(
+                                        f"[Rank {rank}] debug first-step epoch={epoch} "
+                                        f"batch={batch_idx} global_step={current_step}: after orphan grad sync"
+                                    )
                                 if self.max_grad_norm is not None:
+                                    if debug_first_step:
+                                        logger.info(
+                                            f"[Rank {rank}] debug first-step epoch={epoch} "
+                                            f"batch={batch_idx} global_step={current_step}: before clip_grad"
+                                        )
                                     params = list(self.bundle.trainable_parameters())
                                     self.accelerator.clip_grad_norm_(params, self.max_grad_norm)
+                                    if debug_first_step:
+                                        logger.info(
+                                            f"[Rank {rank}] debug first-step epoch={epoch} "
+                                            f"batch={batch_idx} global_step={current_step}: after clip_grad"
+                                        )
                                 for opt in self.optimizers.values():
+                                    if debug_first_step:
+                                        logger.info(
+                                            f"[Rank {rank}] debug first-step epoch={epoch} "
+                                            f"batch={batch_idx} global_step={current_step}: before optimizer.step"
+                                        )
                                     opt.step()
+                                    if debug_first_step:
+                                        logger.info(
+                                            f"[Rank {rank}] debug first-step epoch={epoch} "
+                                            f"batch={batch_idx} global_step={current_step}: after optimizer.step"
+                                        )
                                     opt.zero_grad()
                                 for sched in self.lr_schedulers.values():
                                     sched.step()
