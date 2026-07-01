@@ -60,9 +60,10 @@ train_cfg = dict(
 )
 
 optimizer = dict(
-    # bs=16 has enough H20 headroom for AdamW foreach and needs it to avoid the
-    # very slow scalar CUDA update path observed after the first optimizer steps.
-    foreach=True,
+    # H20 + torch 2.5/cu118 stalls in AdamW foreach/scalar CUDA work after the
+    # first optimizer steps on the 64-card job. Prefer the fused CUDA backend.
+    foreach=False,
+    fused=True,
 )
 
 train_dataloader = dict(
