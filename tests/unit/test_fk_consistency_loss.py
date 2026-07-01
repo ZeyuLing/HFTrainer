@@ -46,6 +46,70 @@ class TestFKConsistencyLossIntegration:
         # MSE per component: trans=1, root_rot=4, body_rot=9, pos=16.
         assert torch.allclose(result['velocity'], torch.tensor(7.5))
 
+    def test_m2m_loss_modality_mean_respects_sparse_channel_groups(self):
+        """Sparse channel supervision should be averaged inside each modality first."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 1, 198)
+        gt = torch.zeros(1, 1, 198)
+        # Root rotation has 6 active channels with MSE=1.
+        gt[..., 3:9] = 1.0
+        # Joint position supervises only x/z subchannels with MSE=9.
+        gt[..., 135:198:3] = 3.0
+        gt[..., 137:198:3] = 3.0
+
+        generation_mask = torch.zeros(1, 1, 198)
+        generation_mask[..., 3:9] = 1.0
+        generation_mask[..., 135:198:3] = 1.0
+        generation_mask[..., 137:198:3] = 1.0
+
+        loss_fn = M2MLoss(
+            loss_type='mse',
+            velocity_weight=1.0,
+            velocity_loss_reduction='modality_mean',
+            trans_dim_weight=1.0,
+        )
+        result = loss_fn(
+            pred_vel=pred,
+            gt_vel=gt,
+            data_mask_temporal=torch.ones(1, 1),
+            generation_mask=generation_mask,
+        )
+
+        # Active modality means: root_rot=1, joint_pos=9.  The final scalar
+        # should be (1 + 9) / 2, not an element-count-weighted mean.
+        assert torch.allclose(result['velocity'], torch.tensor(5.0))
+        assert torch.allclose(result['velocity_root_rot'], torch.tensor(1.0))
+        assert torch.allclose(result['velocity_joint_pos'], torch.tensor(9.0))
+
+    def test_m2m_loss_component_mean_alias_matches_modality_mean(self):
+        """component_mean remains a backward-compatible alias."""
+        from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss
+
+        pred = torch.zeros(1, 1, 198)
+        gt = torch.zeros(1, 1, 198)
+        gt[..., 0:3] = 1.0
+        gt[..., 3:9] = 2.0
+        gt[..., 9:135] = 3.0
+        gt[..., 135:198] = 4.0
+
+        results = []
+        for reduction in ('component_mean', 'modality_mean'):
+            loss_fn = M2MLoss(
+                loss_type='mse',
+                velocity_weight=1.0,
+                velocity_loss_reduction=reduction,
+                trans_dim_weight=1.0,
+            )
+            results.append(loss_fn(
+                pred_vel=pred,
+                gt_vel=gt,
+                data_mask_temporal=torch.ones(1, 1),
+            ))
+
+        assert torch.allclose(results[0]['velocity'], results[1]['velocity'])
+        assert results[1]['velocity_root_rot'].item() == 4.0
+
     def test_m2m_loss_component_mean_skips_empty_generation_groups(self):
         """A fully known component should not dilute active component means."""
         from hftrainer.models.motion.hymotion_m2m.network.m2m_loss import M2MLoss

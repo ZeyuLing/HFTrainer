@@ -44,7 +44,7 @@ model = dict(
         trans_dim_weight=1.0,
         motion_smoothness_weight=0.0,
         fk_consistency_weight=0.0,
-        velocity_loss_reduction='element_mean',
+        velocity_loss_reduction='modality_mean',
     ),
 )
 

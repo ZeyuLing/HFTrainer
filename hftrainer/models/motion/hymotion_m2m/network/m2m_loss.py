@@ -7,6 +7,13 @@ from collections import deque
 
 
 class M2MLoss(nn.Module):
+    _MODALITY_MEAN_REDUCTIONS = ("component_mean", "modality_mean")
+    _VALID_VELOCITY_LOSS_REDUCTIONS = (
+        "element_mean",
+        "component_mean",
+        "modality_mean",
+    )
+
     def __init__(
         self,
         loss_type: str = "smooth_l1",
@@ -54,10 +61,11 @@ class M2MLoss(nn.Module):
         self._baseline_trans_loss = 0.0
         self._trans_loss_std = 0.0
 
-        if velocity_loss_reduction not in ("element_mean", "component_mean"):
+        if velocity_loss_reduction not in self._VALID_VELOCITY_LOSS_REDUCTIONS:
             raise ValueError(
-                "velocity_loss_reduction must be 'element_mean' or "
-                f"'component_mean', got {velocity_loss_reduction!r}"
+                "velocity_loss_reduction must be one of "
+                f"{self._VALID_VELOCITY_LOSS_REDUCTIONS}, "
+                f"got {velocity_loss_reduction!r}"
             )
 
         if loss_type == "smooth_l1":
@@ -74,12 +82,15 @@ class M2MLoss(nn.Module):
     @staticmethod
     def _motion_components(dim: int):
         if dim >= 198:
+            # 198-dim SMPL layout:
+            #   trans(0:3), root rot6d(3:9), body rot6d(9:135),
+            #   joint positions(135:198).
             return ((0, 3), (3, 9), (9, 135), (135, 198))
         if dim >= 135:
             return ((0, 3), (3, 9), (9, 135))
         if dim == 38:
             # G1-native layout: transl(0:3) + pelvis rot6d(3:9) + 29 joint angles(9:38).
-            # Splitting here lets ``component_mean`` give translation and root
+            # Splitting here lets modality/component mean give translation and root
             # rotation their own mean instead of being swamped by the 29 dof.
             return ((0, 3), (3, 9), (9, 38))
         return ((0, dim),)
@@ -94,6 +105,9 @@ class M2MLoss(nn.Module):
         if dim == 38:
             return ('trans', 'root_rot', 'joint')
         return ('all',)
+
+    def _uses_modality_mean(self) -> bool:
+        return self.velocity_loss_reduction in self._MODALITY_MEAN_REDUCTIONS
 
     def _update_spike_detection_stats(self, trans_loss_magnitude: float):
         """Update rolling statistics for spike detection.
@@ -137,7 +151,7 @@ class M2MLoss(nn.Module):
         data_mask_temporal: Tensor,
         generation_mask: Optional[Tensor] = None,
     ) -> Tensor:
-        """Reduce (B, L, D) losses with optional semantic component means."""
+        """Reduce (B, L, D) losses with optional modality-wise means."""
         data_mask = data_mask_temporal.to(per_dim.device).to(per_dim.dtype)
 
         if self.velocity_loss_reduction == "element_mean":
@@ -151,10 +165,13 @@ class M2MLoss(nn.Module):
             mask_sum = torch.clamp(data_mask.sum(), min=1.0)
             return (per_frame * data_mask).sum() / mask_sum
 
-        # KIMODO-style semantic reduction: each representation component
-        # first gets its own valid-cell mean, then active components are
-        # averaged.  This prevents large components (e.g. body rot6d) from
-        # swallowing small but important ones such as translation/root.
+        # Modality-wise semantic reduction: each representation component first
+        # gets its own valid-cell mean, then active components are averaged.
+        # This prevents wide modalities (e.g. body rot6d / joint positions) from
+        # swallowing small but important ones such as translation/root. When a
+        # generation mask exposes only a subset of channels, e.g. x/z position
+        # without y, the mean is still taken only over those active cells inside
+        # that modality.
         comp_losses = []
         for start, end in self._motion_components(per_dim.shape[-1]):
             comp = per_dim[..., start:end]
@@ -183,8 +200,8 @@ class M2MLoss(nn.Module):
         data_mask_temporal: Tensor,
         generation_mask: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
-        """Like _masked_motion_loss (component_mean path) but also returns
-        per-component scalars for logging.
+        """Like _masked_motion_loss (modality mean path) but also returns
+        per-modality scalars for logging.
 
         Returns:
             (combined_scalar, {"trans": ..., "root_rot": ..., ...})
@@ -267,7 +284,7 @@ class M2MLoss(nn.Module):
             # Apply spike downweighting to translation components
             if trans_vel_spike_weight < 1.0:
                 vel_per_dim[:, :, :self.trans_dims] = vel_per_dim[:, :, :self.trans_dims] * trans_vel_spike_weight
-            if self.velocity_loss_reduction == "component_mean":
+            if self._uses_modality_mean():
                 vel_loss, vel_comps = self._masked_motion_loss_with_components(
                     vel_per_dim, data_mask_temporal, generation_mask
                 )
@@ -296,7 +313,7 @@ class M2MLoss(nn.Module):
             # Apply spike downweighting to translation components
             if trans_x1_spike_weight < 1.0:
                 x1_per_dim[:, :, :self.trans_dims] = x1_per_dim[:, :, :self.trans_dims] * trans_x1_spike_weight
-            if self.velocity_loss_reduction == "component_mean":
+            if self._uses_modality_mean():
                 x1_loss, x1_comps = self._masked_motion_loss_with_components(
                     x1_per_dim, data_mask_temporal, generation_mask
                 )
