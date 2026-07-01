@@ -68,8 +68,9 @@ optimizer = dict(
 
 train_dataloader = dict(
     # H20 has ~96GB/card. bs=64 reaches ~63GB/card but hangs in distributed
-    # backward on the resumed 64-card job; bs=48 is the next high-memory probe.
-    batch_size=48,
+    # backward on the resumed 64-card job; bs=48 is also killed around the
+    # first backward, so bs=32 is the current highest stable-probe target.
+    batch_size=32,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
