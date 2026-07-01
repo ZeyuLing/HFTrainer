@@ -1250,6 +1250,35 @@ class AccelerateRunner:
                 "verify scheduler state is compatible with the overridden LR."
             )
 
+    def _normalize_resumed_optimizer_state(self):
+        """Move Adam-style scalar step tensors back to CPU after full resume.
+
+        Accelerate may restore optimizer ``state['step']`` tensors onto CUDA.
+        PyTorch AdamW's non-capturable foreach path then calls ``.item()`` on
+        those tensors inside optimizer.step(), which can turn resume into a long
+        device synchronization stall. Keeping only scalar step counters on CPU
+        preserves Adam moments while matching AdamW's expected fast path.
+        """
+        for opt_name, optimizer in self.optimizers.items():
+            moved = 0
+            for state in optimizer.state.values():
+                step = state.get('step') if isinstance(state, dict) else None
+                if (
+                    torch.is_tensor(step)
+                    and step.is_cuda
+                    and step.ndim == 0
+                    and step.numel() == 1
+                ):
+                    state['step'] = step.detach().cpu()
+                    moved += 1
+            if moved:
+                logger.info(
+                    "resume optimizer-state normalization: moved %d CUDA "
+                    "scalar step tensors to CPU for optimizer=%s",
+                    moved,
+                    opt_name,
+                )
+
     def _load(self, path: str, load_scope: str = 'model',
               exclude_bundle_keys=None, skip_frozen: bool = False):
         """
@@ -1272,6 +1301,7 @@ class AccelerateRunner:
             # sees a complete, count-matched state directory.
             self._ensure_bundle_orphan_custom_ckpt(path)
             self.accelerator.load_state(path)
+            self._normalize_resumed_optimizer_state()
             # Try to restore global_step from metadata
             meta_path = os.path.join(path, 'meta.pt')
             if os.path.exists(meta_path):
