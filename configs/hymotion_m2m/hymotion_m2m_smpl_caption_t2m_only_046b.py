@@ -110,9 +110,11 @@ default_hooks = dict(
 )
 
 accelerator = dict(
-    # The T2M-only graph uses the motion transformer path consistently; avoid
-    # the extra unused-parameter traversal in the resumed 64-card job.
-    ddp_kwargs=dict(find_unused_parameters=False),
+    # CFG text dropout routes through trainable null text parameters only for
+    # the sampled unconditional clips. Across 64 DDP ranks some ranks can skip
+    # that branch on a given step, so unused-parameter detection must stay on
+    # to avoid first-step gradient synchronization stalls.
+    ddp_kwargs=dict(find_unused_parameters=True),
     # Keep dataloader batches on CPU. HyMotion trainers already move only the
     # needed tensors to device; Accelerate's recursive batch placement stalls
     # on large pre-extracted text/motion batches at H20 bs=64.
