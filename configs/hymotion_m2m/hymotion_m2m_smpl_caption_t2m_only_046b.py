@@ -52,6 +52,13 @@ trainer = dict(
     mask_aware_noise=False,  # Full mask has no known region; keep phase-1 path simple.
 )
 
+train_cfg = dict(
+    # H20 bs=64 hangs inside Accelerate's distributed grad-norm clipping after
+    # backward. Keep the T2M-only resume moving and rely on the smooth-L1
+    # objective / existing optimizer state instead of clipping this phase.
+    max_grad_norm=None,
+)
+
 train_dataloader = dict(
     # H20 has ~96GB/card. On the restarted 20260701 container, fp32 bs=64 is
     # the first confirmed clean 64-card resume setting; larger/bf16 probes
