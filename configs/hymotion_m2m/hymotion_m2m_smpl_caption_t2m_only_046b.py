@@ -103,6 +103,12 @@ train_dataloader = dict(
     ),
 )
 
+default_hooks = dict(
+    # HYMotion T2M official training does not maintain EMA. The M2M base EMA
+    # hook doubles the per-step parameter sweep and stalls large 64-card resumes.
+    ema=None,
+)
+
 accelerator = dict(
     # The T2M-only graph uses the motion transformer path consistently; avoid
     # the extra unused-parameter traversal in the resumed 64-card job.
