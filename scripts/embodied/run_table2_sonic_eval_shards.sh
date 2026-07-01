@@ -14,6 +14,8 @@ INTERFACE="${INTERFACE:-bond1}"
 SETUP_OVERHEAD_SECONDS="${SETUP_OVERHEAD_SECONDS:-35}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 SONIC_TARGET_FPS="${SONIC_TARGET_FPS:-50}"
+SONIC_PYTHON="${SONIC_PYTHON:-python3}"
+MIN_RUN_SECONDS="${MIN_RUN_SECONDS:-120}"
 
 cd "${PROJECT_ROOT}"
 mkdir -p "${PROTOCOL_ROOT}/runs/sonic/logs"
@@ -23,7 +25,7 @@ echo "[sonic-table2] start $(date) host=$(hostname) shard=${SHARD_ID}/${TOTAL_SH
 
 for split in ${SPLITS//,/ }; do
   manifest="${PROTOCOL_ROOT}/inputs/${split}/manifest.json"
-  mapfile -t names < <(python3 - "${manifest}" "${TOTAL_SHARDS}" "${SHARD_ID}" <<'PY'
+  mapfile -t names < <("${SONIC_PYTHON}" - "${manifest}" "${TOTAL_SHARDS}" "${SHARD_ID}" <<'PY'
 import json, sys
 names = json.loads(open(sys.argv[1]).read())
 total = int(sys.argv[2])
@@ -45,13 +47,13 @@ PY
     ref_root="${out_dir}/reference_parent"
     sonic_ref_npz="${out_dir}/sonic_reference_qpos.npz"
     rm -rf "${ref_root}"
-    python3 scripts/embodied/prepare_sonic_reference_from_npz.py \
+    "${SONIC_PYTHON}" scripts/embodied/prepare_sonic_reference_from_npz.py \
       --npz "${ref_npz}" \
       --out-root "${ref_root}" \
       --name "${name}" \
       --target-fps "${SONIC_TARGET_FPS}" \
       --out-npz "${sonic_ref_npz}"
-    read -r frames fps < <(python3 - "${sonic_ref_npz}" <<'PY'
+    read -r frames fps < <("${SONIC_PYTHON}" - "${sonic_ref_npz}" <<'PY'
 import numpy as np, sys
 data = np.load(sys.argv[1], allow_pickle=True)
 q = data["qpos"]
@@ -60,10 +62,13 @@ print(q.shape[0], int(round(fps)))
 PY
 )
     run_seconds=$(( SETUP_OVERHEAD_SECONDS + (frames + fps - 1) / fps + 3 ))
+    if (( run_seconds < MIN_RUN_SECONDS )); then
+      run_seconds="${MIN_RUN_SECONDS}"
+    fi
     echo "[sonic-table2] run ${split}/${name} frames=${frames} seconds=${run_seconds}"
-    GPU_ID="${GPU_ID}" INTERFACE="${INTERFACE}" RUN_SECONDS="${run_seconds}" OUT_DIR="${out_dir}" REFERENCE_DIR="${ref_root}" \
+    GPU_ID="${GPU_ID}" INTERFACE="${INTERFACE}" RUN_SECONDS="${run_seconds}" OUT_DIR="${out_dir}" REFERENCE_DIR="${ref_root}" SONIC_PYTHON="${SONIC_PYTHON}" \
       bash scripts/embodied/run_sonic_reference_smoke.sh
-    python3 scripts/embodied/eval_sonic_qpos_logs.py \
+    "${SONIC_PYTHON}" scripts/embodied/eval_sonic_qpos_logs.py \
       --ref-npz "${sonic_ref_npz}" \
       --run-dir "${out_dir}" \
       --xml "${XML_PATH}" \

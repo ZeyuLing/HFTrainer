@@ -25,24 +25,43 @@ def quat_to_mat(q: np.ndarray) -> np.ndarray:
 
 
 def _load_sim_qpos(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    data = np.genfromtxt(path, delimiter=",", names=True, dtype=np.float64)
-    if data.shape == ():
-        data = data.reshape(1)
-    times = np.asarray(data["time"], dtype=np.float64)
-    qpos = np.stack([np.asarray(data[f"qpos_{i}"], dtype=np.float64) for i in range(36)], axis=1)
-    return times, qpos
+    qpos_keys = [f"qpos_{i}" for i in range(36)]
+    times: list[float] = []
+    qpos_rows: list[list[float]] = []
+    with path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                times.append(float(row["time"]))
+                qpos_rows.append([float(row[key]) for key in qpos_keys])
+            except (KeyError, TypeError, ValueError):
+                if times:
+                    times.pop()
+                continue
+    if not qpos_rows:
+        raise ValueError(f"no valid qpos rows in {path}")
+    return np.asarray(times, dtype=np.float64), np.asarray(qpos_rows, dtype=np.float64)
 
 
 def _load_q_log(path: Path) -> tuple[np.ndarray, np.ndarray] | None:
     if not path.is_file() or path.stat().st_size == 0:
         return None
-    data = np.genfromtxt(path, delimiter=",", names=True, dtype=np.float64)
-    if data.shape == ():
-        data = data.reshape(1)
-    times = np.asarray(data["time_ms"], dtype=np.float64) / 1000.0
-    times = times - float(times[0])
-    qpos = np.stack([np.asarray(data[f"q_{i}"], dtype=np.float64) for i in range(29)], axis=1)
-    return times, qpos
+    q_keys = [f"q_{i}" for i in range(29)]
+    times: list[float] = []
+    q_rows: list[list[float]] = []
+    with path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                times.append(float(row["time_ms"]) / 1000.0)
+                q_rows.append([float(row[key]) for key in q_keys])
+            except (KeyError, TypeError, ValueError):
+                if times:
+                    times.pop()
+                continue
+    if not q_rows:
+        return None
+    times_arr = np.asarray(times, dtype=np.float64)
+    times_arr = times_arr - float(times_arr[0])
+    return times_arr, np.asarray(q_rows, dtype=np.float64)
 
 
 def _control_start_time(sim_times: np.ndarray, sim_qpos: np.ndarray, q_log: tuple[np.ndarray, np.ndarray] | None) -> tuple[float, float]:
