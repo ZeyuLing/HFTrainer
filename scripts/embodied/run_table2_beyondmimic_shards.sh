@@ -29,7 +29,13 @@ echo "[table2-beyondmimic] splits=${SPLITS}"
 echo "[table2-beyondmimic] max_iterations=${BEYONDMIMIC_MAX_ITERATIONS} num_envs=${BEYONDMIMIC_NUM_ENVS}"
 echo "[table2-beyondmimic] gpu_list=${GPU_LIST} max_parallel=${MAX_PARALLEL}"
 
-if [[ ! -f "${PROTOCOL_ROOT}/protocol_summary.json" ]]; then
+need_build=0
+for split in ${SPLITS}; do
+  if [[ ! -f "${PROTOCOL_ROOT}/inputs/${split}/manifest.json" || ! -d "${PROTOCOL_ROOT}/inputs/${split}/npz" ]]; then
+    need_build=1
+  fi
+done
+if [[ "${need_build}" == "1" ]]; then
   python3 scripts/embodied/build_table2_unified_protocol_inputs.py --out-root "${PROTOCOL_ROOT}"
 fi
 
