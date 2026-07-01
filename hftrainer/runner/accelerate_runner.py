@@ -450,14 +450,23 @@ class AccelerateRunner:
         optimizer_list = list(optimizers.values())
         scheduler_list = list(lr_schedulers.values())
 
+        dataloader_device_placement = accel_cfg.get('dataloader_device_placement', True)
+
         to_prepare = trainable_module_list + optimizer_list
+        device_placement = [True] * len(to_prepare)
         if train_dataloader is not None:
             to_prepare.append(train_dataloader)
+            device_placement.append(dataloader_device_placement)
         if val_dataloader is not None:
             to_prepare.append(val_dataloader)
+            device_placement.append(dataloader_device_placement)
         to_prepare.extend(scheduler_list)
+        device_placement.extend([True] * len(scheduler_list))
 
-        prepared = accelerator.prepare(*to_prepare)
+        prepare_kwargs = {}
+        if not all(device_placement):
+            prepare_kwargs['device_placement'] = device_placement
+        prepared = accelerator.prepare(*to_prepare, **prepare_kwargs)
 
         # Make Accelerator's save_state / load_state cover bundle-level orphan
         # nn.Parameters and buffers (e.g. null_vtxt_feat / null_ctxt_input /

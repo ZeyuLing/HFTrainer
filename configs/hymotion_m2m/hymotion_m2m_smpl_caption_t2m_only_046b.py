@@ -113,4 +113,8 @@ accelerator = dict(
     # The T2M-only graph uses the motion transformer path consistently; avoid
     # the extra unused-parameter traversal in the resumed 64-card job.
     ddp_kwargs=dict(find_unused_parameters=False),
+    # Keep dataloader batches on CPU. HyMotion trainers already move only the
+    # needed tensors to device; Accelerate's recursive batch placement stalls
+    # on large pre-extracted text/motion batches at H20 bs=64.
+    dataloader_device_placement=False,
 )
