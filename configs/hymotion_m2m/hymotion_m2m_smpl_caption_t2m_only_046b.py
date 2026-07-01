@@ -60,10 +60,9 @@ train_cfg = dict(
 )
 
 optimizer = dict(
-    # Avoid AdamW's CUDA foreach path at bs=64. The foreach update can require
-    # large temporary tensorlists after backward; the scalar loop has lower peak
-    # memory and is the safer path for this H20 resume.
-    foreach=False,
+    # bs=16 has enough H20 headroom for AdamW foreach and needs it to avoid the
+    # very slow scalar CUDA update path observed after the first optimizer steps.
+    foreach=True,
 )
 
 train_dataloader = dict(
