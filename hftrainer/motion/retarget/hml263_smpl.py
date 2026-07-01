@@ -1,15 +1,20 @@
 """HumanML3D-263 to SMPL ``motion_135`` retargeting API.
 
 This module exposes the public library wrapper for the repository's validated
-HML263 -> SMPL chain.  The implementation intentionally delegates the actual
-IK/FK math to ``scripts/eval/hml263_to_smpl_ik.py`` so the library API and the
-evaluation scripts stay on the same path.
+HML263 -> SMPL chain.  When full HML263 features are available, the conversion
+maps HumanML3D's canonical-skeleton rotation block onto the SMPL rest skeleton
+as pose initialization, then refines against the recovered 22 joints.
+``position_ik`` is reserved for raw joint-only input or explicit diagnostics.
+
+The implementation intentionally delegates the shared IK/FK math to
+``scripts/eval/hml263_to_smpl_ik.py`` so the library API and the evaluation
+scripts stay on the same path.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import torch
@@ -19,8 +24,10 @@ from scripts.eval.hml263_to_smpl_ik import (
     N_JOINTS,
     estimate_local_rotations,
     fit_length_linear,
+    hml263_rotations_to_smpl_init,
     load_smpl_rest as _load_smpl_rest,
     matrix_to_rot6d_rowmajor,
+    merge_hml263_end_effectors,
     recover_hml263_local_rotations,
     recover_from_ric,
     refine_smpl_fit,
@@ -67,9 +74,10 @@ def retarget_hml263_clip(
     floor_align: bool = False,
     refine_iters: int = 0,
     refine_lr: float = 2e-2,
-    rotation_init: str = "position_ik",
+    rotation_init: str = "auto",
     orientation_mode: str = "bone",
     parent_ref_weight: float = 0.25,
+    pose_keep_weight: float = 1e-4,
     pose_l2_weight: float = 0.0,
     angle_prior_weight: float = 0.0,
     target_len: int | None = None,
@@ -78,11 +86,19 @@ def retarget_hml263_clip(
     source_motion135_transl: np.ndarray | None = None,
     root_translation_mode: str = "auto",
     rot6d_convention: str = "row",
+    lock_global_orient: bool | None = None,
+    lock_body_joint_ids: Iterable[int] | None = None,
 ) -> dict[str, np.ndarray]:
     """Retarget one un-normalized HML263 clip to SMPL ``motion_135``.
 
     The returned ``motion_135`` is ROW-major rot6d:
     ``[root_translation(3), 22 * rot6d_row(132)]`` at ``target_fps``.
+
+    Args:
+        rotation_init: ``"auto"`` (default) maps the HumanML3D rotation block
+            onto the SMPL rest skeleton for HML263 feature input and falls back
+            to ``"position_ik"`` only when the input is already raw
+            ``(T, 22, 3)`` joints.
     """
 
     if rot6d_convention != "row":
@@ -91,7 +107,7 @@ def retarget_hml263_clip(
         raise ValueError(f"unsupported orientation_mode: {orientation_mode}")
     if root_translation_mode not in {"auto", "canonical", "source_transl"}:
         raise ValueError(f"unsupported root_translation_mode: {root_translation_mode}")
-    if rotation_init not in {"position_ik", "hml263"}:
+    if rotation_init not in {"auto", "position_ik", "hml263", "hml263_end_effectors", "hml263_init"}:
         raise ValueError(f"unsupported rotation_init: {rotation_init}")
 
     device_t = _as_device(device)
@@ -99,12 +115,18 @@ def retarget_hml263_clip(
 
     arr = np.asarray(feats, dtype=np.float32)
     hml_local_r = None
-    use_hml_rot = rotation_init == "hml263"
+    hml_feature_input = False
+    use_hml_rot = rotation_init in {"auto", "hml263", "hml263_end_effectors", "hml263_init"}
     if arr.ndim == 3 and arr.shape[1:] == (N_JOINTS, 3):
         target = resample_linear(arr, source_fps, target_fps)
+        if rotation_init == "auto":
+            rotation_init = "position_ik"
     else:
         if arr.ndim != 2 or arr.shape[-1] != 263:
             raise ValueError(f"expected (T,263) or (T,{N_JOINTS},3), got {arr.shape}")
+        hml_feature_input = True
+        if rotation_init == "auto":
+            rotation_init = "hml263_init"
         if mean is not None and std is not None:
             arr = arr * std + mean
         if use_hml_rot:
@@ -118,20 +140,29 @@ def retarget_hml263_clip(
         target = target.copy()
         target[..., 1] -= target[..., 1].min()
 
-    if rotation_init == "hml263" and hml_local_r is None:
-        raise ValueError("rotation_init='hml263' requires HML263 feature input")
-    if hml_local_r is not None:
+    if rotation_init in {"hml263", "hml263_end_effectors", "hml263_init"} and hml_local_r is None:
+        raise ValueError(f"rotation_init={rotation_init!r} requires HML263 feature input")
+    position_local_r = estimate_local_rotations(
+        target,
+        rest_joints,
+        parents,
+        orientation_mode=orientation_mode,
+        parent_ref_weight=parent_ref_weight,
+    )
+    if rotation_init == "hml263":
         local_r = hml_local_r
         rotation_init_used = "hml263"
+    elif rotation_init == "hml263_end_effectors":
+        local_r = merge_hml263_end_effectors(position_local_r, hml_local_r, rest_joints, parents)
+        rotation_init_used = "hml263_end_effectors"
+    elif rotation_init == "hml263_init":
+        local_r = hml263_rotations_to_smpl_init(hml_local_r, position_local_r, rest_joints, parents)
+        rotation_init_used = "hml263_init"
     else:
-        local_r = estimate_local_rotations(
-            target,
-            rest_joints,
-            parents,
-            orientation_mode=orientation_mode,
-            parent_ref_weight=parent_ref_weight,
-        )
+        local_r = position_local_r
         rotation_init_used = "position_ik"
+    if lock_global_orient is None:
+        lock_global_orient = bool(hml_feature_input and rotation_init_used != "position_ik")
     aa = R.from_matrix(local_r.reshape(-1, 3, 3)).as_rotvec().astype(np.float32)
     aa = aa.reshape(len(target), N_JOINTS, 3)
     global_orient = aa[:, 0]
@@ -148,8 +179,11 @@ def retarget_hml263_clip(
         refine_iters,
         refine_lr,
         pose_l2_weight,
+        pose_keep_weight,
         angle_prior_weight,
         device_t,
+        lock_global_orient=bool(lock_global_orient),
+        lock_body_joint_ids=lock_body_joint_ids,
     )
     canonical_transl = transl.copy()
     canonical_fitted = fitted.copy()
@@ -192,6 +226,7 @@ def retarget_hml263_clip(
         "rotation_init": np.array(rotation_init_used),
         "root_translation_restore_mode": np.array("source_transl" if root_translation_restored else "canonical"),
         "root_translation_restored": np.array(root_translation_restored),
+        "global_orient_locked": np.array(bool(lock_global_orient)),
     }
 
 

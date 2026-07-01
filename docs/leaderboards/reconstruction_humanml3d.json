@@ -14,8 +14,10 @@
   "canonical_split": "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/split/test.txt",
   "canonical_ms272_gt": "ref_repo/MotionStreamer/MotionStreamer/humanml3d_272/motion_data",
   "canonical_selected_caption_annotation": "outputs/evaluation/t2m/humanml3d_official_test/captions/gt_motionclip_selected_20260622/test_hml3d_official272_gtlen_motionclip_selected_caption.json",
+  "metrics_summary": "outputs/evaluation/reconstruction/humanml3d_official_test/metrics_summary.json",
+  "metrics_summary_tsv": "outputs/evaluation/reconstruction/humanml3d_official_test/metrics_summary.tsv",
   "planned_metrics": {
-    "geom": "MPJPE, root-aligned MPJPE, PA-MPJPE, and MPJRE from scripts/eval/eval_paired_recon_geom_272.py",
+    "geom": "MPJPE after first-frame root XZ alignment and root-height canonicalization, root-aligned MPJPE, first-frame-given root-delta XZ/Y error, PA-MPJPE, and MPJRE from motion135 SMPL-H FK joints via scripts/eval/eval_paired_recon_geom_motion135.py; accumulated root XZ/Y are retained as diagnostics.",
     "paired_rfid_emb_l2": "MotionStreamer-272 paired rFID and embedding L2 from scripts/eval/eval_paired_recon_rfid_272.py",
     "physics": "Slide, Float, Jitter, and Dynamic from scripts/eval/eval_mbench_physics_dir.py",
     "poseq": "PoseQ from scripts/eval/compute_pose_quality_h3d.py"
@@ -42,12 +44,17 @@
         "ms272": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/t2mgpt",
           "count": 4042,
-          "new_files": 1,
+          "new_files": 0,
           "missing": 0,
           "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/t2mgpt/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/t2mgpt/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/t2mgpt/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/t2mgpt/metrics/poseq.json"
+      }
     },
     {
       "method": "tm2t",
@@ -88,7 +95,10 @@
         },
         "motion135": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/motionstreamer",
-          "count": 0
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
         }
       },
       "metrics": {
@@ -96,6 +106,35 @@
         "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/paired_rfid_emb_l2.json",
         "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/physics.json",
         "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motionstreamer/metrics/poseq.json"
+      }
+    },
+    {
+      "method": "gotozero",
+      "aliases": [
+        "GoToZero",
+        "MotionMillion"
+      ],
+      "tokenizer_family": "GoToZero / MotionMillion FSQ",
+      "native_representation": "ms272",
+      "status": "complete",
+      "representations": {
+        "ms272": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/gotozero",
+          "count": 4042
+        },
+        "motion135": {
+          "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/gotozero",
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
+        }
+      },
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/gotozero/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/gotozero/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/gotozero/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/gotozero/metrics/poseq.json"
       }
     },
     {
@@ -124,7 +163,12 @@
           "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mld/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mld/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mld/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mld/metrics/poseq.json"
+      }
     },
     {
       "method": "momask",
@@ -151,7 +195,12 @@
           "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/momask/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/momask/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/momask/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/momask/metrics/poseq.json"
+      }
     },
     {
       "method": "mogents",
@@ -178,7 +227,12 @@
           "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mogents/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mogents/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mogents/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/mogents/metrics/poseq.json"
+      }
     },
     {
       "method": "motiongpt3",
@@ -205,7 +259,12 @@
           "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motiongpt3/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motiongpt3/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motiongpt3/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/motiongpt3/metrics/poseq.json"
+      }
     },
     {
       "method": "prism",
@@ -214,18 +273,26 @@
       ],
       "tokenizer_family": "PRISM tokenizer",
       "native_representation": "motion135",
-      "status": "pending",
+      "status": "complete",
       "representations": {
         "motion135": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/prism",
-          "count": 0
+          "count": 4042
         },
         "ms272": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/prism",
-          "count": 0
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/prism/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/prism/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/prism/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/prism/metrics/poseq.json"
+      }
     },
     {
       "method": "vermo",
@@ -234,7 +301,7 @@
       ],
       "tokenizer_family": "VerMo tokenizer",
       "native_representation": "smplx",
-      "status": "pending",
+      "status": "complete",
       "representations": {
         "smplx": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/smplx/vermo",
@@ -242,14 +309,22 @@
         },
         "motion135": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/motion135/vermo",
-          "count": 0
+          "count": 4042
         },
         "ms272": {
           "path": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/vermo",
-          "count": 0
+          "count": 4042,
+          "new_files": 0,
+          "missing": 0,
+          "failed": 0
         }
       },
-      "metrics": {}
+      "metrics": {
+        "geom": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/vermo/metrics/geom.json",
+        "paired_rfid_emb_l2": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/vermo/metrics/paired_rfid_emb_l2.json",
+        "physics": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/vermo/metrics/physics.json",
+        "poseq": "outputs/evaluation/reconstruction/humanml3d_official_test/ms272/vermo/metrics/poseq.json"
+      }
     }
   ]
 }

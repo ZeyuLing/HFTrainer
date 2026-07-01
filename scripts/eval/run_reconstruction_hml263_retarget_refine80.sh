@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Rebuild HumanML3D reconstruction hml263-native rows as SMPL motion_135.
 #
-# The official bridge for hml263 -> SMPL/MS272 must use position IK plus Adam
-# refinement. The hml263 rotation block is a HumanML canonical-skeleton prior,
-# not a valid SMPL local-rotation output by itself.
+# The official bridge for hml263 -> SMPL/MS272 preserves the explicit HumanML
+# root heading, maps the HumanML canonical-skeleton rotation block onto the SMPL
+# rest skeleton, and only refines body pose/translation against joints.
 set -euo pipefail
 
 ROOT="${ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
@@ -80,10 +80,12 @@ launch() {
           --device cuda \
           --batch-size "$BATCH_SIZE" \
           --floor-align \
-          --rotation-init position_ik \
+          --rotation-init hml263_init \
+          --orientation-mode parent_frame \
           --refine-iters "$REFINE_ITERS" \
           --refine-lr "$REFINE_LR" \
           --restore-root-translation none \
+          --lock-global-orient \
           --skip-existing
         echo "[method-done] $(date -Is) shard=$shard method=$method"
       done

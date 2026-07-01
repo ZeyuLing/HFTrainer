@@ -13,11 +13,35 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE = ROOT / "outputs/evaluation/reconstruction/humanml3d_official_test"
+DEFAULT_BASE = ROOT / "outputs/evaluation/reconstruction/humanml3d_official_test"
+BASE = DEFAULT_BASE
 REF_MS272 = ROOT / "outputs/evaluation/t2m/humanml3d_official_test/ms272/gt_0beta"
-SPLIT = BASE / "_meta/test_ids.txt"
+REF_MOTION135 = ROOT / "outputs/evaluation/t2m/humanml3d_official_test/motion135/gt_0beta"
+REF_HML263_BRIDGE_MOTION135 = BASE / "motion135/gt_hml263_bridge"
+REF_MS272_BRIDGE_MOTION135 = BASE / "motion135/gt_ms272_bridge"
+SPLIT = DEFAULT_BASE / "_meta/test_ids.txt"
 LOG_DIR = ROOT / "logs/reconstruction_humanml3d_20260630/metrics"
-METHODS = ["t2mgpt", "momask", "mld", "mogents", "motiongpt3", "motionstreamer"]
+METHODS = [
+    "t2mgpt",
+    "momask",
+    "mld",
+    "mogents",
+    "motiongpt3",
+    "motionstreamer",
+    "gotozero",
+    "prism",
+    "vermo",
+]
+HML263_METHODS = {"t2mgpt", "momask", "mld", "mogents", "motiongpt3", "motiongpt", "motionlcm"}
+MS272_METHODS = {"motionstreamer", "gotozero"}
+
+
+def geom_ref_dir(method: str) -> Path:
+    if method in HML263_METHODS:
+        return REF_HML263_BRIDGE_MOTION135
+    if method in MS272_METHODS:
+        return REF_MS272_BRIDGE_MOTION135
+    return REF_MOTION135
 
 
 @dataclass
@@ -40,23 +64,30 @@ def metric_path(method: str, name: str) -> Path:
     return BASE / "ms272" / method / "metrics" / f"{name}.json"
 
 
+def configure_paths(base: Path, split: Path | None = None, log_dir: Path | None = None) -> None:
+    global BASE, REF_HML263_BRIDGE_MOTION135, REF_MS272_BRIDGE_MOTION135, SPLIT, LOG_DIR
+    BASE = base
+    REF_HML263_BRIDGE_MOTION135 = BASE / "motion135/gt_hml263_bridge"
+    REF_MS272_BRIDGE_MOTION135 = BASE / "motion135/gt_ms272_bridge"
+    SPLIT = split or (BASE / "_meta/test_ids.txt" if (BASE / "_meta/test_ids.txt").exists() else DEFAULT_BASE / "_meta/test_ids.txt")
+    if log_dir is not None:
+        LOG_DIR = log_dir
+
+
 def build_geom(method: str) -> Task:
     out = metric_path(method, "geom")
-    pred = BASE / "ms272" / method
+    ref = geom_ref_dir(method)
+    pred = BASE / "motion135" / method
     return Task(
         "geom",
         method,
         [
             sys.executable,
-            "scripts/eval/eval_paired_recon_geom_272.py",
+            "scripts/eval/eval_paired_recon_geom_motion135.py",
             "--ref-dir",
-            str(REF_MS272),
-            "--ref-kind",
-            "npz272",
+            str(ref),
             "--pred-dir",
             str(pred),
-            "--pred-kind",
-            "npz272",
             "--split",
             str(SPLIT),
             "--out-json",
@@ -104,7 +135,7 @@ def build_rfid(method: str, ckpt: Path) -> Task:
 
 def build_physics(method: str) -> Task:
     out = metric_path(method, "physics")
-    if method == "motionstreamer":
+    if method in MS272_METHODS:
         src = BASE / "ms272" / method
         mode = "gt272"
     else:
@@ -132,7 +163,7 @@ def build_physics(method: str) -> Task:
 
 def build_poseq(method: str) -> Task:
     out = metric_path(method, "poseq")
-    if method == "motionstreamer":
+    if method in MS272_METHODS:
         mode_arg = "--gt272-dir"
         src = BASE / "ms272" / method
     else:
@@ -265,10 +296,14 @@ def write_summary(methods: list[str]) -> None:
     keys = [
         "method",
         "geom_used",
-        "mpjpe_mm",
         "root_aligned_mpjpe_mm",
+        "root_delta_xz_error_mm",
+        "root_delta_y_error_mm",
         "pa_mpjpe_mm",
         "mpjre_deg",
+        "mpjpe_mm",
+        "root_xz_error_mm",
+        "root_y_error_mm",
         "rfid_n",
         "rfid",
         "emb_l2",
@@ -296,7 +331,16 @@ def main() -> int:
     parser.add_argument("--gpus", default="0,1,2,3,4,5")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--expected", type=int, default=4042)
+    parser.add_argument("--base", default=str(DEFAULT_BASE), help="Reconstruction result root.")
+    parser.add_argument("--split", default=None, help="Optional test id split file.")
+    parser.add_argument("--log-dir", default=None, help="Optional metric log directory.")
     args = parser.parse_args()
+
+    configure_paths(
+        Path(args.base).expanduser().resolve(),
+        Path(args.split).expanduser().resolve() if args.split else None,
+        Path(args.log_dir).expanduser().resolve() if args.log_dir else None,
+    )
 
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
     requested = {m.strip() for m in args.metrics.split(",") if m.strip()}
@@ -304,10 +348,24 @@ def main() -> int:
     if not SPLIT.exists():
         raise FileNotFoundError(f"missing split: {SPLIT}")
     for method in methods:
-        count = count_files(BASE / "ms272" / method)
-        print(f"[preflight] ms272/{method} count={count}", flush=True)
-        if count < args.expected:
-            raise RuntimeError(f"incomplete ms272/{method}: {count}/{args.expected}")
+        if "geom" in requested:
+            ref_count = count_files(geom_ref_dir(method))
+            pred_count = count_files(BASE / "motion135" / method)
+            print(
+                f"[preflight] geom_ref/{method} count={ref_count} "
+                f"motion135/{method} count={pred_count}",
+                flush=True,
+            )
+            if ref_count < args.expected:
+                raise RuntimeError(f"incomplete geom ref for {method}: {ref_count}/{args.expected}")
+            count = pred_count
+            if count < args.expected:
+                raise RuntimeError(f"incomplete motion135/{method}: {count}/{args.expected}")
+        if requested - {"geom"}:
+            count = count_files(BASE / "ms272" / method)
+            print(f"[preflight] ms272/{method} count={count}", flush=True)
+            if count < args.expected:
+                raise RuntimeError(f"incomplete ms272/{method}: {count}/{args.expected}")
 
     ckpt = Path("/dev/shm/eval272_epoch99.ckpt")
     if "rfid" in requested and not ckpt.exists():

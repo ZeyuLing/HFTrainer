@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """Retarget HumanML3D-263 predictions to SMPL-style motion_135.
 
-This script intentionally avoids the repository's existing HumanML3D-to-SMPL
-conversion path. It only uses the canonical HumanML3D RIC decoder, scipy's
-vector alignment, and the public smplx layer:
+This script keeps the HumanML3D-to-SMPL conversion auditable in one place:
 
     HML3D-263 -> 22 joints -> hierarchical IK on SMPL rest skeleton
               -> global_orient/body_pose/transl + motion_135
 
 The conversion is not mathematically exact: HumanML3D-263 does not uniquely
-determine SMPL pose twist, shape, or mesh details. The saved fit MPJPE is a
-diagnostic for how well the SMPL skeleton tracks the recovered 22 joints.
+determine SMPL pose twist, shape, or mesh details.  The default ``auto`` path
+maps the HML263 rotation block from the canonical HumanML skeleton to the SMPL
+rest skeleton for full feature input, and falls back to position IK only when
+the input is already raw joints.  The saved fit MPJPE is a diagnostic for how
+well the SMPL skeleton tracks the recovered 22 joints, but it does not by itself
+validate terminal mesh orientation.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import sys
+import types
 from pathlib import Path
 from typing import Iterable
 
@@ -48,11 +52,76 @@ def _patch_numpy_chumpy_aliases() -> None:
 
 _patch_numpy_chumpy_aliases()
 
+
+def _ensure_chumpy_unpickle_support() -> None:
+    """Provide the tiny part of chumpy needed by legacy SMPL pickles."""
+    try:
+        import chumpy.ch  # type: ignore  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    class Ch:
+        @property
+        def r(self) -> np.ndarray:
+            return np.asarray(getattr(self, "x"))
+
+        @property
+        def shape(self) -> tuple[int, ...]:
+            return self.r.shape
+
+        def __array__(self, dtype=None):
+            return np.asarray(self.r, dtype=dtype)
+
+        def __getitem__(self, item):
+            return self.r[item]
+
+        def __len__(self) -> int:
+            return len(self.r)
+
+    ch_mod = types.ModuleType("chumpy.ch")
+    ch_mod.Ch = Ch
+    root_mod = types.ModuleType("chumpy")
+    root_mod.ch = ch_mod
+    sys.modules.setdefault("chumpy", root_mod)
+    sys.modules.setdefault("chumpy.ch", ch_mod)
+
+
+_ensure_chumpy_unpickle_support()
+
 import smplx  # noqa: E402
 
 
 # HumanML3D 22-joint skeleton order follows the first 22 SMPL joints.
 N_JOINTS = 22
+HML263_END_EFFECTOR_JOINTS = np.asarray([10, 11, 15, 20, 21], dtype=np.int64)
+HML263_RAW_OFFSETS = np.asarray(
+    [
+        [0, 0, 0],
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, -1, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, -1, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [0, 0, 1],
+        [0, 1, 0],
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 0, 1],
+        [0, -1, 0],
+        [0, -1, 0],
+        [0, -1, 0],
+        [0, -1, 0],
+        [0, -1, 0],
+        [0, -1, 0],
+    ],
+    dtype=np.float32,
+)
 
 
 def _qinv(q: np.ndarray) -> np.ndarray:
@@ -296,8 +365,128 @@ def estimate_local_rotations(
     return local.astype(np.float32)
 
 
+def _global_rotations_from_local(local_r: np.ndarray, parents: np.ndarray) -> np.ndarray:
+    local_r = np.asarray(local_r, dtype=np.float32)
+    parents = np.asarray(parents[: local_r.shape[1]], dtype=np.int64)
+    out = np.zeros_like(local_r)
+    for j in range(local_r.shape[1]):
+        parent = int(parents[j])
+        if parent < 0:
+            out[:, j] = local_r[:, j]
+        else:
+            out[:, j] = out[:, parent] @ local_r[:, j]
+    return out
+
+
+def hml263_rotations_to_smpl_init(
+    hml_local_r: np.ndarray,
+    position_local_r: np.ndarray,
+    rest_joints: np.ndarray,
+    parents: np.ndarray,
+) -> np.ndarray:
+    """Convert HumanML IK rotations into an SMPL-local initialization.
+
+    HumanML3D stores local rotations on the canonical T2M skeleton.  In that
+    skeleton, the rotation attached to joint ``j`` is used together with the
+    incoming offset ``parent(j) -> j``.  SMPL local pose instead defines the
+    skinning/outgoing frame at joint ``j``.  Directly copying the HumanML local
+    matrices into SMPL therefore corrupts terminal mesh orientation.
+
+    This initializer keeps the useful twist/orientation signal from HML263 by
+    first converting HML local matrices to global joint frames, aligning each
+    SMPL incoming rest bone to the corresponding HumanML raw incoming axis, and
+    then converting those desired global frames back to SMPL local rotations.
+    The root frame is copied directly from the HumanML root quaternion.  Unlike
+    body twist, HumanML root heading is an explicit trajectory channel and should
+    survive HML263 <-> SMPL conversion without being re-estimated from positions.
+    """
+
+    if hml_local_r.shape != position_local_r.shape:
+        raise ValueError(f"rotation shapes differ: {hml_local_r.shape} vs {position_local_r.shape}")
+    parents22 = np.asarray(parents[: N_JOINTS], dtype=np.int64)
+    hml_global = _global_rotations_from_local(hml_local_r, parents22)
+    pos_global = _global_rotations_from_local(position_local_r, parents22)
+    rest_joints = np.asarray(rest_joints[: N_JOINTS], dtype=np.float32)
+
+    desired_global = np.empty_like(hml_global)
+    desired_global[:, 0] = hml_global[:, 0]
+    for j in range(1, N_JOINTS):
+        parent = int(parents22[j])
+        smpl_incoming = rest_joints[j] - rest_joints[parent]
+        hml_incoming = HML263_RAW_OFFSETS[j]
+        correction = _align_vector_matrix(smpl_incoming, hml_incoming)
+        desired_global[:, j] = hml_global[:, j] @ correction
+
+    out = np.empty_like(desired_global)
+    out[:, 0] = desired_global[:, 0]
+    for j in range(1, N_JOINTS):
+        parent = int(parents22[j])
+        out[:, j] = np.einsum(
+            "tij,tjk->tik",
+            desired_global[:, parent].transpose(0, 2, 1),
+            desired_global[:, j],
+        )
+    return out.astype(np.float32)
+
+
+def _align_vector_matrix(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+    src = np.asarray(src, dtype=np.float64)
+    dst = np.asarray(dst, dtype=np.float64)
+    src = src / max(np.linalg.norm(src), 1e-8)
+    dst = dst / max(np.linalg.norm(dst), 1e-8)
+    try:
+        return R.align_vectors(dst[None], src[None])[0].as_matrix().astype(np.float32)
+    except Exception:
+        return np.eye(3, dtype=np.float32)
+
+
+def merge_hml263_end_effectors(
+    position_local_r: np.ndarray,
+    hml_local_r: np.ndarray,
+    rest_joints: np.ndarray,
+    parents: np.ndarray,
+) -> np.ndarray:
+    """Diagnostic injection of HML263 terminal orientation.
+
+    HumanML3D/MoMask ``cont6d_params[j]`` rotates the incoming bone
+    ``parent(j) -> j`` on the canonical skeleton. SMPL local pose ``pose[j]``
+    instead defines joint ``j``'s own skinning/child frame. Copying HML local
+    rotations directly into SMPL local rotations therefore deforms terminal
+    meshes. This function is kept only for explicit diagnostics; it must pass a
+    mesh-integrity check before any result using it is trusted.
+    """
+
+    if position_local_r.shape != hml_local_r.shape:
+        raise ValueError(f"rotation shapes differ: {position_local_r.shape} vs {hml_local_r.shape}")
+    out = position_local_r.copy()
+    parents22 = np.asarray(parents[: N_JOINTS], dtype=np.int64)
+    smpl_global = _global_rotations_from_local(position_local_r, parents22)
+    hml_global = _global_rotations_from_local(hml_local_r, parents22)
+    rest_joints = np.asarray(rest_joints[: N_JOINTS], dtype=np.float32)
+    for j in HML263_END_EFFECTOR_JOINTS:
+        parent = int(parents22[int(j)])
+        if parent < 0:
+            continue
+        smpl_incoming = rest_joints[int(j)] - rest_joints[parent]
+        hml_incoming = HML263_RAW_OFFSETS[int(j)]
+        correction = _align_vector_matrix(smpl_incoming, hml_incoming)
+        desired_global = hml_global[:, int(j)] @ correction
+        out[:, int(j)] = np.einsum("tij,tjk->tik", smpl_global[:, parent].transpose(0, 2, 1), desired_global)
+    return out
+
+
 def matrix_to_rot6d_rowmajor(rotmat: np.ndarray) -> np.ndarray:
     return np.asarray(rotmat[..., :, :2], dtype=np.float32).reshape(*rotmat.shape[:-2], 6)
+
+
+def matrix_to_rot6d(rotmat: np.ndarray, convention: str = "row") -> np.ndarray:
+    """Convert rotation matrices to 6D with explicit row/column convention."""
+
+    if convention == "row":
+        return matrix_to_rot6d_rowmajor(rotmat)
+    if convention == "column":
+        return np.asarray(rotmat[..., :2, :], dtype=np.float32).reshape(*rotmat.shape[:-2], 6)
+    raise ValueError(f"unsupported rot6d convention: {convention}")
 
 
 def load_smpl_rest(model_dir: Path, device: torch.device):
@@ -361,9 +550,12 @@ def refine_smpl_fit(
     iters: int,
     lr: float,
     pose_l2_weight: float,
+    pose_keep_weight: float,
     angle_prior_weight: float,
     device: torch.device,
     smooth_weight: float = 1e-3,
+    lock_global_orient: bool = False,
+    lock_body_joint_ids: Iterable[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Refine IK initialization by optimizing SMPL pose/transl against joints."""
     if iters <= 0:
@@ -372,11 +564,19 @@ def refine_smpl_fit(
 
     target = torch.from_numpy(target_joints.astype(np.float32)).to(device)
     n = len(target_joints)
-    g = torch.tensor(global_orient, dtype=torch.float32, device=device, requires_grad=True)
+    g = torch.tensor(global_orient, dtype=torch.float32, device=device, requires_grad=not lock_global_orient)
     b21 = torch.tensor(body_pose_21, dtype=torch.float32, device=device, requires_grad=True)
     tr = torch.tensor(transl, dtype=torch.float32, device=device, requires_grad=True)
     b21_init = b21.detach().clone()
-    opt = torch.optim.Adam([g, b21, tr], lr=lr)
+    params = [b21, tr] if lock_global_orient else [g, b21, tr]
+    opt = torch.optim.Adam(params, lr=lr)
+    lock_slices: list[slice] = []
+    for joint_id in lock_body_joint_ids or []:
+        joint_id = int(joint_id)
+        if not (1 <= joint_id <= 21):
+            raise ValueError(f"SMPL body joint id must be in [1,21], got {joint_id}")
+        start = (joint_id - 1) * 3
+        lock_slices.append(slice(start, start + 3))
 
     for _ in range(iters):
         body_23 = torch.zeros(n, 69, dtype=torch.float32, device=device)
@@ -407,7 +607,7 @@ def refine_smpl_fit(
             smooth = torch.tensor(0.0, device=device)
         loss = (
             data_loss
-            + 1e-4 * pose_keep
+            + pose_keep_weight * pose_keep
             + pose_l2_weight * pose_prior
             + angle_prior_weight * angle_prior
             + smooth_weight * smooth
@@ -415,6 +615,10 @@ def refine_smpl_fit(
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+        if lock_slices:
+            with torch.no_grad():
+                for sl in lock_slices:
+                    b21[:, sl] = b21_init[:, sl]
 
     with torch.no_grad():
         body_23 = torch.zeros(n, 69, dtype=torch.float32, device=device)
@@ -451,22 +655,29 @@ def retarget_one(
     orientation_mode: str,
     parent_ref_weight: float,
     pose_l2_weight: float,
+    pose_keep_weight: float,
     angle_prior_weight: float,
     mean: np.ndarray | None,
     std: np.ndarray | None,
     canonical_meta_dir: Path | None,
     restore_root_translation: str,
+    lock_global_orient: bool,
+    lock_body_joint_ids: Iterable[int] | None,
     target_len: int | None = None,
 ) -> dict:
     arr = np.load(str(in_path)).astype(np.float32)
     hml_local_r = None
-    use_hml_rot = rotation_init == "hml263"
+    use_hml_rot = rotation_init in {"auto", "hml263", "hml263_end_effectors", "hml263_init"}
     if arr.ndim == 3 and arr.shape[1:] == (22, 3):
         target = resample_linear(arr, source_fps, target_fps)
+        if rotation_init == "auto":
+            rotation_init = "position_ik"
     else:
         feats = arr
         if feats.ndim != 2 or feats.shape[-1] != 263:
             raise ValueError(f"expected (T,263) or (T,22,3), got {feats.shape}")
+        if rotation_init == "auto":
+            rotation_init = "hml263_init"
         if mean is not None and std is not None:
             feats = feats * std + mean
         target = recover_from_ric(feats, N_JOINTS)
@@ -480,19 +691,26 @@ def retarget_one(
         target = target.copy()
         target[..., 1] -= target[..., 1].min()
 
-    if rotation_init == "hml263" and hml_local_r is None:
-        raise ValueError("--rotation-init hml263 requires HML263 feature input")
-    if hml_local_r is not None:
+    if rotation_init in {"hml263", "hml263_end_effectors", "hml263_init"} and hml_local_r is None:
+        raise ValueError(f"--rotation-init {rotation_init} requires HML263 feature input")
+    position_local_r = estimate_local_rotations(
+        target,
+        rest_joints,
+        parents,
+        orientation_mode=orientation_mode,
+        parent_ref_weight=parent_ref_weight,
+    )
+    if rotation_init == "hml263":
         local_r = hml_local_r
         rotation_init_used = "hml263"
+    elif rotation_init == "hml263_end_effectors":
+        local_r = merge_hml263_end_effectors(position_local_r, hml_local_r, rest_joints, parents)
+        rotation_init_used = "hml263_end_effectors"
+    elif rotation_init == "hml263_init":
+        local_r = hml263_rotations_to_smpl_init(hml_local_r, position_local_r, rest_joints, parents)
+        rotation_init_used = "hml263_init"
     else:
-        local_r = estimate_local_rotations(
-            target,
-            rest_joints,
-            parents,
-            orientation_mode=orientation_mode,
-            parent_ref_weight=parent_ref_weight,
-        )
+        local_r = position_local_r
         rotation_init_used = "position_ik"
     aa = R.from_matrix(local_r.reshape(-1, 3, 3)).as_rotvec().astype(np.float32)
     aa = aa.reshape(len(target), N_JOINTS, 3)
@@ -510,8 +728,11 @@ def retarget_one(
         refine_iters,
         refine_lr,
         pose_l2_weight,
+        pose_keep_weight,
         angle_prior_weight,
         device,
+        lock_global_orient=lock_global_orient,
+        lock_body_joint_ids=lock_body_joint_ids,
     )
     canonical_transl = transl.copy()
     canonical_fitted = fitted.copy()
@@ -549,6 +770,7 @@ def retarget_one(
         rotation_init=np.array(rotation_init_used),
         root_translation_restore_mode=np.array(str(root_restore_info["mode"])),
         root_translation_restored=np.array(bool(root_restore_info.get("applied", False))),
+        global_orient_locked=np.array(bool(lock_global_orient)),
     )
     return {
         "sid": in_path.stem,
@@ -557,6 +779,7 @@ def retarget_one(
         "mpjpe_mm_mean": float(canonical_mpjpe_mm.mean()),
         "mpjpe_mm_p95": float(np.percentile(canonical_mpjpe_mm, 95)),
         "rotation_init": rotation_init_used,
+        "global_orient_locked": bool(lock_global_orient),
         "root_translation_restore": root_restore_info,
     }
 
@@ -598,12 +821,35 @@ def main():
     ap.add_argument("--refine-iters", type=int, default=0)
     ap.add_argument("--refine-lr", type=float, default=2e-2)
     ap.add_argument("--pose-l2-weight", type=float, default=0.0)
+    ap.add_argument("--pose-keep-weight", type=float, default=1e-4)
     ap.add_argument("--angle-prior-weight", type=float, default=0.0)
     ap.add_argument(
+        "--lock-global-orient",
+        action="store_true",
+        help=(
+            "Keep SMPL global_orient fixed during refinement. Use this for "
+            "HML263 feature input, whose root heading is explicitly recoverable."
+        ),
+    )
+    ap.add_argument(
+        "--lock-body-joints",
+        default="",
+        help=(
+            "Comma-separated SMPL body joint ids in [1,21] to keep fixed at the "
+            "rotation initializer during refinement. Useful for terminal joints "
+            "whose orientation is weakly constrained by 22-joint positions."
+        ),
+    )
+    ap.add_argument(
         "--rotation-init",
-        choices=["position_ik", "hml263"],
-        default="position_ik",
-        help="Initial local rotations for SMPL fitting. hml263 is experimental and uses the raw HML263 rot block.",
+        choices=["auto", "hml263_init", "hml263_end_effectors", "position_ik", "hml263"],
+        default="auto",
+        help=(
+            "Initial local rotations for SMPL fitting. Default auto maps the HumanML3D "
+            "rotation block onto the SMPL rest skeleton for HML263 feature input and "
+            "falls back to position_ik only for raw (T,22,3) joint input. Direct hml263 "
+            "and hml263_end_effectors are diagnostic variants."
+        ),
     )
     ap.add_argument(
         "--canonical-meta-dir",
@@ -676,10 +922,11 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     canonical_meta_dir = Path(args.canonical_meta_dir) if args.canonical_meta_dir else None
+    lock_body_joint_ids = [int(x) for x in args.lock_body_joints.split(",") if x.strip()]
     print(
         f"[setup] files={len(files)} shard={args.shard_index}/{args.num_shards} "
         f"out={out_dir} device={device} target_fps={args.target_fps} "
-        f"restore_root={args.restore_root_translation}",
+        f"restore_root={args.restore_root_translation} lock_body_joints={lock_body_joint_ids}",
         flush=True,
     )
 
@@ -707,11 +954,14 @@ def main():
                 args.orientation_mode,
                 args.parent_ref_weight,
                 args.pose_l2_weight,
+                args.pose_keep_weight,
                 args.angle_prior_weight,
                 mean,
                 std,
                 canonical_meta_dir,
                 args.restore_root_translation,
+                args.lock_global_orient,
+                lock_body_joint_ids,
                 target_lengths.get(in_path.stem),
             )
             summary.append(item)

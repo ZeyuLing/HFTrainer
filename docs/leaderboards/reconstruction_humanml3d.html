@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reconstruction HumanML3D Leaderboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8f7;
+      --panel: #ffffff;
+      --ink: #17212b;
+      --muted: #667284;
+      --line: #d8e0df;
+      --line-strong: #c3cecc;
+      --teal: #087f7a;
+      --blue: #365f9d;
+      --amber: #98610c;
+      --shadow: 0 10px 24px rgba(33, 45, 57, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    .page { width: min(1480px, calc(100vw - 32px)); margin: 0 auto; padding: 28px 0 42px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: 0; }
+    h2 { margin: 26px 0 10px; font-size: 18px; letter-spacing: 0; }
+    .sub { max-width: 980px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+    .badge { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 10px; color: #39485a; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+    .card { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 14px; box-shadow: var(--shadow); }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
+    .value { margin-top: 6px; font-size: 21px; font-weight: 760; }
+    .note { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .notice { border: 1px solid #d7c38c; background: #fff9e8; color: #553b08; border-radius: 8px; padding: 12px 14px; margin: 18px 0; font-size: 13px; box-shadow: var(--shadow); }
+    .table-shell { overflow: auto; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); margin-top: 12px; }
+    table { width: 100%; min-width: 1260px; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 9px; white-space: nowrap; text-align: right; }
+    th { background: #edf3f1; color: #415064; font-weight: 700; }
+    th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: inherit; min-width: 210px; }
+    th:first-child { background: #edf3f1; }
+    tr:nth-child(even) td { background: #fbfcfb; }
+    .best { color: var(--teal); font-weight: 760; }
+    .ok { color: var(--teal); font-weight: 760; }
+    .pending { color: var(--amber); font-weight: 720; }
+    code { color: var(--blue); }
+    .caption { color: var(--muted); font-size: 12px; margin: 10px 2px 0; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>Reconstruction · HumanML3D Official Test</h1>
+    <p class="sub">
+      Tokenizer and autoencoder reconstruction on the complete HumanML3D official test set.
+      All geometry rows are evaluated in motion135 SMPL-H FK joint space; embedding metrics use
+      the MotionStreamer-272 evaluator.
+    </p>
+    <div class="badges">
+      <span class="badge">4042 official clips</span>
+      <span class="badge">9 complete rows</span>
+      <span class="badge">TM2T pending</span>
+      <span class="badge">first-frame root given</span>
+      <span class="badge">updated 2026-07-01</span>
+    </div>
+    <section class="grid" aria-label="headline metrics">
+      <div class="card"><div class="label">Best RA-MPJPE</div><div class="value">1.736</div><div class="note">PRISM</div></div>
+      <div class="card"><div class="label">Best rFID</div><div class="value">1.045</div><div class="note">PRISM</div></div>
+      <div class="card"><div class="label">Best PoseQ</div><div class="value">1.245</div><div class="note">GoToZero / MotionMillion</div></div>
+      <div class="card"><div class="label">Metric Files</div><div class="value">4 / row</div><div class="note">geom, rFID, physics, PoseQ</div></div>
+    </section>
+    <div class="notice">
+      HumanML3D does not evaluate global trajectory recovery. The benchmark assumes the first root position is known;
+      <code>dRoot-XZ</code> and <code>dRoot-Y</code> compare adjacent-frame root displacement.
+      <code>MPJPE</code> aligns the first-frame root XZ coordinate, canonicalizes
+      root height, and remains included as the trajectory-sensitive full joint error.
+    </div>
+    <h2>Results</h2>
+    <section class="table-shell">
+      <table>
+        <thead><tr><th>Method</th><th>Geom n</th><th>rFID n</th><th>MPJPE ↓</th><th>RA-MPJPE ↓</th><th>dRoot-XZ ↓</th><th>dRoot-Y ↓</th><th>PA-MPJPE ↓</th><th>MPJRE ↓</th><th>rFID ↓</th><th>Emb-L2 ↓</th><th>Slide ↓</th><th>Float ↓</th><th>Jitter ↓</th><th>Dynamic ↓</th><th>PoseQ ↓</th></tr></thead>
+        <tbody><tr><td>T2M-GPT / MotionGPT</td><td>4042</td><td>3972</td><td class="">179.352</td><td class="">52.956</td><td class="">4.097</td><td class="">1.952</td><td class="">40.777</td><td class="">18.011</td><td class="">327.987</td><td class="">23.692</td><td class="">4.210</td><td class="">12.298</td><td class="">8.241</td><td class="">23.564</td><td class="">3.292</td></tr><tr><td>MoMask</td><td>4042</td><td>3972</td><td class="">103.156</td><td class="">30.671</td><td class="">2.540</td><td class="">1.229</td><td class="">21.536</td><td class="">12.002</td><td class="">322.807</td><td class="">23.500</td><td class="">3.367</td><td class="">7.590</td><td class="">7.810</td><td class="">23.895</td><td class="">3.305</td></tr><tr><td>MLD / MotionLCM</td><td>4042</td><td>3972</td><td class="">117.413</td><td class="">41.346</td><td class="">4.090</td><td class="">2.560</td><td class="">34.287</td><td class="">13.117</td><td class="">312.617</td><td class="">23.798</td><td class="">3.863</td><td class="">10.438</td><td class="">6.722</td><td class="">22.415</td><td class="">3.348</td></tr><tr><td>MoGenTS</td><td>4042</td><td>3972</td><td class="">105.186</td><td class="">32.649</td><td class="">2.664</td><td class="">1.309</td><td class="">23.903</td><td class="">12.928</td><td class="">309.614</td><td class="">23.249</td><td class="">3.586</td><td class="">8.474</td><td class="">8.646</td><td class="">24.355</td><td class="">3.299</td></tr><tr><td>MotionGPT3</td><td>4042</td><td>3972</td><td class="">109.998</td><td class="">40.092</td><td class="">3.968</td><td class="">2.515</td><td class="">33.167</td><td class="">12.605</td><td class="">308.330</td><td class="">23.721</td><td class="">3.796</td><td class="">10.305</td><td class="">6.530</td><td class="best">21.800</td><td class="">3.299</td></tr><tr><td>MotionStreamer</td><td>4042</td><td>3972</td><td class="">40.021</td><td class="">25.882</td><td class="">0.589</td><td class="">1.730</td><td class="">19.178</td><td class="">5.581</td><td class="">2.082</td><td class="">4.186</td><td class="">5.143</td><td class="">16.784</td><td class="">12.729</td><td class="">25.604</td><td class="">1.323</td></tr><tr><td>GoToZero / MotionMillion</td><td>4042</td><td>3972</td><td class="">235.939</td><td class="">42.196</td><td class="">4.814</td><td class="">2.037</td><td class="">18.619</td><td class="">5.905</td><td class="">2.401</td><td class="">4.321</td><td class="">4.654</td><td class="">18.324</td><td class="">10.461</td><td class="">23.668</td><td class="best">1.245</td></tr><tr><td>PRISM</td><td>4042</td><td>3972</td><td class="best">9.721</td><td class="best">1.736</td><td class="best">0.504</td><td class="best">0.240</td><td class="best">1.086</td><td class="best">0.344</td><td class="best">1.045</td><td class="best">1.513</td><td class="best">2.398</td><td class="best">3.698</td><td class="best">5.817</td><td class="">23.034</td><td class="">1.433</td></tr><tr><td>VerMo</td><td>4042</td><td>3972</td><td class="">79.425</td><td class="">19.931</td><td class="">2.257</td><td class="">1.326</td><td class="">11.658</td><td class="">2.013</td><td class="">5.502</td><td class="">4.284</td><td class="">5.129</td><td class="">16.187</td><td class="">9.864</td><td class="">25.721</td><td class="">1.443</td></tr></tbody>
+      </table>
+    </section>
+    <p class="caption">All arrows point down. Geometry and physics use n=4042; rFID uses n=3972 after short-clip filtering.</p>
+    <h2>Coverage</h2>
+    <section class="table-shell">
+      <table>
+        <thead><tr><th>Method</th><th>Status</th><th>HML263</th><th>motion135</th><th>MS272</th><th>Metric files</th></tr></thead>
+        <tbody><tr><td>T2M-GPT / MotionGPT</td><td class="ok">complete</td><td>4042</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>TM2T</td><td class="pending">pending</td><td>0</td><td>0</td><td>0</td><td>0</td></tr><tr><td>MotionStreamer</td><td class="ok">complete</td><td>-</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>GoToZero / MotionMillion</td><td class="ok">complete</td><td>-</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>MLD / MotionLCM</td><td class="ok">complete</td><td>4042</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>MoMask</td><td class="ok">complete</td><td>4042</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>MoGenTS</td><td class="ok">complete</td><td>4042</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>MotionGPT3</td><td class="ok">complete</td><td>4042</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>PRISM</td><td class="ok">complete</td><td>-</td><td>4042</td><td>4042</td><td>4</td></tr><tr><td>VerMo</td><td class="ok">complete</td><td>-</td><td>4042</td><td>4042</td><td>4</td></tr></tbody>
+      </table>
+    </section>
+    <p class="caption">
+      Manifest: <code>docs/leaderboards/reconstruction_humanml3d.json</code>.
+      Summary: <code>outputs/evaluation/reconstruction/humanml3d_official_test/metrics_summary.tsv</code>.
+      Validator: <code>scripts/eval/validate_leaderboard_paths.py</code>.
+    </p>
+  </main>
+</body>
+</html>
