@@ -73,6 +73,7 @@ PY
       --run-dir "${out_dir}" \
       --xml "${XML_PATH}" \
       --output-json "${metric_json}" \
+      --output-robot-frames "${out_dir}/robot_frames.json" \
       --require-q-log
   done
 done

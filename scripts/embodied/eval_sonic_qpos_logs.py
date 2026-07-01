@@ -12,6 +12,56 @@ import mujoco
 import numpy as np
 
 
+MESHES_BY_BODY = {
+    "pelvis": ["pelvis.stl", "pelvis_contour_link.stl"],
+    "head": [],
+    "left_hip_pitch_link": ["left_hip_pitch_link.stl"],
+    "left_hip_roll_link": ["left_hip_roll_link.stl"],
+    "left_hip_yaw_link": ["left_hip_yaw_link.stl"],
+    "left_knee_link": ["left_knee_link.stl"],
+    "left_ankle_pitch_link": ["left_ankle_pitch_link.stl"],
+    "left_ankle_roll_link": ["left_ankle_roll_link.stl"],
+    "right_hip_pitch_link": ["right_hip_pitch_link.stl"],
+    "right_hip_roll_link": ["right_hip_roll_link.stl"],
+    "right_hip_yaw_link": ["right_hip_yaw_link.stl"],
+    "right_knee_link": ["right_knee_link.stl"],
+    "right_ankle_pitch_link": ["right_ankle_pitch_link.stl"],
+    "right_ankle_roll_link": ["right_ankle_roll_link.stl"],
+    "waist_yaw_link": ["waist_yaw_link_rev_1_0.stl"],
+    "waist_roll_link": ["waist_roll_link_rev_1_0.stl"],
+    "torso_link": ["torso_link_rev_1_0.stl", "logo_link.stl", "head_link.stl"],
+    "left_shoulder_pitch_link": ["left_shoulder_pitch_link.stl"],
+    "left_shoulder_roll_link": ["left_shoulder_roll_link.stl"],
+    "left_shoulder_yaw_link": ["left_shoulder_yaw_link.stl"],
+    "left_elbow_link": ["left_elbow_link.stl"],
+    "left_wrist_roll_link": ["left_wrist_roll_link.stl"],
+    "left_wrist_pitch_link": ["left_wrist_pitch_link.stl"],
+    "left_wrist_yaw_link": ["left_wrist_yaw_link.stl", "left_rubber_hand.stl"],
+    "left_rubber_hand": [],
+    "right_shoulder_pitch_link": ["right_shoulder_pitch_link.stl"],
+    "right_shoulder_roll_link": ["right_shoulder_roll_link.stl"],
+    "right_shoulder_yaw_link": ["right_shoulder_yaw_link.stl"],
+    "right_elbow_link": ["right_elbow_link.stl"],
+    "right_wrist_roll_link": ["right_wrist_roll_link.stl"],
+    "right_wrist_pitch_link": ["right_wrist_pitch_link.stl"],
+    "right_wrist_yaw_link": ["right_wrist_yaw_link.stl", "right_rubber_hand.stl"],
+    "right_rubber_hand": [],
+}
+
+
+def _body_descriptors(body_names: list[str]) -> list[dict]:
+    return [
+        {
+            "name": name,
+            "meshes": [
+                {"file": mesh, "pos": [0.0, 0.0, 0.0], "quat": [1.0, 0.0, 0.0, 0.0]}
+                for mesh in MESHES_BY_BODY.get(name, [])
+            ],
+        }
+        for name in body_names
+    ]
+
+
 def quat_to_mat(q: np.ndarray) -> np.ndarray:
     q = np.outer(q, q)
     return np.array(
@@ -131,6 +181,39 @@ def _body_positions(model: mujoco.MjModel, qpos: np.ndarray, body_ids: np.ndarra
     return np.asarray(out)
 
 
+def _write_robot_frames(path: Path, model: mujoco.MjModel, qpos: np.ndarray, fps: float, note: str) -> None:
+    data = mujoco.MjData(model)
+    body_ids = np.array([i for i in range(1, model.nbody)])
+    body_names = [model.body(i).name for i in body_ids]
+    frames = []
+    for q in qpos:
+        data.qpos[:] = q
+        data.qvel[:] = 0
+        mujoco.mj_forward(model, data)
+        frames.append(
+            {
+                "body_pos": data.xpos[body_ids].copy().tolist(),
+                "body_quat": data.xquat[body_ids].copy().tolist(),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "type": "robot_frames",
+                "robot": "g1",
+                "fps": int(round(fps)),
+                "source_note": note,
+                "num_frames": len(frames),
+                "num_bodies": len(body_names),
+                "bodies": _body_descriptors(body_names),
+                "frames": frames,
+            },
+            separators=(",", ":"),
+        )
+    )
+
+
 def _metrics(ref_qpos: np.ndarray, exec_qpos: np.ndarray, fps: float, model: mujoco.MjModel) -> dict:
     n = min(len(ref_qpos), len(exec_qpos))
     if n < 2:
@@ -236,6 +319,18 @@ def main() -> None:
     parser.add_argument("--xml", type=Path, required=True)
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument(
+        "--output-robot-frames",
+        type=Path,
+        default=None,
+        help="Optional path for the time-aligned SONIC execution as G1 robot_frames JSON.",
+    )
+    parser.add_argument(
+        "--output-reference-frames",
+        type=Path,
+        default=None,
+        help="Optional path for the SONIC 50 Hz reference as G1 robot_frames JSON.",
+    )
+    parser.add_argument(
         "--require-q-log",
         action="store_true",
         help="Mark the case as failed instead of scoring simulator warm-up when deploy q.csv is missing.",
@@ -271,6 +366,10 @@ def main() -> None:
     exec_qpos, covered = _sample_exec(len(ref_qpos), fps, sim_times, sim_qpos, start)
     model = mujoco.MjModel.from_xml_path(str(args.xml))
     row = _metrics(ref_qpos, exec_qpos, fps, model)
+    if args.output_robot_frames is not None:
+        _write_robot_frames(args.output_robot_frames, model, exec_qpos, fps, "sonic_execution_aligned_to_reference")
+    if args.output_reference_frames is not None:
+        _write_robot_frames(args.output_reference_frames, model, ref_qpos, fps, "sonic_reference")
     row.update(
         {
             "motion": args.ref_npz.stem,
