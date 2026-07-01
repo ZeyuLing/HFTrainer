@@ -74,6 +74,11 @@ def main() -> None:
     ap.add_argument("--table", type=Path, required=True)
     ap.add_argument("--status", type=Path)
     ap.add_argument("--split", default="amass_test_fixed600")
+    ap.add_argument(
+        "--success-key",
+        default="strict_success_rate",
+        help="Summary key used for table Success columns. Defaults to strict unified success.",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -89,14 +94,15 @@ def main() -> None:
         method_summary = summary.get("summaries", {}).get(method, {}).get(args.split)
         if not method_summary:
             raise SystemExit(f"Missing summary for {method}/{args.split}")
-        if "success_rate" not in method_summary:
-            raise SystemExit(f"Missing success_rate for {method}/{args.split}")
-        value = _fmt_pct(method_summary["success_rate"])
+        if args.success_key not in method_summary:
+            raise SystemExit(f"Missing {args.success_key} for {method}/{args.split}")
+        value = _fmt_pct(method_summary[args.success_key])
         table_text, old = _replace_cell(table_text, row_label, col_idx, value)
         updates[method] = {
             "row_label": row_label,
             "split": args.split,
             "field": field_name,
+            "source_key": args.success_key,
             "old": old,
             "new": value,
         }

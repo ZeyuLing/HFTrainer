@@ -7,6 +7,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Slerp
 
 
 MUJOCO_TO_ISAACLAB = np.array(
@@ -52,11 +54,39 @@ def _write_csv(path: Path, header: list[str], values: np.ndarray) -> None:
         np.savetxt(f, values, delimiter=",", fmt="%.9f")
 
 
+def _resample_qpos(qpos: np.ndarray, source_fps: float, target_fps: float) -> np.ndarray:
+    if abs(source_fps - target_fps) < 1e-6 or qpos.shape[0] <= 1:
+        return qpos.astype(np.float64, copy=False)
+
+    src_t = np.arange(qpos.shape[0], dtype=np.float64) / source_fps
+    duration = src_t[-1]
+    dst_n = int(round(duration * target_fps)) + 1
+    dst_t = np.arange(dst_n, dtype=np.float64) / target_fps
+    dst_t[-1] = min(dst_t[-1], duration)
+
+    out = np.empty((dst_n, qpos.shape[1]), dtype=np.float64)
+    for i in range(3):
+        out[:, i] = np.interp(dst_t, src_t, qpos[:, i])
+
+    src_xyzw = qpos[:, 3:7][:, [1, 2, 3, 0]]
+    out[:, 3:7] = Slerp(src_t, R.from_quat(src_xyzw))(dst_t).as_quat()[:, [3, 0, 1, 2]]
+
+    for i in range(7, qpos.shape[1]):
+        out[:, i] = np.interp(dst_t, src_t, qpos[:, i])
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--npz", type=Path, required=True)
     parser.add_argument("--out-root", type=Path, required=True)
     parser.add_argument("--name", default=None)
+    parser.add_argument(
+        "--target-fps",
+        type=float,
+        default=50.0,
+        help="SONIC deploy advances one reference frame per 50 Hz control tick.",
+    )
     args = parser.parse_args()
 
     pack = np.load(args.npz, allow_pickle=True)
@@ -64,6 +94,7 @@ def main() -> None:
     if qpos.ndim != 2 or qpos.shape[1] != 36:
         raise ValueError(f"{args.npz}: expected qpos shape (T, 36), got {qpos.shape}")
     fps = float(np.asarray(pack["frequency"]).reshape(-1)[0]) if "frequency" in pack.files else 30.0
+    qpos = _resample_qpos(qpos, fps, args.target_fps)
     name = args.name or args.npz.stem
     out_dir = args.out_root / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -82,8 +113,9 @@ def main() -> None:
         f"Metadata for: {name}\n"
         "==============================\n"
         f"source_npz: {args.npz}\n"
+        f"source_fps: {fps:.6f}\n"
         f"num_frames: {len(qpos)}\n"
-        f"fps: {fps:.6f}\n"
+        f"fps: {args.target_fps:.6f}\n"
     )
     print(out_dir)
 

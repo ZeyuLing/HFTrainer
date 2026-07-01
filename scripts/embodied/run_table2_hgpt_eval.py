@@ -328,7 +328,11 @@ def _summarize(raw: dict[str, Any], complete_thresh: float) -> dict[str, float]:
         vals = [float(v[key]) for v in ok_rows if key in v and np.isfinite(float(v[key]))]
         return float(np.mean(vals)) if vals else float("nan")
 
-    return {
+    def maybe_mean(key: str) -> float | None:
+        vals = [float(v[key]) for v in ok_rows if key in v and np.isfinite(float(v[key]))]
+        return float(np.mean(vals)) if vals else None
+
+    summary = {
         "num_motions": float(n),
         "num_ok": float(len(ok_rows)),
         "error_rate": float((n - len(ok_rows)) / n) if n else float("nan"),
@@ -363,6 +367,15 @@ def _summarize(raw: dict[str, Any], complete_thresh: float) -> dict[str, float]:
         "mpjae_mps2": mean("mpjae_mps2"),
         "local_mpjae_mps2": mean("local_mpjae_mps2"),
     }
+    for out_key, row_key in (
+        ("paper_success_rate", "paper_success"),
+        ("strict_success_rate", "strict_success"),
+        ("fall_rate", "fall"),
+    ):
+        value = maybe_mean(row_key)
+        if value is not None:
+            summary[out_key] = value
+    return summary
 
 
 def main() -> None:

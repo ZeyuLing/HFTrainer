@@ -235,12 +235,42 @@ def _rollout_body_tracking_metrics(history, ref_traj, model, fps):
 
     ref_xy_aligned = ref_pos.copy()
     ref_xy_aligned[:, :, :2] += exec_qpos[:, None, :2] - ref_qpos[:, None, :2]
+    root_err = np.linalg.norm(exec_qpos[:, :3] - ref_qpos[:, :3], axis=1)
+    root_height_err = np.abs(exec_qpos[:, 2] - ref_qpos[:, 2])
+    joint_dim = min(exec_qpos.shape[1], ref_qpos.shape[1])
+    if joint_dim > 7:
+        joint_abs = np.abs(exec_qpos[:, 7:joint_dim] - ref_qpos[:, 7:joint_dim])
+        max_joint = joint_abs.max(axis=1)
+    else:
+        max_joint = np.array([np.inf], dtype=np.float32)
+    completion = float(num_steps / len(ref_qpos_all)) if len(ref_qpos_all) else 0.0
+    min_height = float(np.min(exec_qpos[:, 2])) if len(exec_qpos) else float("-inf")
+    finite = bool(np.isfinite(exec_qpos).all() and np.isfinite(ref_qpos).all())
     out = {
+        "completion": completion,
+        "fall": float(min_height < 0.25),
+        "root_err_mean": float(root_err.mean()),
+        "root_err_max": float(root_err.max()),
+        "root_height_err_mean": float(root_height_err.mean()),
+        "root_height_err_max": float(root_height_err.max()),
+        "max_joint_err_mean": float(max_joint.mean()),
+        "max_joint_err_max": float(max_joint.max()),
+        "min_height": min_height,
         "raw_body_err_mean": _mean_norm(exec_pos - ref_pos),
         "body_err_mean": _mean_norm(exec_pos - ref_xy_aligned),
         "xy_aligned_body_err_mean": _mean_norm(exec_pos - ref_xy_aligned),
         "local_body_err_mean": _mean_norm(local_exec_pos - local_ref_pos),
     }
+    paper_failed = (
+        (not finite)
+        or completion < 0.95
+        or bool(out["fall"])
+        or out["local_body_err_mean"] > 0.2
+        or out["root_height_err_mean"] > 0.2
+    )
+    strict_failed = paper_failed or out["root_err_mean"] > 1.0 or out["max_joint_err_max"] > 0.7
+    out["paper_success"] = float(not paper_failed)
+    out["strict_success"] = float(not strict_failed)
     out.update(
         {
             "raw_global_mpjpe_m": out["raw_body_err_mean"],

@@ -33,21 +33,58 @@ def _load_sim_qpos(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return times, qpos
 
 
-def _load_q_log(path: Path) -> np.ndarray | None:
+def _load_q_log(path: Path) -> tuple[np.ndarray, np.ndarray] | None:
     if not path.is_file() or path.stat().st_size == 0:
         return None
     data = np.genfromtxt(path, delimiter=",", names=True, dtype=np.float64)
     if data.shape == ():
         data = data.reshape(1)
-    return np.stack([np.asarray(data[f"q_{i}"], dtype=np.float64) for i in range(29)], axis=1)
+    times = np.asarray(data["time_ms"], dtype=np.float64) / 1000.0
+    times = times - float(times[0])
+    qpos = np.stack([np.asarray(data[f"q_{i}"], dtype=np.float64) for i in range(29)], axis=1)
+    return times, qpos
 
 
-def _control_start_time(sim_times: np.ndarray, sim_qpos: np.ndarray, q_log: np.ndarray | None) -> float:
-    if q_log is None or len(q_log) == 0:
-        return float(sim_times[0])
-    target = q_log[0]
-    d = np.linalg.norm(sim_qpos[:, 7:] - target[None], axis=1)
-    return float(sim_times[int(np.argmin(d))])
+def _control_start_time(sim_times: np.ndarray, sim_qpos: np.ndarray, q_log: tuple[np.ndarray, np.ndarray] | None) -> tuple[float, float]:
+    if q_log is None:
+        return float(sim_times[0]), float("nan")
+    q_times, q_values = q_log
+    if len(q_values) == 0:
+        return float(sim_times[0]), float("nan")
+
+    # SONIC starts the simulator before the deploy controller is in CONTROL.
+    # Align the logged robot joints against the MuJoCo qpos trace as a short
+    # sequence; matching only q_log[0] can snap to the standing warm-up phase.
+    max_points = min(len(q_values), 240)
+    if max_points < 2:
+        target = q_values[0]
+        d = np.linalg.norm(sim_qpos[:, 7:] - target[None], axis=1)
+        best = int(np.argmin(d))
+        return float(sim_times[best]), float(d[best])
+
+    sample_ids = np.linspace(0, len(q_values) - 1, max_points, dtype=np.int64)
+    target_times = q_times[sample_ids]
+    target_q = q_values[sample_ids]
+    max_start = sim_times[-1] - target_times[-1]
+    candidates = np.flatnonzero(sim_times <= max_start)
+    if len(candidates) == 0:
+        return float(sim_times[0]), float("nan")
+
+    step = max(1, int(round(0.02 / max(np.median(np.diff(sim_times)), 1e-6))))
+    best_time = float(sim_times[0])
+    best_err = float("inf")
+    for ci in candidates[::step]:
+        desired = sim_times[ci] + target_times
+        idx = np.searchsorted(sim_times, desired, side="left")
+        idx = np.clip(idx, 0, len(sim_times) - 1)
+        prev = np.clip(idx - 1, 0, len(sim_times) - 1)
+        use_prev = np.abs(sim_times[prev] - desired) < np.abs(sim_times[idx] - desired)
+        idx[use_prev] = prev[use_prev]
+        err = float(np.mean(np.linalg.norm(sim_qpos[idx, 7:] - target_q, axis=1)))
+        if err < best_err:
+            best_err = err
+            best_time = float(sim_times[ci])
+    return best_time, best_err
 
 
 def _sample_exec(ref_len: int, fps: float, sim_times: np.ndarray, sim_qpos: np.ndarray, start_time: float) -> tuple[np.ndarray, int]:
@@ -186,7 +223,7 @@ def main() -> None:
     fps = float(np.asarray(pack["frequency"]).reshape(-1)[0]) if "frequency" in pack.files else 30.0
     sim_times, sim_qpos = _load_sim_qpos(args.run_dir / "sim_qpos.csv")
     q_log = _load_q_log(args.run_dir / "deploy_logs" / "q.csv")
-    start = _control_start_time(sim_times, sim_qpos, q_log)
+    start, align_err = _control_start_time(sim_times, sim_qpos, q_log)
     exec_qpos, covered = _sample_exec(len(ref_qpos), fps, sim_times, sim_qpos, start)
     model = mujoco.MjModel.from_xml_path(str(args.xml))
     row = _metrics(ref_qpos, exec_qpos, fps, model)
@@ -194,6 +231,7 @@ def main() -> None:
         {
             "motion": args.ref_npz.stem,
             "control_start_time": start,
+            "control_start_alignment_err": align_err,
             "sim_qpos_rows": int(len(sim_qpos)),
             "covered_frames": int(covered),
         }
