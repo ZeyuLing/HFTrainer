@@ -67,12 +67,10 @@ optimizer = dict(
 )
 
 train_dataloader = dict(
-    # H20 has ~96GB/card. bs=64 reaches ~63GB/card but hangs in distributed
-    # backward on the resumed 64-card job; bs=48 is killed around the first
-    # backward, bs=32 remains stuck in the first backward, and bs=16 reaches
-    # the first optimizer steps but then stalls. Use bs=8 to recover progress
-    # before probing upward again.
-    batch_size=8,
+    # H20 has ~96GB/card. With NCCL_ALGO=Ring and NCCL_PROTO=Simple the
+    # 64-card resume can progress stably, so push the per-GPU batch high enough
+    # to use most of the available H20 memory.
+    batch_size=96,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
