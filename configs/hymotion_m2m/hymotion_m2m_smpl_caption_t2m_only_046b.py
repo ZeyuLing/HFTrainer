@@ -56,6 +56,7 @@ train_cfg = dict(
     # H20 bs=64 hangs inside Accelerate's distributed grad-norm clipping after
     # backward. Keep the T2M-only resume moving and rely on the smooth-L1
     # objective / existing optimizer state instead of clipping this phase.
+    val_interval=100,
     max_grad_norm=None,
 )
 
@@ -121,6 +122,7 @@ train_dataloader = dict(
 )
 
 default_hooks = dict(
+    checkpoint=dict(interval=100),
     # HYMotion T2M official training does not maintain EMA. The M2M base EMA
     # hook doubles the per-step parameter sweep and stalls large 64-card resumes.
     ema=None,
