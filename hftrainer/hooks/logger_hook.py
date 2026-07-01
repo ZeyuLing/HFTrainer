@@ -63,7 +63,8 @@ class LoggerHook:
         self._iter_times = deque(maxlen=100)  # rolling window for ETA
 
         # Epoch-based accumulators
-        self._epoch_losses = {}     # key -> list of values
+        self._epoch_losses = {}     # key -> detached scalar sum
+        self._epoch_loss_counts = {}  # key -> number of accumulated values
         self._epoch_iter_count = 0
         self._epoch_start_time = None
 
@@ -73,6 +74,7 @@ class LoggerHook:
 
     def before_train_epoch(self, epoch: int):
         self._epoch_losses = {}
+        self._epoch_loss_counts = {}
         self._epoch_iter_count = 0
         self._epoch_start_time = time.time()
 
@@ -101,28 +103,43 @@ class LoggerHook:
         if output is None:
             return
 
-        output = self._mean_scalar_output_across_ranks(output)
-
         if self.by_epoch:
-            # Accumulate metrics for epoch summary
+            # Accumulate local metrics on-device for epoch summary. Calling
+            # Tensor.item() here would synchronize the CUDA stream every iter.
             for k, v in output.items():
-                try:
-                    if hasattr(v, 'item'):
-                        self._epoch_losses.setdefault(k, []).append(v.item())
-                    elif isinstance(v, (int, float)):
-                        self._epoch_losses.setdefault(k, []).append(float(v))
-                except Exception:
-                    pass
+                self._accumulate_epoch_metric(k, v)
             self._epoch_iter_count += 1
 
             # Also log per-iteration within each epoch so users get timely
             # feedback (especially for large-epoch training).
             if self.iter_interval and self._epoch_iter_count % self.iter_interval == 0:
+                output = self._mean_scalar_output_across_ranks(output)
                 self._log(global_step, output, data_time=data_time, train_time=train_time)
         else:
             # Iter-based: log every N iters
             if (global_step + 1) % self.interval == 0:
+                output = self._mean_scalar_output_across_ranks(output)
                 self._log(global_step, output, data_time=data_time, train_time=train_time)
+
+    def _accumulate_epoch_metric(self, key: str, value):
+        """Accumulate scalar metrics without forcing a CPU/GPU sync."""
+        try:
+            if isinstance(value, torch.Tensor) and value.numel() == 1:
+                metric = value.detach().float()
+            elif isinstance(value, (int, float)):
+                device = self.runner.accelerator.device if self.runner is not None else None
+                metric = torch.tensor(float(value), device=device)
+            else:
+                return
+
+            if key in self._epoch_losses:
+                self._epoch_losses[key] = self._epoch_losses[key] + metric
+                self._epoch_loss_counts[key] += 1
+            else:
+                self._epoch_losses[key] = metric.clone()
+                self._epoch_loss_counts[key] = 1
+        except Exception:
+            pass
 
     def _mean_scalar_output_across_ranks(self, output: dict) -> dict:
         """Mean scalar log metrics across all distributed ranks.
@@ -161,13 +178,13 @@ class LoggerHook:
             self._log_epoch_summary(epoch)
         # Reset epoch accumulators
         self._epoch_losses = {}
+        self._epoch_loss_counts = {}
         self._epoch_iter_count = 0
         self._epoch_start_time = None
 
     def _log_epoch_summary(self, epoch: int):
         """Print epoch-level summary with averaged metrics."""
-        if self.runner is not None and not self.runner.accelerator.is_main_process:
-            return
+        is_main = self.runner is None or self.runner.accelerator.is_main_process
 
         parts = []
         scalar_metrics = {}
@@ -191,12 +208,34 @@ class LoggerHook:
                 except Exception:
                     pass
 
-        # Averaged losses
-        for k, vals in self._epoch_losses.items():
-            if vals:
-                avg = sum(vals) / len(vals)
+        # Averaged losses. In distributed runs, reduce the accumulated sums and
+        # counts once per epoch instead of synchronizing every training iter.
+        for k, total in self._epoch_losses.items():
+            count = self._epoch_loss_counts.get(k, 0)
+            if not count:
+                continue
+            try:
+                if isinstance(total, torch.Tensor):
+                    avg_tensor = total
+                    count_tensor = torch.tensor(float(count), device=avg_tensor.device)
+                    if self.runner is not None and self.runner.accelerator.num_processes > 1:
+                        avg_tensor = self.runner.accelerator.reduce(avg_tensor, reduction="sum")
+                        count_tensor = self.runner.accelerator.reduce(count_tensor, reduction="sum")
+                    avg_tensor = avg_tensor / count_tensor.clamp_min(1.0)
+                    if not is_main:
+                        continue
+                    avg = avg_tensor.item()
+                else:
+                    if not is_main:
+                        continue
+                    avg = float(total) / max(1, count)
                 parts.append(f"{k}={avg:.4f}")
                 scalar_metrics[k] = avg
+            except Exception:
+                pass
+
+        if not is_main:
+            return
 
         # Epoch timing
         if self._epoch_start_time is not None:
