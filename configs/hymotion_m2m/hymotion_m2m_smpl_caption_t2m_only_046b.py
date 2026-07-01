@@ -60,18 +60,18 @@ train_cfg = dict(
 )
 
 optimizer = dict(
-    # H20 + torch 2.5/cu118 stalls in AdamW foreach/scalar CUDA work after the
-    # first optimizer steps on the 64-card job. Prefer the fused CUDA backend.
-    foreach=False,
-    fused=True,
+    # AdamW fused stalls in the first distributed backward on the 64-card H20
+    # job. Foreach at small per-rank batch is the current recovery path.
+    foreach=True,
 )
 
 train_dataloader = dict(
     # H20 has ~96GB/card. bs=64 reaches ~63GB/card but hangs in distributed
-    # backward on the resumed 64-card job; bs=48 is also killed around the
-    # first backward, and bs=32 remains stuck in the first backward. Keep bs=16
-    # as the current stable-recovery target before probing upward again.
-    batch_size=16,
+    # backward on the resumed 64-card job; bs=48 is killed around the first
+    # backward, bs=32 remains stuck in the first backward, and bs=16 reaches
+    # the first optimizer steps but then stalls. Use bs=8 to recover progress
+    # before probing upward again.
+    batch_size=8,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
