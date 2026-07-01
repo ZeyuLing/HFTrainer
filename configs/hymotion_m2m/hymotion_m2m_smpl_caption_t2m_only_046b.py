@@ -43,9 +43,9 @@ trainer = dict(
 )
 
 train_dataloader = dict(
-    # H20 has ~96GB/card. With RDMA enabled, 64-card training has been stable
-    # at bs=100 with ~3.8s/iter in the 20260701_134235 run.
-    batch_size=100,
+    # H20 has ~96GB/card. On the restarted 20260701 container, bs=100 stalls
+    # after the first batch; bs=88 is the high-util stable resume setting.
+    batch_size=88,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
