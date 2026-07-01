@@ -78,8 +78,12 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
         preset_tasks: Optional[List[str]] = None,
         log_task_iter: int = 10000,
         num_person: Optional[int] = None,
+        require_caption: bool = False,
+        require_caption_file: bool = False,
     ):
         self.num_person = num_person
+        self.require_caption = require_caption
+        self.require_caption_file = require_caption_file
 
         super().__init__(
             motion_key=motion_key,
@@ -165,8 +169,23 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
         )
 
         data_list = []
+        skipped_no_caption = 0
+        skipped_missing_caption_file = 0
         for data_info in iterator:
             assert isinstance(data_info, dict)
+            caption_path = data_info.get(
+                "hierarchical_caption_path", data_info.get("caption_path")
+            )
+            if self.require_caption:
+                if not caption_path:
+                    skipped_no_caption += 1
+                    continue
+                if self.require_caption_file:
+                    resolved_caption_path = os.path.join(self.data_dir, caption_path)
+                    if not os.path.exists(resolved_caption_path):
+                        skipped_missing_caption_file += 1
+                        continue
+
             # skip multi-person data
             motion_path: Union[str, List[str]] = data_info[f"{self.motion_key}_path"]
 
@@ -182,7 +201,13 @@ class MotionhubMultiTaskMultiAgentDataset(MotionHubSingleAgentDataset):
                     continue
             data_list.append(data_info)
 
-        print_log(f"Loaded {len(data_list)} samples from {self.anno_file}")
+        skip_msg = ""
+        if self.require_caption:
+            skip_msg = (
+                f" (skipped {skipped_no_caption} without caption"
+                f", {skipped_missing_caption_file} missing caption files)"
+            )
+        print_log(f"Loaded {len(data_list)} samples from {self.anno_file}{skip_msg}")
         return data_list
 
     @override

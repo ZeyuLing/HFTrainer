@@ -62,12 +62,15 @@ train_dataloader = dict(
     dataset=dict(
         # Pure 400h HQ caption data only: no MotionFix/PerMo source-edit pairs.
         anno_file='data/annotation/train_hymotion_400h_hq_20260403.json',
+        task_mode='preset',
+        preset_tasks=['t2m'],
+        # T2M-only must train on real text supervision. The 400h HQ annotation
+        # also contains caption-less motion clips for other tasks; filter them
+        # up front instead of relying on per-sample refetch during training.
+        require_caption=True,
         pipeline=[
-            # The 400h HQ annotation contains caption-less clips. Keep them in
-            # the pool and let LoadPreExtractedTextEmbedding provide learned-null
-            # text conditioning, matching the T2M CFG/null-text path.
-            dict(type='LoadCompatibleCaption', allow_none=True),
-            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
+            dict(type='LoadCompatibleCaption', allow_none=False),
+            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=False),
             dict(
                 type='LoadSmplx55',
                 key='motion',
