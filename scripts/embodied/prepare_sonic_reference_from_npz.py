@@ -87,14 +87,20 @@ def main() -> None:
         default=50.0,
         help="SONIC deploy advances one reference frame per 50 Hz control tick.",
     )
+    parser.add_argument(
+        "--out-npz",
+        type=Path,
+        default=None,
+        help="Optional path for the resampled MuJoCo-order qpos NPZ used by the evaluator.",
+    )
     args = parser.parse_args()
 
     pack = np.load(args.npz, allow_pickle=True)
     qpos = np.asarray(pack["qpos"], dtype=np.float64)
     if qpos.ndim != 2 or qpos.shape[1] != 36:
         raise ValueError(f"{args.npz}: expected qpos shape (T, 36), got {qpos.shape}")
-    fps = float(np.asarray(pack["frequency"]).reshape(-1)[0]) if "frequency" in pack.files else 30.0
-    qpos = _resample_qpos(qpos, fps, args.target_fps)
+    source_fps = float(np.asarray(pack["frequency"]).reshape(-1)[0]) if "frequency" in pack.files else 30.0
+    qpos = _resample_qpos(qpos, source_fps, args.target_fps)
     name = args.name or args.npz.stem
     out_dir = args.out_root / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +108,7 @@ def main() -> None:
     joint_pos = qpos[:, 7:][:, MUJOCO_TO_ISAACLAB]
     joint_vel = np.zeros_like(joint_pos)
     if len(joint_pos) > 1:
-        joint_vel[1:] = (joint_pos[1:] - joint_pos[:-1]) * fps
+        joint_vel[1:] = (joint_pos[1:] - joint_pos[:-1]) * args.target_fps
         joint_vel[0] = joint_vel[1]
 
     _write_csv(out_dir / "body_pos.csv", ["root_x", "root_y", "root_z"], qpos[:, :3])
@@ -113,10 +119,19 @@ def main() -> None:
         f"Metadata for: {name}\n"
         "==============================\n"
         f"source_npz: {args.npz}\n"
-        f"source_fps: {fps:.6f}\n"
+        f"source_fps: {source_fps:.6f}\n"
         f"num_frames: {len(qpos)}\n"
         f"fps: {args.target_fps:.6f}\n"
     )
+    if args.out_npz is not None:
+        args.out_npz.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            args.out_npz,
+            qpos=qpos.astype(np.float32),
+            frequency=np.float32(args.target_fps),
+            source_npz=str(args.npz),
+            source_fps=np.float32(source_fps),
+        )
     print(out_dir)
 
 

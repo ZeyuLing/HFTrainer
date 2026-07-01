@@ -216,6 +216,11 @@ def main() -> None:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--xml", type=Path, required=True)
     parser.add_argument("--output-json", type=Path, required=True)
+    parser.add_argument(
+        "--require-q-log",
+        action="store_true",
+        help="Mark the case as failed instead of scoring simulator warm-up when deploy q.csv is missing.",
+    )
     args = parser.parse_args()
 
     pack = np.load(args.ref_npz, allow_pickle=True)
@@ -223,6 +228,26 @@ def main() -> None:
     fps = float(np.asarray(pack["frequency"]).reshape(-1)[0]) if "frequency" in pack.files else 30.0
     sim_times, sim_qpos = _load_sim_qpos(args.run_dir / "sim_qpos.csv")
     q_log = _load_q_log(args.run_dir / "deploy_logs" / "q.csv")
+    if args.require_q_log and q_log is None:
+        row = {
+            "success": False,
+            "paper_success": False,
+            "strict_success": False,
+            "legacy_success": False,
+            "fall": False,
+            "steps": 0,
+            "completion": 0.0,
+            "motion": args.ref_npz.stem,
+            "runtime_error": "missing_or_empty_deploy_q_log",
+            "control_start_time": float(sim_times[0]) if len(sim_times) else float("nan"),
+            "control_start_alignment_err": float("nan"),
+            "sim_qpos_rows": int(len(sim_qpos)),
+            "covered_frames": 0,
+        }
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        args.output_json.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(row, indent=2, sort_keys=True))
+        return
     start, align_err = _control_start_time(sim_times, sim_qpos, q_log)
     exec_qpos, covered = _sample_exec(len(ref_qpos), fps, sim_times, sim_qpos, start)
     model = mujoco.MjModel.from_xml_path(str(args.xml))

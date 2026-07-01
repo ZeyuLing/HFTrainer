@@ -13,6 +13,7 @@ GPU_ID="${GPU_ID:-0}"
 INTERFACE="${INTERFACE:-bond1}"
 SETUP_OVERHEAD_SECONDS="${SETUP_OVERHEAD_SECONDS:-35}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
+SONIC_TARGET_FPS="${SONIC_TARGET_FPS:-50}"
 
 cd "${PROJECT_ROOT}"
 mkdir -p "${PROTOCOL_ROOT}/runs/sonic/logs"
@@ -41,27 +42,33 @@ PY
       echo "[sonic-table2] skip done ${split}/${name}"
       continue
     fi
-    frames="$(python3 - "${ref_npz}" <<'PY'
-import numpy as np, sys
-q = np.load(sys.argv[1], allow_pickle=True)["qpos"]
-print(q.shape[0])
-PY
-)"
-    run_seconds=$(( SETUP_OVERHEAD_SECONDS + (frames + 29) / 30 + 3 ))
     ref_root="${out_dir}/reference_parent"
+    sonic_ref_npz="${out_dir}/sonic_reference_qpos.npz"
     rm -rf "${ref_root}"
     python3 scripts/embodied/prepare_sonic_reference_from_npz.py \
       --npz "${ref_npz}" \
       --out-root "${ref_root}" \
-      --name "${name}"
+      --name "${name}" \
+      --target-fps "${SONIC_TARGET_FPS}" \
+      --out-npz "${sonic_ref_npz}"
+    read -r frames fps < <(python3 - "${sonic_ref_npz}" <<'PY'
+import numpy as np, sys
+data = np.load(sys.argv[1], allow_pickle=True)
+q = data["qpos"]
+fps = float(np.asarray(data["frequency"]).reshape(-1)[0])
+print(q.shape[0], int(round(fps)))
+PY
+)
+    run_seconds=$(( SETUP_OVERHEAD_SECONDS + (frames + fps - 1) / fps + 3 ))
     echo "[sonic-table2] run ${split}/${name} frames=${frames} seconds=${run_seconds}"
     GPU_ID="${GPU_ID}" INTERFACE="${INTERFACE}" RUN_SECONDS="${run_seconds}" OUT_DIR="${out_dir}" REFERENCE_DIR="${ref_root}" \
       bash scripts/embodied/run_sonic_reference_smoke.sh
     python3 scripts/embodied/eval_sonic_qpos_logs.py \
-      --ref-npz "${ref_npz}" \
+      --ref-npz "${sonic_ref_npz}" \
       --run-dir "${out_dir}" \
       --xml "${XML_PATH}" \
-      --output-json "${metric_json}"
+      --output-json "${metric_json}" \
+      --require-q-log
   done
 done
 
