@@ -59,6 +59,13 @@ train_cfg = dict(
     max_grad_norm=None,
 )
 
+optimizer = dict(
+    # Avoid AdamW's CUDA foreach path at bs=64. The foreach update can require
+    # large temporary tensorlists after backward; the scalar loop has lower peak
+    # memory and is the safer path for this H20 resume.
+    foreach=False,
+)
+
 train_dataloader = dict(
     # H20 has ~96GB/card. On the restarted 20260701 container, fp32 bs=64 is
     # the first confirmed clean 64-card resume setting; larger/bf16 probes
