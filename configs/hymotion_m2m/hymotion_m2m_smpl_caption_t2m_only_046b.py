@@ -43,9 +43,9 @@ trainer = dict(
 )
 
 train_dataloader = dict(
-    # H20 has ~96GB/card. Batch 56 reaches the first forward but OOMs on
-    # the 0.46B M2M path; bs=48 is the high-utilisation stable retry point.
-    batch_size=48,
+    # H20 has ~96GB/card. On 2026-07-01, 8xH20 resume probes from epoch 150
+    # showed bs=100 passes multi-step training while bs=104/112/128 OOM.
+    batch_size=100,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
