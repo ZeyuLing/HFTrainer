@@ -67,10 +67,9 @@ optimizer = dict(
 )
 
 train_dataloader = dict(
-    # H20 has ~96GB/card. On the restarted 20260701 container, fp32 bs=64 is
-    # the first confirmed clean 64-card resume setting; larger/bf16 probes
-    # either OOMed or were polluted by overlapping stale launches.
-    batch_size=64,
+    # H20 has ~96GB/card. bs=64 reaches ~63GB/card but hangs in distributed
+    # backward on the resumed 64-card job; bs=48 is the next high-memory probe.
+    batch_size=48,
     num_workers=8,
     persistent_workers=True,
     dataset=dict(
