@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -10,6 +12,8 @@ from torch import Tensor
 
 from hftrainer.registry import TRAINERS
 from hftrainer.trainers.base_trainer import BaseTrainer
+
+logger = logging.getLogger('hftrainer')
 
 
 def _length_to_mask(lengths: Tensor, max_len: int) -> Tensor:
@@ -45,6 +49,31 @@ class HyMotionM2MTrainer(BaseTrainer):
         # Fixed text sequence length — matches HY-Motion T2M 1.0 (max_length_llm=128).
         # Pre-extracted embeddings are variable-length; we pad/truncate to this.
         self.max_text_len = max_text_len
+        self._debug_train_step_count = 0
+
+    def _debug_train_step_enabled(self) -> bool:
+        if os.environ.get('HFTRAINER_DEBUG_TRAIN_STEP') != '1':
+            return False
+        max_steps = int(os.environ.get('HFTRAINER_DEBUG_TRAIN_STEP_STEPS', '4'))
+        return self._debug_train_step_count < max_steps
+
+    def _debug_train_step_log(self, message: str, device: Optional[torch.device] = None) -> None:
+        if os.environ.get('HFTRAINER_DEBUG_TRAIN_STEP') != '1':
+            return
+        if (
+            os.environ.get('HFTRAINER_DEBUG_TRAIN_STEP_SYNC') == '1'
+            and device is not None
+            and device.type == 'cuda'
+        ):
+            torch.cuda.synchronize(device)
+        rank = int(os.environ.get('RANK', os.environ.get('LOCAL_RANK', -1)))
+        logger.info(
+            "[Rank %s] train_step_debug step_idx=%s global_step=%s: %s",
+            rank,
+            getattr(self, '_debug_train_step_count', -1),
+            self.get_global_step(),
+            message,
+        )
 
     def _prepare_and_forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare inputs and run a single base forward pass.
@@ -64,6 +93,10 @@ class HyMotionM2MTrainer(BaseTrainer):
           vace_context, pred, generation_mask
         """
         device = next(self.bundle.motion_transformer.parameters()).device
+        debug_train_step = self._debug_train_step_enabled()
+        if debug_train_step:
+            keys = sorted(str(k) for k in batch.keys())
+            self._debug_train_step_log(f"start keys={keys}", device)
 
 
         # Helper: convert list of tensors to stacked tensor (or keep as list if shapes differ)
@@ -106,6 +139,12 @@ class HyMotionM2MTrainer(BaseTrainer):
         tgt_motion = _stack_if_list(batch['tgt_motion'])
         src_mask = batch.get('src_mask')
         src_mask = _stack_if_list(src_mask) if src_mask is not None else None
+        if debug_train_step:
+            self._debug_train_step_log(
+                f"after stack src={tuple(src_motion.shape)} tgt={tuple(tgt_motion.shape)} "
+                f"mask={None if src_mask is None else tuple(src_mask.shape)}",
+                device,
+            )
         
 
         # Now convert to device
@@ -113,6 +152,11 @@ class HyMotionM2MTrainer(BaseTrainer):
         tgt_motion = tgt_motion.to(device)
         if src_mask is not None:
             src_mask = src_mask.to(device)
+        if debug_train_step:
+            self._debug_train_step_log(
+                f"after to_device src_dtype={src_motion.dtype} tgt_dtype={tgt_motion.dtype}",
+                device,
+            )
 
         # Normalize motions using bundle's mean/std (matching original repo which
         # normalizes in dataset before padding). src_mask is binary — NOT normalized.
@@ -135,6 +179,8 @@ class HyMotionM2MTrainer(BaseTrainer):
 
         src_motion = self.bundle.normalize_motion(src_motion)
         tgt_motion = self.bundle.normalize_motion(tgt_motion)
+        if debug_train_step:
+            self._debug_train_step_log("after normalize", device)
 
         # Zero out mask regions for Completion samples; keep LQ values for Edit samples.
         # Per-sample: edit_mode[i]=True → keep src values; edit_mode[i]=False → zero mask region.
@@ -168,6 +214,14 @@ class HyMotionM2MTrainer(BaseTrainer):
                 src_motion[i, src_len:] = 0.0
                 if src_mask is not None:
                     src_mask[i, src_len:] = 0.0
+        if debug_train_step:
+            tgt_min = min(int(x) for x in tgt_length_list)
+            tgt_max = max(int(x) for x in tgt_length_list)
+            self._debug_train_step_log(
+                f"after zero_padding B={B} L_src={L_src} L_tgt={L_tgt} "
+                f"tgt_len_min={tgt_min} tgt_len_max={tgt_max}",
+                device,
+            )
 
         # Motion condition dropout: randomly drop the entire motion condition
         # for a fraction of batch samples.  When motion is dropped the model
@@ -199,6 +253,12 @@ class HyMotionM2MTrainer(BaseTrainer):
                 src_motion, tgt_motion, tgt_length_list, src_mask, src_length_list, ref_pose
             )
         )
+        if debug_train_step:
+            self._debug_train_step_log(
+                f"after prepare_padding src={tuple(src_motion.shape)} tgt={tuple(tgt_motion.shape)} "
+                f"pad_mask={tuple(tgt_padding_mask.shape)}",
+                device,
+            )
 
         # 2. Prepare text: use null embeddings (unconditioned) or batch text
         B = tgt_motion.shape[0]
@@ -229,6 +289,13 @@ class HyMotionM2MTrainer(BaseTrainer):
                     ctxt_input = ctxt_raw[:, :pad_len].to(device)
             ctxt_length = batch['text_ctxt_raw_length'].to(device).clamp(max=pad_len)
             ctxt_mask_temporal = _length_to_mask(ctxt_length, pad_len)
+            if debug_train_step:
+                self._debug_train_step_log(
+                    f"after text tensors vtxt={tuple(vtxt_input.shape)} ctxt={tuple(ctxt_input.shape)} "
+                    f"ctxt_len_min={int(ctxt_length.min().item())} "
+                    f"ctxt_len_max={int(ctxt_length.max().item())}",
+                    device,
+                )
 
             # For null-embedding samples (no caption, text_ctxt_raw_length==0),
             # force-replace with the learned null embeddings so they match the
@@ -262,6 +329,11 @@ class HyMotionM2MTrainer(BaseTrainer):
                 ctxt_mask_temporal = ctxt_mask_temporal.clone()
                 ctxt_mask_temporal[dropped_samples] = False
                 ctxt_mask_temporal[dropped_samples, 0] = True  # Only 1 position valid
+            if debug_train_step:
+                self._debug_train_step_log(
+                    f"after mask_text_cond text_available={int(text_available.sum().item())}/{B}",
+                    device,
+                )
 
         elif 'caption' in batch and batch['caption'] is not None:
             # Online text encoding from raw captions.
@@ -341,6 +413,12 @@ class HyMotionM2MTrainer(BaseTrainer):
 
         t = timesteps.unsqueeze(-1).unsqueeze(-1)
         x_t = (1 - t) * x0 + t * x1
+        if debug_train_step:
+            self._debug_train_step_log(
+                f"after flow_sample t_min={float(timesteps.min().item()):.4f} "
+                f"t_max={float(timesteps.max().item()):.4f} x_t={tuple(x_t.shape)}",
+                device,
+            )
 
         # Mask-aware noise: keep known regions clean in x_t so that
         # inference-time replacement guidance is train-consistent.
@@ -356,9 +434,20 @@ class HyMotionM2MTrainer(BaseTrainer):
             ref_pose=ref_pose,
             src_mask=src_mask,
         )
+        if debug_train_step:
+            self._debug_train_step_log(
+                f"after prepare_vace vace={tuple(vace_context.shape)}",
+                device,
+            )
 
         # 5. Forward
         x_input = torch.cat([x_t, vace_context], dim=-1)
+        if debug_train_step:
+            self._debug_train_step_log(
+                f"before predict_flow x_input={tuple(x_input.shape)} "
+                f"ctxt_mask={tuple(ctxt_mask_temporal.shape)}",
+                device,
+            )
         pred = self.bundle.predict_flow(
             task_emb=task_emb,
             x_input=x_input,
@@ -368,6 +457,8 @@ class HyMotionM2MTrainer(BaseTrainer):
             x_mask_temporal=tgt_padding_mask,
             ctxt_mask_temporal=ctxt_mask_temporal,
         )
+        if debug_train_step:
+            self._debug_train_step_log(f"after predict_flow pred={tuple(pred.shape)}", device)
 
         # Generation mask for mask-aware loss weighting.
         generation_mask = None
@@ -504,13 +595,22 @@ class HyMotionM2MTrainer(BaseTrainer):
         return losses
 
     def train_step(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        debug_train_step = self._debug_train_step_enabled()
         ctx = self._prepare_and_forward(batch)
 
+        if debug_train_step:
+            self._debug_train_step_log("before compute_base_loss", ctx['device'])
         losses = self._compute_base_loss(ctx)
+        if debug_train_step:
+            self._debug_train_step_log(f"after compute_base_loss keys={list(losses.keys())}", ctx['device'])
         loss = self.sum_train_losses(losses)
+        if debug_train_step:
+            self._debug_train_step_log("after sum_train_losses", ctx['device'])
         result = {'loss': loss}
         for k, v in losses.items():
             result[f'loss_{k}'] = v.detach()
+        if debug_train_step:
+            self._debug_train_step_count += 1
         return result
 
     def _compute_fk_keypoints(
