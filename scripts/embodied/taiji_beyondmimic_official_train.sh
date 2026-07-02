@@ -101,7 +101,11 @@ PY
 
 READY_MARK="${VENV}/.beyondmimic_requirements_ready"
 if [[ ! -e "${READY_MARK}" ]]; then
-  run_py -m pip install -r "${REQ_FILTERED}" --extra-index-url https://pypi.nvidia.com --retries "${PIP_RETRIES}" --timeout "${PIP_DEFAULT_TIMEOUT}"
+  run_py -m pip install -r "${REQ_FILTERED}" \
+    --extra-index-url https://pypi.nvidia.com \
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
+    --retries "${PIP_RETRIES}" \
+    --timeout "${PIP_DEFAULT_TIMEOUT}"
   touch "${READY_MARK}"
 else
   echo "[beyondmimic] requirements already installed: ${READY_MARK}"

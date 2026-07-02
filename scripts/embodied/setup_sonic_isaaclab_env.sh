@@ -57,6 +57,12 @@ trap 'rm -f "${LOCK_FILE}"' EXIT
     "isaacsim[all,extscache]==${ISAACSIM_VERSION}" \
     --extra-index-url https://pypi.nvidia.com
 
+  # Taiji H20 containers do not provide apt-get. IsaacLab's installer only
+  # enters the system-dependency branch when `cmake` is missing, so provide a
+  # user-space cmake in the venv and put it on PATH for the install step.
+  run_vpy -m pip install "cmake>=3.27,<4"
+  export PATH="${VENV}/bin:${PATH}"
+
   (
     cd "${ISAACLAB_REPO}"
     VIRTUAL_ENV="${VENV}" ./isaaclab.sh -i all
