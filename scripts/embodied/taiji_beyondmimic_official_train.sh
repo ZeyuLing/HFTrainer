@@ -87,6 +87,11 @@ skip = (
     "git.midea.com/robotics/future-appliance",
     "github.com/HybridRobotics/whole_body_tracking",
 )
+skip_prefix = (
+    "torch==",
+    "torchvision==",
+    "torchaudio==",
+)
 lines = []
 for line in src.read_text().splitlines():
     stripped = line.strip()
@@ -95,12 +100,22 @@ for line in src.read_text().splitlines():
     if any(token in stripped for token in skip):
         print(f"[beyondmimic] skip private requirement: {stripped}")
         continue
+    if stripped.startswith(skip_prefix):
+        print(f"[beyondmimic] skip torch requirement installed separately: {stripped}")
+        continue
     lines.append(line)
 dst.write_text("\n".join(lines) + "\n")
 PY
 
 READY_MARK="${VENV}/.beyondmimic_requirements_ready"
 if [[ ! -e "${READY_MARK}" ]]; then
+  run_py -m pip install \
+    "torch==2.7.0" \
+    "torchvision==0.22.0" \
+    "torchaudio==2.7.0" \
+    --index-url https://download.pytorch.org/whl/cu128 \
+    --retries "${PIP_RETRIES}" \
+    --timeout "${PIP_DEFAULT_TIMEOUT}"
   run_py -m pip install -r "${REQ_FILTERED}" \
     --extra-index-url https://pypi.nvidia.com \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
