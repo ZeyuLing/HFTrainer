@@ -119,12 +119,8 @@ class IndividualTokenRefiner(nn.Module):
             all_false = all_false.unsqueeze(-1).expand(-1, -1, -1, L)
             self_attn_mask = torch.where(all_false, diag.expand_as(self_attn_mask), self_attn_mask)
 
-        if self_attn_mask is not None:
-            self_attn_mask = torch.where(
-                self_attn_mask,
-                torch.zeros_like(self_attn_mask, dtype=torch.float),
-                torch.full_like(self_attn_mask, float("-inf"), dtype=torch.float),
-            )
+        # Keep a boolean mask for PyTorch SDPA (True = visible). The additive
+        # 0/-inf form can produce NaNs in bf16 on some CUDA SDPA backends.
         for block in self.blocks:
             x = block(x, c, self_attn_mask)
         return x

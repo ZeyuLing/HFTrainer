@@ -1117,6 +1117,13 @@ class HunyuanMotionMMDiT(nn.Module):
         )
         return key_padding_mask
 
+    @staticmethod
+    def _visible_from_mask(mask: Tensor) -> Tensor:
+        """Return a boolean visibility mask from bool or additive masks."""
+        if mask.dtype == torch.bool:
+            return mask
+        return torch.isfinite(mask)
+
     def _build_dmm_attn_mask_shared(
         self,
         bsz: int,
@@ -1157,24 +1164,27 @@ class HunyuanMotionMMDiT(nn.Module):
             device (torch.device): Device to create tensor on.
         
         Returns:
-            Tensor: Combined attention mask of shape (B, 1, total_len, total_len).
+            Tensor: Boolean combined attention mask of shape
+            (B, 1, total_len, total_len), where True means visible.
         """
         total_len = motion_len + text_len
-        base = torch.zeros((bsz, 1, total_len, total_len), dtype=dtype, device=device)
+        base = torch.ones((bsz, 1, total_len, total_len), dtype=torch.bool, device=device)
         if attn_mask is not None:
             if attn_mask.dim() != 2 or attn_mask.shape != (motion_len, motion_len):
                 raise RuntimeError(
                     f"attn_mask should be 2D with shape {(motion_len, motion_len)}, got {attn_mask.shape}"
                 )
-            base[:, :, :motion_len, :motion_len] += attn_mask.view(1, 1, motion_len, motion_len)
+            motion_visible = self._visible_from_mask(attn_mask).to(device)
+            base[:, :, :motion_len, :motion_len] &= motion_visible.view(1, 1, motion_len, motion_len)
         if key_padding_mask is not None:
-            mask_total_len = key_padding_mask.shape[1]
+            key_visible = self._visible_from_mask(key_padding_mask).to(device)
+            mask_total_len = key_visible.shape[1]
             if mask_total_len == motion_len:
-                pad = torch.zeros((bsz, text_len), dtype=key_padding_mask.dtype, device=device)
-                key_padding_mask = torch.cat((key_padding_mask, pad), dim=-1)
-            base = base + key_padding_mask.view(bsz, 1, 1, total_len)
+                pad = torch.ones((bsz, text_len), dtype=torch.bool, device=device)
+                key_visible = torch.cat((key_visible, pad), dim=-1)
+            base &= key_visible.view(bsz, 1, 1, total_len)
         # disable T→M
-        base[:, :, motion_len:, :motion_len] = float("-inf")
+        base[:, :, motion_len:, :motion_len] = False
         return base
 
     def _build_smm_attn_mask_shared(
@@ -1215,26 +1225,30 @@ class HunyuanMotionMMDiT(nn.Module):
             device (torch.device): Device to create tensor on.
         
         Returns:
-            Tensor: Combined attention mask of shape (B, 1, total_len, total_len).
+            Tensor: Boolean combined attention mask of shape
+            (B, 1, total_len, total_len), where True means visible.
         """
-        # Initialize base mask with zeros (all positions can attend)
-        base = torch.zeros((bsz, 1, total_len, total_len), dtype=dtype, device=device)
+        # Initialize base mask with True (all positions can attend)
+        base = torch.ones((bsz, 1, total_len, total_len), dtype=torch.bool, device=device)
         if attn_mask is not None:
             if attn_mask.dim() != 2 or attn_mask.shape != (split_len, split_len):
                 raise RuntimeError(f"attn_mask should be 2D with shape {(split_len, split_len)}, got {attn_mask.shape}")
-            base[:, :, :split_len, :split_len] += attn_mask.view(1, 1, split_len, split_len)
+            motion_visible = self._visible_from_mask(attn_mask).to(device)
+            base[:, :, :split_len, :split_len] &= motion_visible.view(1, 1, split_len, split_len)
         if key_padding_mask is not None:
-            mask_total_len = key_padding_mask.shape[1]
+            key_visible = self._visible_from_mask(key_padding_mask).to(device)
+            mask_total_len = key_visible.shape[1]
             if mask_total_len == split_len:
                 pad = torch.zeros(
                     (bsz, total_len - split_len),
-                    dtype=key_padding_mask.dtype,
+                    dtype=torch.bool,
                     device=device,
                 )
-                key_padding_mask = torch.cat((key_padding_mask, pad), dim=-1)
-            base = base + key_padding_mask.view(bsz, 1, 1, total_len)
+                pad.fill_(True)
+                key_visible = torch.cat((key_visible, pad), dim=-1)
+            base &= key_visible.view(bsz, 1, 1, total_len)
         # disable T→M
-        base[:, :, split_len:, :split_len] = float("-inf")
+        base[:, :, split_len:, :split_len] = False
         return base
 
     def params_count(self):
