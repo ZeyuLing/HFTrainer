@@ -55,6 +55,10 @@ def _read_first_caption(txt: Path):
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument("--config", default=T2M_CONFIG,
+                   help="HYMotion T2M config to build the bundle.")
+    p.add_argument("--ckpt", default=None,
+                   help="Checkpoint dir/file to load. Defaults to config load_from.")
     p.add_argument("--data-root", default="/dev/shm/ms272_data",
                    help="272 GT root (motion_data/, texts/, split/test.txt).")
     p.add_argument("--out", required=True, help="Output dir for <id>.npy (272).")
@@ -117,7 +121,7 @@ def main():
           f"cfg={args.cfg_scale}, rot={args.rotation_space})", flush=True)
 
     # ---- build + load HY-Lite ----
-    cfg = Config.fromfile(T2M_CONFIG)
+    cfg = Config.fromfile(args.config)
     bundle = MODEL_BUNDLES.build(cfg.model.to_dict())
     bundle._text_encoder_cfg = {
         "llm_type": "qwen3", "max_length_llm": 128,
@@ -129,7 +133,9 @@ def main():
         # motion model attends via ctxt_length (right-padding + attn mask).
         "enable_llm_padding": True,
     }
-    ckpt_path = cfg.load_from["path"] if isinstance(cfg.load_from, dict) else cfg.load_from
+    ckpt_path = args.ckpt
+    if ckpt_path is None:
+        ckpt_path = cfg.load_from["path"] if isinstance(cfg.load_from, dict) else cfg.load_from
     assert os.path.exists(ckpt_path), f"checkpoint not found: {ckpt_path}"
     print(f"[+] loading {ckpt_path}", flush=True)
     sd = load_checkpoint(ckpt_path, map_location="cpu")
