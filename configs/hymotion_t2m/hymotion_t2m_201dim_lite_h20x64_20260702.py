@@ -101,6 +101,9 @@ accelerator = dict(
     gradient_accumulation_steps=1,
     ddp_kwargs=dict(find_unused_parameters=True),
     dataloader_device_placement=False,
+    # Avoid multi-node Accelerate broadcasting an invalid DataLoader mt19937
+    # generator state at iterator boundaries.
+    rng_types=[],
 )
 
 default_hooks = dict(
