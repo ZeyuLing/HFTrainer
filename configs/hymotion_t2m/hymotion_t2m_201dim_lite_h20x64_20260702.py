@@ -33,7 +33,7 @@ trainer = dict(
 
 train_dataloader = dict(
     _delete_=True,
-    batch_size=8,
+    batch_size=64,
     num_workers=8,
     persistent_workers=True,
     shuffle=True,
@@ -97,7 +97,7 @@ optimizer = dict(
 )
 
 accelerator = dict(
-    mixed_precision='bf16',
+    mixed_precision='no',
     gradient_accumulation_steps=1,
     ddp_kwargs=dict(find_unused_parameters=True),
     dataloader_device_placement=False,
@@ -108,7 +108,7 @@ accelerator = dict(
 
 default_hooks = dict(
     logger=dict(type='LoggerHook', interval=1, iter_interval=10),
-    checkpoint=dict(type='CheckpointHook', interval=100, max_keep_ckpts=3, save_last=True),
+    checkpoint=dict(type='CheckpointHook', interval=10, max_keep_ckpts=3, save_last=True),
 )
 
 load_from = dict(
