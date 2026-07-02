@@ -63,8 +63,18 @@ if [[ ! -x "${VENV}/bin/python" ]]; then
   "${PYTHON_BIN}" -m venv "${VENV}"
 fi
 PY="${VENV}/bin/python"
-"${PY}" -m ensurepip --upgrade || true
-"${PY}" -m pip install --upgrade pip "setuptools<81" wheel
+GLIBC_LD="${GLIBC_LD:-}"
+BASE_LIB="${BASE_LIB:-}"
+run_py() {
+  if [[ -n "${GLIBC_LD}" && -x "${GLIBC_LD}" ]]; then
+    "${GLIBC_LD}" --library-path "${BASE_LIB:-/lib64:/usr/lib64}:${LD_LIBRARY_PATH:-}" "${PY}" "$@"
+  else
+    "${PY}" "$@"
+  fi
+}
+
+run_py -m ensurepip --upgrade || true
+run_py -m pip install --upgrade pip "setuptools<81" wheel
 
 REQ_FILTERED="${LOG_DIR}/requirements.filtered.txt"
 python3 - "${BM_ROOT}/requirements.txt" "${REQ_FILTERED}" <<'PY'
@@ -91,14 +101,14 @@ PY
 
 READY_MARK="${VENV}/.beyondmimic_requirements_ready"
 if [[ ! -e "${READY_MARK}" ]]; then
-  "${PY}" -m pip install -r "${REQ_FILTERED}" --extra-index-url https://pypi.nvidia.com --retries "${PIP_RETRIES}" --timeout "${PIP_DEFAULT_TIMEOUT}"
+  run_py -m pip install -r "${REQ_FILTERED}" --extra-index-url https://pypi.nvidia.com --retries "${PIP_RETRIES}" --timeout "${PIP_DEFAULT_TIMEOUT}"
   touch "${READY_MARK}"
 else
   echo "[beyondmimic] requirements already installed: ${READY_MARK}"
 fi
 
 cd "${BM_ROOT}"
-"${PY}" -m pip install -e source/whole_body_tracking
+run_py -m pip install -e source/whole_body_tracking
 flock -u 9
 
 ASSET_DIR="${BM_ROOT}/source/whole_body_tracking/whole_body_tracking/assets"
@@ -111,7 +121,7 @@ fi
 
 if [[ ! -f "${MOTION_CSV}" ]]; then
   echo "[beyondmimic] downloading HF LAFAN-G1 csv: ${MOTION_NAME}"
-  "${PY}" - <<PY
+  run_py - <<PY
 from huggingface_hub import hf_hub_download
 hf_hub_download(
     repo_id="lvhaidong/LAFAN1_Retargeting_Dataset",
@@ -123,7 +133,7 @@ hf_hub_download(
 PY
 fi
 
-"${PY}" - <<'PY'
+run_py - <<'PY'
 import importlib.util
 import sys
 print("python", sys.version)
@@ -140,7 +150,7 @@ if [[ -n "${SOURCE_NPZ}" ]]; then
     exit 5
   fi
   echo "[beyondmimic] converting Table-2 G1 qpos npz to BeyondMimic npz"
-  "${PY}" "${ROOT}/scripts/embodied/convert_opentrack_npz_to_beyondmimic_npz.py" \
+  run_py "${ROOT}/scripts/embodied/convert_opentrack_npz_to_beyondmimic_npz.py" \
     --input "${SOURCE_NPZ}" \
     --output-dir "${LOG_DIR}/motions" \
     --xml "${XML_PATH}" \
@@ -149,7 +159,7 @@ if [[ -n "${SOURCE_NPZ}" ]]; then
   MOTION_NPZ="${LOG_DIR}/motions/$(basename "${SOURCE_NPZ}" .npz).npz"
 else
   echo "[beyondmimic] preprocessing csv to BeyondMimic npz"
-  "${PY}" scripts/csv_to_npz.py \
+  run_py scripts/csv_to_npz.py \
     --input_file "${MOTION_CSV}" \
     --input_fps 30 \
     --output_name "${MOTION_NAME}" \
@@ -160,7 +170,7 @@ else
 fi
 
 echo "[beyondmimic] training"
-"${PY}" scripts/rsl_rl/train.py \
+run_py scripts/rsl_rl/train.py \
   --task=Tracking-Flat-G1-v0 \
   --motion_file "${MOTION_NPZ}" \
   --headless \
@@ -194,7 +204,7 @@ echo "[beyondmimic] deterministic rollout dump"
 ROLLOUT_DIR="${LOG_DIR}/rollout"
 mkdir -p "${ROLLOUT_DIR}"
 EXEC_NPZ="${ROLLOUT_DIR}/${MOTION_NAME}.execution.npz"
-"${PY}" "${ROOT}/scripts/embodied/run_beyondmimic_play_dump.py" \
+run_py "${ROOT}/scripts/embodied/run_beyondmimic_play_dump.py" \
   --bm-root "${BM_ROOT}" \
   --task=Tracking-Flat-G1-v0 \
   --motion_file "${MOTION_NPZ}" \
@@ -208,7 +218,7 @@ EXEC_NPZ="${ROLLOUT_DIR}/${MOTION_NAME}.execution.npz"
 
 if [[ -n "${EVAL_REF_NPZ}" && -f "${EVAL_REF_NPZ}" ]]; then
   echo "[beyondmimic] unified metric eval"
-  "${PY}" "${ROOT}/scripts/embodied/eval_beyondmimic_rollouts.py" \
+  run_py "${ROOT}/scripts/embodied/eval_beyondmimic_rollouts.py" \
     --reference-npz "${EVAL_REF_NPZ}" \
     --execution-npz "${EXEC_NPZ}" \
     --name "${MOTION_NAME}" \
@@ -221,7 +231,7 @@ fi
 
 if [[ -n "${CANONICAL_ROOT}" && -n "${CANONICAL_SPLIT}" && -n "${EVAL_REF_NPZ}" && -f "${EVAL_REF_NPZ}" ]]; then
   echo "[beyondmimic] materialize canonical PhysFlow rollout"
-  "${PY}" "${ROOT}/scripts/embodied/materialize_physflow_qpos_rollout.py" \
+  run_py "${ROOT}/scripts/embodied/materialize_physflow_qpos_rollout.py" \
     --reference-npz "${EVAL_REF_NPZ}" \
     --execution-npz "${EXEC_NPZ}" \
     --canonical-root "${CANONICAL_ROOT}" \
