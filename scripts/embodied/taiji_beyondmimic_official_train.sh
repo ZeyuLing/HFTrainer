@@ -18,6 +18,8 @@ EVAL_REF_NPZ="${BEYONDMIMIC_EVAL_REF_NPZ:-${SOURCE_NPZ}}"
 MOTION_NPZ="${LOG_DIR}/motions/${MOTION_NAME}.npz"
 RUN_NAME="${TAG}_${MOTION_NAME}"
 XML_PATH="${BEYONDMIMIC_XML_PATH:-${ROOT}/ref_repo/OpenTrack/storage/assets/unitree_g1/scene_mjx_flat_terrain.xml}"
+CANONICAL_ROOT="${PHYSFLOW_CANONICAL_ROOT:-}"
+CANONICAL_SPLIT="${BEYONDMIMIC_SPLIT:-}"
 
 mkdir -p "${LOG_DIR}/motions"
 exec > >(tee -a "${LOG_DIR}/run.log") 2>&1
@@ -215,6 +217,19 @@ if [[ -n "${EVAL_REF_NPZ}" && -f "${EVAL_REF_NPZ}" ]]; then
     --output-csv "${LOG_DIR}/summary.csv"
 else
   echo "[beyondmimic] skip unified metric eval; no EVAL_REF_NPZ"
+fi
+
+if [[ -n "${CANONICAL_ROOT}" && -n "${CANONICAL_SPLIT}" && -n "${EVAL_REF_NPZ}" && -f "${EVAL_REF_NPZ}" ]]; then
+  echo "[beyondmimic] materialize canonical PhysFlow rollout"
+  "${PY}" "${ROOT}/scripts/embodied/materialize_physflow_qpos_rollout.py" \
+    --reference-npz "${EVAL_REF_NPZ}" \
+    --execution-npz "${EXEC_NPZ}" \
+    --canonical-root "${CANONICAL_ROOT}" \
+    --split "${CANONICAL_SPLIT}" \
+    --method beyondmimic \
+    --case-id "${MOTION_NAME}" \
+    --xml "${XML_PATH}" \
+    --output-fps 30
 fi
 
 EXPORT_DIR="${RUN_DIR}/exported"

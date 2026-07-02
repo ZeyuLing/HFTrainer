@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,18 @@ import numpy as np
 import onnxruntime as ort
 from scipy.spatial.transform import Rotation, Slerp
 from tqdm import tqdm
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.embodied.physflow_canonical_rollouts import (
+    qpos_to_body_arrays,
+    save_body,
+    save_qpos,
+    write_reference_from_qpos,
+    write_run_config,
+)
 
 
 ACTION_JOINT_NAMES = [
@@ -389,6 +402,9 @@ class OpenTrackRollout:
             "body_quat": data.xquat[self.valid_body_ids].astype(float).tolist(),
         }
 
+    def _body_arrays_from_qpos(self, qpos: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[str]]:
+        return qpos_to_body_arrays(self.model, qpos, self.valid_body_ids)
+
     def _robot_frames_payload(self, frames: list[dict], frame_stride: int) -> dict:
         fps = _fps_after_stride(1.0 / self.dt, frame_stride)
         return {
@@ -503,6 +519,7 @@ class OpenTrackRollout:
         path: Path,
         max_steps: Optional[int] = None,
         capture_frames: bool = False,
+        capture_qpos: bool = False,
         frame_stride: int = 1,
     ) -> dict:
         qpos, qvel = self._load_motion(path)
@@ -520,6 +537,7 @@ class OpenTrackRollout:
         prev_body_pos = self.data.xpos[self.valid_body_ids].copy()
         prev_ref_body_pos = self.ref_data.xpos[self.valid_body_ids].copy()
         rollout_frames = [self._frame_from_data(self.data)] if capture_frames else []
+        rollout_qpos = [self.data.qpos.copy()] if capture_qpos else []
 
         n_steps = qpos.shape[0] - 1
         if max_steps is not None:
@@ -624,6 +642,8 @@ class OpenTrackRollout:
             prev_body_pos = current_body_pos
             prev_ref_body_pos = ref_body_pos
             height.append(float(self.data.qpos[2]))
+            if capture_qpos:
+                rollout_qpos.append(self.data.qpos.copy())
             if capture_frames and (i % max(int(frame_stride), 1) == 0 or i == n_steps):
                 rollout_frames.append(self._frame_from_data(self.data))
 
@@ -699,6 +719,9 @@ class OpenTrackRollout:
         }
         if capture_frames:
             result["_robot_frames"] = self._robot_frames_payload(rollout_frames, frame_stride)
+        if capture_qpos:
+            result["_rollout_qpos"] = np.stack(rollout_qpos, axis=0).astype(np.float32)
+            result["_rollout_fps"] = float(1.0 / self.dt)
         return result
 
 
@@ -720,6 +743,10 @@ def main() -> None:
     parser.add_argument("--frames-dir", type=Path, default=None)
     parser.add_argument("--frames-manifest", type=Path, default=None)
     parser.add_argument("--frame-stride", type=int, default=1)
+    parser.add_argument("--canonical-root", type=Path, default=None)
+    parser.add_argument("--canonical-split", default=None)
+    parser.add_argument("--canonical-method", default="any2track")
+    parser.add_argument("--canonical-output-fps", type=float, default=30.0)
     args = parser.parse_args()
 
     names = None
@@ -740,10 +767,65 @@ def main() -> None:
             path,
             max_steps=args.max_steps,
             capture_frames=args.frames_dir is not None,
+            capture_qpos=args.canonical_root is not None,
             frame_stride=args.frame_stride,
         )
         rollout_payload = row.pop("_robot_frames", None)
+        rollout_qpos = row.pop("_rollout_qpos", None)
+        rollout_fps = float(row.pop("_rollout_fps", 1.0 / runner.dt))
         rows.append(row)
+        if args.canonical_root is not None:
+            if not args.canonical_split:
+                raise ValueError("--canonical-split is required with --canonical-root")
+            ref_qpos, _ = runner._load_motion(path)
+            n_steps = ref_qpos.shape[0] - 1
+            if args.max_steps is not None:
+                n_steps = min(n_steps, args.max_steps)
+            ref_qpos = ref_qpos[: n_steps + 1]
+            meta = {
+                "source": str(path),
+                "runner": "eval_opentrack_onnx_mujoco.py",
+                "xml": str(args.xml),
+                "config": str(args.config),
+                "onnx": str(args.onnx),
+                "max_steps": args.max_steps,
+                "output_fps": args.canonical_output_fps,
+            }
+            write_reference_from_qpos(
+                args.canonical_root,
+                args.canonical_split,
+                path.stem,
+                ref_qpos,
+                source_fps=1.0 / runner.dt,
+                model=runner.model,
+                target_fps=args.canonical_output_fps,
+                metadata=meta,
+            )
+            if rollout_qpos is not None and rollout_qpos.size:
+                save_qpos(
+                    args.canonical_root,
+                    args.canonical_split,
+                    args.canonical_method,
+                    path.stem,
+                    rollout_qpos,
+                    source_fps=rollout_fps,
+                    target_fps=args.canonical_output_fps,
+                    metadata={**meta, "execution_frames_source": int(rollout_qpos.shape[0])},
+                )
+                exec_qpos30 = _resample_qpos(rollout_qpos, rollout_fps, args.canonical_output_fps)
+                body_pos, body_quat, body_names = runner._body_arrays_from_qpos(exec_qpos30)
+                save_body(
+                    args.canonical_root,
+                    args.canonical_split,
+                    args.canonical_method,
+                    path.stem,
+                    body_pos,
+                    body_quat,
+                    body_names,
+                    source_fps=args.canonical_output_fps,
+                    target_fps=args.canonical_output_fps,
+                    metadata={**meta, "execution_frames_source": int(rollout_qpos.shape[0])},
+                )
         if args.frames_dir is not None and rollout_payload is not None:
             ref_payload = runner.reference_motion_frames(
                 path,
@@ -846,6 +928,26 @@ def main() -> None:
         }
         args.frames_manifest.write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
+    if args.canonical_root is not None:
+        for rep in ("g1_qpos30", "g1_body30"):
+            write_run_config(
+                args.canonical_root,
+                args.canonical_split or "unknown",
+                rep,
+                args.canonical_method,
+                {
+                    "method": args.canonical_method,
+                    "runner": "scripts/embodied/eval_opentrack_onnx_mujoco.py",
+                    "motion_dir": str(args.motion_dir),
+                    "manifest": str(args.manifest) if args.manifest else None,
+                    "xml": str(args.xml),
+                    "config": str(args.config),
+                    "onnx": str(args.onnx),
+                    "max_steps": args.max_steps,
+                    "output_fps": args.canonical_output_fps,
+                    "num_rows": len(rows),
+                },
+            )
 
 
 if __name__ == "__main__":

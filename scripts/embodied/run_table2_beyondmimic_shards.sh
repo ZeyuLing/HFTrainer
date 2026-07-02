@@ -4,6 +4,7 @@ set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
 PROTOCOL_ROOT="${PROTOCOL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow/table2_tracker/unified_protocol_v1}"
+CANONICAL_ROOT="${CANONICAL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow}"
 SPLITS="${SPLITS:-lafan1_fixed600 amass_test_fixed600 wild_clean_fixed600}"
 SPLITS="${SPLITS//,/ }"
 TOTAL_SHARDS="${TOTAL_SHARDS:-768}"
@@ -155,6 +156,8 @@ run_case_bg() {
     export BEYONDMIMIC_MOTION_NAME="${name}"
     export BEYONDMIMIC_SOURCE_NPZ="${source_npz}"
     export BEYONDMIMIC_EVAL_REF_NPZ="${source_npz}"
+    export BEYONDMIMIC_SPLIT="${split}"
+    export PHYSFLOW_CANONICAL_ROOT="${CANONICAL_ROOT}"
     export BEYONDMIMIC_MAX_ITERATIONS
     export BEYONDMIMIC_NUM_ENVS
     export BEYONDMIMIC_PLAY_VIDEO_LENGTH

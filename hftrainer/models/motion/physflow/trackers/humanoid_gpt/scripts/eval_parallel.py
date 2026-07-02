@@ -135,6 +135,7 @@ def _evaluate_single_traj(
                 "qpos": state.mj_data.qpos.copy(),
                 "qvel": state.mj_data.qvel.copy(),
                 "xpos": state.mj_data.xpos.copy(),
+                "xquat": state.mj_data.xquat.copy(),
                 "xmat": state.mj_data.xmat.copy(),
             }
         )

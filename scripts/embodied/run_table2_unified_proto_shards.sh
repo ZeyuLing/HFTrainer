@@ -12,6 +12,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_tra
 PROTO_ROOT="${PROTO_ROOT:-${PROJECT_ROOT}/hftrainer/models/motion/physflow/trackers/protomotions/vendor}"
 ENVDIR="${ENVDIR:-/apdcephfs_cq11/share_1467498/home/zeyuling/physflow_env}"
 PROTOCOL_ROOT="${PROTOCOL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow/table2_tracker/unified_protocol_v1}"
+CANONICAL_ROOT="${CANONICAL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow}"
 SPLITS="${SPLITS:-amass_test_fixed600 lafan1_fixed600 wild_clean_fixed600}"
 SPLITS="${SPLITS//,/ }"
 TOTAL_SHARDS="${TOTAL_SHARDS:-32}"
@@ -311,6 +312,13 @@ eval_split() {
       fi
     done
     wait_for_background "${split} ${name} eval" "${pids[@]}"
+    python3 "${PROJECT_ROOT}/scripts/embodied/materialize_protomotions_canonical_rollouts.py" \
+      --protocol-root "${PROTOCOL_ROOT}" \
+      --split "${split}" \
+      --method-name "${name}" \
+      --canonical-root "${CANONICAL_ROOT}" \
+      --canonical-method protomotion \
+      --output-fps 30 || true
   done
 }
 

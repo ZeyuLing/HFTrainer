@@ -41,6 +41,19 @@ if _HERE not in sys.path:
 _SCRIPTS = os.path.join(_HERE, "scripts")
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
+_PROJECT_ROOT = None
+for _candidate in [Path(_HERE).resolve(), *Path(_HERE).resolve().parents]:
+    if (_candidate / "scripts" / "embodied" / "physflow_canonical_rollouts.py").exists():
+        _PROJECT_ROOT = _candidate
+        break
+if _PROJECT_ROOT is not None and str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from scripts.embodied.physflow_canonical_rollouts import (
+    save_body,
+    save_qpos,
+    write_reference_from_qpos,
+)
 
 
 def _emit(obj):
@@ -167,6 +180,34 @@ def _write_robot_frames_from_state_history(history, model, out_path, fps):
             }
         )
     )
+
+
+def _body_arrays_from_state_history(history, model):
+    import mujoco
+
+    body_ids = np.arange(1, model.nbody, dtype=np.int32)
+    body_names = [
+        mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, int(i)) or f"body_{int(i)}"
+        for i in body_ids
+    ]
+    body_pos = np.asarray(
+        [np.asarray(state["xpos"], dtype=np.float32)[body_ids] for state in history],
+        dtype=np.float32,
+    )
+    if history and "xquat" in history[0]:
+        body_quat = np.asarray(
+            [np.asarray(state["xquat"], dtype=np.float32)[body_ids] for state in history],
+            dtype=np.float32,
+        )
+    else:
+        body_quat = np.asarray(
+            [
+                [_quat_from_rotmat_wxyz(state["xmat"].reshape(model.nbody, 3, 3)[int(i)]) for i in body_ids]
+                for state in history
+            ],
+            dtype=np.float32,
+        )
+    return body_pos, body_quat, body_names
 
 
 def _quat_to_mat(q):
@@ -383,6 +424,10 @@ def main():
         job_dir = Path(req["job_dir"])
         out_path = Path(req.get("out", job_dir / "metrics.json"))
         frames_out_dir = Path(req["frames_out_dir"]) if req.get("frames_out_dir") else None
+        canonical_root = Path(req["canonical_root"]) if req.get("canonical_root") else None
+        canonical_split = req.get("canonical_split")
+        canonical_method = req.get("canonical_method", "humanoid_gpt")
+        canonical_output_fps = float(req.get("canonical_output_fps", 30.0))
         results = {}
         npzs = sorted(job_dir.glob("*.npz"))
         for i, f in enumerate(npzs):
@@ -409,6 +454,52 @@ def main():
                         convert_mj_model,
                         frames_out_dir / f"{stem}.json",
                         args.freq,
+                    )
+                if canonical_root is not None and canonical_split and state_history is not None:
+                    source_fps = float(np.asarray(raw.get("frequency", raw.get("fps", args.freq))).reshape(-1)[0])
+                    meta = {
+                        "source": str(f),
+                        "runner": "hftrainer/models/motion/physflow/trackers/humanoid_gpt/physflow_hgpt_judge_server.py",
+                        "onnx": str(cli.load_path),
+                        "control_fps": args.freq,
+                        "output_fps": canonical_output_fps,
+                    }
+                    write_reference_from_qpos(
+                        canonical_root,
+                        canonical_split,
+                        stem,
+                        np.asarray(raw["qpos"], dtype=np.float32),
+                        source_fps=source_fps,
+                        model=convert_mj_model,
+                        target_fps=canonical_output_fps,
+                        metadata=meta,
+                    )
+                    exec_qpos = np.asarray(
+                        [np.asarray(state["qpos"], dtype=np.float32) for state in state_history],
+                        dtype=np.float32,
+                    )
+                    save_qpos(
+                        canonical_root,
+                        canonical_split,
+                        canonical_method,
+                        stem,
+                        exec_qpos,
+                        source_fps=float(args.freq),
+                        target_fps=canonical_output_fps,
+                        metadata={**meta, "execution_frames_source": int(exec_qpos.shape[0])},
+                    )
+                    body_pos, body_quat, body_names = _body_arrays_from_state_history(state_history, convert_mj_model)
+                    save_body(
+                        canonical_root,
+                        canonical_split,
+                        canonical_method,
+                        stem,
+                        body_pos,
+                        body_quat,
+                        body_names,
+                        source_fps=float(args.freq),
+                        target_fps=canonical_output_fps,
+                        metadata={**meta, "execution_frames_source": int(body_pos.shape[0])},
                     )
                 results[stem] = {k: float(v) for k, v in m.items() if k not in ("file_name",)}
             except Exception as exc:  # noqa: BLE001

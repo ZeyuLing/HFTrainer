@@ -9,6 +9,7 @@ set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/apdcephfs_cq11/share_1467498/home/zeyuling/hf_trainer}"
 PROTOCOL_ROOT="${PROTOCOL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow/table2_tracker/unified_protocol_v1}"
+CANONICAL_ROOT="${CANONICAL_ROOT:-${PROJECT_ROOT}/outputs/evaluation/physflow}"
 METHODS="${METHODS:-any2track humanoid_gpt}"
 SPLITS="${SPLITS:-amass_test_fixed600 lafan1_fixed600 wild_clean_fixed600}"
 METHODS="${METHODS//,/ }"
@@ -165,6 +166,10 @@ run_any2track_split() {
         --onnx "${ONNX_PATH}" \
         --output-json "${out_dir}/eval_shard_${shard}.json" \
         --output-csv "${out_dir}/eval_shard_${shard}.csv" \
+        --canonical-root "${CANONICAL_ROOT}" \
+        --canonical-split "${split}" \
+        --canonical-method "any2track" \
+        --canonical-output-fps 30 \
         > "${out_dir}/eval_shard_${shard}.log" 2>&1
     ) &
     pids+=("$!")
@@ -221,6 +226,10 @@ run_hgpt_split() {
         --hgpt-python "${HGPT_PYTHON}" \
         --device "${HGPT_DEVICE}" \
         --complete-thresh "${COMPLETE_THRESH}" \
+        --canonical-root "${CANONICAL_ROOT}" \
+        --canonical-split "${split}" \
+        --canonical-method "humanoid_gpt" \
+        --canonical-output-fps 30 \
         --timeout-s "${HGPT_TIMEOUT_S}" \
         > "${out_dir}/shard_${shard}.log" 2>&1
     ) &

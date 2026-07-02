@@ -15,8 +15,14 @@ from typing import Any
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from scripts.embodied.physflow_canonical_rollouts import write_run_config
+
+
+PROJECT_ROOT = ROOT
 HGPT_ROOT = PROJECT_ROOT / "hftrainer/models/motion/physflow/trackers/humanoid_gpt"
 HGPT_ONNX = HGPT_ROOT / "storage/ckpts/pns_wo_priv216.onnx"
 TARGET_G1_DOF_NAMES = [
@@ -266,6 +272,10 @@ def _run_worker(
     device: str,
     timeout_s: float,
     frames_out_dir: Path | None = None,
+    canonical_root: Path | None = None,
+    canonical_split: str | None = None,
+    canonical_method: str = "humanoid_gpt",
+    canonical_output_fps: float = 30.0,
 ) -> None:
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join([str(HGPT_ROOT), str(HGPT_ROOT / "scripts"), env.get("PYTHONPATH", "")])
@@ -304,6 +314,15 @@ def _run_worker(
             req = {"job_dir": str(job_dir.resolve()), "out": str(out_json.resolve())}
             if frames_out_dir is not None:
                 req["frames_out_dir"] = str(frames_out_dir.resolve())
+            if canonical_root is not None and canonical_split:
+                req.update(
+                    {
+                        "canonical_root": str(canonical_root.resolve()),
+                        "canonical_split": canonical_split,
+                        "canonical_method": canonical_method,
+                        "canonical_output_fps": canonical_output_fps,
+                    }
+                )
             proc.stdin.write(json.dumps(req) + "\n")
             proc.stdin.flush()
             resp = _readline_timeout(proc, timeout_s)
@@ -395,6 +414,10 @@ def main() -> None:
     ap.add_argument("--complete-thresh", type=float, default=0.9)
     ap.add_argument("--timeout-s", type=float, default=1800.0)
     ap.add_argument("--frames-out-dir", type=Path)
+    ap.add_argument("--canonical-root", type=Path)
+    ap.add_argument("--canonical-split")
+    ap.add_argument("--canonical-method", default="humanoid_gpt")
+    ap.add_argument("--canonical-output-fps", type=float, default=30.0)
     args = ap.parse_args()
 
     if args.write_recursive_manifest:
@@ -418,6 +441,10 @@ def main() -> None:
         args.device,
         args.timeout_s,
         args.frames_out_dir,
+        args.canonical_root,
+        args.canonical_split,
+        args.canonical_method,
+        args.canonical_output_fps,
     )
     raw = json.loads(raw_json.read_text())
     payload = {
@@ -442,6 +469,27 @@ def main() -> None:
         lines.append("")
         lines.append(f"- skipped: {len(prep['skipped'])}")
     (args.out_dir / "summary.md").write_text("\n".join(lines) + "\n")
+    if args.canonical_root is not None and args.canonical_split:
+        for rep in ("g1_qpos30", "g1_body30"):
+            write_run_config(
+                args.canonical_root,
+                args.canonical_split,
+                rep,
+                args.canonical_method,
+                {
+                    "method": args.canonical_method,
+                    "runner": "scripts/embodied/run_table2_hgpt_eval.py",
+                    "motion_dir": str(args.motion_dir),
+                    "manifest": str(args.manifest) if args.manifest else None,
+                    "onnx": str(args.onnx),
+                    "hgpt_python": str(args.hgpt_python),
+                    "device": args.device,
+                    "control_fps": args.freq,
+                    "output_fps": args.canonical_output_fps,
+                    "num_requested": len(names),
+                    "num_kept": len(prep["kept"]),
+                },
+            )
     print(json.dumps(payload["summary"], indent=2, sort_keys=True))
 
 
