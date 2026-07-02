@@ -1124,6 +1124,22 @@ class HunyuanMotionMMDiT(nn.Module):
             return mask
         return torch.isfinite(mask)
 
+    @staticmethod
+    def _ensure_nonempty_attention_rows(mask: Tensor) -> Tensor:
+        """Make fully masked query rows attend to themselves to avoid NaNs."""
+        all_false = ~mask.any(dim=-1)
+        total_len = mask.size(-1)
+        diag = torch.eye(
+            total_len,
+            dtype=torch.bool,
+            device=mask.device,
+        ).view(1, 1, total_len, total_len)
+        return torch.where(
+            all_false.unsqueeze(-1).expand_as(mask),
+            diag.expand_as(mask),
+            mask,
+        )
+
     def _build_dmm_attn_mask_shared(
         self,
         bsz: int,
@@ -1185,7 +1201,7 @@ class HunyuanMotionMMDiT(nn.Module):
             base &= key_visible.view(bsz, 1, 1, total_len)
         # disable T→M
         base[:, :, motion_len:, :motion_len] = False
-        return base
+        return self._ensure_nonempty_attention_rows(base)
 
     def _build_smm_attn_mask_shared(
         self,
@@ -1249,7 +1265,7 @@ class HunyuanMotionMMDiT(nn.Module):
             base &= key_visible.view(bsz, 1, 1, total_len)
         # disable T→M
         base[:, :, split_len:, :split_len] = False
-        return base
+        return self._ensure_nonempty_attention_rows(base)
 
     def params_count(self):
         """
