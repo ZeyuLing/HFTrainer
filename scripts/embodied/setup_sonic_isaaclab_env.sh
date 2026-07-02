@@ -67,7 +67,10 @@ EOF
   # Taiji H20 containers do not provide apt-get. Avoid IsaacLab's wrapper-level
   # system dependency installer and install the Python extensions directly.
   run_vpy -m pip install "cmake>=3.27,<4"
+  PIP_BUILD_CONSTRAINT_SAVED="${PIP_BUILD_CONSTRAINT:-}"
+  unset PIP_BUILD_CONSTRAINT
   run_vpy -m pip install --no-build-isolation "flatdict==4.0.1"
+  export PIP_BUILD_CONSTRAINT="${PIP_BUILD_CONSTRAINT_SAVED}"
   export PATH="${VENV}/bin:${PATH}"
 
   (
