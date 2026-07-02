@@ -31,6 +31,7 @@ from hftrainer.datasets.motion.motionhub.transforms.universal_mask import (
 from hftrainer.datasets.motion.motionhub.transforms.crop_audio_to_motion import CropAudioToMotion
 from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
     Compute198DimPosition,
+    Compute201DimO6DP,
 )
 from hftrainer.datasets.motion.motionhub.transforms.prepare_m2m_v2 import (
     PrepareM2Mv2Condition,
@@ -63,6 +64,7 @@ __all__ = [
     'PrepareM2MUniversalMask',
     'LocalToGlobalRotation',
     'Compute198DimPosition',
+    'Compute201DimO6DP',
     'PrepareM2Mv2Condition',
     'PrepareM2Mv2FullMask',
     'PrepareM2Mv2OverfitCase',

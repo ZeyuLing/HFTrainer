@@ -53,8 +53,12 @@ class HyMotionT2MTrainer(BaseTrainer):
         B, L, D = motion.shape
 
         # Build padding mask from tgt_length or num_frames
-        tgt_length = batch.get('tgt_length', batch.get('num_frames'))
+        tgt_length = batch.get('tgt_length')
         if tgt_length is None:
+            tgt_length = batch.get('num_frames')
+        if tgt_length is None:
+            tgt_length = [L] * B
+        elif isinstance(tgt_length, (list, tuple)) and all(x is None for x in tgt_length):
             tgt_length = [L] * B
         if isinstance(tgt_length, Tensor):
             tgt_length = tgt_length.tolist()

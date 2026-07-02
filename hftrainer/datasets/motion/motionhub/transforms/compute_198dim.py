@@ -88,6 +88,37 @@ def motion135_to_198(
     return torch.cat([motion_135, pos_63], dim=-1)
 
 
+def compute_ric66_channels(
+    motion_135: Tensor,
+    bone_offsets: Tensor,
+) -> Tensor:
+    """Compute HY-Motion Lite 66-dim RIC channels from 135-dim motion.
+
+    HY-Motion 1.0 Lite uses 22 joints x 3 local positions appended after the
+    135-dim translation + rotation channels. The pelvis position is always
+    exactly zero after root-relative conversion.
+    """
+    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+
+    leading = motion_135.shape[:-1]
+
+    with torch.no_grad():
+        world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='local')
+
+    pelvis_world = world_pos[..., 0:1, :]
+    joint_pos = world_pos - pelvis_world
+    return joint_pos.reshape(*leading, 66)
+
+
+def motion135_to_201(
+    motion_135: Tensor,
+    bone_offsets: Tensor,
+) -> Tensor:
+    """Convert 135-dim motion to HY-Motion Lite 201-dim O6DP motion."""
+    pos_66 = compute_ric66_channels(motion_135, bone_offsets)
+    return torch.cat([motion_135, pos_66], dim=-1)
+
+
 def motion198_to_135(motion_198: Tensor) -> Tensor:
     """Extract 135-dim (trans + rot6d) from 198-dim motion.
 
@@ -288,4 +319,64 @@ class Compute198DimPosition(BaseTransform):
             motion_198 = motion_198.reshape(T, 198)
 
         results[self.key] = motion_198
+        return results
+
+
+@TRANSFORMS.register_module()
+class Compute201DimO6DP(BaseTransform):
+    """Transform to compute HY-Motion Lite 201-dim O6DP motion from 135-dim.
+
+    This is intentionally separate from Compute198DimPosition: the M2M 198-dim
+    representation uses 21 non-pelvis joints with Y in world coordinates,
+    while HY-Motion Lite's 201-dim representation appends all 22 root-relative
+    joint positions and keeps the pelvis triplet fixed at zero.
+    """
+
+    def __init__(
+        self,
+        key: str = 'motion',
+        bone_offsets_path: Optional[str] = None,
+    ):
+        self.key = key
+        self._bone_offsets_path = bone_offsets_path or _DEFAULT_BONE_OFFSETS_PATH
+        self._bone_offsets: Optional[Tensor] = None
+
+    def _load_bone_offsets(self) -> Tensor:
+        if self._bone_offsets is None:
+            path = self._bone_offsets_path
+            if not osp.isfile(path):
+                raise FileNotFoundError(
+                    f'Bone offsets not found at {path}. '
+                    'Run: PYTHONPATH=. python3 tools/precompute_bone_offsets.py first.'
+                )
+            self._bone_offsets = torch.load(path, map_location='cpu').float()
+        return self._bone_offsets
+
+    def transform(self, results: Dict) -> Dict:
+        motion = results[self.key]
+        assert isinstance(motion, torch.Tensor), (
+            f'Expected torch.Tensor for key {self.key!r}, got {type(motion)}'
+        )
+
+        orig_shape = motion.shape
+        if motion.ndim == 3:
+            P, T, D = motion.shape
+            assert D == 135, f"Expected motion_dim=135, got {D}"
+            motion_flat = motion.reshape(P * T, D)
+        elif motion.ndim == 2:
+            T, D = motion.shape
+            assert D == 135, f"Expected motion_dim=135, got {D}"
+            motion_flat = motion
+        else:
+            raise ValueError(f"Unexpected motion shape: {orig_shape}")
+
+        bone_offsets = self._load_bone_offsets()
+        motion_201 = motion135_to_201(motion_flat, bone_offsets)
+
+        if motion.ndim == 3:
+            motion_201 = motion_201.reshape(P, T, 201)
+        else:
+            motion_201 = motion_201.reshape(T, 201)
+
+        results[self.key] = motion_201
         return results
