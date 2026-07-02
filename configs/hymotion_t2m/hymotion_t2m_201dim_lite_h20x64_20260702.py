@@ -33,7 +33,7 @@ trainer = dict(
 
 train_dataloader = dict(
     _delete_=True,
-    batch_size=64,
+    batch_size=96,
     num_workers=8,
     persistent_workers=True,
     shuffle=True,
