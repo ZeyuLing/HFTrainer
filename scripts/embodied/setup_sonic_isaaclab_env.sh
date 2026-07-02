@@ -46,8 +46,15 @@ trap 'rm -f "${LOCK_FILE}"' EXIT
     fi
   }
 
+  PIP_CONSTRAINT_FILE="${LOG_DIR}/pip_constraints.txt"
+  cat > "${PIP_CONSTRAINT_FILE}" <<'EOF'
+setuptools<81
+EOF
+  export PIP_CONSTRAINT="${PIP_CONSTRAINT_FILE}"
+  export PIP_BUILD_CONSTRAINT="${PIP_CONSTRAINT_FILE}"
+
   run_vpy -m ensurepip --upgrade || true
-  run_vpy -m pip install --upgrade pip setuptools wheel
+  run_vpy -m pip install --upgrade pip "setuptools<81" wheel
 
   run_vpy -m pip install \
     torch==2.7.0 torchvision==0.22.0 \
@@ -60,6 +67,7 @@ trap 'rm -f "${LOCK_FILE}"' EXIT
   # Taiji H20 containers do not provide apt-get. Avoid IsaacLab's wrapper-level
   # system dependency installer and install the Python extensions directly.
   run_vpy -m pip install "cmake>=3.27,<4"
+  run_vpy -m pip install --no-build-isolation "flatdict==4.0.1"
   export PATH="${VENV}/bin:${PATH}"
 
   (
