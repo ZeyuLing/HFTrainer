@@ -46,6 +46,12 @@ MODELS = {
                  "from870_20260528/checkpoint-epoch_230"),
         "viewer_dir": "smpl_caption_editfix_ep230",
     },
+    "smpl_t2m300": {
+        "model": "smpl_caption_t2m_only",
+        "ckpt": ("work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_"
+                 "h20x64_20260630/checkpoint-epoch_300"),
+        "viewer_dir": "smpl_caption_t2m_only_ep300",
+    },
 }
 
 RECON_ROOT = "work_dirs/h3d263_eval/h3d263_test_recon_fk"

@@ -89,6 +89,11 @@ MODELS: Dict[str, Dict] = {
         "work_dir": "work_dirs/hymotion_m2m_v2_smpl_caption_resume_E2",
         "has_caption": True, "rotation_space": "local",
     },
+    "smpl_caption_t2m_only": {
+        "config": "configs/hymotion_m2m/hymotion_m2m_smpl_caption_t2m_only_046b.py",
+        "work_dir": "work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_h20x64_20260630",
+        "has_caption": True, "rotation_space": "local",
+    },
     # *** Real experiment models (editfix continuations) -- evaluate THESE. ***
     # KIMODO-Root + caption, editfix from ep890 (latest = ep240).
     "kimodo_caption_permo_editfix": {
