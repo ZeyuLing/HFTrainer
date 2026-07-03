@@ -34,8 +34,10 @@ trainer = dict(
 train_dataloader = dict(
     _delete_=True,
     batch_size=96,
-    num_workers=8,
-    persistent_workers=True,
+    # On the 64-card H20 Taiji job, multi-worker batches reach the trainer but
+    # can hang during the first shared-memory CPU->CUDA transfer.
+    num_workers=0,
+    persistent_workers=False,
     shuffle=True,
     dataset=dict(
         type='MotionhubMultiTaskMultiAgentDataset',
@@ -104,7 +106,9 @@ optimizer = dict(
 accelerator = dict(
     mixed_precision='no',
     gradient_accumulation_steps=1,
-    ddp_kwargs=dict(find_unused_parameters=True),
+    # The T2M forward path uses all DDP parameters; find_unused=True adds a
+    # graph traversal and can hang in the first backward sync at 64 ranks.
+    ddp_kwargs=dict(find_unused_parameters=False),
     dataloader_device_placement=False,
     # Avoid multi-node Accelerate broadcasting an invalid DataLoader mt19937
     # generator state at iterator boundaries.
