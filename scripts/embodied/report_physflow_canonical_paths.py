@@ -3,7 +3,7 @@
 
 Formal per-case rollouts live under:
 
-    outputs/evaluation/physflow/<test_dataset>/<representation>/<method>/<case>.npz
+    outputs/evaluation/physflow/table2_tracker/<method>/<test_dataset>/<representation>/<case>.npz
 
 The Table-2 runner roots under table2_tracker/unified_protocol_v1/runs are
 debug/aggregation roots, not the stable artifact interface.
@@ -22,12 +22,17 @@ DEFAULT_METHODS = ("any2track", "humanoid_gpt", "protomotions", "sonic", "beyond
 DEFAULT_REPRESENTATIONS = ("g1_body30", "g1_qpos30")
 
 
+def _task_root(root: Path) -> Path:
+    root = Path(root)
+    return root if root.name == "table2_tracker" else root / "table2_tracker"
+
+
 def _count_npz(path: Path) -> int:
     return sum(1 for p in path.glob("*.npz") if p.is_file()) if path.is_dir() else 0
 
 
 def _row(root: Path, split: str, representation: str, method: str) -> dict[str, Any]:
-    path = root / split / representation / method
+    path = _task_root(root) / method / split / representation
     return {
         "split": split,
         "representation": representation,
@@ -49,18 +54,18 @@ def main() -> None:
 
     rows = [
         _row(args.root, split, representation, method)
+        for method in args.methods
         for split in args.splits
         for representation in args.representations
-        for method in args.methods
     ]
     if args.json:
         print(json.dumps(rows, indent=2, sort_keys=True))
         return
 
-    print("split\trepresentation\tmethod\tnum_cases\texists\tpath")
+    print("method\tsplit\trepresentation\tnum_cases\texists\tpath")
     for row in rows:
         print(
-            f"{row['split']}\t{row['representation']}\t{row['method']}\t"
+            f"{row['method']}\t{row['split']}\t{row['representation']}\t"
             f"{row['num_cases']}\t{str(row['exists']).lower()}\t{row['path']}"
         )
 

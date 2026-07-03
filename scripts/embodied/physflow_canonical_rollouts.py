@@ -3,10 +3,11 @@
 
 The storage contract mirrors the T2M evaluation layout:
 
-    outputs/evaluation/physflow/<test_dataset>/<motion_representation>/<method>/<case>.npz
+    outputs/evaluation/physflow/table2_tracker/<method>/<test_dataset>/<motion_representation>/<case>.npz
 
-where the representation directory names the arrays directly stored in that
-directory.  For Table-2 tracking we currently materialize:
+where the method is the stable artifact entry point, and the representation
+directory names the arrays directly stored in that directory.  For Table-2
+tracking we currently materialize:
 
 * g1_qpos30: qpos [T, 36], root xyz + quat WXYZ + 29 G1 DOFs, 30 FPS.
 * g1_body30: body_pos/body_quat [T, B, ...], 30 FPS.
@@ -37,6 +38,11 @@ def canonical_split_name(split: str) -> str:
 
 def _safe_method(method: str) -> str:
     return method.strip().lower().replace("-", "_")
+
+
+def canonical_task_root(root: Path) -> Path:
+    root = Path(root)
+    return root if root.name == "table2_tracker" else root / "table2_tracker"
 
 
 def _normalize_quat(q: np.ndarray) -> np.ndarray:
@@ -143,11 +149,11 @@ def _atomic_json(path: Path, payload: Any) -> None:
 
 
 def qpos_path(root: Path, split: str, method: str, case_id: str) -> Path:
-    return Path(root) / canonical_split_name(split) / "g1_qpos30" / _safe_method(method) / f"{case_id}.npz"
+    return canonical_task_root(root) / _safe_method(method) / canonical_split_name(split) / "g1_qpos30" / f"{case_id}.npz"
 
 
 def body_path(root: Path, split: str, method: str, case_id: str) -> Path:
-    return Path(root) / canonical_split_name(split) / "g1_body30" / _safe_method(method) / f"{case_id}.npz"
+    return canonical_task_root(root) / _safe_method(method) / canonical_split_name(split) / "g1_body30" / f"{case_id}.npz"
 
 
 def save_qpos(
@@ -209,7 +215,7 @@ def save_body(
 
 
 def write_run_config(root: Path, split: str, representation: str, method: str, payload: dict[str, Any]) -> Path:
-    path = Path(root) / canonical_split_name(split) / representation / _safe_method(method) / "run_config.json"
+    path = canonical_task_root(root) / _safe_method(method) / canonical_split_name(split) / representation / "run_config.json"
     _atomic_json(path, payload)
     return path
 
