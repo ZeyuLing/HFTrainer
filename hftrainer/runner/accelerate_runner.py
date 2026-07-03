@@ -1879,6 +1879,9 @@ class AccelerateRunner:
                             os.environ.get('HFTRAINER_DEBUG_FIRST_STEP') == '1'
                             and batch_idx < debug_first_steps
                         )
+                        sync_after_optimizer_step = (
+                            os.environ.get('HFTRAINER_SYNC_AFTER_OPTIMIZER_STEP') == '1'
+                        )
                         if debug_first_step:
                             logger.info(
                                 f"[Rank {rank}] debug first-step epoch={epoch} "
@@ -1942,6 +1945,20 @@ class AccelerateRunner:
                                             f"[Rank {rank}] debug first-step epoch={epoch} "
                                             f"batch={batch_idx} global_step={current_step}: after optimizer.step"
                                         )
+                                    if sync_after_optimizer_step and torch.cuda.is_available():
+                                        if debug_first_step:
+                                            logger.info(
+                                                f"[Rank {rank}] debug first-step epoch={epoch} "
+                                                f"batch={batch_idx} global_step={current_step}: "
+                                                "before cuda.synchronize after optimizer.step"
+                                            )
+                                        torch.cuda.synchronize()
+                                        if debug_first_step:
+                                            logger.info(
+                                                f"[Rank {rank}] debug first-step epoch={epoch} "
+                                                f"batch={batch_idx} global_step={current_step}: "
+                                                "after cuda.synchronize after optimizer.step"
+                                            )
                                     opt.zero_grad()
                                 for sched in self.lr_schedulers.values():
                                     sched.step()
