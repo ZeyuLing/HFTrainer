@@ -16,6 +16,11 @@ model = dict(
     cond_mask_prob=0.1,
     mean_std_dir='checkpoints/HY-Motion-1.0/stats/',
     text_encoder=dict(),
+    # HY-Motion-1.0-Lite already provides learned null embeddings, and the
+    # T2M trainer never consumes special-game conditioning. Freezing these
+    # bundle-level parameters avoids an extra non-DDP grad sync path at 64 ranks.
+    train_null_embeddings=False,
+    train_special_game_embeddings=False,
     losses_cfg=dict(
         _delete_=True,
         loss_type='smooth_l1',

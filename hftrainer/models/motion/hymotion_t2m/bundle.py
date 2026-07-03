@@ -191,6 +191,8 @@ class HyMotionT2MBundle(ModelBundle):
         infer_noise_scheduler_cfg: Optional[dict] = None,
         cond_mask_prob: float = 0.1,
         enable_special_game_feat: bool = False,
+        train_null_embeddings: bool = True,
+        train_special_game_embeddings: bool = True,
         vtxt_input_dim: int = 768,
         ctxt_input_dim: int = 4096,
         # ----- self-contained artifact loading --------------------------
@@ -230,6 +232,14 @@ class HyMotionT2MBundle(ModelBundle):
         self.special_game_vtxt_feat = nn.Parameter(torch.zeros(1, 1, vtxt_input_dim))
         self.special_game_ctxt_feat = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim))
         self.enable_special_game_feat = bool(enable_special_game_feat)
+        self.train_null_embeddings = bool(train_null_embeddings)
+        self.train_special_game_embeddings = bool(train_special_game_embeddings)
+        if not self.train_null_embeddings:
+            self.null_vtxt_feat.requires_grad_(False)
+            self.null_ctxt_input.requires_grad_(False)
+        if not self.train_special_game_embeddings:
+            self.special_game_vtxt_feat.requires_grad_(False)
+            self.special_game_ctxt_feat.requires_grad_(False)
 
         # ---- mean / std buffers ----
         self._load_mean_std(mean_std_dir, mean_path=mean_path, std_path=std_path)
@@ -426,6 +436,8 @@ class HyMotionT2MBundle(ModelBundle):
             'infer_noise_scheduler_cfg': deepcopy(self._infer_noise_scheduler_cfg),
             'cond_mask_prob': self.cond_mask_prob,
             'enable_special_game_feat': self.enable_special_game_feat,
+            'train_null_embeddings': self.train_null_embeddings,
+            'train_special_game_embeddings': self.train_special_game_embeddings,
             'vtxt_input_dim': self._vtxt_input_dim,
             'ctxt_input_dim': self._ctxt_input_dim,
             'body_model_path': self._body_model_path,
