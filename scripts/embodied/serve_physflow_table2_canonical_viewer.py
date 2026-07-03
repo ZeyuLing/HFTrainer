@@ -101,12 +101,46 @@ def _load_body(path: Path) -> dict[str, Any]:
     body_quat = np.asarray(data["body_quat"], dtype=np.float32)
     fps = float(np.asarray(data["fps" if "fps" in data.files else "frequency"]).reshape(-1)[0])
     body_names = [str(x) for x in np.asarray(data["body_names"], dtype=str).reshape(-1).tolist()]
+    num_bodies = int(min(body_pos.shape[1], body_quat.shape[1]))
+    body_pos = body_pos[:, :num_bodies]
+    body_quat = body_quat[:, :num_bodies]
+    if len(body_names) < num_bodies:
+        body_names = body_names + [f"body_{i}" for i in range(len(body_names), num_bodies)]
+    elif len(body_names) > num_bodies:
+        body_names = body_names[:num_bodies]
     return {
         "body_pos": body_pos,
         "body_quat": body_quat,
         "fps": fps,
         "body_names": body_names,
     }
+
+
+def _common_body_indices(ref: dict[str, Any], pred: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    ref_names = list(ref["body_names"])
+    pred_names = list(pred["body_names"])
+    pred_by_name = {name: idx for idx, name in enumerate(pred_names)}
+    ref_idx: list[int] = []
+    pred_idx: list[int] = []
+    for idx, name in enumerate(ref_names):
+        if name in pred_by_name:
+            ref_idx.append(idx)
+            pred_idx.append(pred_by_name[name])
+    if not ref_idx:
+        count = min(ref["body_pos"].shape[1], pred["body_pos"].shape[1])
+        ref_idx = list(range(count))
+        pred_idx = list(range(count))
+    return np.asarray(ref_idx, dtype=np.int64), np.asarray(pred_idx, dtype=np.int64)
+
+
+def _root_positions(ref: dict[str, Any], pred: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    ref_names = list(ref["body_names"])
+    pred_names = list(pred["body_names"])
+    if "pelvis" in ref_names and "pelvis" in pred_names:
+        return ref["body_pos"][:, ref_names.index("pelvis")], pred["body_pos"][:, pred_names.index("pelvis")]
+    if "torso_link" in ref_names and "torso_link" in pred_names:
+        return ref["body_pos"][:, ref_names.index("torso_link")], pred["body_pos"][:, pred_names.index("torso_link")]
+    return ref["body_pos"][:, 0], pred["body_pos"][:, 0]
 
 
 def _local_mpjpe(ref: np.ndarray, pred: np.ndarray) -> float:
@@ -119,13 +153,15 @@ def _local_mpjpe(ref: np.ndarray, pred: np.ndarray) -> float:
 
 
 def _metrics(ref: dict[str, Any], pred: dict[str, Any]) -> dict[str, Any]:
-    ref_pos = ref["body_pos"]
-    pred_pos = pred["body_pos"]
+    ref_idx, pred_idx = _common_body_indices(ref, pred)
+    ref_pos = ref["body_pos"][:, ref_idx]
+    pred_pos = pred["body_pos"][:, pred_idx]
     n = min(len(ref_pos), len(pred_pos))
     if n == 0:
         return {"frames": 0, "completion": 0.0}
     global_mpjpe = float(np.linalg.norm(pred_pos[:n] - ref_pos[:n], axis=-1).mean() * 1000.0)
-    root_err = float(np.linalg.norm(pred_pos[:n, 0] - ref_pos[:n, 0], axis=-1).mean())
+    ref_root, pred_root = _root_positions(ref, pred)
+    root_err = float(np.linalg.norm(pred_root[:n] - ref_root[:n], axis=-1).mean())
     return {
         "frames": int(len(pred_pos)),
         "reference_frames": int(len(ref_pos)),
@@ -135,6 +171,9 @@ def _metrics(ref: dict[str, Any], pred: dict[str, Any]) -> dict[str, Any]:
         "local_mpjpe_mm": _local_mpjpe(ref_pos, pred_pos),
         "root_err_m": root_err,
         "fps": float(pred["fps"]),
+        "matched_bodies": int(len(ref_idx)),
+        "reference_bodies": int(ref["body_pos"].shape[1]),
+        "predicted_bodies": int(pred["body_pos"].shape[1]),
     }
 
 
@@ -143,6 +182,8 @@ def _frames_payload(root: Path, split: str, case_id: str, method: str, bodies: l
     if not path.is_file():
         raise FileNotFoundError(path)
     motion = _load_body(path)
+    body_meta = {body["name"]: body for body in bodies}
+    payload_bodies = [body_meta.get(name, {"name": name, "meshes": []}) for name in motion["body_names"]]
     return {
         "method": method,
         "title": METHOD_TITLES.get(method, method),
@@ -153,7 +194,7 @@ def _frames_payload(root: Path, split: str, case_id: str, method: str, bodies: l
         "fps": float(motion["fps"]),
         "num_frames": int(motion["body_pos"].shape[0]),
         "body_names": motion["body_names"],
-        "bodies": bodies,
+        "bodies": payload_bodies,
         "body_pos": motion["body_pos"].round(5).tolist(),
         "body_quat": motion["body_quat"].round(6).tolist(),
     }
@@ -276,6 +317,12 @@ def _html() -> str:
       if(!geoms.has(file)) geoms.set(file, await loader.loadAsync('/assets/g1_mesh/' + file));
       return geoms.get(file);
     }
+    async function fetchJson(url){
+      const response = await fetch(url);
+      const text = await response.text();
+      if(!response.ok) throw new Error(text.slice(0, 600));
+      return JSON.parse(text);
+    }
     async function buildActor(method, motion, offset){
       const group = new THREE.Group(); group.userData.method = method; group.position.x = offset;
       const material = new THREE.MeshStandardMaterial({color: motion.color || '#666', roughness:.72, metalness:.08});
@@ -297,13 +344,14 @@ def _html() -> str:
       const f = Math.min(frame, motion.num_frames - 1);
       const pos = motion.body_pos[f], quat = motion.body_quat[f];
       group.userData.bodyGroups.forEach((bg, i) => {
+        if(!pos[i] || !quat[i]) return;
         bg.position.fromArray(pos[i]);
         bg.quaternion.copy(qWXYZ(quat[i]));
       });
     }
     function renderMetrics(caseInfo){
-      const rows = Object.entries(caseInfo.metrics || {}).map(([m,x]) => `<tr><td>${m}</td><td>${(x.completion*100).toFixed(1)}%</td><td>${x.local_mpjpe_mm?.toFixed(1) ?? '-'}</td><td>${x.global_mpjpe_mm?.toFixed(1) ?? '-'}</td><td>${x.root_err_m?.toFixed(3) ?? '-'}</td><td>${x.frames}/${x.reference_frames}</td></tr>`).join('');
-      document.getElementById('metrics').innerHTML = `<table><thead><tr><th>method</th><th>completion</th><th>local MPJPE mm</th><th>global MPJPE mm</th><th>root err m</th><th>frames</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No metrics</td></tr>'}</tbody></table>`;
+      const rows = Object.entries(caseInfo.metrics || {}).map(([m,x]) => `<tr><td>${m}</td><td>${(x.completion*100).toFixed(1)}%</td><td>${x.local_mpjpe_mm?.toFixed(1) ?? '-'}</td><td>${x.global_mpjpe_mm?.toFixed(1) ?? '-'}</td><td>${x.root_err_m?.toFixed(3) ?? '-'}</td><td>${x.frames}/${x.reference_frames}</td><td>${x.matched_bodies ?? '-'}/${x.reference_bodies ?? '-'}/${x.predicted_bodies ?? '-'}</td></tr>`).join('');
+      document.getElementById('metrics').innerHTML = `<table><thead><tr><th>method</th><th>completion</th><th>local MPJPE mm</th><th>global MPJPE mm</th><th>root err m</th><th>frames</th><th>matched/ref/pred bodies</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No metrics</td></tr>'}</tbody></table>`;
     }
     function renderCaseList(){
       const split = document.getElementById('split').value;
@@ -316,25 +364,38 @@ def _html() -> str:
       const c = state.cases.find(x => x.id === id); if(!c) return;
       state.current = c; state.motions = {}; state.visible = {}; state.frame = 0; actorRoot.clear();
       renderCaseList(); document.getElementById('status').textContent = 'loading ' + id;
-      const info = await (await fetch(`/api/case?split=${encodeURIComponent(c.split)}&case=${encodeURIComponent(c.case_id)}`)).json();
+      let info;
+      try {
+        info = await fetchJson(`/api/case?split=${encodeURIComponent(c.split)}&case=${encodeURIComponent(c.case_id)}`);
+      } catch (err) {
+        document.getElementById('status').textContent = 'case load failed';
+        document.getElementById('metrics').innerHTML = `<div class="missing">Failed to load case: ${String(err.message || err)}</div>`;
+        return;
+      }
       renderMetrics(info);
       const methods = info.available_methods;
       const offsets = methods.map((_,i) => (i - (methods.length-1)/2) * 2.25);
+      const loaded = [];
       for(let i=0;i<methods.length;i++){
         const method = methods[i];
         state.visible[method] = true;
-        const motion = await (await fetch(`/api/motion?split=${encodeURIComponent(c.split)}&case=${encodeURIComponent(c.case_id)}&method=${encodeURIComponent(method)}`)).json();
-        motion.group = await buildActor(method, motion, offsets[i]);
-        state.motions[method] = motion;
+        try {
+          const motion = await fetchJson(`/api/motion?split=${encodeURIComponent(c.split)}&case=${encodeURIComponent(c.case_id)}&method=${encodeURIComponent(method)}`);
+          motion.group = await buildActor(method, motion, offsets[i]);
+          state.motions[method] = motion;
+          loaded.push(method);
+        } catch (err) {
+          console.warn('skip method', method, err);
+        }
       }
-      document.getElementById('methodToggles').innerHTML = methods.map(m => `<button class="toggle" data-method="${m}">${m}</button>`).join('') + '<button class="control" id="play">Pause</button>';
+      document.getElementById('methodToggles').innerHTML = loaded.map(m => `<button class="toggle" data-method="${m}">${m}</button>`).join('') + '<button class="control" id="play">Pause</button>';
       document.querySelectorAll('.toggle').forEach(b => b.onclick = () => { const m=b.dataset.method; state.visible[m]=!state.visible[m]; b.classList.toggle('off', !state.visible[m]); state.motions[m].group.visible = state.visible[m]; });
       document.getElementById('play').onclick = () => { state.playing = !state.playing; document.getElementById('play').textContent = state.playing ? 'Pause' : 'Play'; };
-      document.getElementById('legend').innerHTML = methods.map(m => `<div><span class="dot" style="background:${state.motions[m].color}"></span>${state.motions[m].title}</div>`).join('');
-      document.getElementById('status').textContent = `${id} · ${methods.length} actors`;
+      document.getElementById('legend').innerHTML = loaded.map(m => `<div><span class="dot" style="background:${state.motions[m].color}"></span>${state.motions[m].title}</div>`).join('');
+      document.getElementById('status').textContent = `${id} · ${loaded.length}/${methods.length} actors`;
     }
     async function init(){
-      const payload = await (await fetch('/api/cases')).json();
+      const payload = await fetchJson('/api/cases');
       state.cases = payload.cases;
       const splits = [...new Set(state.cases.map(c => c.split))];
       document.getElementById('split').innerHTML = '<option value="">all splits</option>' + splits.map(s => `<option value="${s}">${s}</option>`).join('');
@@ -396,6 +457,9 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if parsed.path in {"/", "/index.html"}:
                 self._send_text(_html())
+            elif parsed.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
             elif parsed.path == "/api/cases":
                 cases = _list_cases(self.root, self.methods, self.splits)
                 self._send_json({"root": str(self.root), "cases": cases, "methods": self.methods, "splits": self.splits})

@@ -89,6 +89,9 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if parsed.path in {"/", "/index.html"}:
                 self._send_bytes(_html().encode("utf-8"), "text/html; charset=utf-8")
+            elif parsed.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
             elif parsed.path in {"/api/cases", "/api/case", "/api/motion"}:
                 data = self._remote_json(parsed.path + (f"?{parsed.query}" if parsed.query else ""))
                 self._send_bytes(data, "application/json; charset=utf-8")
