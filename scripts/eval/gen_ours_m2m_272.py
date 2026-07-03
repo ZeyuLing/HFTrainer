@@ -99,14 +99,22 @@ def main():
                         "then exit (no M2M bundle weights, no generation).")
     args = p.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    existing_cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if existing_cuda_visible:
+        print(
+            f"[+] using pre-set CUDA_VISIBLE_DEVICES={existing_cuda_visible} "
+            f"(logical --gpu {args.gpu})",
+            flush=True,
+        )
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     import torch
     from copy import deepcopy
     from mmengine.config import Config
     from hftrainer.registry import MODEL_BUNDLES
     from hftrainer.utils.checkpoint_utils import load_checkpoint
-    from hftrainer.pipelines.motion.hymotion_m2m_pipeline import HyMotionM2MPipeline
+    from hftrainer.pipelines.hymotion_m2m.hymotion_m2m_pipeline import HyMotionM2MPipeline
     from hftrainer.models.motion.hymotion_m2m.network.text_encoder import HYTextModel
     from hftrainer.motion.representation.motion272 import motion135_to_272
 
