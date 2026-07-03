@@ -58,6 +58,13 @@ def main() -> None:
     body_pos_items = _as_case_array(pack["full_body_pos"])
     body_quat_items = _as_case_array(pack["full_body_quat"])
     body_names = [str(x) for x in np.asarray(pack["full_body_names"], dtype=str).reshape(-1).tolist()]
+    if len(body_pos_items) > len(keys) or len(body_quat_items) > len(keys):
+        # SONIC evaluates in fixed-size vectorized batches.  The patched dump
+        # may include padded env slots from the last batch, while motion_keys
+        # only lists the real requested motions.  The valid entries are emitted
+        # first in batch order, matching motion_keys.
+        body_pos_items = body_pos_items[: len(keys)]
+        body_quat_items = body_quat_items[: len(keys)]
     if len(keys) != len(body_pos_items) or len(keys) != len(body_quat_items):
         raise ValueError(
             f"dump case count mismatch: keys={len(keys)} pos={len(body_pos_items)} quat={len(body_quat_items)}"
