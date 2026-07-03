@@ -72,20 +72,29 @@ def build_bundle(config_path: str, ckpt_path: str, device: str, dtype_str: str =
     model_cfg["text_encoder"] = dict()
     bundle = MODEL_BUNDLES.build(model_cfg)
 
-    ck = torch.load(str(REPO / ckpt_path), map_location="cpu", weights_only=False)
-    sd = ck.get("model_state_dict", ck)
-    missing, unexpected = bundle.load_state_dict(sd, strict=False)
-    # special_game_* embeddings are intentionally not part of this bundle.
-    unexpected = [k for k in unexpected if not k.startswith("special_game")]
-    print(
-        f"[hy-gen] ckpt loaded: missing={len(missing)} "
-        f"unexpected(non-special_game)={len(unexpected)}",
-        flush=True,
-    )
-    if missing:
-        print(f"[hy-gen]   missing sample: {missing[:5]}", flush=True)
-    if unexpected:
-        print(f"[hy-gen]   unexpected sample: {unexpected[:5]}", flush=True)
+    from hftrainer.utils.checkpoint_utils import load_checkpoint
+
+    ckpt_abs = Path(ckpt_path)
+    if not ckpt_abs.is_absolute():
+        ckpt_abs = REPO / ckpt_abs
+    sd = load_checkpoint(str(ckpt_abs), map_location="cpu")
+    is_hftrainer_nested = any(isinstance(v, dict) for v in sd.values())
+    if is_hftrainer_nested:
+        bundle.load_state_dict_selective(dict(sd), strict=False)
+        print("[hy-gen] hftrainer nested ckpt loaded with load_state_dict_selective", flush=True)
+    else:
+        missing, unexpected = bundle.load_state_dict(sd, strict=False)
+        # special_game_* embeddings are intentionally not part of this bundle.
+        unexpected = [k for k in unexpected if not k.startswith("special_game")]
+        print(
+            f"[hy-gen] ckpt loaded: missing={len(missing)} "
+            f"unexpected(non-special_game)={len(unexpected)}",
+            flush=True,
+        )
+        if missing:
+            print(f"[hy-gen]   missing sample: {missing[:5]}", flush=True)
+        if unexpected:
+            print(f"[hy-gen]   unexpected sample: {unexpected[:5]}", flush=True)
 
     # Generative path strictly in fp32 (no AMP); keep mean/std float32 too.
     bundle.motion_transformer.to(device=device, dtype=motion_dtype)
@@ -171,7 +180,7 @@ def main():
         return
 
     # --- build bundle + pipeline -------------------------------------------- #
-    from hftrainer.pipelines.motion.hymotion_t2m_pipeline import HyMotionT2MPipeline
+    from hftrainer.pipelines.hymotion_t2m.hymotion_t2m_pipeline import HyMotionT2MPipeline
     from hftrainer.motion.representation.convert import motion135_to_motion272
 
     bundle = build_bundle(args.config, args.ckpt, args.device, args.dtype)
