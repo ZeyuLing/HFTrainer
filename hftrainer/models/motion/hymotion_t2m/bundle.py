@@ -556,7 +556,7 @@ class HyMotionT2MBundle(ModelBundle):
             'format': _ARTIFACT_FORMAT,
             'variant': variant,
             'config': _jsonable(config),
-            'pipeline_class': 'hftrainer.pipelines.motion.hymotion_t2m_pipeline.HyMotionT2MPipeline',
+            'pipeline_class': 'hftrainer.pipelines.hymotion_t2m.hymotion_t2m_pipeline.HyMotionT2MPipeline',
             'bundle_class': 'hftrainer.models.motion.hymotion_t2m.bundle.HyMotionT2MBundle',
             'weights': {
                 'motion_transformer': 'motion_transformer.safetensors'
