@@ -85,7 +85,12 @@ train_dataloader = dict(
         require_caption=True,
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),
-            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=False),
+            dict(
+                type='LoadPreExtractedTextEmbedding',
+                key='caption',
+                allow_none=False,
+                text_emb_augment_dir='qwen3_augmented',
+            ),
             dict(
                 type='LoadSmplx55',
                 key='motion',

@@ -72,7 +72,12 @@ train_dataloader = dict(
         anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_editing_20260527.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
-            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
+            dict(
+                type='LoadPreExtractedTextEmbedding',
+                key='caption',
+                allow_none=True,
+                text_emb_augment_dir='qwen3_augmented',
+            ),
             dict(
                 type='LoadSmplx55',
                 key='motion',

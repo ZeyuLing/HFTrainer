@@ -97,7 +97,12 @@ train_dataloader = dict(
         num_person=1,
         pipeline=[
             # Load pre-extracted Qwen3+CLIP embeddings (no text encoder needed at train time)
-            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
+            dict(
+                type='LoadPreExtractedTextEmbedding',
+                key='caption',
+                allow_none=True,
+                text_emb_augment_dir='qwen3_augmented',
+            ),
             # Remap smplx .npz path to o6dp_v1205 .npy path
             dict(type='RemapMotionPathToO6dp',
                  src_dir='motions',

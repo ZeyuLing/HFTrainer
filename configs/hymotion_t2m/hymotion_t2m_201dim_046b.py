@@ -73,6 +73,7 @@ model = dict(
     noise_scheduler_cfg=dict(method='euler'),
     infer_noise_scheduler_cfg=dict(validation_steps=50),
     cond_mask_prob=0.1,        # CFG dropout: 10% of samples drop text
+    enable_special_game_feat=True,
     vtxt_input_dim=768,
     ctxt_input_dim=4096,
     body_model_path=None,

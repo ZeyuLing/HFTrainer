@@ -46,7 +46,12 @@ train_dataloader = dict(
         anno_file='data/annotation/train_hq_motionhub_hymotion.json',
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),
-            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=True),
+            dict(
+                type='LoadPreExtractedTextEmbedding',
+                key='caption',
+                allow_none=True,
+                text_emb_augment_dir='qwen3_augmented',
+            ),
             dict(
                 type='LoadSmplx55',
                 key='motion',

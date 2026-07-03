@@ -47,6 +47,11 @@ CAPTION_TO_QWEN3_DIR = {
     'hierarchical_caption': 'qwen3_hierarchical',
 }
 
+DEFAULT_AUGMENT_SOURCE_DIRS = (
+    'qwen3_human_checked_short',
+    'qwen3_improved_simple_short',
+)
+
 
 def _caption_path_to_embedding_path(caption_path: str) -> Optional[str]:
     """Given an absolute caption .json path, return the corresponding .pt
@@ -96,6 +101,24 @@ def _caption_path_to_embedding_path(caption_path: str) -> Optional[str]:
     return None
 
 
+def _replace_qwen3_dir(
+    pt_path: str,
+    qwen3_dir: str,
+    allowed_source_dirs: Optional[Tuple[str, ...]] = None,
+) -> Optional[str]:
+    """Replace the qwen3 feature directory component in an embedding path."""
+    parts = os.path.normpath(pt_path).replace('\\', '/').split('/')
+    for i, part in enumerate(parts):
+        if part.startswith('qwen3_'):
+            if allowed_source_dirs is not None and part not in allowed_source_dirs:
+                return None
+            if part == qwen3_dir:
+                return None
+            parts[i] = qwen3_dir
+            return '/'.join(parts)
+    return None
+
+
 @TRANSFORMS.register_module(force=True)
 class LoadPreExtractedTextEmbedding(BaseTransform):
     """Load pre-extracted Qwen3+CLIP text embeddings from .pt files.
@@ -132,6 +155,19 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         fallback_to_caption (bool): If True (default), keep ``caption`` text
             in results even when embedding is found, so text-only fallback
             pipelines still work.
+        text_emb_augment_dir (str, optional): Optional sibling qwen3 feature
+            directory.  When provided and the augmented file exists, raw and
+            augmented features are sampled with the same 50/50 policy as the
+            official HY-Motion T2M dataset.
+        text_emb_long_dir (str, optional): Optional sibling long-caption
+            feature directory.  Long features are appended to the augmented
+            candidate pool, matching the official dataset behavior.
+        augment_source_dirs (tuple[str], optional): Raw qwen3 dirs that are
+            allowed to look up augmented/long siblings.  Defaults to the two
+            official T2M raw dirs so edit-instruction features from
+            ``qwen3_editing`` are never replaced by generic T2M captions.
+        raw_text_prob (float): Probability of sampling the raw feature pool
+            when both raw and augmented/long pools are non-empty.
     """
 
     def __init__(
@@ -141,12 +177,24 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         fallback_to_caption: bool = True,
         vtxt_dim: int = 768,
         ctxt_dim: int = 4096,
+        text_emb_augment_dir: Optional[str] = None,
+        text_emb_long_dir: Optional[str] = None,
+        augment_source_dirs: Optional[Tuple[str, ...]] = DEFAULT_AUGMENT_SOURCE_DIRS,
+        raw_text_prob: float = 0.5,
     ):
         self.key = key
         self.allow_none = allow_none
         self.fallback_to_caption = fallback_to_caption
         self.vtxt_dim = vtxt_dim
         self.ctxt_dim = ctxt_dim
+        self.text_emb_augment_dir = text_emb_augment_dir
+        self.text_emb_long_dir = text_emb_long_dir
+        self.augment_source_dirs = (
+            tuple(augment_source_dirs) if augment_source_dirs is not None else None)
+        self.raw_text_prob = float(raw_text_prob)
+
+        if not 0.0 <= self.raw_text_prob <= 1.0:
+            raise ValueError(f'raw_text_prob must be in [0, 1], got {raw_text_prob}')
 
     def _fill_null_embedding(self, results: Dict) -> Dict:
         """Fill null (zero) embedding tensors so that every sample in a batch
@@ -164,6 +212,50 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         results['_text_is_null'] = True
         return results
 
+    def _load_result_list(self, pt_path: Optional[str]) -> List[Dict]:
+        if pt_path is None or not os.path.exists(pt_path):
+            return []
+        try:
+            data = torch.load(pt_path, map_location='cpu', weights_only=True)
+        except TypeError:
+            try:
+                data = torch.load(pt_path, map_location='cpu')
+            except Exception:
+                return []
+        except Exception:
+            return []
+
+        result_list = data.get('result', []) if isinstance(data, dict) else []
+        return result_list if isinstance(result_list, list) else []
+
+    def _choose_feature_pool(
+        self,
+        raw_features: List[Dict],
+        augment_features: List[Dict],
+        long_features: List[Dict],
+    ) -> Tuple[List[Dict], str, int]:
+        aug_long_features = augment_features + long_features
+        if not raw_features and not aug_long_features:
+            return [], 'null', -1
+
+        if not raw_features:
+            choose_raw = False
+        elif not aug_long_features:
+            choose_raw = True
+        else:
+            choose_raw = random.random() < self.raw_text_prob
+
+        if choose_raw:
+            return raw_features, 'raw', -1
+
+        if augment_features and long_features:
+            source_type = 'augment_or_long'
+        elif augment_features:
+            source_type = 'augment'
+        else:
+            source_type = 'long'
+        return aug_long_features, source_type, len(augment_features)
+
     def transform(self, results: Dict) -> Dict:
         caption_path = results.get(f'{self.key}_path')
         if caption_path is None:
@@ -175,17 +267,22 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
 
         # Derive .pt path from caption JSON path
         pt_path = _caption_path_to_embedding_path(caption_path)
-        if pt_path is None or not os.path.exists(pt_path):
-            # No pre-extracted embedding available — fill null embedding.
-            return self._fill_null_embedding(results)
+        raw_features = self._load_result_list(pt_path)
 
-        try:
-            data = torch.load(pt_path, map_location='cpu', weights_only=False)
-        except Exception:
-            # Corrupted file – fill null embedding
-            return self._fill_null_embedding(results)
+        augment_features: List[Dict] = []
+        if self.text_emb_augment_dir and pt_path is not None:
+            augment_pt_path = _replace_qwen3_dir(
+                pt_path, self.text_emb_augment_dir, self.augment_source_dirs)
+            augment_features = self._load_result_list(augment_pt_path)
 
-        result_list = data.get('result', [])
+        long_features: List[Dict] = []
+        if self.text_emb_long_dir and pt_path is not None:
+            long_pt_path = _replace_qwen3_dir(
+                pt_path, self.text_emb_long_dir, self.augment_source_dirs)
+            long_features = self._load_result_list(long_pt_path)
+
+        result_list, source_type, augment_count = self._choose_feature_pool(
+            raw_features, augment_features, long_features)
         if not result_list:
             return self._fill_null_embedding(results)
 
@@ -205,10 +302,18 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         results['text_vec_raw'] = text_vec_raw
         results['text_ctxt_raw'] = text_ctxt_raw
         results['text_ctxt_raw_length'] = text_ctxt_raw_length
+        results['_text_is_null'] = False
+        results['text_idx'] = idx
+
+        if source_type == 'augment_or_long':
+            results['text_source_type'] = 'augment' if idx < augment_count else 'long'
+        else:
+            results['text_source_type'] = source_type
 
         # Also store caption string (for logging / CFG dropout compatibility)
-        if self.fallback_to_caption and 'caption' not in results:
-            results['caption'] = item.get('caption', '')
+        if self.fallback_to_caption:
+            results['caption'] = item.get(
+                'caption', item.get('short caption', results.get('caption', '')))
 
         return results
 

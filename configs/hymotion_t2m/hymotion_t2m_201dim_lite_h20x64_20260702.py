@@ -48,15 +48,20 @@ train_dataloader = dict(
         require_caption=True,
         pipeline=[
             dict(type='LoadCompatibleCaption', allow_none=False),
-            dict(type='LoadPreExtractedTextEmbedding', key='caption', allow_none=False),
             dict(
-                type='LoadSmplx55',
-                key='motion',
-                rot_type='rotation_6d',
-                transl_type='abs',
-                smpl_type='smpl_22',
+                type='LoadPreExtractedTextEmbedding',
+                key='caption',
+                allow_none=False,
+                text_emb_augment_dir='qwen3_augmented',
             ),
-            dict(type='Compute201DimO6DP', key='motion'),
+            dict(
+                type='RemapMotionPathToO6dp',
+                src_dir='motions',
+                dst_dir='motions_o6dp_v0922',
+                src_ext='.npz',
+                dst_ext='.npy',
+            ),
+            dict(type='LoadO6dp', key='motion', joints_num=22, transl_aug_prob=0.0),
             dict(
                 type='RandomCropPadding',
                 clip_len=360,

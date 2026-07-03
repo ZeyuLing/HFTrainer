@@ -3,20 +3,22 @@
 The o6dp_1103 format stores absolute-translation + rot6d + root-invariant
 joint coordinates (RIC) as a flat NumPy array.
 
-For 52 joints (``joints_num=52``), the layout is 471 dims:
+For 52 joints (``joints_num=52``), the o6dp_1103 layout is 471 dims:
   - ``[0:3]``    abs translation (3)
   - ``[3:9]``    root global rot6d (6)
   - ``[9:315]``  body local rot6d ((52-1)*6=306)
   - ``[315:471]`` RIC joints 3D (52*3=156)
 
-For 22 joints (``joints_num=22``), the layout is 201 dims:
+For 22 joints (``joints_num=22``), the o6dp_1103 layout is 201 dims:
   - ``[0:3]``    abs translation (3)
   - ``[3:9]``    root global rot6d (6)
   - ``[9:135]``  body local rot6d ((22-1)*6=126)
   - ``[135:201]`` RIC joints 3D (22*3=66)
 
-This transform loads the 471-dim npy files and extracts the 22-joint
-201-dim subset by taking the first 22 joints of rotation and RIC.
+This transform loads preprocessed npy files and extracts the requested joint
+subset.  It also supports the official HY-Motion T2M training path where
+``motions_o6dp_v0922`` files are 272/632-dim and are reformulated to the
+201-dim o6dp_1103 training target inside the dataset.
 """
 
 from typing import Dict, Optional, Tuple
@@ -25,6 +27,12 @@ import numpy as np
 import torch
 from mmcv import BaseTransform
 
+from hftrainer.models.motion.hymotion_v2m.vendor.hymotion.datasets.geometry import (
+    rot6d_to_rotation_matrix,
+)
+from hftrainer.models.motion.hymotion_v2m.vendor.hymotion.utils.motion_process import (
+    recover_root_kpts,
+)
 from hftrainer.registry import TRANSFORMS
 
 
@@ -54,6 +62,46 @@ def _extract_22j_from_52j(motion_52j: np.ndarray) -> np.ndarray:
     return np.concatenate([transl, root_rot6d, body_rot6d_22, ric_22], axis=-1)
 
 
+def _reformulate_0922_to_1103_22j(
+    motion_0922: np.ndarray,
+    motion_fps: int = 30,
+) -> np.ndarray:
+    """Convert official 272/632-dim o6dp_0922 files to 201-dim o6dp_1103."""
+    motion = torch.from_numpy(motion_0922).float()
+    D = motion.shape[1]
+    if D not in (272, 632):
+        raise ValueError(f'Expected 272/632-dim o6dp_0922 motion, got {D}')
+
+    translation_vel = motion[:, :4].clone()
+    non_translation_part = motion[:, 4:].clone()
+    root_rotmat_init = rot6d_to_rotation_matrix(non_translation_part[:, 0:6].clone())
+    translation_reconstructed_xyz = recover_root_kpts(
+        translation_vel[:, 0:1].clone(),
+        translation_vel[:, 1:3].clone(),
+        translation_vel[:, 3:4].clone(),
+        root_rotmat_init[0, ...].clone(),
+    ).squeeze(0)
+
+    num_joints = 52 if D == 632 else 22
+    o6d_start = 10
+    rifke_start = o6d_start + (num_joints - 1) * 6
+
+    motion_1103 = torch.cat(
+        [
+            translation_reconstructed_xyz,
+            motion[:, 4:10],
+            motion[:, o6d_start:o6d_start + 21 * 6],
+            motion[:, rifke_start:rifke_start + 22 * 3],
+        ],
+        dim=1,
+    )
+    # Keep the signature close to the official reformulation.  The fps is only
+    # needed by o6dp_1103_rel, which this training transform intentionally
+    # does not expose.
+    _ = motion_fps
+    return motion_1103.numpy().astype(np.float32)
+
+
 @TRANSFORMS.register_module(force=True)
 class LoadO6dp(BaseTransform):
     """Load pre-processed o6dp_1103 motion npy files.
@@ -75,6 +123,8 @@ class LoadO6dp(BaseTransform):
         Max yaw rotation range in degrees for augmentation.
     transl_aug_offset_std : tuple
         Std of XZ-plane offset augmentation (Y forced to 0).
+    motion_fps : int
+        FPS used by the legacy o6dp_0922 -> o6dp_1103 reformulation.
     """
 
     def __init__(
@@ -84,6 +134,7 @@ class LoadO6dp(BaseTransform):
         transl_aug_prob: float = 0.75,
         transl_aug_yaw_deg: float = 180.0,
         transl_aug_offset_std: Tuple[float, float, float] = (1.0, 0.0, 1.0),
+        motion_fps: int = 30,
     ):
         super().__init__()
         assert joints_num in (22, 52), f"joints_num must be 22 or 52, got {joints_num}"
@@ -91,6 +142,7 @@ class LoadO6dp(BaseTransform):
         self.joints_num = joints_num
         self.expected_dim = 3 + 6 + (joints_num - 1) * 6 + joints_num * 3
         # 22 joints -> 201, 52 joints -> 471
+        self.motion_fps = int(motion_fps)
 
         self.transl_aug_prob = float(transl_aug_prob)
         self.transl_aug_yaw_deg = float(transl_aug_yaw_deg)
@@ -168,7 +220,9 @@ class LoadO6dp(BaseTransform):
         motion = np.load(path).astype(np.float32)  # (T, D)
 
         # Handle dimension mismatch: extract 22-joint from 52-joint
-        if motion.shape[1] == 471 and self.joints_num == 22:
+        if motion.shape[1] in (272, 632) and self.joints_num == 22:
+            motion = _reformulate_0922_to_1103_22j(motion, motion_fps=self.motion_fps)
+        elif motion.shape[1] == 471 and self.joints_num == 22:
             motion = _extract_22j_from_52j(motion)
         elif motion.shape[1] != self.expected_dim:
             raise ValueError(

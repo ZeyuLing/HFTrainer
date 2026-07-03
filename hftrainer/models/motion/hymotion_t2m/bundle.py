@@ -20,7 +20,7 @@ import os.path as osp
 import shutil
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import torch
@@ -190,6 +190,7 @@ class HyMotionT2MBundle(ModelBundle):
         noise_scheduler_cfg: Optional[dict] = None,
         infer_noise_scheduler_cfg: Optional[dict] = None,
         cond_mask_prob: float = 0.1,
+        enable_special_game_feat: bool = False,
         vtxt_input_dim: int = 768,
         ctxt_input_dim: int = 4096,
         # ----- self-contained artifact loading --------------------------
@@ -226,6 +227,9 @@ class HyMotionT2MBundle(ModelBundle):
         # Zero default; actual values loaded from pretrained checkpoint.
         self.null_vtxt_feat = nn.Parameter(torch.zeros(1, 1, vtxt_input_dim))
         self.null_ctxt_input = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim))
+        self.special_game_vtxt_feat = nn.Parameter(torch.zeros(1, 1, vtxt_input_dim))
+        self.special_game_ctxt_feat = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim))
+        self.enable_special_game_feat = bool(enable_special_game_feat)
 
         # ---- mean / std buffers ----
         self._load_mean_std(mean_std_dir, mean_path=mean_path, std_path=std_path)
@@ -306,6 +310,9 @@ class HyMotionT2MBundle(ModelBundle):
             if name not in state:
                 raise ValueError(f'{weights_path} is missing {name}')
             getattr(self, name).data.copy_(state[name].to(getattr(self, name).device))
+        for name in ('special_game_vtxt_feat', 'special_game_ctxt_feat'):
+            if name in state:
+                getattr(self, name).data.copy_(state[name].to(getattr(self, name).device))
 
     @property
     def body_model(self):
@@ -418,6 +425,7 @@ class HyMotionT2MBundle(ModelBundle):
             'noise_scheduler_cfg': deepcopy(self._noise_scheduler_cfg),
             'infer_noise_scheduler_cfg': deepcopy(self._infer_noise_scheduler_cfg),
             'cond_mask_prob': self.cond_mask_prob,
+            'enable_special_game_feat': self.enable_special_game_feat,
             'vtxt_input_dim': self._vtxt_input_dim,
             'ctxt_input_dim': self._ctxt_input_dim,
             'body_model_path': self._body_model_path,
@@ -594,6 +602,8 @@ class HyMotionT2MBundle(ModelBundle):
         }
         state['null_vtxt_feat'] = self.null_vtxt_feat.detach().cpu().contiguous()
         state['null_ctxt_input'] = self.null_ctxt_input.detach().cpu().contiguous()
+        state['special_game_vtxt_feat'] = self.special_game_vtxt_feat.detach().cpu().contiguous()
+        state['special_game_ctxt_feat'] = self.special_game_ctxt_feat.detach().cpu().contiguous()
 
         if safe_serialization:
             from safetensors.torch import save_file
@@ -695,6 +705,85 @@ class HyMotionT2MBundle(ModelBundle):
             )
         return vtxt, ctxt
 
+    def maybe_inject_source_token(
+        self,
+        vtxt_input: Tensor,
+        ctxt_input: Tensor,
+        ctxt_mask_temporal: Tensor,
+        sources: Optional[List[str]],
+        trigger_sources: Optional[Set[str]] = None,
+        prob: float = 0.5,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """Inject the official special source token for selected data sources."""
+        if (sources is None or trigger_sources is None) or not self.enable_special_game_feat:
+            return vtxt_input, ctxt_input, ctxt_mask_temporal
+
+        B, Lc, Dc = ctxt_input.shape
+        if not isinstance(sources, (list, tuple)) or len(sources) != B:
+            raise ValueError(f'sources length must equal batch size: {len(sources)} vs {B}')
+
+        trig = {str(s).lower() for s in trigger_sources}
+        src_mask = torch.tensor(
+            [str(s).lower() in trig for s in sources],
+            dtype=torch.bool,
+            device=ctxt_input.device,
+        )
+        if not src_mask.any():
+            return vtxt_input, ctxt_input, ctxt_mask_temporal
+
+        if self.training:
+            rand_mask = torch.rand(B, device=ctxt_input.device) < prob
+        else:
+            rand_mask = torch.ones(B, dtype=torch.bool, device=ctxt_input.device)
+        apply_mask = src_mask & rand_mask
+        if not apply_mask.any():
+            return vtxt_input, ctxt_input, ctxt_mask_temporal
+
+        vtxt_token = self.special_game_vtxt_feat.to(vtxt_input).expand(B, 1, -1)
+        vtxt_input = vtxt_input + vtxt_token * apply_mask.view(B, 1, 1).to(vtxt_input.dtype)
+
+        if ctxt_mask_temporal.dtype == torch.bool:
+            cur_len = ctxt_mask_temporal.sum(dim=1).long()
+        else:
+            cur_len = (ctxt_mask_temporal > 0).sum(dim=1).long()
+
+        can_inplace = apply_mask & (cur_len < Lc)
+        b_inplace = torch.nonzero(can_inplace, as_tuple=False).squeeze(1)
+        if b_inplace.numel() > 0:
+            pos = cur_len[b_inplace]
+            token = self.special_game_ctxt_feat.squeeze(0).squeeze(0).to(ctxt_input)
+            ctxt_input = ctxt_input.clone()
+            ctxt_mask_temporal = ctxt_mask_temporal.clone()
+            ctxt_input[b_inplace, pos, :] = token.unsqueeze(0).expand(b_inplace.numel(), Dc)
+            if ctxt_mask_temporal.dtype == torch.bool:
+                ctxt_mask_temporal[b_inplace, pos] = True
+            else:
+                ctxt_mask_temporal[b_inplace, pos] = 1
+
+        need_expand = (apply_mask & (cur_len >= Lc)).any()
+        if need_expand:
+            suffix = torch.zeros((B, 1, Dc), dtype=ctxt_input.dtype, device=ctxt_input.device)
+            full_hit = apply_mask & (cur_len >= Lc)
+            b_full = torch.nonzero(full_hit, as_tuple=False).squeeze(1)
+            if b_full.numel() > 0:
+                suffix[b_full, 0, :] = (
+                    self.special_game_ctxt_feat.expand(b_full.numel(), 1, -1)
+                    .to(ctxt_input)
+                    .squeeze(1)
+                )
+            ctxt_input = torch.cat([ctxt_input, suffix], dim=1)
+
+            if ctxt_mask_temporal.dtype == torch.bool:
+                suffix_mask = torch.zeros((B, 1), dtype=torch.bool, device=ctxt_input.device)
+                suffix_mask[b_full, 0] = True
+            else:
+                suffix_mask = torch.zeros(
+                    (B, 1), dtype=ctxt_mask_temporal.dtype, device=ctxt_input.device)
+                suffix_mask[b_full, 0] = 1
+            ctxt_mask_temporal = torch.cat([ctxt_mask_temporal, suffix_mask], dim=1)
+
+        return vtxt_input, ctxt_input, ctxt_mask_temporal
+
     def predict_flow(
         self,
         x_input: Tensor,
@@ -703,6 +792,9 @@ class HyMotionT2MBundle(ModelBundle):
         timesteps: Tensor,
         x_mask_temporal: Optional[Tensor] = None,
         ctxt_mask_temporal: Optional[Tensor] = None,
+        sources: Optional[List[str]] = None,
+        trigger_sources: Optional[Set[str]] = None,
+        special_game_prob: float = 0.5,
     ) -> Tensor:
         """Single forward pass through the MMDiT transformer.
 
@@ -718,6 +810,16 @@ class HyMotionT2MBundle(ModelBundle):
         Returns:
             Model prediction, shape (B, L, motion_dim).
         """
+        if ctxt_mask_temporal is not None:
+            vtxt_input, ctxt_input, ctxt_mask_temporal = self.maybe_inject_source_token(
+                vtxt_input=vtxt_input,
+                ctxt_input=ctxt_input,
+                ctxt_mask_temporal=ctxt_mask_temporal,
+                sources=sources,
+                trigger_sources=trigger_sources,
+                prob=special_game_prob,
+            )
+
         return self.motion_transformer(
             x=x_input,
             ctxt_input=ctxt_input,
