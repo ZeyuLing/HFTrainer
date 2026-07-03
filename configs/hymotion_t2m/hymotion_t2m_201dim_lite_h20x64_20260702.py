@@ -112,8 +112,14 @@ accelerator = dict(
     mixed_precision='no',
     gradient_accumulation_steps=1,
     # The T2M forward path uses all DDP parameters; find_unused=True adds a
-    # graph traversal and can hang in the first backward sync at 64 ranks.
-    ddp_kwargs=dict(find_unused_parameters=False),
+    # graph traversal and can hang in the first backward sync at 64 ranks. On
+    # the 8-node H20 job, use NCCL_ALGO=Ring and NCCL_PROTO=Simple at launch;
+    # the default NCCL algorithm can also hang in async gradient all-reduce.
+    ddp_kwargs=dict(
+        find_unused_parameters=False,
+        static_graph=True,
+        broadcast_buffers=False,
+    ),
     dataloader_device_placement=False,
     # Avoid multi-node Accelerate broadcasting an invalid DataLoader mt19937
     # generator state at iterator boundaries.
