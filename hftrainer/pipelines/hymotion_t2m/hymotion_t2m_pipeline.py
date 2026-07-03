@@ -36,7 +36,7 @@ def _batch_sources(batch: Dict[str, Any], batch_size: int):
     return None
 
 
-@PIPELINES.register_module()
+@PIPELINES.register_module(force=True)
 class HyMotionT2MPipeline:
     """Inference pipeline for HyMotion-T2M text-to-motion generation.
 
