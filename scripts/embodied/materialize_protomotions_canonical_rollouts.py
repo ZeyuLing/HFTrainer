@@ -94,7 +94,7 @@ def main() -> None:
     ap.add_argument("--split", required=True)
     ap.add_argument("--method-name", default="protomotions_g1_bones")
     ap.add_argument("--canonical-root", type=Path, default=Path("outputs/evaluation/physflow"))
-    ap.add_argument("--canonical-method", default="protomotion")
+    ap.add_argument("--canonical-method", default="protomotions")
     ap.add_argument("--output-fps", type=float, default=30.0)
     args = ap.parse_args()
 

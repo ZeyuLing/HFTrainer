@@ -317,7 +317,7 @@ eval_split() {
       --split "${split}" \
       --method-name "${name}" \
       --canonical-root "${CANONICAL_ROOT}" \
-      --canonical-method protomotion \
+      --canonical-method protomotions \
       --output-fps 30 || true
   done
 }
