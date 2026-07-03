@@ -1,5 +1,6 @@
 from hftrainer.datasets.motion.motionhub.transforms.compose_multi_person import ComposeMultiPerson
 from hftrainer.datasets.motion.motionhub.transforms.crop import (
+    CropMotionByTextTime,
     MotionAudioMaxDurationFilter,
     MotionAudioRandomCrop,
     RandomCropPadding,
@@ -45,6 +46,7 @@ from hftrainer.datasets.motion.motionhub.transforms.prepare_m2m_v2_overfit_case 
 
 __all__ = [
     'ComposeMultiPerson',
+    'CropMotionByTextTime',
     'MotionAudioMaxDurationFilter',
     'MotionAudioRandomCrop',
     'RandomCropPadding',

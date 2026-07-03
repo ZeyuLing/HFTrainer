@@ -137,9 +137,10 @@ def _import_task_modules():
         'hftrainer.datasets.motion.hymotion_m2m_dataset',
         # HyMotion-T2M
         'hftrainer.models.motion.hymotion_t2m.bundle',
-        'hftrainer.trainers.motion.hymotion_t2m_trainer',
-        'hftrainer.pipelines.motion.hymotion_t2m_pipeline',
+        'hftrainer.trainers.hymotion_t2m.hymotion_t2m_trainer',
+        'hftrainer.pipelines.hymotion_t2m.hymotion_t2m_pipeline',
         'hftrainer.datasets.motion.hymotion_t2m_dataset',
+        'hftrainer.datasets.motion.hymotion_official_t2m_dataset',
         'hftrainer.datasets.motion.motionhub.transforms',
         'hftrainer.datasets.motion.motionhub',
         # HyMotion-V2M (video/feature -> motion; vendored self-contained source)

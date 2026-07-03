@@ -10,6 +10,7 @@ class M2MLoss(nn.Module):
     _MODALITY_MEAN_REDUCTIONS = ("component_mean", "modality_mean")
     _VALID_VELOCITY_LOSS_REDUCTIONS = (
         "element_mean",
+        "official_element_mean",
         "component_mean",
         "modality_mean",
     )
@@ -164,6 +165,13 @@ class M2MLoss(nn.Module):
             per_frame = per_dim.mean(dim=-1)
             mask_sum = torch.clamp(data_mask.sum(), min=1.0)
             return (per_frame * data_mask).sum() / mask_sum
+
+        if self.velocity_loss_reduction == "official_element_mean":
+            combined = data_mask.unsqueeze(-1).expand_as(per_dim)
+            if generation_mask is not None:
+                combined = combined * generation_mask.to(per_dim.device).to(per_dim.dtype)
+            mask_sum = torch.clamp(combined.sum(), min=1.0)
+            return (per_dim * combined).sum() / mask_sum
 
         # Modality-wise semantic reduction: each representation component first
         # gets its own valid-cell mean, then active components are averaged.

@@ -162,6 +162,8 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         text_emb_long_dir (str, optional): Optional sibling long-caption
             feature directory.  Long features are appended to the augmented
             candidate pool, matching the official dataset behavior.
+        refetch_on_missing (bool): If True, return None when no extracted
+            feature is available so the dataset can resample the record.
         augment_source_dirs (tuple[str], optional): Raw qwen3 dirs that are
             allowed to look up augmented/long siblings.  Defaults to the two
             official T2M raw dirs so edit-instruction features from
@@ -179,6 +181,7 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         ctxt_dim: int = 4096,
         text_emb_augment_dir: Optional[str] = None,
         text_emb_long_dir: Optional[str] = None,
+        refetch_on_missing: bool = False,
         augment_source_dirs: Optional[Tuple[str, ...]] = DEFAULT_AUGMENT_SOURCE_DIRS,
         raw_text_prob: float = 0.5,
     ):
@@ -189,6 +192,7 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         self.ctxt_dim = ctxt_dim
         self.text_emb_augment_dir = text_emb_augment_dir
         self.text_emb_long_dir = text_emb_long_dir
+        self.refetch_on_missing = bool(refetch_on_missing)
         self.augment_source_dirs = (
             tuple(augment_source_dirs) if augment_source_dirs is not None else None)
         self.raw_text_prob = float(raw_text_prob)
@@ -211,6 +215,11 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         results['text_ctxt_raw_length'] = torch.tensor(0)
         results['_text_is_null'] = True
         return results
+
+    def _handle_missing_embedding(self, results: Dict) -> Optional[Dict]:
+        if self.refetch_on_missing:
+            return None
+        return self._fill_null_embedding(results)
 
     def _load_result_list(self, pt_path: Optional[str]) -> List[Dict]:
         if pt_path is None or not os.path.exists(pt_path):
@@ -256,11 +265,11 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
             source_type = 'long'
         return aug_long_features, source_type, len(augment_features)
 
-    def transform(self, results: Dict) -> Dict:
+    def transform(self, results: Dict) -> Optional[Dict]:
         caption_path = results.get(f'{self.key}_path')
         if caption_path is None:
             if self.allow_none:
-                return self._fill_null_embedding(results)
+                return self._handle_missing_embedding(results)
             raise ValueError(
                 f"LoadPreExtractedTextEmbedding: '{self.key}_path' not found in results"
             )
@@ -284,14 +293,14 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
         result_list, source_type, augment_count = self._choose_feature_pool(
             raw_features, augment_features, long_features)
         if not result_list:
-            return self._fill_null_embedding(results)
+            return self._handle_missing_embedding(results)
 
         # Randomly select one caption variant (data augmentation)
         idx = random.randint(0, len(result_list) - 1)
         item = result_list[idx]
         emb = item.get('text_embedding')
         if emb is None:
-            return self._fill_null_embedding(results)
+            return self._handle_missing_embedding(results)
 
         # Unpack: remove the leading batch dim added during extraction
         # Each tensor was saved as [1, ...] from a batch-size-1 encode call.
@@ -309,6 +318,23 @@ class LoadPreExtractedTextEmbedding(BaseTransform):
             results['text_source_type'] = 'augment' if idx < augment_count else 'long'
         else:
             results['text_source_type'] = source_type
+
+        start_time = item.get('start_time', 0.0)
+        end_time = item.get('end_time', 0.0)
+        try:
+            start_time = float(start_time)
+        except (TypeError, ValueError):
+            start_time = 0.0
+        try:
+            end_time = float(end_time)
+        except (TypeError, ValueError):
+            end_time = 0.0
+        if start_time != start_time:
+            start_time = 0.0
+        if end_time != end_time:
+            end_time = 0.0
+        results['caption_start_time'] = start_time
+        results['caption_end_time'] = end_time
 
         # Also store caption string (for logging / CFG dropout compatibility)
         if self.fallback_to_caption:

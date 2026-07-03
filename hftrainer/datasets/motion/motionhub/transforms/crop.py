@@ -10,6 +10,89 @@ from hftrainer.registry import TRANSFORMS
 
 
 @TRANSFORMS.register_module(force=True)
+class CropMotionByTextTime(BaseTransform):
+    """Crop motion using the selected text feature's time tags.
+
+    The official HY-Motion T2M dataset samples one text embedding first, then
+    crops the motion by that embedding's ``start_time`` / ``end_time`` tags
+    before length filtering and padding.  This transform mirrors that behavior.
+    """
+
+    def __init__(
+        self,
+        keys: Union[str, List[str]] = "motion",
+        fps_key: str = "fps",
+        start_time_key: str = "caption_start_time",
+        end_time_key: str = "caption_end_time",
+        min_frame: int = 10,
+        max_frame: int = 360,
+    ):
+        if not isinstance(keys, list):
+            keys = [keys]
+        self.keys = keys
+        self.fps_key = fps_key
+        self.start_time_key = start_time_key
+        self.end_time_key = end_time_key
+        self.min_frame = int(min_frame)
+        self.max_frame = int(max_frame)
+
+    def transform(self, results: Dict):
+        start_time = float(results.get(self.start_time_key, 0.0) or 0.0)
+        end_time = float(results.get(self.end_time_key, 0.0) or 0.0)
+        if start_time != start_time:
+            start_time = 0.0
+        if end_time != end_time:
+            end_time = 0.0
+
+        if start_time == 0.0 and end_time == 0.0:
+            motion_length = None
+            start_frame = 0
+            end_frame = None
+        else:
+            fps = float(results.get(self.fps_key, 30.0) or 30.0)
+            start_frame = int(start_time * fps)
+            end_frame = int(end_time * fps)
+            motion_length = end_frame - start_frame + 1
+            if motion_length < self.min_frame or motion_length > self.max_frame:
+                return None
+
+        for key in self.keys:
+            if key not in results:
+                continue
+            motion = results[key]
+            if isinstance(motion, (list, tuple)):
+                cropped = []
+                for item in motion:
+                    if motion_length is None:
+                        cur = item
+                    else:
+                        cur = item[start_frame : end_frame + 1]
+                    if cur.shape[0] < self.min_frame or cur.shape[0] > self.max_frame:
+                        return None
+                    cropped.append(cur)
+                results[key] = cropped
+                actual_length = cropped[0].shape[0] if cropped else 0
+            else:
+                if motion_length is None:
+                    cur = motion
+                else:
+                    cur = motion[start_frame : end_frame + 1]
+                if cur.shape[0] < self.min_frame or cur.shape[0] > self.max_frame:
+                    return None
+                results[key] = cur
+                actual_length = cur.shape[0]
+
+            results["num_frames"] = int(actual_length)
+            results[f"{key}_num_frames"] = int(actual_length)
+
+        results["text_crop_start_frame"] = int(start_frame)
+        results["text_crop_end_frame"] = (
+            int(end_frame) if end_frame is not None else int(results.get("num_frames", 0)) - 1
+        )
+        return results
+
+
+@TRANSFORMS.register_module(force=True)
 class HeadCropMotion(BaseTransform):
     """Deterministically keep the first ``clip_len`` frames of motion tensors."""
 
