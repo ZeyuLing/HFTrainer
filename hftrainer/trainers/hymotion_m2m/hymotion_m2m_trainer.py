@@ -39,7 +39,7 @@ def _batch_sources(batch: Dict[str, Any], batch_size: int) -> Optional[List[str]
     return None
 
 
-@TRAINERS.register_module()
+@TRAINERS.register_module(force=True)
 class HyMotionM2MTrainer(BaseTrainer):
     """Trainer for HYMotion-M2M flow-matching motion editing.
 
