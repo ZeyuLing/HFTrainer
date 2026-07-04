@@ -13,9 +13,11 @@ weights into HyMotion-M2M v2 bundle, handling architecture differences:
   - input_encoder: 135→594 (VACE expands input)
   - final_layer: 135→198 (M2M output dimension differs)
 
-- **Bundle-level parameters** (NOT loaded from T2M):
-  - null_vtxt_feat, null_ctxt_input: M2M keeps trainable randn*0.01 (T2M is frozen zeros)
-  - mean, std: M2M uses 198-dim stats (different from T2M 135-dim)
+- **Bundle-level condition parameters** (loaded when present):
+  - null_vtxt_feat, null_ctxt_input
+  - special_game_vtxt_feat, special_game_ctxt_feat
+- **Bundle-level statistics** (NOT loaded from T2M):
+  - mean, std: M2M uses 198-dim stats (different from T2M 201-dim)
 
 **Usage**:
   from hftrainer.models.motion.hymotion_m2m.checkpoint_loading import load_t2m_pretrained_selective
@@ -63,10 +65,15 @@ SHAPE_MISMATCH_MODULES = {
 
 # Bundle-level parameters to exclude (use config-initialized values)
 EXCLUDED_BUNDLE_PARAMS = {
-    'null_vtxt_feat',   # M2M needs trainable zeros, not T2M frozen values
-    'null_ctxt_input',  # M2M needs trainable zeros, not T2M frozen values
-    'mean',              # M2M uses 198-dim stats (T2M is 135-dim)
-    'std',               # M2M uses 198-dim stats (T2M is 135-dim)
+    'mean',              # M2M uses 198-dim stats (T2M is 201-dim)
+    'std',               # M2M uses 198-dim stats (T2M is 201-dim)
+}
+
+REUSABLE_BUNDLE_PARAMS = {
+    'null_vtxt_feat',
+    'null_ctxt_input',
+    'special_game_vtxt_feat',
+    'special_game_ctxt_feat',
 }
 
 
@@ -118,6 +125,9 @@ def _filter_reusable_params(state_dict: Dict[str, torch.Tensor]) -> Dict[str, to
     filtered = {}
     
     for key, value in state_dict.items():
+        if key in REUSABLE_BUNDLE_PARAMS:
+            filtered[key] = value
+            continue
         # Check if key starts with any reusable module path
         for reusable_mod in REUSABLE_MODULES:
             if key.startswith(reusable_mod):
@@ -272,6 +282,8 @@ def load_t2m_pretrained_selective(
                 mod_name = f"{parts[0]}.{parts[1]}"
                 if mod_name not in stats['modules_loaded']:
                     stats['modules_loaded'].append(mod_name)
+            elif key in REUSABLE_BUNDLE_PARAMS and key not in stats['modules_loaded']:
+                stats['modules_loaded'].append(key)
     
     # Count skipped/mismatched parameters
     for key, value in reusable_state.items():

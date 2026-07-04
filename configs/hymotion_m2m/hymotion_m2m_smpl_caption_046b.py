@@ -1,138 +1,178 @@
-# HyMotion M2M v2 — SMPL Root + Caption Conditioning (default caption config)
+# HyMotion M2M v2 -- official-T2M aligned mixed-task training.
 #
-# Standard caption-conditioned M2M training config with:
-#   - Text conditioning via QWEN3 + CLIP-L pre-extracted embeddings
-#   - Frozen vtxt/ctxt/timestep encoders (from T2M pretrained) to prevent
-#     encoder collapse during M2M training
-#   - CFG: 10% unconditional during training
-#   - Keypoint supervision enabled (keypoints3d_weight=10.0)
-#   - PerMo editing pairs (6,177 real Neutral→Emotional editing samples)
-#   - Standard velocity prediction on 198-dim SMPL representation
+# This is the formal M2M phase after the aligned T2M-only M2M checkpoint is
+# selected.  It keeps the robust rank-k / v3 mask sampler for arbitrary
+# motion conditions, but pins pure T2M to the verified official HYMotion SFT
+# data stream instead of the older 400h HQ JSON path.
 #
-# Loads directly from T2M pretrained (clean text encoders). Previous approach
-# of loading from caption_local_phase2 was abandoned because vtxt_encoder had
-# collapsed (cos>0.98 between all caption embeddings) during the Gen1 training
-# chain (046b→phase1→phase2).
-#
-# Launch (local):
-#   bash tools/dist_train.sh configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py 8 --auto-resume
-# Launch (Taiji, 64 GPUs):
-#   python tools/taiji_submit.py m2m_v2_smpl_caption configs/hymotion_m2m/hymotion_m2m_smpl_caption_046b.py --host_num 8
+# Target mix per sampled step:
+#   official_t2m     30%
+#   MotionFix edit    6%
+#   PerMo style edit  7%
+#   PerMo content edit 7%
+#   other M2M tasks   50%
 
 _base_ = './_base_hymotion_m2m_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_editfix_from870_20260528'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_official_sft_mix_20260704'
 
-# Resume from the correct SMPL resume checkpoint, then train with the fixed
-# PerMo/MotionFix editing annotation.
-# load_scope='model' resets optimizer/scheduler for clean start with fixed data.
+_pack_keys = [
+    'src_motion', 'tgt_motion', 'src_mask',
+    'tgt_length', 'src_length', 'edit_mode',
+    'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
+    'data_src', 'source', 'input_filename', 'text_emb_dir',
+    'text_source_type', 'motion_path', 'caption_path', 'fps', 'caption',
+]
+
+# Update this to the selected checkpoint from the aligned T2M-only phase
+# before launching formal M2M.  Keeping the semantic dependency explicit avoids
+# accidentally resuming from the old mixed-task E2 chain.
 load_from = dict(
     _delete_=True,
-    path='work_dirs/hymotion_m2m_v2_smpl_caption_resume_E2/checkpoint-epoch_870/',
+    path=(
+        'work_dirs/'
+        'hymotion_m2m_v2_smpl_caption_t2m_only_official_sft_h20x64_20260704/'
+        'checkpoint-iter_15000'
+    ),
     load_scope='model',
+    exclude_bundle_keys=['mean', 'std'],
 )
 
 model = dict(
     pred_type='velocity',
-    uncondition_mode=False,  # Enable text conditioning
-    cond_mask_prob=0.1,       # CFG: 10% unconditional during training
-    motion_cond_mask_prob=0.0,  # Keep motion/source conditions intact during M2M training
+    uncondition_mode=False,
+    cond_mask_prob=0.1,
+    motion_cond_mask_prob=0.0,
+    enable_special_game_feat=True,
+    train_null_embeddings=True,
+    train_special_game_embeddings=True,
     mean_std_dir='data/hymotion_m2m_data/_stats_198dim',
     rotation_space='local',
-    # Freeze vtxt/ctxt/timestep encoders to preserve T2M text understanding.
-    # Without this, vtxt_encoder collapses during M2M training (cos>0.98).
     caption_freeze_strategy='encoders',
-    text_encoder=dict(),  # Use default QWEN3 + CLIP-L
+    text_encoder=dict(),
     losses_cfg=dict(
         keypoints3d_weight=10.0,
         velocity_loss_reduction='component_mean',
+        spike_downweight_enabled=False,
     ),
 )
 
 train_dataloader = dict(
-    batch_size=20,  # Reduce batch size for caption config (higher memory)
-    num_workers=8,  # Increase from 4 to keep DataLoader prefetch ahead of train_step
-    persistent_workers=True,  # Avoid per-epoch worker restart overhead
-    # 2026-06-25 EDIT-BALANCE: the *_full_20260625 annotation adds 253k PerMo
-    # editing pairs (Task2 same-style content edit + Task3 any-to-any style
-    # transfer), pushing editing-pair share to ~38.6%. Keep ALL pairs in the
-    # pool but down-weight them to ~20% per step via WeightedRandomSampler so
-    # the other 7 task families (T2M / completion / trajectory / ...) are not
-    # drowned out. Synthetic repair-style corruptor editing is disabled below
-    # to avoid interfering with the real MotionFix/PerMo edit signal. See
-    # scripts/data/build_permo_editing_full.py.
-    #
-    # Per-group fractions (not a flat editing %): MotionFix has only 6.7k pairs
-    # vs 197k styleedit, so a flat 20% editing share would starve MotionFix
-    # (Task1) to ~0.5%/step — worse than before. We pin each editing family
-    # explicitly so all three editing tasks get adequate exposure:
-    #   MotionFix (Task1 semantic edit)        6%
-    #   PerMo styleedit (Task3 style transfer) 7%
-    #   PerMo contentedit (Task2 content edit) 7%   -> editing total 20%, other 80%.
+    _delete_=True,
+    batch_size=20,
+    num_workers=8,
+    persistent_workers=True,
+    shuffle=True,
     weighted_sampler=dict(groups=[
+        dict(name='official_t2m', match=['official_t2m'], frac=0.30),
         dict(name='motionfix', match=['MotionFix'], frac=0.06),
         dict(name='style_edit', match=['styleedit'], frac=0.07),
         dict(name='content_edit', match=['contentedit'], frac=0.07),
     ]),
     dataset=dict(
-        # 2026-06-25 FULL EDITING ANNOTATION: MotionFix path-prefix fix (see
-        # scripts/data/fix_motionfix_path_prefix.py) + full PerMo Task2/Task3
-        # editing pairs with deduplicated templated instructions (embeddings in
-        # qwen3_editing/, built by scripts/data/extract_permo_embeddings.py).
-        anno_file='data/annotation/train_hymotion_400h_hq_permo_motionfix_editing_full_20260625.json',
-        pipeline=[
-            dict(type='LoadCompatibleCaption', allow_none=False),  # Require captions
+        type='MotionDatasetUnion',
+        subset_prefixes=['official_t2m', 'm2m'],
+        datasets=[
             dict(
-                type='LoadPreExtractedTextEmbedding',
-                key='caption',
-                allow_none=True,
-                text_emb_augment_dir='qwen3_augmented',
-            ),
-            dict(
-                type='LoadSmplx55',
-                key='motion',
-                rot_type='rotation_6d',
-                transl_type='abs',
-                smpl_type='smpl_22',
-            ),
-            dict(type='Compute198DimPosition', key='motion'),
-            dict(
-                type='RandomCropPadding',
-                clip_len=360,
-                pad_mode='replicate',
-                allow_shorter=True,
-                make_pad_mask=True,
-                pad_mask_key='pad_mask',
-            ),
-            dict(
-                type='PrepareM2Mv2Condition',
-                key='motion',
-                sampler_version='v3',
-                # Disable online synthetic corruptor editing. Real editing pairs
-                # are still injected by LoadEditingSourceMotion below.
-                editing_prob=0.0,
-                # Boost the under-represented pure sparse-XYZ trajectory-control
-                # pattern (was ~0.58% of samples -> model under-learned smooth
-                # sparse-waypoint following -> jitter spikes). 0.12 lifts E5_E
-                # exact coverage to ~3% and pure-XYZ-traj to ~7%.
-                # See docs/temp/traj_jitter_autodebug. 2026-06-22.
-                v3_config=dict(traj_control_prob=0.12),
-                corruptor_names=[],
-            ),
-            # Override synthetic corruption with real Neutral source for
-            # PerMo editing pairs (source_motion_path present in annotation).
-            # Pass-through for regular T2M / completion samples.
-            dict(type='LoadEditingSourceMotion'),
-            dict(
-                type='PackInputs',
-                keys=[
-                    'src_motion', 'tgt_motion', 'src_mask',
-                    'tgt_length', 'src_length', 'edit_mode',
-                    'text_vec_raw', 'text_ctxt_raw', 'text_ctxt_raw_length',
+                type='HYMotionOfficialT2MDataset',
+                data_root='data/hymotion_data',
+                input_record_file_dir='_input_record_files/sft_train_v1103_qwen3',
+                motion_dir='motions_o6dp_v0922',
+                motion_postfix='npy',
+                require_motion_file=False,
+                pipeline=[
+                    dict(
+                        type='LoadPreExtractedTextEmbedding',
+                        key='caption',
+                        allow_none=False,
+                        text_emb_augment_dir='qwen3_augmented',
+                        refetch_on_missing=True,
+                        raw_text_prob=0.5,
+                    ),
+                    dict(type='LoadO6dp', key='motion', joints_num=22, transl_aug_prob=0.0),
+                    dict(type='Compute198DimPosition', key='motion'),
+                    dict(
+                        type='CropMotionByTextTime',
+                        keys='motion',
+                        fps_key='fps',
+                        min_frame=10,
+                        max_frame=360,
+                    ),
+                    dict(
+                        type='RandomCropPadding',
+                        clip_len=360,
+                        pad_mode='replicate',
+                        allow_shorter=True,
+                        allow_longer=False,
+                        make_pad_mask=True,
+                        pad_mask_key='pad_mask',
+                    ),
+                    dict(type='PrepareM2Mv2FullMask', key='motion'),
+                    dict(
+                        type='PackInputs',
+                        keys=_pack_keys,
+                        meta_keys=[],
+                        set_dummy_value=True,
+                        dummy_value=None,
+                    ),
                 ],
-                meta_keys=['motion_path', 'fps'],
-                set_dummy_value=True,
-                dummy_value=None,
+                refetch=True,
+                max_refetch=100,
+                verbose=True,
+            ),
+            dict(
+                type='MotionhubMultiTaskMultiAgentDataset',
+                motion_key='smplx',
+                data_dir='data/motionhub',
+                anno_file=(
+                    'data/annotation/'
+                    'train_hymotion_400h_hq_permo_motionfix_editing_full_20260625.json'
+                ),
+                task_mode='auto',
+                num_person=1,
+                pipeline=[
+                    dict(type='LoadCompatibleCaption', allow_none=False),
+                    dict(
+                        type='LoadPreExtractedTextEmbedding',
+                        key='caption',
+                        allow_none=True,
+                        text_emb_augment_dir='qwen3_augmented',
+                    ),
+                    dict(
+                        type='LoadSmplx55',
+                        key='motion',
+                        rot_type='rotation_6d',
+                        transl_type='abs',
+                        smpl_type='smpl_22',
+                    ),
+                    dict(type='Compute198DimPosition', key='motion'),
+                    dict(
+                        type='RandomCropPadding',
+                        clip_len=360,
+                        pad_mode='replicate',
+                        allow_shorter=True,
+                        make_pad_mask=True,
+                        pad_mask_key='pad_mask',
+                    ),
+                    dict(
+                        type='PrepareM2Mv2Condition',
+                        key='motion',
+                        sampler_version='v3',
+                        editing_prob=0.0,
+                        v3_config=dict(traj_control_prob=0.12),
+                        corruptor_names=[],
+                    ),
+                    dict(type='LoadEditingSourceMotion'),
+                    dict(
+                        type='PackInputs',
+                        keys=_pack_keys,
+                        meta_keys=[],
+                        set_dummy_value=True,
+                        dummy_value=None,
+                    ),
+                ],
+                verbose=True,
+                refetch=True,
             ),
         ],
     ),

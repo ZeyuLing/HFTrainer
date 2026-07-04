@@ -17,7 +17,7 @@ import os
 import os.path as osp
 import warnings
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,9 @@ class HyMotionM2MBundle(ModelBundle):
         infer_noise_scheduler_cfg: Optional[dict] = None,
         cond_mask_prob: float = 0.0,
         motion_cond_mask_prob: float = 0.0,
+        enable_special_game_feat: bool = False,
+        train_null_embeddings: bool = True,
+        train_special_game_embeddings: bool = True,
         enable_ctxt_null_feat: bool = False,
         vace_condition_mode: str = 'split_reactive',
         vtxt_input_dim: int = 768,
@@ -212,15 +215,21 @@ class HyMotionM2MBundle(ModelBundle):
         self._text_encoder_cfg = deepcopy(text_encoder) if text_encoder else None
 
         # ---- null embeddings for classifier-free guidance ----
-        # Trainable: initialized with small random values. During M2M training,
-        # these embeddings learn the "no text condition" representation jointly
-        # with the transformer. This allows CFG to work correctly: when text_available=False,
-        # the model sees null_embeddings which are distinct from real text embeddings,
-        # enabling the transformer to learn meaningful text conditioning via the guidance
-        # signal (pred_with_text - pred_with_null). Frozen null embeddings cause CFG
-        # to fail because null and real embeddings appear equivalent to the model.
-        self.null_vtxt_feat = nn.Parameter(torch.randn(1, 1, vtxt_input_dim) * 0.01, requires_grad=True)
-        self.null_ctxt_input = nn.Parameter(torch.randn(1, 1, ctxt_input_dim) * 0.01, requires_grad=True)
+        # Zero defaults match HYMotion T2M; warm-start checkpoints carry the
+        # learned null and special-source embeddings.
+        self.null_vtxt_feat = nn.Parameter(torch.zeros(1, 1, vtxt_input_dim))
+        self.null_ctxt_input = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim))
+        self.special_game_vtxt_feat = nn.Parameter(torch.zeros(1, 1, vtxt_input_dim))
+        self.special_game_ctxt_feat = nn.Parameter(torch.zeros(1, 1, ctxt_input_dim))
+        self.enable_special_game_feat = bool(enable_special_game_feat)
+        self.train_null_embeddings = bool(train_null_embeddings)
+        self.train_special_game_embeddings = bool(train_special_game_embeddings)
+        if not self.train_null_embeddings:
+            self.null_vtxt_feat.requires_grad_(False)
+            self.null_ctxt_input.requires_grad_(False)
+        if not self.train_special_game_embeddings:
+            self.special_game_vtxt_feat.requires_grad_(False)
+            self.special_game_ctxt_feat.requires_grad_(False)
 
         # ---- mean / std buffers ----
         self._load_mean_std(mean_std_dir)
@@ -549,6 +558,9 @@ class HyMotionM2MBundle(ModelBundle):
         ctxt_mask_temporal: Optional[Tensor] = None,
         mask_density: Optional[Tensor] = None,
         task_emb: Optional[Tensor] = None,
+        sources: Optional[List[str]] = None,
+        trigger_sources: Optional[Set[str]] = None,
+        special_game_prob: float = 0.5,
     ) -> Tensor:
         """Single forward pass through the MMDiT transformer.
 
@@ -561,10 +573,21 @@ class HyMotionM2MBundle(ModelBundle):
             ctxt_mask_temporal: (B, Lc) boolean mask for text tokens.
             mask_density: (B,) optional mask density for CDE (CRFM v3).
             task_emb: (B, 1, 1024) optional task instruction embeddings to add to adapter.
+            sources: Optional data source names for official special-source token injection.
+            trigger_sources: Source names that should receive the learned special token.
 
         Returns:
             Model prediction, shape (B, L, D_motion).
         """
+        if ctxt_mask_temporal is not None:
+            vtxt_input, ctxt_input, ctxt_mask_temporal = self.maybe_inject_source_token(
+                vtxt_input=vtxt_input,
+                ctxt_input=ctxt_input,
+                ctxt_mask_temporal=ctxt_mask_temporal,
+                sources=sources,
+                trigger_sources=trigger_sources,
+                prob=special_game_prob,
+            )
         return self.motion_transformer(
             x=x_input,
             ctxt_input=ctxt_input,
@@ -575,6 +598,85 @@ class HyMotionM2MBundle(ModelBundle):
             mask_density=mask_density,
             task_emb=task_emb,
         )
+
+    def maybe_inject_source_token(
+        self,
+        vtxt_input: Tensor,
+        ctxt_input: Tensor,
+        ctxt_mask_temporal: Tensor,
+        sources: Optional[List[str]],
+        trigger_sources: Optional[Set[str]] = None,
+        prob: float = 0.5,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """Inject the official HYMotion special source token for selected sources."""
+        if (sources is None or trigger_sources is None) or not self.enable_special_game_feat:
+            return vtxt_input, ctxt_input, ctxt_mask_temporal
+
+        B, Lc, Dc = ctxt_input.shape
+        if not isinstance(sources, (list, tuple)) or len(sources) != B:
+            raise ValueError(f'sources length must equal batch size: {len(sources)} vs {B}')
+
+        trig = {str(s).lower() for s in trigger_sources}
+        src_mask = torch.tensor(
+            [str(s).lower() in trig for s in sources],
+            dtype=torch.bool,
+            device=ctxt_input.device,
+        )
+        if not src_mask.any():
+            return vtxt_input, ctxt_input, ctxt_mask_temporal
+
+        if self.training:
+            rand_mask = torch.rand(B, device=ctxt_input.device) < prob
+        else:
+            rand_mask = torch.ones(B, dtype=torch.bool, device=ctxt_input.device)
+        apply_mask = src_mask & rand_mask
+        if not apply_mask.any():
+            return vtxt_input, ctxt_input, ctxt_mask_temporal
+
+        vtxt_token = self.special_game_vtxt_feat.to(vtxt_input).expand(B, 1, -1)
+        vtxt_input = vtxt_input + vtxt_token * apply_mask.view(B, 1, 1).to(vtxt_input.dtype)
+
+        if ctxt_mask_temporal.dtype == torch.bool:
+            cur_len = ctxt_mask_temporal.sum(dim=1).long()
+        else:
+            cur_len = (ctxt_mask_temporal > 0).sum(dim=1).long()
+
+        can_inplace = apply_mask & (cur_len < Lc)
+        b_inplace = torch.nonzero(can_inplace, as_tuple=False).squeeze(1)
+        if b_inplace.numel() > 0:
+            pos = cur_len[b_inplace]
+            token = self.special_game_ctxt_feat.squeeze(0).squeeze(0).to(ctxt_input)
+            ctxt_input = ctxt_input.clone()
+            ctxt_mask_temporal = ctxt_mask_temporal.clone()
+            ctxt_input[b_inplace, pos, :] = token.unsqueeze(0).expand(b_inplace.numel(), Dc)
+            if ctxt_mask_temporal.dtype == torch.bool:
+                ctxt_mask_temporal[b_inplace, pos] = True
+            else:
+                ctxt_mask_temporal[b_inplace, pos] = 1
+
+        need_expand = (apply_mask & (cur_len >= Lc)).any()
+        if need_expand:
+            suffix = torch.zeros((B, 1, Dc), dtype=ctxt_input.dtype, device=ctxt_input.device)
+            full_hit = apply_mask & (cur_len >= Lc)
+            b_full = torch.nonzero(full_hit, as_tuple=False).squeeze(1)
+            if b_full.numel() > 0:
+                suffix[b_full, 0, :] = (
+                    self.special_game_ctxt_feat.expand(b_full.numel(), 1, -1)
+                    .to(ctxt_input)
+                    .squeeze(1)
+                )
+            ctxt_input = torch.cat([ctxt_input, suffix], dim=1)
+
+            if ctxt_mask_temporal.dtype == torch.bool:
+                suffix_mask = torch.zeros((B, 1), dtype=torch.bool, device=ctxt_input.device)
+                suffix_mask[b_full, 0] = True
+            else:
+                suffix_mask = torch.zeros(
+                    (B, 1), dtype=ctxt_mask_temporal.dtype, device=ctxt_input.device)
+                suffix_mask[b_full, 0] = 1
+            ctxt_mask_temporal = torch.cat([ctxt_mask_temporal, suffix_mask], dim=1)
+
+        return vtxt_input, ctxt_input, ctxt_mask_temporal
 
     def decode_motion_from_latent(
         self,

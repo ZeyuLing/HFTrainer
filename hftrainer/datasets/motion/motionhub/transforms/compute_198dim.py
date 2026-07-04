@@ -51,7 +51,7 @@ def compute_position_channels(
     Returns:
         (*, 63) position channels (21 joints, Scheme D).
     """
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
 
     leading = motion_135.shape[:-1]
 
@@ -98,7 +98,7 @@ def compute_ric66_channels(
     135-dim translation + rotation channels. The pelvis position is always
     exactly zero after root-relative conversion.
     """
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
 
     leading = motion_135.shape[:-1]
 
@@ -157,11 +157,11 @@ def recompute_position_from_rotation(
 
     # If global rotation, convert to local for FK
     if rotation_space == 'global':
-        from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+        from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
         # motion135_to_fk handles global->local conversion internally
         world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='global')
     else:
-        from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+        from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
         world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='local')
 
     # Scheme D: XZ relative to pelvis, Y absolute
@@ -256,9 +256,13 @@ _DEFAULT_BONE_OFFSETS_PATH = osp.join(
 
 @TRANSFORMS.register_module()
 class Compute198DimPosition(BaseTransform):
-    """Transform to compute 198-dim motion from 135-dim.
+    """Transform to compute 198-dim motion from 135/201-dim motion.
 
-    Adds 63-dim position channels (21 joints, Scheme D) via FK.
+    Adds/recomputes 63-dim position channels (21 joints, Scheme D) via FK.
+    When the input is official HY-Motion Lite O6DP-201, the first 135
+    translation/rotation channels are kept and the 66-dim official RIC block is
+    intentionally discarded, so M2M always trains with its native 198-dim
+    position convention.
 
     Must be placed BEFORE LocalToGlobalRotation in the pipeline
     (FK requires local rotation).
@@ -297,16 +301,19 @@ class Compute198DimPosition(BaseTransform):
             f'Expected torch.Tensor for key {self.key!r}, got {type(motion)}'
         )
 
-        # Handle multi-person (P, T, D) or single-person (T, D)
+        # Handle multi-person (P, T, D) or single-person (T, D).
+        # D=201 is the official HY-Motion Lite T2M representation; M2M keeps
+        # the shared 135-dim trans+rot prefix and recomputes its own 63-dim
+        # position channels.
         orig_shape = motion.shape
         if motion.ndim == 3:
             P, T, D = motion.shape
-            assert D == 135, f"Expected motion_dim=135, got {D}"
-            motion_flat = motion.reshape(P * T, D)
+            assert D in (135, 201), f"Expected motion_dim=135 or 201, got {D}"
+            motion_flat = motion[..., :135].reshape(P * T, 135)
         elif motion.ndim == 2:
             T, D = motion.shape
-            assert D == 135, f"Expected motion_dim=135, got {D}"
-            motion_flat = motion
+            assert D in (135, 201), f"Expected motion_dim=135 or 201, got {D}"
+            motion_flat = motion[:, :135]
         else:
             raise ValueError(f"Unexpected motion shape: {orig_shape}")
 
