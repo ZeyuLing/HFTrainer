@@ -46,8 +46,9 @@ python3 scripts/embodied/launch_hymotion_tmr_phase1_h20.py \
 ```
 
 The launcher kills only `occupy.py` holders on the selected host, starts one
-8-GPU TMR run per host, refuses hosts that already have `torchrun` or
-`tools/train.py`, and re-runs `../occupy.py` when each script exits.
+8-GPU TMR run per host in a detached `tmux` session, refuses hosts that
+already have `torchrun` or `tools/train.py`, and re-runs `../occupy.py` when
+each script exits.
 
 To start only the fast sanity run on one free host:
 

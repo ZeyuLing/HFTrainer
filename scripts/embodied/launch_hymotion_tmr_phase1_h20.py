@@ -108,6 +108,15 @@ def main() -> None:
             "RUN_ROOT": str(run_root),
             "CAPTION_SOURCE": spec.get("caption_source", "embedding"),
         }
+        session = spec["run_name"].replace("-", "_")[:80]
+        inner = (
+            "cd {root} && env {envs} bash scripts/embodied/run_hymotion_tmr_training.sh "
+            "> {log_file} 2>&1"
+        ).format(
+            root=shlex.quote(str(root)),
+            envs=shell_quote_env(env),
+            log_file=shlex.quote(str(run_root / "logs" / "launcher.log")),
+        )
         launch = (
             "set -euo pipefail; "
             "cd {root}; "
@@ -115,14 +124,14 @@ def main() -> None:
             "if ps -eo pid,cmd | grep -E '[t]orchrun|tools/[t]rain.py' >/dev/null; then "
             "echo BUSY_HOST_HAS_TRAINING_PROCESS; exit 42; fi; "
             "pkill -f '[o]ccupy.py' || true; "
-            "nohup env {envs} bash scripts/embodied/run_hymotion_tmr_training.sh "
-            "> {log_file} 2>&1 & "
-            "echo launched:{run_name}:$!"
+            "tmux has-session -t {session} 2>/dev/null && tmux kill-session -t {session} || true; "
+            "tmux new-session -d -s {session} {inner}; "
+            "echo launched:{run_name}:tmux:{session}"
         ).format(
             root=shlex.quote(str(root)),
             log_dir=shlex.quote(str(run_root / "logs")),
-            envs=shell_quote_env(env),
-            log_file=shlex.quote(str(run_root / "logs" / "launcher.log")),
+            session=shlex.quote(session),
+            inner=shlex.quote(inner),
             run_name=spec["run_name"],
         )
         cmd = [
