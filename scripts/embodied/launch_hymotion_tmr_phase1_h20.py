@@ -123,8 +123,13 @@ def main() -> None:
             "mkdir -p {log_dir}; "
             "if ps -eo pid,cmd | grep -E '[t]orchrun|tools/[t]rain.py' >/dev/null; then "
             "echo BUSY_HOST_HAS_TRAINING_PROCESS; exit 42; fi; "
+            "if nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits "
+            "| awk -F, '{{gsub(/ /,\"\",$1); gsub(/ /,\"\",$2); if ($1 > 4096 || $2 > 20) busy=1}} END {{exit busy ? 0 : 1}}'; then "
+            "echo BUSY_HOST_HAS_ACTIVE_GPUS; exit 43; fi; "
             "pkill -f '[o]ccupy.py' || true; "
             "tmux has-session -t {session} 2>/dev/null && tmux kill-session -t {session} || true; "
+            "if tmux ls 2>/dev/null | grep -E '^tmr_hymotion_' >/dev/null; then "
+            "echo BUSY_HOST_HAS_TMR_SESSION; exit 44; fi; "
             "tmux new-session -d -s {session} {inner}; "
             "echo launched:{run_name}:tmux:{session}"
         ).format(
