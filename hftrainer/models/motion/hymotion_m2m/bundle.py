@@ -797,14 +797,7 @@ class HyMotionM2MBundle(ModelBundle):
 
         frozen = _apply_freeze_strategy(self, strategy)
 
-        # Zero-init null embeddings only for from-scratch caption training.
-        # When warm-starting from HYMotion-Lite, the checkpoint carries learned
-        # non-zero null features that should be preserved for CFG alignment.
-        if frozen and not getattr(self, '_t2m_pretrained_path', None):
-            with torch.no_grad():
-                self.null_vtxt_feat.zero_()
-                self.null_ctxt_input.zero_()
-
+        if frozen:
             total = sum(p.numel() for p in self.parameters())
             frozen_n = sum(
                 p.numel() for p in self.parameters() if not p.requires_grad
