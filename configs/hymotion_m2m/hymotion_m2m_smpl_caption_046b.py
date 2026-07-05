@@ -6,15 +6,18 @@
 # data stream instead of the older 400h HQ JSON path.
 #
 # Target mix per sampled step:
-#   official_t2m     30%
-#   MotionFix edit    6%
-#   PerMo style edit  7%
-#   PerMo content edit 7%
-#   other M2M tasks   50%
+#   official_t2m       50%
+#   MotionFix edit     25%
+#   PerMo edit         25%
+#
+# The weighted-sampler fractions intentionally sum to 1.0 so generic
+# MotionHub generation records get zero probability.  The full M2M phase keeps
+# pure text-to-motion frequent enough to preserve text following, while the
+# remaining half exercises paired motion-conditioned editing.
 
 _base_ = './_base_hymotion_m2m_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_official_sft_mix_20260704'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_official_t2m_permo_motionfix_mix_20260705'
 
 _pack_keys = [
     'src_motion', 'tgt_motion', 'src_mask',
@@ -58,14 +61,13 @@ train_dataloader = dict(
     persistent_workers=True,
     shuffle=True,
     weighted_sampler=dict(groups=[
-        dict(name='official_t2m', match=['official_t2m'], frac=0.30),
-        dict(name='motionfix', match=['MotionFix'], frac=0.06),
-        dict(name='style_edit', match=['styleedit'], frac=0.07),
-        dict(name='content_edit', match=['contentedit'], frac=0.07),
+        dict(name='official_t2m', match=['official_t2m'], frac=0.50),
+        dict(name='motionfix', match=['MotionFix'], frac=0.25),
+        dict(name='permo_edit', match=['PerMo-editing'], frac=0.25),
     ]),
     dataset=dict(
         type='MotionDatasetUnion',
-        subset_prefixes=['official_t2m', 'm2m'],
+        subset_prefixes=['official_t2m', 'permo', 'motionfix'],
         datasets=[
             dict(
                 type='HYMotionOfficialT2MDataset',
@@ -118,10 +120,58 @@ train_dataloader = dict(
                 type='MotionhubMultiTaskMultiAgentDataset',
                 motion_key='smplx',
                 data_dir='data/motionhub',
-                anno_file=(
-                    'data/annotation/'
-                    'train_hymotion_400h_hq_permo_motionfix_editing_full_20260625.json'
-                ),
+                anno_file='data/annotation/permo_editing_train_smplh52_20260705.json',
+                task_mode='auto',
+                num_person=1,
+                pipeline=[
+                    dict(type='LoadCompatibleCaption', allow_none=False),
+                    dict(
+                        type='LoadPreExtractedTextEmbedding',
+                        key='caption',
+                        allow_none=True,
+                        text_emb_augment_dir='qwen3_augmented',
+                    ),
+                    dict(
+                        type='LoadSmplx55',
+                        key='motion',
+                        rot_type='rotation_6d',
+                        transl_type='abs',
+                        smpl_type='smpl_22',
+                    ),
+                    dict(type='Compute198DimPosition', key='motion'),
+                    dict(
+                        type='RandomCropPadding',
+                        clip_len=360,
+                        pad_mode='replicate',
+                        allow_shorter=True,
+                        make_pad_mask=True,
+                        pad_mask_key='pad_mask',
+                    ),
+                    dict(
+                        type='PrepareM2Mv2Condition',
+                        key='motion',
+                        sampler_version='v3',
+                        editing_prob=0.0,
+                        v3_config=dict(traj_control_prob=0.12),
+                        corruptor_names=[],
+                    ),
+                    dict(type='LoadEditingSourceMotion'),
+                    dict(
+                        type='PackInputs',
+                        keys=_pack_keys,
+                        meta_keys=[],
+                        set_dummy_value=True,
+                        dummy_value=None,
+                    ),
+                ],
+                verbose=True,
+                refetch=True,
+            ),
+            dict(
+                type='MotionhubMultiTaskMultiAgentDataset',
+                motion_key='smplx',
+                data_dir='data',
+                anno_file='data/MotionFix/motionfix_train.json',
                 task_mode='auto',
                 num_person=1,
                 pipeline=[
