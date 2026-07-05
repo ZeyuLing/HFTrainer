@@ -137,7 +137,7 @@ train_dataloader = dict(
 
 default_hooks = dict(
     logger=dict(type='LoggerHook', interval=10, iter_interval=10),
-    checkpoint=dict(interval=100, save_last=True),
+    checkpoint=dict(type='CheckpointHook', interval=10, max_keep_ckpts=100, save_last=True),
     ema=None,
 )
 

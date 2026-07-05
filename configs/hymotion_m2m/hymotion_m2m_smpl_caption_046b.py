@@ -24,21 +24,15 @@ _pack_keys = [
     'text_source_type', 'motion_path', 'caption_path', 'fps', 'caption',
 ]
 
-# Update this to the selected checkpoint from the aligned T2M-only phase
-# before launching formal M2M.  Keeping the semantic dependency explicit avoids
-# accidentally resuming from the old mixed-task E2 chain.
-load_from = dict(
-    _delete_=True,
-    path=(
-        'work_dirs/'
-        'hymotion_m2m_v2_smpl_caption_t2m_only_official_sft_h20x64_20260704/'
-        'checkpoint-iter_15000'
-    ),
-    load_scope='model',
-    exclude_bundle_keys=['mean', 'std'],
-)
+# Start formal M2M directly from HY-Motion-1.0-Lite through the M2M bundle
+# adapter.  Do not use the generic load_from path here: the M2M input/output
+# projections need 201->198/channel-expanded adaptation and the learned null
+# embeddings must be preserved.
+load_from = None
 
 model = dict(
+    t2m_pretrained_path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    t2m_freeze_strategy='none',
     pred_type='velocity',
     uncondition_mode=False,
     cond_mask_prob=0.1,
