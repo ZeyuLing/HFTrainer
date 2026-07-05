@@ -9,9 +9,9 @@ weights into HyMotion-M2M v2 bundle, handling architecture differences:
   - Timestep encoder
   - Transformer blocks (double_blocks, single_blocks)
 
-- **Non-reusable modules** (shape mismatch, reinitialized):
-  - input_encoder: 135→594 (VACE expands input)
-  - final_layer: 135→198 (M2M output dimension differs)
+- **Adapted modules** (shape mismatch, deterministically remapped):
+  - input_encoder: 201 -> 594 (M2M input is [x_t, reactive, mask])
+  - final_layer: 201 -> 198 (M2M drops pelvis RIC from position block)
 
 - **Bundle-level condition parameters** (loaded when present):
   - null_vtxt_feat, null_ctxt_input
@@ -59,8 +59,8 @@ REUSABLE_MODULES = {
 
 # Modules with shape mismatches (skipped, reinitialized)
 SHAPE_MISMATCH_MODULES = {
-    'motion_transformer.input_encoder',    # 135→594 input dimension
-    'motion_transformer.final_layer',       # 135→198 output dimension
+    'motion_transformer.input_encoder',    # 201 -> 594 expanded VACE input
+    'motion_transformer.final_layer',       # 201 -> 198 output dimension
 }
 
 # Bundle-level parameters to exclude (use config-initialized values)
@@ -137,6 +137,101 @@ def _filter_reusable_params(state_dict: Dict[str, torch.Tensor]) -> Dict[str, to
     return filtered
 
 
+def _motion201_to_m2m198_indices(device=None) -> torch.Tensor:
+    """Map HYMotion-Lite 201-dim channels to M2M's native 198-dim channels.
+
+    HYMotion-Lite O6DP-201 is [135 trans+rot, 66 RIC]. M2M keeps the shared
+    135-dim trans+rot prefix and uses 21*3 position channels, so the pelvis RIC
+    slice old[135:138] is dropped and body-joint positions old[138:201] map to
+    new[135:198].
+    """
+    return torch.cat(
+        [
+            torch.arange(0, 135, device=device),
+            torch.arange(138, 201, device=device),
+        ],
+        dim=0,
+    )
+
+
+def _adapt_t2m_io_params(
+    state_dict: Dict[str, torch.Tensor],
+    bundle,
+) -> tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
+    """Adapt T2M input/output projection tensors to the M2M architecture."""
+    model_state = {}
+    mt_state = bundle.motion_transformer.state_dict()
+    for key, value in mt_state.items():
+        model_state[f'motion_transformer.{key}'] = value
+
+    adapted: Dict[str, torch.Tensor] = {}
+    stats: Dict[str, Any] = {
+        'modules_adapted': [],
+        'num_params_adapted': 0,
+        'warnings': [],
+    }
+    idx = _motion201_to_m2m198_indices()
+
+    old_in_w = state_dict.get('motion_transformer.input_encoder.weight')
+    new_in_w_ref = model_state.get('motion_transformer.input_encoder.weight')
+    if old_in_w is not None and new_in_w_ref is not None:
+        if tuple(old_in_w.shape) == (new_in_w_ref.shape[0], 201) and new_in_w_ref.shape[1] >= 198:
+            new_in_w = old_in_w.new_zeros(tuple(new_in_w_ref.shape))
+            new_in_w[:, :198] = old_in_w[:, idx]
+            adapted['motion_transformer.input_encoder.weight'] = new_in_w
+            stats['modules_adapted'].append('motion_transformer.input_encoder')
+            stats['num_params_adapted'] += new_in_w.numel()
+        else:
+            stats['warnings'].append(
+                'input_encoder.weight not adapted: '
+                f'ckpt={tuple(old_in_w.shape)} model={tuple(new_in_w_ref.shape)}'
+            )
+
+    old_in_b = state_dict.get('motion_transformer.input_encoder.bias')
+    new_in_b_ref = model_state.get('motion_transformer.input_encoder.bias')
+    if old_in_b is not None and new_in_b_ref is not None:
+        if tuple(old_in_b.shape) == tuple(new_in_b_ref.shape):
+            adapted['motion_transformer.input_encoder.bias'] = old_in_b.clone()
+            stats['num_params_adapted'] += old_in_b.numel()
+        else:
+            stats['warnings'].append(
+                'input_encoder.bias not adapted: '
+                f'ckpt={tuple(old_in_b.shape)} model={tuple(new_in_b_ref.shape)}'
+            )
+
+    old_out_w = state_dict.get('motion_transformer.final_layer.linear.weight')
+    new_out_w_ref = model_state.get('motion_transformer.final_layer.linear.weight')
+    if old_out_w is not None and new_out_w_ref is not None:
+        if tuple(old_out_w.shape) == (201, new_out_w_ref.shape[1]) and new_out_w_ref.shape[0] == 198:
+            adapted['motion_transformer.final_layer.linear.weight'] = old_out_w[idx, :].clone()
+            stats['modules_adapted'].append('motion_transformer.final_layer')
+            stats['num_params_adapted'] += adapted[
+                'motion_transformer.final_layer.linear.weight'
+            ].numel()
+        else:
+            stats['warnings'].append(
+                'final_layer.linear.weight not adapted: '
+                f'ckpt={tuple(old_out_w.shape)} model={tuple(new_out_w_ref.shape)}'
+            )
+
+    old_out_b = state_dict.get('motion_transformer.final_layer.linear.bias')
+    new_out_b_ref = model_state.get('motion_transformer.final_layer.linear.bias')
+    if old_out_b is not None and new_out_b_ref is not None:
+        if tuple(old_out_b.shape) == (201,) and tuple(new_out_b_ref.shape) == (198,):
+            adapted['motion_transformer.final_layer.linear.bias'] = old_out_b[idx].clone()
+            stats['num_params_adapted'] += adapted[
+                'motion_transformer.final_layer.linear.bias'
+            ].numel()
+        else:
+            stats['warnings'].append(
+                'final_layer.linear.bias not adapted: '
+                f'ckpt={tuple(old_out_b.shape)} model={tuple(new_out_b_ref.shape)}'
+            )
+
+    stats['modules_adapted'] = sorted(set(stats['modules_adapted']))
+    return adapted, stats
+
+
 def _get_shape_mismatches(state_dict: Dict[str, torch.Tensor], bundle) -> Dict[str, tuple]:
     """
     Identify parameters with shape mismatches between checkpoint and model.
@@ -145,7 +240,13 @@ def _get_shape_mismatches(state_dict: Dict[str, torch.Tensor], bundle) -> Dict[s
         Dict mapping parameter name to (ckpt_shape, model_shape)
     """
     mismatches = {}
-    model_state = bundle.motion_transformer.state_dict()
+    model_state = {}
+    for key, value in bundle.motion_transformer.state_dict().items():
+        model_state[f'motion_transformer.{key}'] = value
+    for key, value in bundle.named_parameters(recurse=False):
+        model_state[key] = value
+    for key, value in bundle.named_buffers(recurse=False):
+        model_state[key] = value
     
     for key, ckpt_value in state_dict.items():
         if key in model_state:
@@ -183,9 +284,9 @@ def load_t2m_pretrained_selective(
     """
     Selectively load T2M pretrained weights into M2M v2 bundle.
     
-    Handles architecture differences between T2M (input_dim=135) and M2M v2
+    Handles architecture differences between T2M (input_dim=201) and M2M v2
     (input_dim=594 with VACE conditioning). Loads all reusable modules
-    (encoders, blocks) while reinitializing shape-mismatched layers
+    (encoders, blocks) and adapts shape-mismatched input/output projections
     (input_encoder, final_layer).
     
     Args:
@@ -232,8 +333,11 @@ def load_t2m_pretrained_selective(
     except Exception as e:
         raise RuntimeError(f"Failed to load checkpoint: {e}") from e
     
-    # Extract only reusable module parameters
+    # Extract reusable module parameters and adapt the IO layers that differ in
+    # shape but still have a well-defined T2M-to-M2M mapping.
     reusable_state = _filter_reusable_params(t2m_state)
+    adapted_state, adapted_stats = _adapt_t2m_io_params(t2m_state, bundle)
+    reusable_state.update(adapted_state)
     
     if not reusable_state:
         logger.warning("No reusable parameters found in checkpoint. "
@@ -266,9 +370,11 @@ def load_t2m_pretrained_selective(
         'modules_loaded': [],
         'modules_skipped': [],
         'modules_reinitialized': [],
+        'modules_adapted': adapted_stats['modules_adapted'],
         'num_params_loaded': 0,
         'num_params_skipped': 0,
         'num_params_reinitialized': 0,
+        'num_params_adapted': adapted_stats['num_params_adapted'],
         'frozen_modules': [],
     }
     
@@ -295,8 +401,12 @@ def load_t2m_pretrained_selective(
                 if mod_name not in stats['modules_skipped']:
                     stats['modules_skipped'].append(mod_name)
     
-    # Reinitialize shape-mismatch modules
+    # Reinitialize only modules that could not be adapted. A healthy T2M-only
+    # warm-start should adapt both input_encoder and final_layer.
+    adapted_modules = set(adapted_stats['modules_adapted'])
     for mod_path in SHAPE_MISMATCH_MODULES:
+        if mod_path in adapted_modules:
+            continue
         try:
             parts = mod_path.split('.')
             if len(parts) == 2:
@@ -328,6 +438,15 @@ def load_t2m_pretrained_selective(
     
     if stats['modules_reinitialized']:
         logger.info(f"Reinitialized: {', '.join(stats['modules_reinitialized'])}")
+
+    if stats['modules_adapted']:
+        logger.info(
+            f"Adapted T2M IO modules: {', '.join(stats['modules_adapted'])} "
+            f"({stats['num_params_adapted']:,} params)"
+        )
+
+    for warning in adapted_stats.get('warnings', []):
+        logger.warning(f"T2M IO adapter: {warning}")
     
     if stats['frozen_modules']:
         logger.info(f"Frozen (strategy={freeze_strategy}): {', '.join(stats['frozen_modules'])}")

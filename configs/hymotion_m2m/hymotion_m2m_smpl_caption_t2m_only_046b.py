@@ -26,17 +26,15 @@ _pack_keys = [
     'text_source_type', 'motion_path', 'caption_path', 'fps', 'caption',
 ]
 
-# Warm-start from the official Lite checkpoint.  mean/std are excluded because
-# M2M uses its own 198-dim stats; null/special token tensors are intentionally
-# loaded when their shapes match.
-load_from = dict(
-    _delete_=True,
-    path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
-    load_scope='model',
-    exclude_bundle_keys=['mean', 'std'],
-)
+# Warm-start from the official Lite checkpoint in the M2M bundle constructor.
+# The M2M loader remaps HYMotion-Lite 201-dim IO projections into M2M's
+# 198-dim representation and expanded [x_t, reactive, mask] input.  mean/std
+# are always excluded by the M2M loader because this config uses 198-dim stats.
+load_from = None
 
 model = dict(
+    t2m_pretrained_path='checkpoints/HY-Motion-1.0/HY-Motion-1.0-Lite/latest.ckpt',
+    t2m_freeze_strategy='none',
     pred_type='velocity',
     uncondition_mode=False,
     cond_mask_prob=0.1,
