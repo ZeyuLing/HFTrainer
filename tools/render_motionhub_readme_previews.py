@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Render MotionHub README task previews with a headless Three.js viewer.
+"""Render MotionHub README modality previews with a headless Three.js viewer.
 
-The release README should show what each trainable task looks like without
-requiring users to start the full inspection app.  This script:
+The release README should show representative motion-language, music, speech,
+and two-person interaction examples without requiring users to start the full
+inspection app.  This script:
 
 1. selects representative MotionHub annotations,
 2. forwards the released SMPL-H NPZ files through the same SMPL-H convention,
@@ -43,61 +44,44 @@ DEFAULT_OUT_DIR = DEFAULT_DATA_ROOT / "assets" / "readme_previews"
 DEFAULT_WORK_DIR = REPO_ROOT / "outputs" / "temp" / "motionhub_readme_previews"
 THREE_SRC = REPO_ROOT / "motion_annot_web" / "score_m2m" / "static" / "three" / "three.module.js"
 
-TASKS: List[Dict[str, Any]] = [
+PREVIEWS: List[Dict[str, Any]] = [
     {
-        "key": "text_to_motion",
-        "title": "Text-to-motion",
+        "key": "text_motion",
+        "title": "Text and Motion",
         "subset": "HumanML3D_AMASS",
         "split": "test",
-        "description": "Text prompt -> SMPL-H motion",
+        "description": "Text descriptions paired with SMPL-H motion",
         "color": "#68d391",
     },
     {
-        "key": "motion_to_text",
-        "title": "Motion-to-text",
-        "subset": "permo",
-        "split": "test",
-        "description": "SMPL-H motion -> hierarchical motion description",
-        "color": "#63b3ed",
-    },
-    {
-        "key": "music_to_dance",
-        "title": "Music-to-dance",
+        "key": "music_dance",
+        "title": "Music and Dance",
         "subset": "aist",
         "split": "test",
-        "description": "Music audio -> dance motion",
+        "description": "Synchronized music and dance motion",
         "color": "#f6ad55",
         "audio_field": "music_path",
     },
     {
-        "key": "speech_audio_to_gesture",
-        "title": "Speech/audio-to-gesture",
+        "key": "speech_gesture",
+        "title": "Speech and Gesture",
         "subset": "beat_v2.0.0",
         "split": "test",
-        "description": "Speech audio -> co-speech gesture",
+        "description": "Speech audio or transcript paired with gesture motion",
         "color": "#9f7aea",
         "audio_field": "audio_path",
-        "where": {"language": "english"},
+        "select_key": "beatv2_13_lu_0_73_73_1",
     },
     {
-        "key": "script_to_gesture",
-        "title": "Script-to-gesture",
-        "subset": "beat_v2.0.0",
-        "split": "test",
-        "description": "Speech transcript -> gesture motion",
-        "color": "#f687b3",
-        "audio_field": "audio_path",
-        "where": {"language": "english"},
-        "item_offset": 1,
-    },
-    {
-        "key": "interaction_text_to_motion",
-        "title": "Interaction text-to-motion",
+        "key": "two_person_interaction",
+        "title": "Two-Person Interaction",
         "subset": "interx",
         "split": "test",
-        "description": "Interaction text -> paired two-person motion",
+        "description": "Interaction text paired with two-person motion",
         "color": "#4fd1c5",
         "two_person": True,
+        "use_2p_canonical": True,
+        "select_key": "interx_G019T003A018R019_p1",
     },
 ]
 
@@ -152,7 +136,7 @@ VIEWER_HTML = r"""<!doctype html>
     import * as THREE from 'three';
 
     const params = new URLSearchParams(location.search);
-    const key = params.get('case') || 'text_to_motion';
+    const key = params.get('case') || 'text_motion';
     const manifest = await (await fetch(`cases/${key}/manifest.json`)).json();
 
     document.querySelector('#task').textContent = manifest.title;
@@ -178,14 +162,18 @@ VIEWER_HTML = r"""<!doctype html>
     rimLight.position.set(-4.2, 2.4, -3.8);
     scene.add(rimLight);
 
-    const grid = new THREE.GridHelper(7.5, 15, 0x465466, 0x28313d);
+    const floorSize = Math.max(8.5, manifest.camera.floor_size || 8.5);
+    const floorCenter = manifest.camera.floor_center || [0, 0];
+    const gridDivisions = Math.max(16, Math.ceil(floorSize * 2));
+    const grid = new THREE.GridHelper(floorSize, gridDivisions, 0x465466, 0x28313d);
+    grid.position.set(floorCenter[0], 0, floorCenter[1]);
     scene.add(grid);
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(8.5, 8.5),
+      new THREE.PlaneGeometry(floorSize, floorSize),
       new THREE.MeshStandardMaterial({ color: 0x151b24, roughness: 0.95, metalness: 0.0 })
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.004;
+    floor.position.set(floorCenter[0], -0.004, floorCenter[1]);
     floor.receiveShadow = true;
     scene.add(floor);
 
@@ -217,12 +205,12 @@ VIEWER_HTML = r"""<!doctype html>
     }
 
     const radius = Math.max(1.05, manifest.camera.radius);
-    function setCamera(frame) {
-      const raw = manifest.camera.centers ? manifest.camera.centers[frame] : manifest.camera.center;
-      const center = new THREE.Vector3(...raw);
+    function setCamera() {
+      const center = new THREE.Vector3(...manifest.camera.center);
       camera.position.set(center.x + radius * 0.18, center.y + radius * 0.54, center.z + radius * 2.55);
       camera.lookAt(center.x, center.y + radius * 0.12, center.z);
     }
+    setCamera();
 
     function renderFrame(t) {
       const frame = Math.max(0, Math.min(manifest.frames - 1, Math.floor(t)));
@@ -232,7 +220,6 @@ VIEWER_HTML = r"""<!doctype html>
         item.geometry.attributes.position.needsUpdate = true;
         item.geometry.computeVertexNormals();
       }
-      setCamera(frame);
       renderer.render(scene, camera);
     }
 
@@ -290,7 +277,9 @@ def load_split(data_root: Path, subset: str, split: str) -> Dict[str, Any]:
 
 def pick_item(data_root: Path, spec: Dict[str, Any]) -> Tuple[str, Dict[str, Any], Dict[str, Dict[str, Any]]]:
     split = load_split(data_root, spec["subset"], spec.get("split", "test"))
-    items = list(iter_items(split))
+    all_items = list(iter_items(split))
+    by_key = {k: v for k, v in all_items}
+    items = all_items
     where = spec.get("where") or {}
     if where:
         items = [
@@ -299,11 +288,16 @@ def pick_item(data_root: Path, spec: Dict[str, Any]) -> Tuple[str, Dict[str, Any
         ]
         if not items:
             raise ValueError(f"{spec['key']}: no items match {where}")
+    select_key = spec.get("select_key")
+    if select_key:
+        if select_key not in by_key:
+            raise KeyError(f"{spec['key']}: select_key not found: {select_key}")
+        row = by_key[select_key]
+        return select_key, row, by_key
     offset = int(spec.get("item_offset", 0))
     if offset >= len(items):
         raise IndexError(f"{spec['key']}: item_offset={offset} >= {len(items)}")
     key, row = items[offset]
-    by_key = {k: v for k, v in items}
     return key, row, by_key
 
 
@@ -316,7 +310,7 @@ def read_text(path: Path, max_chars: int = 260) -> str:
 
 
 def caption_from_row(data_root: Path, row: Dict[str, Any], task: str) -> str:
-    if task == "script_to_gesture" and row.get("speech_script_path"):
+    if task == "speech_gesture" and row.get("speech_script_path"):
         txt = read_text(data_root / row["speech_script_path"], max_chars=300)
         if txt:
             return txt
@@ -394,31 +388,36 @@ def smplh_vertices(
 
 
 def compute_camera(all_vertices: List[np.ndarray]) -> Dict[str, Any]:
-    frames = all_vertices[0].shape[0]
-    centers: List[List[float]] = []
-    radii: List[float] = []
-    for idx in range(frames):
-        pts = np.concatenate([v[idx].reshape(-1, 3) for v in all_vertices], axis=0)
-        lo = pts.min(axis=0)
-        hi = pts.max(axis=0)
-        center = (lo + hi) / 2.0
-        extent = hi - lo
-        radius = float(max(np.linalg.norm(extent[[0, 2]]) * 0.82, extent[1] * 0.72, 1.15))
-        center[1] = max(center[1], 0.85)
-        centers.append([float(x) for x in center])
-        radii.append(radius)
-    center_arr = np.asarray(centers, dtype=np.float32)
-    # Smooth camera follow a little so locomotion stays readable without shaking.
-    if len(center_arr) >= 3:
-        smooth = center_arr.copy()
-        for idx in range(1, len(center_arr) - 1):
-            smooth[idx] = center_arr[idx - 1] * 0.25 + center_arr[idx] * 0.5 + center_arr[idx + 1] * 0.25
-        center_arr = smooth
+    pts = np.concatenate([v.reshape(-1, 3) for v in all_vertices], axis=0)
+    lo = pts.min(axis=0)
+    hi = pts.max(axis=0)
+    center = (lo + hi) / 2.0
+    extent = hi - lo
+    xz_extent = max(float(extent[0]), float(extent[2]))
+    radius = float(max(xz_extent * 0.52, float(extent[1]) * 0.82, 1.25))
+    center[1] = max(center[1], 0.85)
+    floor_center = [float((lo[0] + hi[0]) * 0.5), float((lo[2] + hi[2]) * 0.5)]
+    floor_size = float(max(10.0, xz_extent + 7.0))
     return {
-        "center": [float(x) for x in center_arr[len(center_arr) // 2]],
-        "centers": [[float(x) for x in row] for row in center_arr],
-        "radius": float(max(radii)),
+        "center": [float(x) for x in center],
+        "radius": radius,
+        "floor_center": floor_center,
+        "floor_size": floor_size,
     }
+
+
+def two_person_motion_rows(row: Dict[str, Any], other: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any], str]]:
+    rows: List[Tuple[str, Dict[str, Any], str]] = []
+    for label, item, color in (("P1", row, "#4fd1c5"), ("P2", other, "#f6ad55")):
+        motion_rel = item.get("smplh_path") or item.get("smplx_path") or item.get("motion_path")
+        if not motion_rel:
+            raise KeyError(f"missing motion path for {label}")
+        motion_rel = motion_rel.replace("/smplh_52_1p/", "/smplh_52_2p/")
+        clone = dict(item)
+        clone["smplh_path"] = motion_rel
+        clone["smplx_path"] = motion_rel
+        rows.append((label, clone, color))
+    return rows
 
 
 def ensure_three(work_dir: Path) -> None:
@@ -450,7 +449,10 @@ def write_case_cache(
         other = by_key.get(other_key) if other_key else None
         if other is None:
             raise KeyError(f"{spec['key']}: missing interactor_key={other_key!r}")
-        rows.append(("P2", other, "#f6ad55"))
+        if spec.get("use_2p_canonical"):
+            rows = two_person_motion_rows(row, other)
+        else:
+            rows.append(("P2", other, "#f6ad55"))
 
     vertices: List[np.ndarray] = []
     bodies: List[Dict[str, Any]] = []
@@ -627,7 +629,7 @@ def main() -> None:
     (work_dir / "viewer.html").write_text(VIEWER_HTML, encoding="utf-8")
 
     requested = {x.strip() for x in args.tasks.split(",") if x.strip()}
-    specs = [s for s in TASKS if not requested or s["key"] in requested]
+    specs = [s for s in PREVIEWS if not requested or s["key"] in requested]
     if requested:
         missing = requested - {s["key"] for s in specs}
         if missing:
