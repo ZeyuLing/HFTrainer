@@ -214,7 +214,8 @@ class LoadEditingSourceMotion(BaseTransform):
         )  # (T, 3)
 
         # Step 2: Adjust position reference frame
-        # pos_rel_smooth = pos_rel_raw + (raw_trans - smooth_trans)
+        # pos_rel_smooth = pos_rel_raw + (raw_trans - smooth_trans).
+        # The KIMODO smoother keeps Y raw, so only XZ change in practice.
         trans_diff = raw_trans - smooth_trans  # (T, 3)
         trans_diff_expanded = trans_diff.unsqueeze(-2).expand(-1, 21, -1).reshape(-1, 63)
         pos_rel_smooth = pos_rel_raw + trans_diff_expanded  # (T, 63)

@@ -310,7 +310,7 @@ def _place_b_custom(
         (T_b, 135) motion B placed in world coords.
     """
     import torch as _torch
-    from hftrainer.pipelines.motion.transition_utils import (
+    from hftrainer.motion.pipeline_utils.transition_utils import (
         build_yaw_rotation_matrix, extract_yaw_from_root_rot6d,
         apply_rigid_transform_to_motion,
     )
@@ -507,7 +507,7 @@ def _load_adaptive_mask_for_motion(
 # Canonical mask utilities live in the pipeline package so the offline eval and
 # HyMotionM2MPipeline.infer_repair share ONE implementation (no drift). The thin
 # wrappers below preserve the historical private names/signatures used here.
-from hftrainer.pipelines.motion.repair_utils import (  # noqa: E402
+from hftrainer.motion.pipeline_utils.repair_utils import (  # noqa: E402
     compute_ada_keep_mask as _ru_compute_ada_keep_mask,
     compute_strict_adaptive_mask as _ru_compute_strict_adaptive_mask,
     smpl22_neighbors as _ru_smpl22_neighbors,
@@ -856,8 +856,8 @@ def motion_135_to_198(
 ) -> np.ndarray:
     """Convert 135-dim to 198-dim by appending FK position channels.
 
-    198-dim = 135 (trans + rot6d) + 63 (21 joints * 3D position).
-    Position is: XZ relative to pelvis, Y absolute. Pelvis excluded.
+    198-dim = official HYMotion 201-dim O6DP with the zero pelvis RIC triplet
+    removed.  Position channels are XYZ root-relative RIC for joints 1:22.
 
     Args:
         motion_135: (T, 135) motion.
@@ -870,15 +870,8 @@ def motion_135_to_198(
 
     positions = motion135_to_positions_np(motion_135, bone_offsets)  # (T, 22, 3)
 
-    # Exclude pelvis (joint 0), keep joints 1-21
-    joint_pos = positions[:, 1:, :]  # (T, 21, 3)
-
-    # XZ relative to pelvis
-    pelvis_xz = positions[:, 0:1, [0, 2]]  # (T, 1, 2)
-    joint_pos_rel = joint_pos.copy()
-    joint_pos_rel[:, :, 0] -= pelvis_xz[:, :, 0]  # X relative
-    joint_pos_rel[:, :, 2] -= pelvis_xz[:, :, 1]  # Z relative
-    # Y stays absolute
+    pelvis = positions[:, 0:1, :]  # (T, 1, 3)
+    joint_pos_rel = positions[:, 1:, :] - pelvis
 
     pos_flat = joint_pos_rel.reshape(-1, 63)  # (T, 63)
     return np.concatenate([motion_135, pos_flat], axis=-1).astype(np.float32)
@@ -1122,7 +1115,7 @@ def load_model(model_name: str, device: str):
     from mmengine.config import Config
     from hftrainer.registry import MODEL_BUNDLES
     from hftrainer.utils.checkpoint_utils import load_checkpoint, find_latest_checkpoint
-    from hftrainer.pipelines.motion.hymotion_m2m_pipeline import HyMotionM2MPipeline
+    from hftrainer.pipelines.hymotion_m2m.hymotion_m2m_pipeline import HyMotionM2MPipeline
 
     model_info = ALL_MODELS[model_name]
     cfg = Config.fromfile(model_info['config'])
@@ -1250,7 +1243,7 @@ def _evaluate_e13_multiprompt_chain(
         # we still anchor on the synthesized src's frame 0, but since
         # src_135 is all zeros the transform is identity — no-op.
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             canonicalize_segment, decanonicalize_segment,
         )
 
@@ -1671,7 +1664,7 @@ def evaluate_sample(
         # fed GT tail). The canonical frame should depend only on what is sent
         # into the network, not on this segment's index in the original motion.
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             canonicalize_segment,
         )
         segment_world_t = _torch.from_numpy(segment_world).float()
@@ -1782,7 +1775,7 @@ def evaluate_sample(
         #      coordinates before computing metrics.
         # ------------------------------------------------------------------
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             canonicalize_segment, decanonicalize_segment,
         )
 
@@ -2024,7 +2017,7 @@ def evaluate_sample(
             return {}, None
 
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             canonicalize_segment, place_b_after_a,
         )
 
@@ -2213,7 +2206,7 @@ def evaluate_sample(
         # of motion_tail, then canonicalize the whole segment.
         # ------------------------------------------------------------------
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             canonicalize_segment, place_b_after_a,
         )
 
@@ -2295,7 +2288,7 @@ def evaluate_sample(
         # so target_last (the anchor frame) is at origin facing +Z.
         # ------------------------------------------------------------------
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             canonicalize_segment, place_b_after_a,
         )
 
@@ -3214,7 +3207,7 @@ def evaluate_sample(
     _canon_info = locals().get('_transition_canon_info', None)
     if (task.task_id in ('E14', 'E15', 'E16', 'E8') and _canon_info is not None):
         import torch as _torch
-        from hftrainer.pipelines.motion.transition_utils import (
+        from hftrainer.motion.pipeline_utils.transition_utils import (
             decanonicalize_segment,
         )
         R_canon = _canon_info['R_canon']
@@ -3620,7 +3613,7 @@ def main():
     args = parser.parse_args()
 
     from hftrainer.evaluation.motion.m2m_eval_tasks import EVAL_TASKS, get_task
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
 
     # Determine tasks
     if args.all_tasks:

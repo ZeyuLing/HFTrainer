@@ -77,7 +77,7 @@ def _fk_global_positions(
     Returns:
         (B, L, 22, 3) world-frame joint positions.
     """
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
 
     world_pos, _, _, _ = motion135_to_fk(
         motion_135_denorm, bone_offsets, rotation_space=rotation_space
@@ -85,20 +85,14 @@ def _fk_global_positions(
     return world_pos
 
 
-def _scheme_d_relative(world_pos: Tensor) -> Tensor:
-    """Convert (B, L, 22, 3) world joint positions to Scheme-D rel-pelvis (B, L, 21*3).
+def _strict_ric_relative(world_pos: Tensor) -> Tensor:
+    """Convert world joint positions to strict non-pelvis RIC (B, L, 21*3).
 
-    XZ relative to pelvis, Y absolute, pelvis joint dropped.  This matches
-    the layout of the position channels inside the 198-dim motion vector
-    (see ``compute_198dim.compute_position_channels``).
+    XYZ are all relative to the pelvis and the pelvis joint is dropped.  This
+    matches the strict 198-dim layout used by ``Compute198DimPosition``.
     """
-    # autograd-safe form (no in-place mutation):
-    pelvis = world_pos[..., 0, :]               # (B, L, 3)
-    body = world_pos[..., 1:, :]                # (B, L, 21, 3)
-    body_x = body[..., 0] - pelvis[..., 0:1]    # (B, L, 21)
-    body_y = body[..., 1]                       # (B, L, 21) — absolute Y
-    body_z = body[..., 2] - pelvis[..., 2:3]    # (B, L, 21)
-    body_rel = torch.stack([body_x, body_y, body_z], dim=-1)  # (B, L, 21, 3)
+    pelvis = world_pos[..., 0:1, :]             # (B, L, 1, 3)
+    body_rel = world_pos[..., 1:, :] - pelvis   # (B, L, 21, 3)
     leading = body_rel.shape[:-2]
     return body_rel.reshape(*leading, 63)
 
@@ -319,7 +313,7 @@ class KimodoStyleAuxLoss(nn.Module):
         # ==================================================================
         if self.fk_consistency_weight > 0.0:
             pred_pos_chan = pred_denorm[..., 135:]                      # (B, L, 63)
-            fk_pos = _scheme_d_relative(pred_world)                     # (B, L, 63)
+            fk_pos = _strict_ric_relative(pred_world)                   # (B, L, 63)
             per_pt = self.loss_fn(pred_pos_chan, fk_pos, reduction="none")
             per_frame = per_pt.mean(dim=-1)  # (B, L)
             if t_sq is not None:

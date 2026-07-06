@@ -59,7 +59,7 @@ def motion135_to_positions_np(
     motion_t = torch.from_numpy(motion).float()
     offsets_t = torch.from_numpy(bone_offsets).float()
 
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
     with torch.no_grad():
         world_pos, _, _, _ = motion135_to_fk(motion_t, offsets_t, rotation_space='local')
     return world_pos.numpy()
@@ -144,7 +144,7 @@ def motion135_to_positions_global_np(
     motion_t = torch.from_numpy(motion).float()
     offsets_t = torch.from_numpy(bone_offsets).float()
 
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
     with torch.no_grad():
         world_pos, _, _, _ = motion135_to_fk(motion_t, offsets_t, rotation_space='global')
     return world_pos.numpy()
@@ -542,7 +542,7 @@ def compute_heading_error(
     gt_t = torch.from_numpy(gt_motion).float()
     offsets_t = torch.from_numpy(bone_offsets).float()
 
-    from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
     with torch.no_grad():
         _, pred_rot, _, _ = motion135_to_fk(pred_t, offsets_t)
         _, gt_rot, _, _ = motion135_to_fk(gt_t, offsets_t)
@@ -882,13 +882,14 @@ def compute_fk_consistency(
 
     # FK from rotation → (T, 22, 3) including pelvis
     fk_pos = motion135_to_positions_np(motion_with_pos[:, :135], bone_offsets)
-    # Position channel: 63-dim = 21 joints × 3 (pelvis excluded, XZ relative to pelvis, Y absolute)
+    # Position channel: 63-dim = 21 joints × 3, pelvis excluded,
+    # XYZ relative to pelvis.
     pos_dim = D - pos_start_dim
     if pos_dim < 63:
         return 0.0  # Not enough position dimensions
     pos_channel = motion_with_pos[:, pos_start_dim:pos_start_dim + 63].reshape(-1, 21, 3)
-    # Compare only the 21 non-pelvis joints (fk_pos[:, 1:])
-    return float(np.mean(np.linalg.norm(fk_pos[:, 1:] - pos_channel, axis=-1)))
+    fk_rel = fk_pos[:, 1:] - fk_pos[:, 0:1]
+    return float(np.mean(np.linalg.norm(fk_rel - pos_channel, axis=-1)))
 
 
 # =====================================================================

@@ -286,7 +286,7 @@ class TestKimodoStyleAuxLoss:
         """When pred == gt and gt is FK-consistent, all 3 terms are 0.
 
         Synthetic FK-consistent GT is built via motion135_to_198, so the
-        198-dim pos channel exactly equals FK(rot+trans) under Scheme D.
+        198-dim pos channel exactly equals strict non-pelvis RIC from FK.
         """
         from hftrainer.models.motion.hymotion_m2m.network.kimodo_aux_loss import (
             KimodoStyleAuxLoss,

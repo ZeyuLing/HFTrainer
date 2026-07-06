@@ -17,7 +17,7 @@
 
 _base_ = './_base_hymotion_m2m_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_official_t2m_permo_motionfix_mix_20260705'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_strict198_official_t2m_permo_motionfix_mix_20260706'
 
 _pack_keys = [
     'src_motion', 'tgt_motion', 'src_mask',
@@ -29,8 +29,8 @@ _pack_keys = [
 
 # Start formal M2M directly from HY-Motion-1.0-Lite through the M2M bundle
 # adapter.  Do not use the generic load_from path here: the M2M input/output
-# projections need 201->198/channel-expanded adaptation and the learned null
-# embeddings must be preserved.
+# projections use strict 201->198 pelvis-RIC-drop/channel-expanded adaptation
+# and the learned null embeddings must be preserved.
 load_from = None
 
 model = dict(

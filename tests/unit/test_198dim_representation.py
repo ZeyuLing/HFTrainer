@@ -46,12 +46,12 @@ class TestMotion198Representation:
         back = motion198_to_135(result)
         assert torch.allclose(back, motion)
 
-    def test_position_channels_scheme_d(self, bone_offsets):
-        """Position channels should follow Scheme D: XZ relative to pelvis, Y absolute."""
+    def test_position_channels_strict_ric(self, bone_offsets):
+        """Position channels should be official RIC with pelvis removed."""
         from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
             compute_position_channels,
         )
-        from hftrainer.pipelines.motion.differentiable_fk import motion135_to_fk
+        from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
 
         motion = torch.randn(5, 135)
         pos_63 = compute_position_channels(motion, bone_offsets)
@@ -61,12 +61,34 @@ class TestMotion198Representation:
             world_pos, _, _, _ = motion135_to_fk(motion, bone_offsets)
 
         pelvis_world = world_pos[:, 0:1, :]
-        expected = world_pos[:, 1:, :].clone()
-        expected[..., 0] -= pelvis_world[..., 0]
-        expected[..., 2] -= pelvis_world[..., 2]
+        expected = world_pos[:, 1:, :] - pelvis_world
         expected_flat = expected.reshape(5, 63)
 
         assert torch.allclose(pos_63, expected_flat, atol=1e-5)
+
+    def test_201_to_198_drops_zero_pelvis(self):
+        from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
+            motion201_to_198,
+        )
+
+        motion_201 = torch.randn(4, 201)
+        motion_201[:, 135:138] = 0
+        motion_198 = motion201_to_198(motion_201)
+
+        assert motion_198.shape == (4, 198)
+        assert torch.allclose(motion_198[:, :135], motion_201[:, :135])
+        assert torch.allclose(motion_198[:, 135:], motion_201[:, 138:])
+
+    def test_201_to_198_rejects_nonzero_pelvis(self):
+        from hftrainer.datasets.motion.motionhub.transforms.compute_198dim import (
+            motion201_to_198,
+        )
+
+        motion_201 = torch.zeros(4, 201)
+        motion_201[0, 136] = 1e-3
+
+        with pytest.raises(ValueError):
+            motion201_to_198(motion_201)
 
     def test_identity_rotation_tpose(self, bone_offsets):
         """Identity rotation should produce T-pose positions."""
@@ -131,6 +153,22 @@ class TestStats198:
             pytest.skip("Stats files not found")
 
         assert np.allclose(mean_198[:135], mean_201[:135])
+
+    def test_198_stats_are_201_without_pelvis(self):
+        """198-dim stats should be strict 201-dim stats with [135:138] removed."""
+        try:
+            mean_198 = np.load('data/hymotion_m2m_data/_stats_198dim/Mean.npy')
+            std_198 = np.load('data/hymotion_m2m_data/_stats_198dim/Std.npy')
+            mean_201 = np.load('data/hymotion_m2m_data/_stats_201dim/Mean.npy')
+            std_201 = np.load('data/hymotion_m2m_data/_stats_201dim/Std.npy')
+        except FileNotFoundError:
+            pytest.skip("Stats files not found")
+
+        idx = np.r_[0:135, 138:201]
+        assert np.allclose(mean_201[135:138], 0)
+        assert np.allclose(std_201[135:138], 0)
+        assert np.allclose(mean_198, mean_201[idx])
+        assert np.allclose(std_198, std_201[idx])
 
 
 class TestFKConsistencyLoss:

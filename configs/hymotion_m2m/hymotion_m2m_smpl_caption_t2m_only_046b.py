@@ -9,14 +9,14 @@
 #   - official HYMotion SFT input records:
 #       data/hymotion_data/_input_record_files/sft_train_v1103_qwen3
 #   - qwen3 raw/augmented sampling with raw_text_prob=0.5
-#   - O6DP 201 loading followed by M2M-native 198-dim position recomputation
+#   - O6DP 201 loading followed by strict pelvis-RIC drop to 198 dim
 #   - CropMotionByTextTime before 360-frame padding
 #   - learned null and special source token weights from HY-Motion 1.0-Lite
 #   - fp32 training and official element-masked SmoothL1 reduction
 
 _base_ = './_base_hymotion_m2m_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_official_sft_h20x64_20260704'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_strict198_h20x64_20260706'
 
 _pack_keys = [
     'src_motion', 'tgt_motion', 'src_mask',

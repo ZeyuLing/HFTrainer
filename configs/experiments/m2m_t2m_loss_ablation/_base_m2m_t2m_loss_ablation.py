@@ -7,7 +7,7 @@
 #                 transformer blocks + text encoders loaded, input_encoder /
 #                 final_layer reinitialized by the bundle on shape mismatch)
 #   - data      : train_hq_motionhub_hymotion.json (same source as HYMotion T2M)
-#   - target    : 198-dim SMPL (Scheme-D position) + _stats_198dim normalization
+#   - target    : strict HYMotion 198-dim SMPL + _stats_198dim normalization
 #   - condition : pure T2M via v3 sampler K=0 (all-generate mask, reactive=0),
 #                 editing_prob=0, no corruptors
 #   - text      : QWEN3 + CLIP-L pre-extracted embeddings, encoders frozen

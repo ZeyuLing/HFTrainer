@@ -265,12 +265,11 @@ def _build_ee_mask_198(T: int, joint_names: List[str], frame_interval: int,
         "body sinks when cond frame forces wrist low" failure mode.
 
     Caveats:
-      - World-space X/Z precision depends on model's ability to place pelvis
-        consistently (XZ relative encoding means: if pred pelvis moves, the
-        R_Wrist world X/Z moves with it). T2-5 training had this same
-        ambiguity, so model should have learnt to pick a stable pelvis.
-      - World-space Y is absolute in Scheme D → exact height control.
-      - For best world-space X/Z control, can optionally add pelvis-trans
+      - World-space XYZ precision depends on model's ability to place pelvis
+        consistently because strict 198 stores non-pelvis positions as
+        pelvis-relative RIC. If pred pelvis moves, the constrained joint moves
+        with it in world space.
+      - For best world-space control, can optionally add pelvis-trans
         cond at the same frames (see ``also_lock_pelvis_trans`` flag below)
         — but that departs from T2-5 into OOD territory, use sparingly.
 
@@ -292,11 +291,10 @@ def _build_ee_mask_198(T: int, joint_names: List[str], frame_interval: int,
         for name in joint_names:
             j = JOINT_NAME_TO_IDX[name]  # 0..21, 0 = pelvis
             if j == 0:
-                # Pelvis has no position channel in Scheme D (redundant
+                # Pelvis has no position channel in strict 198 (redundant
                 # with translation). Skip — can't do EE control on root.
                 continue
-            # ONLY lock the joint's position channel (Scheme D: XZ relative
-            # to pelvis, Y absolute). Matches T2-5 training exactly.
+            # ONLY lock the joint's position channel (XYZ relative to pelvis).
             pos_start = 135 + (j - 1) * 3
             mask[t, pos_start: pos_start + 3] = 0
         constraint_frames.extend([t] * len(joint_names))
@@ -846,7 +844,7 @@ _JOINT_ANGLE_WEIGHTS = np.array([
 def _rot6d_to_matrix(rot6d: np.ndarray) -> np.ndarray:
     """Row-major rot6d → 3x3 rotation matrix via Gram-Schmidt.
 
-    Matches the convention in hftrainer/pipelines/motion/transition_utils.py
+    Matches the convention in hftrainer/motion/pipeline_utils/transition_utils.py
     (row-major: rot6d layout = [R00, R01, R10, R11, R20, R21], i.e. first
     two COLUMNS of R flattened row by row). Accepts shape (..., 6).
     """

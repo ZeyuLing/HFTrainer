@@ -1,12 +1,14 @@
-"""Compute 198-dim motion representation from 135-dim motion.
+"""Compute HYMotion-aligned 198/201-dim O6DP motion representations.
 
-Adds 63-dim position channels (21 joints, Scheme D: XZ relative to pelvis,
-Y absolute world) to the base 135-dim (3 trans + 132 rot6d).
+The 198-dim representation used by M2M is the official HY-Motion Lite 201-dim
+O6DP representation with the redundant pelvis RIC triplet removed:
+
+    198 = 201[:135] + 201[138:201]
 
 The transform:
 1. Runs differentiable FK on the 135-dim motion (always using LOCAL rotation)
-2. Applies Scheme D encoding (XZ relative to pelvis, Y absolute)
-3. Removes pelvis position (always [0, pelvis_y, 0], redundant with translation)
+2. Computes the official 66-dim root-invariant coordinate (RIC) block
+3. Removes the pelvis RIC triplet (always [0, 0, 0])
 4. Concatenates position channels to produce 198-dim output
 
 Usage in pipeline:
@@ -42,40 +44,24 @@ def compute_position_channels(
     motion_135: Tensor,
     bone_offsets: Tensor,
 ) -> Tensor:
-    """Compute 63-dim position channels from 135-dim local-rotation motion.
+    """Compute strict HYMotion 63-dim non-pelvis RIC channels.
 
     Args:
         motion_135: (*, 135) motion tensor in local rotation space.
         bone_offsets: (22, 3) bone offsets tensor.
 
     Returns:
-        (*, 63) position channels (21 joints, Scheme D).
+        (*, 63) position channels for joints 1:22, root-relative in XYZ.
     """
-    from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
-
-    leading = motion_135.shape[:-1]
-
-    # FK always uses local rotation
-    with torch.no_grad():
-        world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='local')
-
-    # world_pos: (*, 22, 3)
-    pelvis_world = world_pos[..., 0:1, :]  # (*, 1, 3)
-
-    # Scheme D: XZ relative to pelvis, Y absolute world
-    joint_pos = world_pos[..., 1:, :].clone()  # (*, 21, 3), skip pelvis
-    joint_pos[..., 0] -= pelvis_world[..., 0]  # X: relative to pelvis
-    joint_pos[..., 2] -= pelvis_world[..., 2]  # Z: relative to pelvis
-    # Y: keep absolute world height
-
-    return joint_pos.reshape(*leading, 63)
+    ric66 = compute_ric66_channels(motion_135, bone_offsets)
+    return ric66[..., 3:66]
 
 
 def motion135_to_198(
     motion_135: Tensor,
     bone_offsets: Tensor,
 ) -> Tensor:
-    """Convert 135-dim motion to 198-dim by appending position channels.
+    """Convert 135-dim motion to strict HYMotion 198-dim O6DP.
 
     Args:
         motion_135: (*, 135) motion tensor.
@@ -86,6 +72,25 @@ def motion135_to_198(
     """
     pos_63 = compute_position_channels(motion_135, bone_offsets)
     return torch.cat([motion_135, pos_63], dim=-1)
+
+
+def motion201_to_198(motion_201: Tensor, pelvis_eps: float = 1e-6) -> Tensor:
+    """Drop the redundant pelvis RIC triplet from official HYMotion 201-dim O6DP.
+
+    The official 201-dim layout is:
+      [0:135]   translation + rot6d
+      [135:138] pelvis RIC, expected to be exactly zero
+      [138:201] non-pelvis joint RIC
+    """
+    if motion_201.shape[-1] != 201:
+        raise ValueError(f"Expected last dim 201, got {motion_201.shape[-1]}")
+    pelvis = motion_201[..., 135:138]
+    if torch.max(torch.abs(pelvis)).item() > pelvis_eps:
+        raise ValueError(
+            "HYMotion 201-dim pelvis RIC channels are expected to be zero; "
+            f"max_abs={torch.max(torch.abs(pelvis)).item():.6g}"
+        )
+    return torch.cat([motion_201[..., :135], motion_201[..., 138:201]], dim=-1)
 
 
 def compute_ric66_channels(
@@ -138,7 +143,7 @@ def recompute_position_from_rotation(
     bone_offsets: Tensor,
     rotation_space: str = 'local',
 ) -> Tensor:
-    """Recompute position channels from rotation/translation in 198-dim motion.
+    """Recompute strict 198-dim position channels from rotation.
 
     This is used for FK consistency loss: given a 198-dim prediction, extract
     the rotation+translation (first 135 dims), run FK, and compute what the
@@ -151,7 +156,7 @@ def recompute_position_from_rotation(
         rotation_space: 'local' or 'global'.
 
     Returns:
-        (*, 63) FK-derived position channels (Scheme D, 21 joints).
+        (*, 63) FK-derived non-pelvis RIC channels.
     """
     motion_135 = motion_198[..., :135]
 
@@ -164,11 +169,8 @@ def recompute_position_from_rotation(
         from hftrainer.motion.pipeline_utils.differentiable_fk import motion135_to_fk
         world_pos, _, _, _ = motion135_to_fk(motion_135, bone_offsets, rotation_space='local')
 
-    # Scheme D: XZ relative to pelvis, Y absolute
     pelvis_world = world_pos[..., 0:1, :]
-    joint_pos = world_pos[..., 1:, :].clone()
-    joint_pos[..., 0] -= pelvis_world[..., 0]
-    joint_pos[..., 2] -= pelvis_world[..., 2]
+    joint_pos = world_pos[..., 1:, :] - pelvis_world
 
     leading = motion_198.shape[:-1]
     return joint_pos.reshape(*leading, 63)
@@ -258,11 +260,11 @@ _DEFAULT_BONE_OFFSETS_PATH = osp.join(
 class Compute198DimPosition(BaseTransform):
     """Transform to compute 198-dim motion from 135/201-dim motion.
 
-    Adds/recomputes 63-dim position channels (21 joints, Scheme D) via FK.
-    When the input is official HY-Motion Lite O6DP-201, the first 135
-    translation/rotation channels are kept and the 66-dim official RIC block is
-    intentionally discarded, so M2M always trains with its native 198-dim
-    position convention.
+    When the input is official HY-Motion Lite O6DP-201, this transform simply
+    removes the redundant pelvis RIC triplet [135:138].  When the input is
+    135-dim translation+rotation, it computes the official 201-dim RIC block
+    via FK and then removes the pelvis triplet.  In both cases the output is
+    aligned with the HYMotion-Lite 201-dim checkpoint adapter.
 
     Must be placed BEFORE LocalToGlobalRotation in the pipeline
     (FK requires local rotation).
@@ -301,19 +303,22 @@ class Compute198DimPosition(BaseTransform):
             f'Expected torch.Tensor for key {self.key!r}, got {type(motion)}'
         )
 
-        # Handle multi-person (P, T, D) or single-person (T, D).
-        # D=201 is the official HY-Motion Lite T2M representation; M2M keeps
-        # the shared 135-dim trans+rot prefix and recomputes its own 63-dim
-        # position channels.
         orig_shape = motion.shape
         if motion.ndim == 3:
             P, T, D = motion.shape
             assert D in (135, 201), f"Expected motion_dim=135 or 201, got {D}"
-            motion_flat = motion[..., :135].reshape(P * T, 135)
+            if D == 201:
+                motion_198 = motion201_to_198(motion.reshape(P * T, D)).reshape(P, T, 198)
+                results[self.key] = motion_198
+                return results
+            motion_flat = motion.reshape(P * T, 135)
         elif motion.ndim == 2:
             T, D = motion.shape
             assert D in (135, 201), f"Expected motion_dim=135 or 201, got {D}"
-            motion_flat = motion[:, :135]
+            if D == 201:
+                results[self.key] = motion201_to_198(motion)
+                return results
+            motion_flat = motion
         else:
             raise ValueError(f"Unexpected motion shape: {orig_shape}")
 
@@ -333,10 +338,8 @@ class Compute198DimPosition(BaseTransform):
 class Compute201DimO6DP(BaseTransform):
     """Transform to compute HY-Motion Lite 201-dim O6DP motion from 135-dim.
 
-    This is intentionally separate from Compute198DimPosition: the M2M 198-dim
-    representation uses 21 non-pelvis joints with Y in world coordinates,
-    while HY-Motion Lite's 201-dim representation appends all 22 root-relative
-    joint positions and keeps the pelvis triplet fixed at zero.
+    HY-Motion Lite's 201-dim representation appends all 22 root-relative joint
+    positions and keeps the pelvis triplet fixed at zero.
     """
 
     def __init__(

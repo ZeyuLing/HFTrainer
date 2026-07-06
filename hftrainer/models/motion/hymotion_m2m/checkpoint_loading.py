@@ -17,7 +17,7 @@ weights into HyMotion-M2M v2 bundle, handling architecture differences:
   - null_vtxt_feat, null_ctxt_input
   - special_game_vtxt_feat, special_game_ctxt_feat
 - **Bundle-level statistics** (NOT loaded from T2M):
-  - mean, std: M2M uses 198-dim stats (different from T2M 201-dim)
+  - mean, std: M2M uses strict 198-dim stats derived from T2M 201-dim stats
 
 **Usage**:
   from hftrainer.models.motion.hymotion_m2m.checkpoint_loading import load_t2m_pretrained_selective
@@ -65,8 +65,8 @@ SHAPE_MISMATCH_MODULES = {
 
 # Bundle-level parameters to exclude (use config-initialized values)
 EXCLUDED_BUNDLE_PARAMS = {
-    'mean',              # M2M uses 198-dim stats (T2M is 201-dim)
-    'std',               # M2M uses 198-dim stats (T2M is 201-dim)
+    'mean',              # M2M config loads strict 198-dim mapped stats.
+    'std',               # M2M config loads strict 198-dim mapped stats.
 }
 
 REUSABLE_BUNDLE_PARAMS = {
@@ -138,7 +138,7 @@ def _filter_reusable_params(state_dict: Dict[str, torch.Tensor]) -> Dict[str, to
 
 
 def _motion201_to_m2m198_indices(device=None) -> torch.Tensor:
-    """Map HYMotion-Lite 201-dim channels to M2M's native 198-dim channels.
+    """Map HYMotion-Lite 201-dim channels to strict M2M 198-dim channels.
 
     HYMotion-Lite O6DP-201 is [135 trans+rot, 66 RIC]. M2M keeps the shared
     135-dim trans+rot prefix and uses 21*3 position channels, so the pelvis RIC

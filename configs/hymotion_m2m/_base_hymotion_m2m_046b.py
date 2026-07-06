@@ -5,13 +5,13 @@
 #   - VACE: no_inactive mode → input = [x_t(198), reactive(198), mask(198)] = 594-dim
 #   - Two-tier condition sampler with per-dim position control
 #   - FK consistency loss: enforces rotation/position self-consistency
-#   - Data pipeline: Compute198DimPosition transform inserts position channels
+#   - Data pipeline: Compute198DimPosition transform builds strict HYMotion 198
 #   - T2M 1.0 pretrained weights: 18 transformer blocks loaded, input/output re-initialized
 #
 # 198-dim layout:
 #   [0:3]      translation (SMPL trans)
 #   [3:135]    22 joints × 6D rot6d (row-major)
-#   [135:198]  21 joints × 3D position (XZ rel pelvis, Y absolute, pelvis excluded)
+#   [135:198]  21 joints × 3D position (XYZ rel pelvis, pelvis excluded)
 
 _base_ = '../_base_/default_runtime.py'
 

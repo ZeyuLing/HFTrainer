@@ -170,15 +170,16 @@ class SmplTransToKimodoRootOnline(BaseTransform):
         )  # (T, 3)
 
         # Step 2: Adjust position reference frame
-        # pos_rel_raw[j,t] = world_pos[j,t] - raw_trans[t] (for XZ)
-        # pos_rel_smooth[j,t] = world_pos[j,t] - smooth_trans[t] (for XZ)
+        # pos_rel_raw[j,t] = world_pos[j,t] - raw_trans[t]
+        # pos_rel_smooth[j,t] = world_pos[j,t] - smooth_trans[t]
         # => pos_rel_smooth[j,t] = pos_rel_raw[j,t] + (raw_trans[t] - smooth_trans[t])
         trans_diff = raw_trans - smooth_trans  # (T, 3)
 
         # Reshape for broadcasting: (T, 3) -> (T, 21, 3) -> (T, 63)
         trans_diff_expanded = trans_diff.unsqueeze(-2).expand(-1, 21, -1).reshape(-1, 63)
 
-        # Apply offset to position channels (XZ only; Y unchanged due to raw Y in smooth_trans)
+        # Apply offset to position channels.  Current smoothing keeps Y raw, so
+        # the Y offset is zero while XZ are adjusted to the smooth reference.
         pos_rel_smooth = pos_rel_raw + trans_diff_expanded  # (T, 63)
 
         # Reconstruct 198-dim KIMODO Root motion
