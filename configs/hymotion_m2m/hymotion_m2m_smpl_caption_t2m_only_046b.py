@@ -16,7 +16,7 @@
 
 _base_ = './_base_hymotion_m2m_046b.py'
 
-work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_strict198_h20x64_20260706'
+work_dir = 'work_dirs/hymotion_m2m_v2_smpl_caption_t2m_only_strict198_bs80_h20x64_20260706'
 
 _pack_keys = [
     'src_motion', 'tgt_motion', 'src_mask',
@@ -82,7 +82,7 @@ lr_scheduler = None
 
 train_dataloader = dict(
     _delete_=True,
-    batch_size=100,
+    batch_size=80,
     num_workers=8,
     persistent_workers=True,
     shuffle=True,
