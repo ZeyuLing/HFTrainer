@@ -1,0 +1,104 @@
+{
+  "database": "motion_annot_web/score_m2m/score_m2m.db",
+  "ours_model": "HyMotion-M2M+MoGenDIT_QCSelect",
+  "baseline_model": "StableMotion",
+  "run_pairs": [
+    {
+      "ours_run": 3049,
+      "baseline_run": 3051,
+      "matched_annotations": 81,
+      "valid_pairs": 81,
+      "excluded_data_issues": 0
+    },
+    {
+      "ours_run": 3065,
+      "baseline_run": 3059,
+      "matched_annotations": 94,
+      "valid_pairs": 92,
+      "excluded_data_issues": 2
+    },
+    {
+      "ours_run": 3071,
+      "baseline_run": 3066,
+      "matched_annotations": 58,
+      "valid_pairs": 58,
+      "excluded_data_issues": 0
+    }
+  ],
+  "valid_pairs": 231,
+  "excluded_data_issues": 2,
+  "dimensions": {
+    "fluency": {
+      "better_same_worse": [
+        192,
+        38,
+        1
+      ],
+      "ours_mean": 3.090909090909091,
+      "baseline_mean": 1.4415584415584415
+    },
+    "naturalness": {
+      "better_same_worse": [
+        169,
+        61,
+        1
+      ],
+      "ours_mean": 3.1082251082251084,
+      "baseline_mean": 1.7316017316017316
+    },
+    "pose_accuracy": {
+      "better_same_worse": [
+        183,
+        45,
+        3
+      ],
+      "ours_mean": 3.1298701298701297,
+      "baseline_mean": 1.5454545454545454
+    },
+    "horizontal_support": {
+      "better_same_worse": [
+        153,
+        76,
+        2
+      ],
+      "ours_mean": 3.1471861471861473,
+      "baseline_mean": 1.974025974025974
+    },
+    "vertical_support": {
+      "better_same_worse": [
+        137,
+        90,
+        4
+      ],
+      "ours_mean": 2.8744588744588744,
+      "baseline_mean": 1.87012987012987
+    },
+    "joint_anomaly": {
+      "better_same_worse": [
+        189,
+        40,
+        2
+      ],
+      "ours_mean": 3.220779220779221,
+      "baseline_mean": 1.5887445887445888
+    },
+    "penetration": {
+      "better_same_worse": [
+        153,
+        76,
+        2
+      ],
+      "ours_mean": 3.2683982683982684,
+      "baseline_mean": 2.0952380952380953
+    },
+    "repair_effectiveness": {
+      "better_same_worse": [
+        194,
+        34,
+        3
+      ],
+      "ours_mean": 3.1515151515151514,
+      "baseline_mean": 1.3376623376623376
+    }
+  }
+}
