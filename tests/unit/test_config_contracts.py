@@ -40,6 +40,7 @@ def test_all_leaf_configs_resolve_local_model_components(repo_root: Path):
             inference = _plain(cfg.inference)
             assert inference['task'] in {
                 'image_classification',
+                'multimodal_to_audio_video',
                 'text_generation',
                 'text_to_image',
                 'text_to_video',

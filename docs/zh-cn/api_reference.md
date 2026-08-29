@@ -326,6 +326,12 @@ hftrainer-infer --config CONFIG.py [--checkpoint CKPT_DIR] [OPTIONS]
 | `--height`, `--width` | 输出空间尺寸 |
 | `--merge-lora` | 推理前把 LoRA adapter 合并进 base weight |
 | `--device` | `cuda` 或 `cpu` |
+| `--mode` | MiniMax-H3 的 `t2va`、`fl2va` 或 `ref2va` 推理图 |
+| `--duration` | MiniMax-H3 目标秒数 |
+| `--first-frame`, `--last-frame` | FL2VA 首尾关键帧 |
+| `--reference-image` | 可重复的 Ref2VA 图片参考；与其他参考参数的跨类型顺序会被保留 |
+| `--reference-video` | 可重复的视频参考，可携带音轨；跨类型顺序会被保留 |
+| `--reference-audio` | 可重复的音频参考；跨类型顺序会被保留 |
 
 ### LTX-Video Console 命令
 
@@ -338,6 +344,11 @@ hftrainer-ltx-preprocess DATASET.json [MODEL OPTIONS]
 参数和 config override。预处理入口执行 HFTrainer 随包发布的修改版 `process_dataset.py`。
 完整 checkpoint 与命令合约见 [LTX-Video 2.5](models/ltx_video_2_5.md)。
 
+MiniMax-H3 使用通用 `hftrainer-infer` 和
+`multimodal_to_audio_video` adapter，返回的 `MiniMaxH3PipelineOutput`
+包含视频/音频、最终高宽与帧数、采样率/FPS、seed 和最终 latent。详见
+[MiniMax-H3](models/minimax_h3.md)。
+
 ## 任务类映射
 
 | 任务 | Bundle | Trainer | Pipeline |
@@ -349,5 +360,6 @@ hftrainer-ltx-preprocess DATASET.json [MODEL OPTIONS]
 | GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` |
 | DMD | `DMDBundle` | `DMDTrainer` | `DMDPipeline` |
 | LTX-Video 2.5 | `LTXVideoBundle` | `LTXVideoTrainer`（managed） | `LTXVideoPipeline` |
+| MiniMax-H3 | `MiniMaxH3Bundle` | `MiniMaxH3Trainer`（实验性） | `MiniMaxH3Pipeline` |
 
 可运行 config 和任务相关说明见 [任务矩阵](tasks.md)。

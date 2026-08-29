@@ -59,6 +59,27 @@ Linux with NVIDIA CUDA. See the complete
 [LTX-Video 2.5 guide](models/ltx_video_2_5.md) for the source/license boundary,
 gated model access, exact commands, validation limits, and hardware planning.
 
+## MiniMax-H3
+
+The H3 model, conditioner, tokenizer, processor, codecs, schedulers, trainer,
+and pipeline execute from repository-local code. Install only its supporting
+download and media utilities:
+
+```bash
+python -m pip install -e ".[minimax-h3]"
+```
+
+This extra adds Hugging Face Hub download support, PyAV, and torchaudio. The
+Qwen byte-level BPE and its Unicode splitter are implemented locally, so the
+extra does not install Diffusers, Transformers, Tokenizers, PEFT, or a MiniMax
+package. Select the correct CUDA PyTorch build before installing torchaudio.
+
+MiniMax-H3 artifacts have a non-permissive community license with territorial
+and use restrictions. Read the bundled complete agreement, then download the
+frozen revision yourself. Hardware planning is mandatory because the released
+denoiser and conditioner are approximately 33B and 32B parameters. See the
+[MiniMax-H3 guide](models/minimax_h3.md).
+
 ## Model dependency boundary
 
 Model implementations, tokenizers, sampling schedulers, LoRA layers, artifact
@@ -96,5 +117,5 @@ Download or prepare demo data:
 python tools/download_demo_data.py --task all
 ```
 
-LTX-2.5 weights are gated and intentionally excluded from these demo helpers.
-Download them only after accepting the model license and access terms.
+LTX-2.5 and MiniMax-H3 weights are intentionally excluded from these demo
+helpers. Download them only after accepting their respective model terms.

@@ -27,6 +27,7 @@ nav:
   - LoRA: lora.md
   - Models:
     - LTX-Video 2.5: models/ltx_video_2_5.md
+    - MiniMax-H3: models/minimax_h3.md
   - Distributed Training: distributed.md
   - Experiment Directory: experiment_dir.md
   - Architecture: architecture.md

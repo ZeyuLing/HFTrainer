@@ -10,6 +10,9 @@ readme = "README.md"
 license-files = [
     "THIRD_PARTY_NOTICES.md",
     "hftrainer/models/ltx_video/LICENSE.ltx-2.x",
+    "hftrainer/models/minimax_h3/LICENSE.minimax-h3",
+    "hftrainer/models/minimax_h3/LICENSE.apache-2.0",
+    "hftrainer/models/minimax_h3/NOTICE.minimax-h3",
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -84,6 +87,14 @@ ltx-video-hdr = [
     "opencv-python-headless>=4.10,<5",
 ]
 
+# The executable MiniMax-H3 implementation is local. These extras provide
+# only artifact download and media I/O helpers, never an external model stack.
+minimax-h3 = [
+    "av>=14,<17",
+    "huggingface-hub>=0.28,<2",
+    "torchaudio>=2.0",
+]
+
 [project.scripts]
 hftrainer-train = "tools.train:main"
 hftrainer-infer = "tools.infer:main"
@@ -104,6 +115,12 @@ namespaces = true
 "hftrainer.models.ltx_video" = ["LICENSE.ltx-2.x", "UPSTREAM.md"]
 "hftrainer.models.ltx_video.network.text_encoders.gemma.encoders" = ["prompts/*.txt"]
 "hftrainer.models.wan" = ["SOURCES.md"]
+"hftrainer.models.minimax_h3" = [
+    "LICENSE.apache-2.0",
+    "LICENSE.minimax-h3",
+    "NOTICE.minimax-h3",
+    "UPSTREAM.md",
+]
 "tools" = ["*.sh"]
 
 [tool.pytest.ini_options]

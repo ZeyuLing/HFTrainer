@@ -56,6 +56,7 @@ not only documented as a convention.
 | StyleGAN2 | yes | yes | generator and discriminator | tiny adversarial path and artifact round-trip |
 | Wan T2V | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | local tiny train/denoise/artifact tests; see compatibility note below |
 | LTX-Video 2.5 | LoRA | distilled and dev+LoRA | pinned source reorganized into local model/trainer/pipeline layers; local Gemma text runtime and LoRA | API/config/checkpoint contracts and tiny Gemma path tested; full 22B GPU run not performed here |
+| MiniMax-H3 Base 768p | experimental full/LoRA | T2VA, FL2VA, Ref2VA synchronized A/V | 50-layer Omni Transformer, Qwen3-VL-32B conditioner, visual/audio VAEs, processor and dual flow schedulers | tiny numerical/component/train/pipeline/artifact contracts; full 33B+32B GPU run not performed here |
 
 “Reference aligned” refers to isolated development-time numerical checks. The
 reference packages are not installed as product dependencies and are not
@@ -74,6 +75,13 @@ enhancement* is explicitly rejected until the Gemma vision tower is also
 implemented locally. Image conditioning for the LTX video model is a separate
 pipeline feature.
 
+MiniMax-H3 is substantially larger and its public model agreement contains
+territorial exclusions and use restrictions. The repository does not bundle
+its weights or tokenizer/config assets. Tiny and frozen-reference tests cover
+the local implementation and artifact boundary; they do not claim full-model
+quality, throughput, convergence, or a successful 33B denoiser plus 32B
+conditioner allocation on this development machine.
+
 ## Installation
 
 ```bash
@@ -88,6 +96,9 @@ python -m pip install -e ".[ltx-video-inference]"
 python -m pip install -e ".[ltx-video-train]"
 # or both
 python -m pip install -e ".[ltx-video]"
+
+# MiniMax-H3 media I/O and checkpoint-download helpers
+python -m pip install -e ".[minimax-h3]"
 ```
 
 Choose the correct CUDA-enabled PyTorch wheel for the target machine before
@@ -165,6 +176,48 @@ which contains use restrictions and commercial-license conditions. See the
 [upstream and modification record](hftrainer/models/ltx_video/UPSTREAM.md) and
 [third-party notices](THIRD_PARTY_NOTICES.md) before use or redistribution.
 
+## MiniMax-H3
+
+After reading and accepting the upstream MiniMax H3 Community License
+Agreement, download the frozen checkpoint revision and run one of the local
+pipelines:
+
+```bash
+hf download MiniMaxAI/MiniMax-H3 \
+  --revision 42ed227ee7df40d41602854ae760620d6eb651fe \
+  --include "model_index.json" "modular_model_index.json" \
+    "processor/*" "tokenizer/*" "text_encoder/*" \
+    "vae/*" "audio_vae/*" "scheduler/*" "audio_scheduler/*" \
+    "transformer/*" "transformer_ref/*" \
+  --local-dir checkpoints/MiniMax-H3
+
+export MINIMAX_H3_ROOT="$PWD/checkpoints/MiniMax-H3"
+
+hftrainer-infer \
+  --config configs/minimax_h3/infer_h3_base_fl2va.py \
+  --mode t2va \
+  --prompt "A paper boat drifts downstream with synchronized water and bird sounds." \
+  --duration 5 \
+  --output outputs/minimax_h3/t2va.mp4
+```
+
+The FL2VA checkpoint partition also supports first and/or last frames. Ordered
+image/video/audio references use the separate
+`configs/minimax_h3/infer_h3_base_ref2va.py` recipe. Experimental transformer
+LoRA training consumes cached Qwen/VAE features through
+`configs/minimax_h3/train_h3_base_lora.py`; the matching
+`infer_h3_base_fl2va_lora.py` recipe loads and merges its adapter checkpoint.
+MiniMax has not published a complete official training recipe, so this is not
+presented as recipe parity.
+
+Read the [English MiniMax-H3 guide](docs/en/models/minimax_h3.md),
+[中文指南](docs/zh-cn/models/minimax_h3.md), the
+[upstream record](hftrainer/models/minimax_h3/UPSTREAM.md), the
+[Apache-2.0 reference-code license](hftrainer/models/minimax_h3/LICENSE.apache-2.0),
+and the
+[complete model agreement](hftrainer/models/minimax_h3/LICENSE.minimax-h3)
+before use or redistribution.
+
 ## Repository Standard
 
 ```text
@@ -236,6 +289,8 @@ The focused tests include:
 - artifact checksum, schema, tamper, and round-trip tests;
 - all shipped config imports and registry resolution;
 - LTX split-checkpoint, preprocessing, packaged trainer, and inference contracts.
+- MiniMax-H3 packed-layout, scheduler, transformer, Qwen/tokenizer, dual-VAE,
+  cached-training, synchronized-inference, and strict-artifact contracts.
 
 ## Documentation
 
@@ -248,6 +303,7 @@ The focused tests include:
 | Architecture | [docs/en/architecture.md](docs/en/architecture.md) | [docs/zh-cn/architecture.md](docs/zh-cn/architecture.md) |
 | ModelBundle | [docs/en/design/model_bundle.md](docs/en/design/model_bundle.md) | [docs/zh-cn/design/model_bundle.md](docs/zh-cn/design/model_bundle.md) |
 | LTX-Video 2.5 | [docs/en/models/ltx_video_2_5.md](docs/en/models/ltx_video_2_5.md) | [docs/zh-cn/models/ltx_video_2_5.md](docs/zh-cn/models/ltx_video_2_5.md) |
+| MiniMax-H3 | [docs/en/models/minimax_h3.md](docs/en/models/minimax_h3.md) | [docs/zh-cn/models/minimax_h3.md](docs/zh-cn/models/minimax_h3.md) |
 
 ## Acknowledgements and Provenance
 
@@ -258,3 +314,6 @@ Some local implementations were validated against public reference
 implementations during development. Those references are not runtime
 dependencies. LTX is a modified pinned source snapshot and retains its own
 license, notices, and use restrictions as described above.
+MiniMax-H3 model materials likewise retain their Community License terms;
+HFTrainer ships the complete agreement, required notice, and pinned
+modification record but no pretrained model artifacts.

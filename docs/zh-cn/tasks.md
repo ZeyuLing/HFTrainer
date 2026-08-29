@@ -11,6 +11,8 @@
 | 文生视频 | `WanBundle` | `WanTrainer` | `WanPipeline` | `configs/wan/wan_demo.py` | 内置 smoke 路径 |
 | LTX-2.5 蒸馏同步音视频推理 | `LTXVideoBundle` | 不适用 | `LTXVideoPipeline` | `configs/ltx_video/infer_ltx_video_2_5_distilled.py` | 本地 registry/config/checkpoint 合约；未实跑 22B GPU |
 | LTX-2.5 LoRA 训练 + Dev 推理 | `LTXVideoBundle` | `LTXVideoTrainer`（managed 本地循环） | `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | 随包 trainer/preprocess 合约与 tiny Gemma 路径；未实跑 22B GPU |
+| MiniMax-H3 同步音视频推理 | `MiniMaxH3Bundle` | 不适用 | `MiniMaxH3Pipeline` | `configs/minimax_h3/infer_h3_base_fl2va.py`、`infer_h3_base_ref2va.py` | 本地 tiny/参考合约；未实跑完整 33B+32B GPU |
+| MiniMax-H3 实验性 LoRA | `MiniMaxH3Bundle` | `MiniMaxH3Trainer` | `MiniMaxH3Pipeline` | `configs/minimax_h3/train_h3_base_lora.py`、`infer_h3_base_fl2va_lora.py` | 缓存特征 loss/backward、checkpoint 到推理合并与 artifact 合约；不声明官方 recipe |
 | GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` | `configs/stylegan2/stylegan2_demo.py` | 框架参考实现 |
 | DMD 一步蒸馏 | `DMDBundle` | `DMDTrainer` | `DMDPipeline` | `configs/dmd/dmd_demo.py` | 框架参考实现 |
 
@@ -19,6 +21,8 @@
 随仓库提供；轻量测试不会分配 gated 22B 权重，只验证本地
 API/config/checkpoint 边界。详见
 [LTX-Video 2.5 指南](models/ltx_video_2_5.md)。
+MiniMax-H3 的公开 768p 能力和严格验证边界见
+[MiniMax-H3 指南](models/minimax_h3.md)。
 
 ## Validation 输出约定
 

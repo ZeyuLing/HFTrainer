@@ -63,14 +63,14 @@ with model/paper names at the same level.
 
 | Namespace | Ownership axis | Canonical examples |
 | --- | --- | --- |
-| `hftrainer/models/` | concrete implementation | `vit`, `llama`, `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `hftrainer/models/` | concrete implementation | `vit`, `llama`, `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video`, `minimax_h3` |
 | `hftrainer/models/<id>/network/` | model math and model-specific primitives | attention blocks, VAE, tokenizer, scheduler |
-| `hftrainer/trainers/` | implementation-specific optimization | `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
-| `hftrainer/pipelines/` | implementation-specific inference | `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `hftrainer/trainers/` | implementation-specific optimization | `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video`, `minimax_h3` |
+| `hftrainer/pipelines/` | implementation-specific inference | `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video`, `minimax_h3` |
 | `hftrainer/tasks/` | genuinely reusable task contract | `image_classification`, `causal_language_modeling` |
-| `hftrainer/datasets/` | record/collation contract | `image_classification`, `instruction_sft`, `text_to_image`, `text_to_video`, `unconditional_image`, `dmd` |
+| `hftrainer/datasets/` | record/collation contract | `image_classification`, `instruction_sft`, `text_to_image`, `text_to_video`, `synchronized_audio_video`, `unconditional_image`, `dmd` |
 | `hftrainer/evaluation/` | reusable metric contract | `image_classification`, `causal_language_modeling` |
-| `configs/` | implementation selected by the user | `vit`, `llama`, `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `configs/` | implementation selected by the user | `vit`, `llama`, `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video`, `minimax_h3` |
 
 Use the same `implementation_id` across model, trainer, pipeline, and config
 when behavior belongs to one concrete method. Move a trainer/pipeline into
@@ -148,8 +148,13 @@ flowchart TB
 - `StyleGAN2Bundle` + `StyleGAN2Trainer` + `StyleGAN2Pipeline`;
 - `DMDBundle` + `DMDTrainer` + `DMDPipeline`;
 - `LTXVideoBundle` + local managed `LTXVideoTrainer` + `LTXVideoPipeline`.
+- `MiniMaxH3Bundle` + experimental `MiniMaxH3Trainer` +
+  synchronized `MiniMaxH3Pipeline`.
 
 StyleGAN2 and DMD are framework-oriented reference implementations rather than
 benchmark claims. LTX contract/config and tiny local Gemma paths are tested,
 but the repository test environment has not executed the gated 22B workflow.
 See [LTX-Video 2.5](models/ltx_video_2_5.md) for the exact boundary.
+MiniMax-H3 has the same local ownership rule, including its Qwen3-VL vision
+conditioner and tokenizer; full-checkpoint execution is outside the tiny test
+environment. See [MiniMax-H3](models/minimax_h3.md).

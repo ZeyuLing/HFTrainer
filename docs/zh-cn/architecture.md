@@ -59,14 +59,14 @@ flowchart LR
 
 | 命名空间 | 所有权分类轴 | 规范示例 |
 | --- | --- | --- |
-| `hftrainer/models/` | 具体实现 | `vit`、`llama`、`sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `hftrainer/models/` | 具体实现 | `vit`、`llama`、`sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video`、`minimax_h3` |
 | `hftrainer/models/<id>/network/` | 模型数学与模型专属原语 | attention block、VAE、tokenizer、scheduler |
-| `hftrainer/trainers/` | 实现专属优化逻辑 | `sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
-| `hftrainer/pipelines/` | 实现专属推理逻辑 | `sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `hftrainer/trainers/` | 实现专属优化逻辑 | `sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video`、`minimax_h3` |
+| `hftrainer/pipelines/` | 实现专属推理逻辑 | `sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video`、`minimax_h3` |
 | `hftrainer/tasks/` | 真正可复用的任务合约 | `image_classification`、`causal_language_modeling` |
-| `hftrainer/datasets/` | 样本/collation 合约 | `image_classification`、`instruction_sft`、`text_to_image`、`text_to_video`、`unconditional_image`、`dmd` |
+| `hftrainer/datasets/` | 样本/collation 合约 | `image_classification`、`instruction_sft`、`text_to_image`、`text_to_video`、`synchronized_audio_video`、`unconditional_image`、`dmd` |
 | `hftrainer/evaluation/` | 可复用指标合约 | `image_classification`、`causal_language_modeling` |
-| `configs/` | 用户选择的具体实现 | `vit`、`llama`、`sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `configs/` | 用户选择的具体实现 | `vit`、`llama`、`sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video`、`minimax_h3` |
 
 行为属于具体方法时，model、trainer、pipeline 与 config 使用同一个
 `implementation_id`。只有逻辑确实可被多个模型族复用时，trainer/pipeline 才放入
@@ -135,8 +135,13 @@ flowchart TB
 - `StyleGAN2Bundle` + `StyleGAN2Trainer` + `StyleGAN2Pipeline`；
 - `DMDBundle` + `DMDTrainer` + `DMDPipeline`；
 - `LTXVideoBundle` + 本地 managed `LTXVideoTrainer` + `LTXVideoPipeline`。
+- `MiniMaxH3Bundle` + 实验性 `MiniMaxH3Trainer` + 同步音视频
+  `MiniMaxH3Pipeline`。
 
 StyleGAN2 与 DMD 是框架导向的 reference implementation，不直接声明 benchmark
 复现。LTX 的 config/合约和 tiny 本地 Gemma 路径已测试，但仓库测试环境未执行
 gated 22B 工作流。精确边界见
 [LTX-Video 2.5](models/ltx_video_2_5.md)。
+MiniMax-H3 同样遵守本地所有权边界，Qwen3-VL 视觉条件器和 tokenizer 也由仓库
+实现；tiny 测试环境不声明跑通过完整权重。详见
+[MiniMax-H3](models/minimax_h3.md)。

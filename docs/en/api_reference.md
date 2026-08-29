@@ -329,6 +329,12 @@ hftrainer-infer --config CONFIG.py [--checkpoint CKPT_DIR] [OPTIONS]
 | `--height`, `--width` | output spatial size |
 | `--merge-lora` | merge LoRA adapters into base weights before infer |
 | `--device` | `cuda` or `cpu` |
+| `--mode` | MiniMax-H3 `t2va`, `fl2va`, or `ref2va` graph |
+| `--duration` | MiniMax-H3 target duration in seconds |
+| `--first-frame`, `--last-frame` | FL2VA keyframes |
+| `--reference-image` | repeatable Ref2VA image; order is preserved across all reference flags |
+| `--reference-video` | repeatable Ref2VA video with optional soundtrack; cross-flag order is preserved |
+| `--reference-audio` | repeatable Ref2VA audio reference; cross-flag order is preserved |
 
 ### LTX-Video console commands
 
@@ -343,6 +349,11 @@ preprocessor executes HFTrainer's packaged, modified `process_dataset.py`. See
 [LTX-Video 2.5](models/ltx_video_2_5.md) for the full checkpoint and command
 contract.
 
+MiniMax-H3 uses the general `hftrainer-infer` command and the
+`multimodal_to_audio_video` adapter. It returns `MiniMaxH3PipelineOutput` with
+video/audio outputs, resolved dimensions/frame count, sample rate/FPS, seed,
+and the final latents. See [MiniMax-H3](models/minimax_h3.md).
+
 ## Task Class Map
 
 | Task | Bundle | Trainer | Pipeline |
@@ -354,5 +365,6 @@ contract.
 | GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` |
 | DMD | `DMDBundle` | `DMDTrainer` | `DMDPipeline` |
 | LTX-Video 2.5 | `LTXVideoBundle` | `LTXVideoTrainer` (managed) | `LTXVideoPipeline` |
+| MiniMax-H3 | `MiniMaxH3Bundle` | `MiniMaxH3Trainer` (experimental) | `MiniMaxH3Pipeline` |
 
 For runnable configs and task-specific notes, see [Task Matrix](tasks.md).

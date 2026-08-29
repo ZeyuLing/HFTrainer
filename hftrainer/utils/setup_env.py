@@ -45,6 +45,11 @@ _BUILTIN_METHOD_MODULES = (
     'hftrainer.trainers.wan.trainer',
     'hftrainer.pipelines.wan.pipeline',
     'hftrainer.datasets.text_to_video.hf_video',
+    # Joint text/reference-to-audio-video / MiniMax-H3
+    'hftrainer.models.minimax_h3.bundle',
+    'hftrainer.trainers.minimax_h3.trainer',
+    'hftrainer.pipelines.minimax_h3.pipeline',
+    'hftrainer.datasets.synchronized_audio_video.minimax_h3_cached',
     # StyleGAN2
     'hftrainer.models.stylegan2.network',
     'hftrainer.models.stylegan2.bundle',

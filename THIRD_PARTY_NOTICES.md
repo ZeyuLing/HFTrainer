@@ -1,5 +1,24 @@
 # Third-party notices
 
+## MiniMax-H3
+
+`hftrainer/models/minimax_h3` contains a repository-local, modified
+implementation of the public MiniMax-H3 Base 768p execution path. The code was
+adapted from Apache-2.0 Hugging Face Diffusers and Transformers references;
+the exact commits and modification record are documented in
+`hftrainer/models/minimax_h3/UPSTREAM.md`.
+The Apache License text shipped with those reference implementations is
+included at `hftrainer/models/minimax_h3/LICENSE.apache-2.0`.
+
+MiniMax model materials are governed by the MiniMax H3 Community License
+Agreement. The complete agreement and required notice are included at
+`hftrainer/models/minimax_h3/LICENSE.minimax-h3` and
+`hftrainer/models/minimax_h3/NOTICE.minimax-h3`. The agreement contains
+territorial exclusions, use restrictions, redistribution obligations, and
+additional commercial terms. HFTrainer does not bundle pretrained weights or
+tokenizer/config artifacts; downloading or using them requires accepting and
+complying with the upstream agreement.
+
 ## LTX-2.x
 
 The directories below contain a modified, pinned snapshot of Lightricks'

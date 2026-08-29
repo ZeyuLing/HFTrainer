@@ -55,6 +55,25 @@ extra 要求 `torch>=2.8`；请先为目标机器选择正确的 CUDA PyTorch wh
 命令、验证范围和硬件规划见
 [LTX-Video 2.5 指南](models/ltx_video_2_5.md)。
 
+## MiniMax-H3
+
+H3 模型、条件器、tokenizer、processor、codec、scheduler、trainer 与 pipeline
+全部执行仓库本地代码，只需安装下载和媒体支持工具：
+
+```bash
+python -m pip install -e ".[minimax-h3]"
+```
+
+该 extra 只增加 Hugging Face Hub 下载、PyAV 和 torchaudio。本地 Qwen
+byte-level BPE 及其 Unicode splitter 均由仓库实现；不会安装 Diffusers、
+Transformers、Tokenizers、PEFT 或 MiniMax 包。安装 torchaudio 前先选择匹配的
+CUDA PyTorch。
+
+MiniMax-H3 artifact 使用非宽松的 Community License，其中包含地域与用途限制。
+先阅读仓库内完整协议，再自行下载固定 revision。公开 denoiser 与 conditioner
+分别约为 33B 和 32B 参数，必须提前规划硬件。详见
+[MiniMax-H3 指南](models/minimax_h3.md)。
+
 ## 模型依赖边界
 
 模型实现、tokenizer、采样 scheduler、LoRA、artifact loader、trainer 与 pipeline
@@ -89,5 +108,5 @@ bash tools/download_checkpoints.sh
 python tools/download_demo_data.py --task all
 ```
 
-LTX-2.5 权重需要 gated 授权，因此不会由上述 demo helper 自动下载。请先接受
-模型许可证和访问条款，再按 LTX 专页手动下载。
+LTX-2.5 与 MiniMax-H3 权重都不会由上述 demo helper 自动下载。请分别接受对应
+模型条款后，再按模型专页自行下载。
