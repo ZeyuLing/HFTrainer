@@ -6,5 +6,5 @@ Canonical documentation is maintained by language:
 - [简体中文架构设计](zh-cn/architecture.md)
 
 The canonical pages cover package taxonomy, lightweight registration, the
-standard `AccelerateRunner`, and managed upstream training loops such as
+standard `AccelerateRunner`, and packaged managed-local loops such as
 LTX-Video 2.5.

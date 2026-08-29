@@ -1,99 +1,152 @@
+"""Config-driven inference entry point.
+
+Every inference config declares two independent choices:
+
+* ``pipeline.type`` selects the inference graph.
+* ``inference.task`` selects this CLI's input/output adapter.
+
+No trainer-name or model-name dispatch is used.
 """
-tools/infer.py — Inference entry point for hftrainer pipelines.
 
-Usage:
-    # WAN text-to-video
-    python tools/infer.py \\
-        --config configs/text2video/wan_demo.py \\
-        --checkpoint work_dirs/wan_smoke/checkpoint-iter_5 \\
-        --prompt "a cat running in the park" \\
-        --output output/video.mp4
-
-    # SD1.5 text-to-image
-    python tools/infer.py \\
-        --config configs/text2image/sd15_demo.py \\
-        --checkpoint work_dirs/sd15_smoke/checkpoint-iter_10 \\
-        --prompt "a beautiful sunset" \\
-        --output output/image.png
-
-    # Classification
-    python tools/infer.py \\
-        --config configs/classification/vit_base_demo.py \\
-        --checkpoint work_dirs/vit_smoke/checkpoint-iter_10 \\
-        --input data/classification/demo/images/class_0/0000.jpg
-
-    # LLM
-    python tools/infer.py \\
-        --config configs/llm/llama_lora_demo.py \\
-        --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \\
-        --merge-lora \\
-        --prompt "What is the capital of France?"
-"""
+from __future__ import annotations
 
 import argparse
 import os
 import sys
+from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Run inference with hftrainer pipeline')
+def parse_args(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(description='Run an HFTrainer inference pipeline')
     parser.add_argument('--config', required=True, help='Path to config file (.py)')
-    parser.add_argument(
-        '--checkpoint',
-        help=(
-            'Path to an HFTrainer checkpoint directory. Required by legacy '
-            'task configs; registry-driven cfg.pipeline configs own their model paths.'
-        ),
-    )
+    parser.add_argument('--checkpoint', help='Optional HFTrainer checkpoint file or directory')
     parser.add_argument('--prompt', help='Text prompt for generation tasks')
-    parser.add_argument('--input', help='Input file path (e.g., image for classification)')
-    parser.add_argument('--output', help='Output file path (e.g., image.png, video.mp4)')
-    parser.add_argument('--num-steps', type=int, default=None,
-                        help='Number of denoising steps (diffusion tasks)')
-    parser.add_argument('--num-samples', type=int, default=1,
-                        help='Number of samples for unconditional generation tasks')
-    parser.add_argument('--num-frames', type=int, default=None,
-                        help='Number of output frames (video tasks)')
-    parser.add_argument('--frame-rate', type=float, default=None,
-                        help='Output frame rate (video tasks)')
-    parser.add_argument('--seed', type=int, default=None,
-                        help='Generation seed')
-    parser.add_argument('--negative-prompt', default=None,
-                        help='Negative prompt for guided generation')
-    parser.add_argument('--image', action='append', default=[],
-                        help='Optional conditioning image; repeat as needed')
-    parser.add_argument('--max-new-tokens', type=int, default=200,
-                        help='Maximum number of new tokens for LLM generation.')
-    parser.add_argument('--height', type=int, default=None, help='Output height')
-    parser.add_argument('--width', type=int, default=None, help='Output width')
-    parser.add_argument('--merge-lora', action='store_true',
-                        help='Merge LoRA adapters into base weights before inference.')
-    parser.add_argument(
-        '--device',
-        default=None,
-        help=(
-            'Override cfg.model.device for registered pipelines. Legacy configs '
-            'default to cuda and fall back to cpu when CUDA is unavailable.'
-        ),
-    )
-    return parser.parse_args()
+    parser.add_argument('--input', help='Input image for classification')
+    parser.add_argument('--output', help='Output image or video path')
+    parser.add_argument('--num-steps', type=int, help='Number of denoising steps')
+    parser.add_argument('--num-samples', type=int, default=1)
+    parser.add_argument('--num-frames', type=int)
+    parser.add_argument('--frame-rate', type=float)
+    parser.add_argument('--seed', type=int)
+    parser.add_argument('--negative-prompt')
+    parser.add_argument('--image', action='append', default=[], help='Repeatable conditioning image')
+    parser.add_argument('--max-new-tokens', type=int, default=200)
+    parser.add_argument('--height', type=int)
+    parser.add_argument('--width', type=int)
+    parser.add_argument('--merge-lora', action='store_true')
+    parser.add_argument('--device', help='Execution device, for example cuda or cpu')
+    return parser.parse_args(argv)
 
 
-def infer_registered_pipeline(cfg, args):
-    """Run the config-declared pipeline without trainer-name dispatch."""
-    from hftrainer.pipelines.builder import build_pipeline_from_cfg
+def _ensure_parent(path: str | Path) -> Path:
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
-    if args.device is not None:
-        cfg.merge_from_dict({'model.device': args.device})
-    pipeline = build_pipeline_from_cfg(cfg)
+
+def _save_images(images, output: str | None) -> str:
+    from torchvision.utils import save_image
+
+    path = _ensure_parent(output or 'outputs/inference/image.png')
+    batch = images.detach().cpu()
+    if batch.ndim == 3:
+        batch = batch.unsqueeze(0)
+    save_image(batch, str(path), nrow=min(4, batch.shape[0]))
+    return str(path.resolve())
+
+
+def _save_video_frames(video, frames_dir: Path) -> str:
+    from torchvision.utils import save_image
+
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    for index, frame in enumerate(video):
+        save_image(frame, str(frames_dir / f'frame_{index:05d}.png'))
+    return str(frames_dir.resolve())
+
+
+def _save_video(videos, output: str | None, frame_rate: float | None) -> str:
+    import torch
+
+    path = _ensure_parent(output or 'outputs/inference/video.mp4')
+    video = videos[0].detach().cpu().clamp(0, 1)
+    fps = float(frame_rate or 8.0)
+    try:
+        from torchvision.io import write_video
+
+        # torchvision expects [time, height, width, channels].
+        frames = (video.permute(0, 2, 3, 1) * 255).round().to(dtype=torch.uint8)
+        write_video(str(path), frames, fps=fps)
+        return str(path.resolve())
+    except Exception:
+        return _save_video_frames(video, path.with_suffix(''))
+
+
+def _value(mapping: Any, name: str, default=None):
+    if mapping is None:
+        return default
+    if hasattr(mapping, 'get'):
+        return mapping.get(name, default)
+    return getattr(mapping, name, default)
+
+
+def _run_image_classification(pipeline, args):
+    if not args.input:
+        raise ValueError("inference.task='image_classification' requires --input")
+    from PIL import Image
+
+    with Image.open(args.input) as image:
+        result = pipeline(image.convert('RGB'), return_scores=True)
+    predictions = result['preds']
+    scores = result['scores']
+    prediction = predictions if isinstance(predictions, int) else predictions[0]
+    confidence = float(scores.max() if scores.ndim == 1 else scores[0].max())
+    print(f'Predicted class: {prediction}; confidence: {confidence:.6f}')
+    return result
+
+
+def _run_text_generation(pipeline, args):
+    prompt = args.prompt or 'What is artificial intelligence?'
+    result = pipeline(prompt, max_new_tokens=args.max_new_tokens)
+    for text in result:
+        print(text)
+    return result
+
+
+def _run_text_to_image(pipeline, args):
+    prompt = args.prompt or 'a beautiful landscape'
+    kwargs = {
+        name: value
+        for name, value in {
+            'num_inference_steps': args.num_steps,
+            'height': args.height,
+            'width': args.width,
+            'negative_prompt': args.negative_prompt,
+        }.items()
+        if value is not None
+    }
+    images = pipeline(prompt, **kwargs)
+    output = _save_images(images, args.output)
+    print(f'Saved image to: {output}')
+    return {'images': images, 'output_path': output}
+
+
+def _run_unconditional_image(pipeline, args):
+    images = pipeline(num_samples=args.num_samples)
+    output = _save_images(images, args.output)
+    print(f'Saved image to: {output}')
+    return {'images': images, 'output_path': output}
+
+
+def _run_text_to_video(pipeline, args):
+    prompt = args.prompt or 'a cat walking in the park'
     if hasattr(pipeline, 'infer_text_to_video'):
-        prompt = args.prompt or 'a cat walking in the park'
-        output = args.output or 'outputs/inference/output_video.mp4'
+        output = args.output or 'outputs/inference/video.mp4'
         kwargs = {
-            key: value
-            for key, value in {
+            name: value
+            for name, value in {
                 'output_path': output,
                 'images': args.image,
                 'height': args.height,
@@ -107,246 +160,70 @@ def infer_registered_pipeline(cfg, args):
             if value is not None
         }
         result = pipeline.infer_text_to_video(prompt, **kwargs)
-        print(f"Saved output to: {result.get('output_path', output)}")
+        print(f"Saved video to: {result.get('output_path', output)}")
         return result
-    raise TypeError(
-        f"Registered pipeline {type(pipeline).__name__} does not expose a supported "
-        "task API. Implement infer_text_to_video() or use its Python API directly."
-    )
+
+    kwargs = {
+        name: value
+        for name, value in {
+            'num_inference_steps': args.num_steps,
+            'num_frames': args.num_frames,
+            'height': args.height,
+            'width': args.width,
+            'negative_prompt': args.negative_prompt,
+        }.items()
+        if value is not None
+    }
+    videos = pipeline(prompt, **kwargs)
+    output = _save_video(videos, args.output, args.frame_rate)
+    print(f'Saved video to: {output}')
+    return {'videos': videos, 'output_path': output}
 
 
-def load_bundle_from_checkpoint(cfg, checkpoint_path: str, device: str):
-    """Build ModelBundle from config and load checkpoint weights."""
-    from hftrainer.registry import MODEL_BUNDLES
-    from hftrainer.utils.checkpoint_utils import load_checkpoint
-
-    model_cfg = getattr(cfg, 'model', None)
-    assert model_cfg is not None, "cfg.model is required"
-    if hasattr(model_cfg, 'to_dict'):
-        model_cfg = model_cfg.to_dict()
-
-    bundle_type = model_cfg.get('type')
-    if bundle_type is None:
-        raise KeyError("cfg.model.type is required")
-
-    bundle_cls = MODEL_BUNDLES.get(bundle_type)
-    if bundle_cls is None:
-        raise KeyError(f"Unknown bundle type: {bundle_type}")
-
-    bundle = bundle_cls.from_config(model_cfg)
-    bundle.eval()
-
-    # Load checkpoint
-    try:
-        state_dict = load_checkpoint(checkpoint_path, map_location='cpu')
-        print(f'Loading checkpoint: {checkpoint_path}')
-        bundle.load_state_dict_selective(state_dict)
-    except FileNotFoundError:
-        print(f'Warning: No checkpoint file found in {checkpoint_path}, using pretrained weights.')
-
-    bundle = bundle.to(device)
-    return bundle
+_TASK_RUNNERS = {
+    'image_classification': _run_image_classification,
+    'text_generation': _run_text_generation,
+    'text_to_image': _run_text_to_image,
+    'unconditional_image_generation': _run_unconditional_image,
+    'text_to_video': _run_text_to_video,
+}
 
 
-def infer_text2video(bundle, args):
-    """Run WAN text-to-video inference."""
-    from hftrainer.pipelines.text2video.wan_pipeline import WanPipeline
+def run(cfg, args):
+    import torch
 
-    pipeline = WanPipeline(
-        bundle=bundle,
-        num_inference_steps=args.num_steps or 20,
-        num_frames=args.num_frames or 16,
-        height=args.height or 256,
-        width=args.width or 256,
-    )
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
 
-    prompt = args.prompt or 'a cat walking in the park'
-    print(f'Generating video for prompt: "{prompt}"')
-
-    videos = pipeline(prompt)  # [B, T, C, H, W] in [0, 1]
-
-    output = args.output or 'output_video.mp4'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-
-    try:
-        import torchvision.io as io
-        # Convert to [T, C, H, W] uint8
-        video = videos[0]  # [T, C, H, W]
-        video_uint8 = (video * 255).clamp(0, 255).byte()
-        io.write_video(output, video_uint8, fps=8)
-        print(f'Saved video to: {output}')
-    except Exception as e:
-        print(f'Could not save as video ({e}). Saving frames instead.')
-        frames_dir = output.replace('.mp4', '_frames')
-        os.makedirs(frames_dir, exist_ok=True)
-        import torchvision.utils as vutils
-        for i, frame in enumerate(videos[0]):
-            vutils.save_image(frame, os.path.join(frames_dir, f'frame_{i:04d}.png'))
-        print(f'Saved {len(videos[0])} frames to: {frames_dir}')
-
-
-def infer_text2image(bundle, args):
-    """Run SD1.5 text-to-image inference."""
-    from hftrainer.pipelines.text2image.sd15_pipeline import SD15Pipeline
-    from hftrainer.utils.image import save_tensor_image
-
-    pipeline = SD15Pipeline(
-        bundle=bundle,
-        num_inference_steps=args.num_steps or 20,
-        height=args.height or 512,
-        width=args.width or 512,
-    )
-
-    prompt = args.prompt or 'a beautiful landscape'
-    print(f'Generating image for prompt: "{prompt}"')
-
-    images = pipeline(prompt)  # [B, C, H, W] in [0, 1]
-
-    output = args.output or 'output_image.png'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-
-    try:
-        import torchvision.utils as vutils
-        vutils.save_image(images[0], output)
-    except Exception:
-        save_tensor_image(images[0], output)
-    print(f'Saved image to: {output}')
-
-
-def infer_dmd(bundle, args):
-    """Run DMD one-step text-to-image inference."""
-    from hftrainer.pipelines.text2image.dmd_pipeline import DMDPipeline
-    from hftrainer.utils.image import save_tensor_image
-
-    pipeline = DMDPipeline(bundle=bundle)
-    prompt = args.prompt or 'a beautiful landscape'
-    print(f'Generating image for prompt: "{prompt}"')
-    images = pipeline(prompt)
-
-    output = args.output or 'output_dmd.png'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-    try:
-        import torchvision.utils as vutils
-        vutils.save_image(images[0], output)
-    except Exception:
-        save_tensor_image(images[0], output)
-    print(f'Saved image to: {output}')
-
-
-def infer_gan(bundle, args):
-    """Run StyleGAN2 inference."""
-    from hftrainer.pipelines.gan.stylegan2_pipeline import StyleGAN2Pipeline
-    from hftrainer.utils.image import save_tensor_image
-
-    pipeline = StyleGAN2Pipeline(bundle=bundle)
-    images = pipeline(num_samples=args.num_samples or 1)
-    output = args.output or 'output_gan.png'
-    os.makedirs(os.path.dirname(output) if os.path.dirname(output) else '.', exist_ok=True)
-    try:
-        import torchvision.utils as vutils
-        if images.shape[0] == 1:
-            vutils.save_image(images[0], output)
-        else:
-            vutils.save_image(images, output, nrow=min(4, images.shape[0]))
-    except Exception:
-        save_tensor_image(images[0], output)
-    print(f'Saved image to: {output}')
-
-
-def infer_classification(bundle, args):
-    """Run ViT classification inference."""
-    from hftrainer.pipelines.classification.classification_pipeline import ClassificationPipeline
-
-    pipeline = ClassificationPipeline(bundle=bundle)
-
-    if args.input:
-        from PIL import Image
-        img = Image.open(args.input).convert('RGB')
-        result = pipeline(img, return_scores=True)
-        pred_ids = result['preds']
-        scores = result['scores']
-        pred_id = pred_ids if isinstance(pred_ids, int) else pred_ids[0]
-        score = scores.max().item() if scores.ndim == 1 else scores[0].max().item()
-        print(f'Predicted class: {pred_id}, score: {score:.4f}')
-    else:
-        print('Please provide --input path to an image for classification.')
-
-
-def infer_llm(bundle, args):
-    """Run LLM text generation inference."""
-    from hftrainer.pipelines.llm.causal_lm_pipeline import CausalLMPipeline
-
-    pipeline = CausalLMPipeline(bundle=bundle)
-
-    prompt = args.prompt or 'What is artificial intelligence?'
-    print(f'Prompt: {prompt}')
-
-    outputs = pipeline([prompt], max_new_tokens=args.max_new_tokens)
-    print(f'Generated: {outputs[0]}')
-
-
-def main():
-    args = parse_args()
-
-    from mmengine.config import Config
-    cfg = Config.fromfile(args.config, import_custom_modules=False)
-
-    from hftrainer.utils.setup_env import import_custom_modules
-    import_custom_modules(cfg)
-
-    # New configs declare their inference pipeline explicitly. This removes the
-    # old coupling between trainer class names and inference behavior and also
-    # supports split external artifacts such as LTX-2.5 without a synthetic
-    # HFTrainer checkpoint directory.
-    if getattr(cfg, 'pipeline', None) is not None:
-        infer_registered_pipeline(cfg, args)
-        return
-
-    if not args.checkpoint:
+    inference_cfg = getattr(cfg, 'inference', None)
+    task = _value(inference_cfg, 'task')
+    if task not in _TASK_RUNNERS:
         raise ValueError(
-            '--checkpoint is required for legacy configs that do not define cfg.pipeline.'
+            'cfg.inference.task must be one of: ' + ', '.join(sorted(_TASK_RUNNERS))
         )
 
-    # Determine task type from config
-    trainer_cfg = getattr(cfg, 'trainer', {})
-    if hasattr(trainer_cfg, 'to_dict'):
-        trainer_cfg = trainer_cfg.to_dict()
-    trainer_type = trainer_cfg.get('type', '')
+    from hftrainer.pipelines.builder import build_pipeline_from_cfg
 
-    # Import modules
-    import hftrainer
-    hftrainer.register_all_modules()
+    pipeline = build_pipeline_from_cfg(
+        cfg,
+        checkpoint_path=args.checkpoint,
+        device=args.device,
+        merge_lora=args.merge_lora,
+    )
+    return _TASK_RUNNERS[task](pipeline, args)
 
-    legacy_device = args.device or 'cuda'
-    if legacy_device.startswith('cuda'):
-        import torch
 
-        if not torch.cuda.is_available():
-            print('CUDA is not available, falling back to cpu.')
-            legacy_device = 'cpu'
-    args.device = legacy_device
+def main(argv: list[str] | None = None):
+    args = parse_args(argv)
+    from mmengine.config import Config
 
-    print(f'Loading bundle from config: {args.config}')
-    bundle = load_bundle_from_checkpoint(cfg, args.checkpoint, legacy_device)
-    if args.merge_lora:
-        bundle.merge_lora_weights()
-        print('Merged LoRA adapters into base weights.')
+    cfg = Config.fromfile(args.config, import_custom_modules=False)
+    from hftrainer.utils.setup_env import import_custom_modules
 
-    if 'Wan' in trainer_type:
-        infer_text2video(bundle, args)
-    elif 'DMD' in trainer_type:
-        infer_dmd(bundle, args)
-    elif 'SD15' in trainer_type or 'Text2Image' in trainer_type:
-        infer_text2image(bundle, args)
-    elif 'GAN' in trainer_type:
-        infer_gan(bundle, args)
-    elif 'Classification' in trainer_type:
-        infer_classification(bundle, args)
-    elif 'CausalLM' in trainer_type or 'LLM' in trainer_type:
-        infer_llm(bundle, args)
-    else:
-        print(f'Unknown trainer type: {trainer_type}. Cannot auto-detect pipeline.')
-        print('Supported: WanTrainer, SD15Trainer, ClassificationTrainer, CausalLMTrainer')
+    import_custom_modules(cfg)
+    run(cfg, args)
 
 
 if __name__ == '__main__':

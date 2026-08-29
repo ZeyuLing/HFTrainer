@@ -1,128 +1,104 @@
-# Copyright (c) OpenMMLab. All rights reserved.
+"""Estimate FLOPs for one explicitly selected repository-owned module."""
+
+from __future__ import annotations
+
 import argparse
 
 import torch
 from mmengine import Config
-from mmengine.registry import init_default_scope
+from mmengine.analysis import get_model_complexity_info
 
-from mmagic.registry import MODELS
-
-try:
-    from mmengine.analysis import get_model_complexity_info
-except ImportError:
-    raise ImportError('Please upgrade mmengine >= 0.6.0')
+import hftrainer
+from hftrainer.registry import MODEL_BUNDLES
+from hftrainer.utils.setup_env import import_custom_modules
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Get a editor complexity',
-        formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('config', help='train config file path')
+        description='Estimate complexity for an HFTrainer-local model module.',
+    )
+    parser.add_argument('config', help='HFTrainer config file path')
     parser.add_argument(
         '--shape',
         type=int,
         nargs='+',
-        default=[3, 250, 250],
-        help='Input shape. Supported tasks:\n'
-        'Image Super-Resolution: --shape 3 h w\n'
-        'Video Super-Resolution: --shape t 3 h w\n'
-        'Video Interpolation: --shape t 3 h w\n'
-        'Image Restoration: --shape 3 h w\n'
-        'Inpainting: --shape 4 h w\n'
-        'Matting: --shape 4 h w\n'
-        'Unconditional GANs: --shape noisy_size\n'
-        'Image Translation: --shape 3 h w')
+        required=True,
+        help='Input tensor shape without the batch dimension.',
+    )
     parser.add_argument(
-        '--activations',
-        action='store_true',
-        help='Whether to show the Activations')
-    parser.add_argument(
-        '--out-table',
-        action='store_true',
-        help='Whether to show the complexity table')
-    parser.add_argument(
-        '--out-arch',
-        action='store_true',
-        help='Whether to show the complexity arch')
-    args = parser.parse_args()
-    return args
+        '--module',
+        help=(
+            'ModelBundle attribute to analyse (for example model, generator, '
+            'unet, or transformer). It may be omitted only when the bundle '
+            'has exactly one trainable module.'
+        ),
+    )
+    parser.add_argument('--activations', action='store_true')
+    parser.add_argument('--out-table', action='store_true')
+    parser.add_argument('--out-arch', action='store_true')
+    return parser.parse_args()
+
+
+def _select_module(bundle, requested: str | None):
+    if requested:
+        if not hasattr(bundle, requested):
+            available = sorted(name for name, _ in bundle.named_children())
+            raise ValueError(
+                f"Bundle {type(bundle).__name__} has no module {requested!r}; "
+                f'available: {available}'
+            )
+        model = getattr(bundle, requested)
+    else:
+        candidates = list(getattr(bundle, '_trainable_modules', ()))
+        if len(candidates) != 1:
+            raise ValueError(
+                'Pass --module because this bundle does not expose exactly one '
+                f'trainable module; candidates: {candidates}'
+            )
+        model = getattr(bundle, candidates[0])
+    if not isinstance(model, torch.nn.Module):
+        raise TypeError(f'Selected object {requested!r} is not a torch.nn.Module.')
+    return model
 
 
 def main():
-    """
-    Examples:
+    """Build through HFTrainer's local registry and print model complexity.
 
-    Image Super-Resolution:
-    `python tools/analysis_tools/get_flops.py configs/srcnn/srcnn_x4k915_1xb16-1000k_div2k.py --shape 3 250 250` # noqa
+    Examples::
 
-    Video Super-Resolution:
-    `python tools/analysis_tools/get_flops.py configs/edvr/edvrm_8xb4-600k_reds.py --shape 5 3 256 256` # noqa
+        python tools/analysis_tools/get_flops.py \
+            configs/vit/vit_base_demo.py --module model --shape 3 224 224
 
-    Video Interpolation:
-    `python tools/analysis_tools/get_flops.py configs/flavr/flavr_in4out1_8xb4_vimeo90k-septuplet.py --shape 4 3 64 64` # noqa
-
-    Image Restoration:
-    `python tools/analysis_tools/get_flops.py configs/nafnet/nafnet_c64eb11128mb1db1111_8xb8-lr1e-3-400k_gopro.py --shape 3 128 128` # noqa
-
-    Inpainting:
-    `python tools/analysis_tools/get_flops.py configs/aot_gan/aot-gan_smpgan_4xb4_places-512x512.py --shape 4 64 64` # noqa
-
-    Matting:
-    `python tools/analysis_tools/get_flops.py configs/dim/dim_stage1-v16_1xb1-1000k_comp1k.py --shape 4 256 256` # noqa
-
-    Unconditional GANs:
-    `python tools/analysis_tools/get_flops.py configs/wgan-gp/wgangp_GN_1xb64-160kiters_celeba-cropped-128x128.py --shape 128` # noqa
-
-    Image Translation:
-    `python tools/analysis_tools/get_flops.py configs/cyclegan/cyclegan_lsgan-id0-resnet-in_1xb1-250kiters_summer2winter.py --shape 3 250 250`
+        python tools/analysis_tools/get_flops.py \
+            configs/stylegan2/stylegan2_demo.py --module generator --shape 512
     """
 
     args = parse_args()
-
-    input_shape = tuple(args.shape)
-
     cfg = Config.fromfile(args.config)
+    hftrainer.register_all_modules()
+    import_custom_modules(cfg)
+    bundle = MODEL_BUNDLES.build(cfg.model)
+    model = _select_module(bundle, args.module)
 
-    init_default_scope(cfg.get('default_scope', 'mmagic'))
-
-    model = MODELS.build(cfg.model)
-    inputs = torch.randn(1, *input_shape)
+    inputs = torch.randn(1, *tuple(args.shape))
     if torch.cuda.is_available():
-        model.cuda()
+        model = model.cuda()
         inputs = inputs.cuda()
     model.eval()
 
-    if hasattr(model, 'generator'):
-        model = model.generator
-    elif hasattr(model, 'backbone'):
-        model = model.backbone
-    if hasattr(model, 'translation'):
-        model.forward = model.translation
-    elif hasattr(model, 'infer'):
-        model.forward = model.infer
-
-    analysis_results = get_model_complexity_info(model, inputs=inputs)
-    flops = analysis_results['flops_str']
-    params = analysis_results['params_str']
-    activations = analysis_results['activations_str']
-
+    analysis = get_model_complexity_info(model, inputs=inputs)
     split_line = '=' * 30
-    print(f'{split_line}\nInput shape: {input_shape}\n'
-          f'Flops: {flops}\nParams: {params}\n{split_line}\n')
+    print(
+        f'{split_line}\nInput shape: {tuple(args.shape)}\n'
+        f"FLOPs: {analysis['flops_str']}\n"
+        f"Params: {analysis['params_str']}\n{split_line}"
+    )
     if args.activations:
-        print(f'Activations: {activations}\n{split_line}\n')
+        print(f"Activations: {analysis['activations_str']}\n{split_line}")
     if args.out_table:
-        print(analysis_results['out_table'], '\n')
+        print(analysis['out_table'])
     if args.out_arch:
-        print(analysis_results['out_arch'], '\n')
-
-    if len(input_shape) == 4:
-        print('!!!If your network computes N frames in one forward pass, you '
-              'may want to divide the FLOPs by N to get the average FLOPs '
-              'for each frame.')
-    print('!!!Please be cautious if you use the results in papers. '
-          'You may need to check if all ops are supported and verify that the '
-          'flops computation is correct.')
+        print(analysis['out_arch'])
 
 
 if __name__ == '__main__':

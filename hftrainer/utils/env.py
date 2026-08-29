@@ -22,7 +22,7 @@ def collect_env_info() -> str:
     except ImportError:
         lines.append("PyTorch: not installed")
 
-    for pkg in ['accelerate', 'transformers', 'diffusers', 'peft', 'mmengine', 'safetensors']:
+    for pkg in ['accelerate', 'mmengine', 'safetensors', 'torchvision', 'datasets']:
         try:
             mod = __import__(pkg)
             lines.append(f"{pkg}: {mod.__version__}")

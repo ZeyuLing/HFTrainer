@@ -89,8 +89,10 @@ runner.train()
 
 Ordinary `BaseTrainer` subclasses return an `AccelerateRunner`. A registered
 trainer with `manages_training_loop=True` and
-`from_framework_config(cfg)` is returned directly, allowing a pinned official
-stack such as LTX to preserve its complete optimization/checkpoint lifecycle.
+`from_framework_config(cfg)` is returned directly. LTX uses this path so its
+packaged local trainer can preserve a tightly coupled preprocessing,
+optimization, validation, and checkpoint lifecycle without importing another
+trainer package.
 
 ## `ModelBundle`
 
@@ -114,14 +116,14 @@ Each bundle sub-module can declare:
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `type` | `str` | registry key / class name |
-| `from_pretrained` | `dict` | HuggingFace-style pretrained load arguments |
+| `from_pretrained` | `dict` | arguments for the selected local class's supported artifact loader |
 | `from_config` | `dict` | config-based construction arguments |
-| `from_single_file` | `dict` | single-file load arguments |
+| `from_single_file` | `dict` | arguments for a local class that explicitly implements single-file loading |
 | `trainable` | `bool` or `'lora'` | train full module, freeze it, or inject LoRA |
 | `save_ckpt` | `bool` | include module in selective checkpoint save/load |
 | `checkpoint_format` | `'full'` or `'lora'` | save full weights or adapter-only weights |
-| `lora_cfg` | `dict` | PEFT LoRA configuration when `trainable='lora'` |
-| `gradient_checkpointing` | `bool` or `dict` | enable activation checkpointing on modules that expose a supported HF hook |
+| `lora_cfg` | `dict` | local LoRA configuration when `trainable='lora'` |
+| `gradient_checkpointing` | `bool` or `dict` | enable activation checkpointing on modules that expose a supported hook |
 | `module_dtype` | dtype string or `torch.dtype` | post-load cast applied to the constructed sub-module |
 
 ### Main API
@@ -129,7 +131,7 @@ Each bundle sub-module can declare:
 | Method | What it does | Inputs |
 | --- | --- | --- |
 | `from_config(cfg=None, **kwargs)` | generic parent-class bundle construction | config dict or `mmengine.ConfigDict` |
-| `from_pretrained(path, config_overrides=None, **kwargs)` | generic HuggingFace-style bundle construction | pretrained path plus task-specific kwargs |
+| `from_pretrained(path, config_overrides=None, **kwargs)` | construct from a repository-supported artifact | artifact path plus implementation-specific kwargs |
 | `_build_modules(modules_cfg)` | instantiate and configure sub-modules | `modules_cfg: dict` |
 | `trainable_parameters()` | return all trainable parameters | none |
 | `trainable_named_parameters()` | yield trainable `(name, param)` pairs | none |
@@ -144,11 +146,10 @@ Each bundle sub-module can declare:
 
 ### Construction semantics
 
-- `from_config(...)` is fully generic and should be the default entry for custom/self-developed models.
-- `from_pretrained(...)` is a generic parent-class API. Ordinary HF-native bundles should use `HF_PRETRAINED_SPEC` instead of hand-writing `_bundle_config_from_pretrained(...)`.
-- `save_pretrained(...)` is intentionally task-specific, but ordinary HF-native bundles should prefer `HF_SAVE_PRETRAINED_SPEC` over a hand-written method.
-- Override `_bundle_config_from_pretrained(...)` or `save_pretrained(...)` only when the artifact layout is unusual enough that the declarative specs are not sufficient.
-- `from_pretrained.torch_dtype` / `dtype` are passed through to the underlying HF loader, while `module_dtype` is an HF-Trainer post-load cast.
+- `from_config(...)` is the normal constructor for repository-local components.
+- `from_pretrained(...)` maps a supported artifact into local classes. Simple bundles may declare `PRETRAINED_SPEC`; complex bundles can override `_bundle_config_from_pretrained(...)`.
+- Every concrete bundle owns `save_pretrained(...)` and the validation rules for its artifact schema.
+- `from_pretrained.torch_dtype` / `dtype` are interpreted by the local component loader, while `module_dtype` is a bundle-level post-load cast.
 - See [Memory and Precision](memory.md) for global AMP, per-module dtype, and gradient-checkpointing guidance.
 
 ### `load_state_dict_selective(...)`
@@ -333,12 +334,12 @@ hftrainer-infer --config CONFIG.py [--checkpoint CKPT_DIR] [OPTIONS]
 
 ```bash
 hftrainer-ltx-infer CONFIG.py --prompt TEXT --output OUTPUT.mp4
-hftrainer-ltx-preprocess DATASET.json --ltx-repo PATH [MODEL OPTIONS]
+hftrainer-ltx-preprocess DATASET.json [MODEL OPTIONS]
 ```
 
 The inference command exposes conditioning images, shape/frame overrides,
 `--auto-duration`, guidance arguments for dev mode, and config overrides. The
-preprocessor delegates to the pinned official `process_dataset.py`. See
+preprocessor executes HFTrainer's packaged, modified `process_dataset.py`. See
 [LTX-Video 2.5](models/ltx_video_2_5.md) for the full checkpoint and command
 contract.
 
@@ -348,9 +349,9 @@ contract.
 | --- | --- | --- | --- |
 | Classification | `ViTBundle` | `ClassificationTrainer` | `ClassificationPipeline` |
 | Text-to-image | `SD15Bundle` | `SD15Trainer` | `SD15Pipeline` |
-| Causal LM | `CausalLMBundle` | `CausalLMTrainer` | `CausalLMPipeline` |
+| Causal LM | `LlamaBundle` | `CausalLMTrainer` | `CausalLMPipeline` |
 | Text-to-video | `WanBundle` | `WanTrainer` | `WanPipeline` |
-| GAN | `StyleGAN2Bundle` | `GANTrainer` | `StyleGAN2Pipeline` |
+| GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` |
 | DMD | `DMDBundle` | `DMDTrainer` | `DMDPipeline` |
 | LTX-Video 2.5 | `LTXVideoBundle` | `LTXVideoTrainer` (managed) | `LTXVideoPipeline` |
 

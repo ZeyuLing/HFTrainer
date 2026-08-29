@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dist_train.sh — Launch distributed training with accelerate
 # Usage: bash tools/dist_train.sh CONFIG [GPUS] [extra args]
-# Example: bash tools/dist_train.sh configs/classification/vit_base_demo.py 8
+# Example: bash tools/dist_train.sh configs/vit/vit_base_demo.py 8
 
 CONFIG=$1
 if command -v python3 >/dev/null 2>&1; then

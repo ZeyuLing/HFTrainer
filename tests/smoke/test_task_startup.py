@@ -250,7 +250,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='classification',
-            config_path='configs/classification/vit_base_demo.py',
+            config_path='configs/vit/vit_base_demo.py',
             required_paths=[
                 'checkpoints/vit-base-patch16-224',
                 'data/classification/demo/images',
@@ -268,7 +268,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='gan',
-            config_path='configs/gan/gan_demo.py',
+            config_path='configs/stylegan2/stylegan2_demo.py',
             required_paths=['data/classification/demo/images'],
             customize_cfg=_customize_gan,
             build_infer_args=_gan_infer_args,
@@ -283,7 +283,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='llm_sft',
-            config_path='configs/llm/llama_sft_demo.py',
+            config_path='configs/llama/llama_sft_demo.py',
             required_paths=[
                 'checkpoints/TinyLlama-1.1B-Chat-v1.0',
                 'data/llm/demo/alpaca_sample.json',
@@ -299,7 +299,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='llm_lora',
-            config_path='configs/llm/llama_lora_demo.py',
+            config_path='configs/llama/llama_lora_demo.py',
             required_paths=[
                 'checkpoints/TinyLlama-1.1B-Chat-v1.0',
                 'data/llm/demo/alpaca_sample.json',
@@ -315,7 +315,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='sd15',
-            config_path='configs/text2image/sd15_demo.py',
+            config_path='configs/sd15/sd15_demo.py',
             required_paths=[
                 'checkpoints/stable-diffusion-v1-5',
                 'data/text2image/demo',
@@ -331,7 +331,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='wan',
-            config_path='configs/text2video/wan_demo.py',
+            config_path='configs/wan/wan_demo.py',
             required_paths=[
                 'checkpoints/Wan2.1-T2V-1.3B-Diffusers',
                 'data/text2video/demo',
@@ -348,7 +348,7 @@ SMOKE_CASES = [
     pytest.param(
         SmokeCase(
             name='dmd',
-            config_path='configs/distillation/dmd_demo.py',
+            config_path='configs/dmd/dmd_demo.py',
             required_paths=[
                 'checkpoints/stable-diffusion-v1-5',
                 'data/text2image/demo',

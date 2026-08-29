@@ -1,97 +1,96 @@
 # LoRA
 
-HF-Trainer 支持按子模块配置的 LoRA。
+HFTrainer 在 `hftrainer.models.lora` 中本地实现 LoRA。它把 `LoRALinear` 注入
+仓库自有模型的 `torch.nn.Linear`，不导入、也不要求安装其他 adapter 框架。
 
 ## 配置方式
 
-在任意一个被 PEFT 支持的 bundle 子模块上使用 `trainable='lora'`：
+在 bundle 子模块上设置 `trainable='lora'`，并填写本地 LoRA 参数：
 
 ```python
 model = dict(
-    type='CausalLMBundle',
+    type='LlamaBundle',
     model=dict(
-        type='AutoModelForCausalLM',
+        type='LocalLlamaForCausalLM',
         from_pretrained=dict(
             pretrained_model_name_or_path='checkpoints/TinyLlama-1.1B-Chat-v1.0',
             torch_dtype='auto',
         ),
         trainable='lora',
-        checkpoint_format='lora',  # 可选；LoRA 模块默认就是这个
+        checkpoint_format='lora',
         lora_cfg=dict(
-            task_type='CAUSAL_LM',
             r=16,
             lora_alpha=32,
             lora_dropout=0.05,
             target_modules='all-linear',
+            bias='none',
         ),
     ),
 )
 ```
 
-LoRA 模块支持两种 checkpoint 保存格式：
+当前本地参数包括：
 
-- `checkpoint_format='lora'`：只保存 adapter 权重
-- `checkpoint_format='full'`：保存完整的 LoRA 包装模块 state dict
+- `r` 或 `rank`：正数 adapter rank；
+- `lora_alpha` 或 `alpha`：残差缩放的分子；
+- `lora_dropout` 或 `dropout`：范围为 `[0, 1)` 的输入 dropout；
+- `target_modules`：`'all-linear'`、一个限定名后缀，或后缀列表；
+- `bias`：`'none'`、`'all'` 或 `'lora_only'`。
 
-当 `trainable='lora'` 时，HF-Trainer 默认使用 `checkpoint_format='lora'`。
+为兼容已有 HFTrainer recipe，旧的 `task_type` 字段仍可出现但会被忽略；它不会
+选择另一套实现。
 
-## 推荐示例
+## 训练与 checkpoint
 
-当前可直接运行的参考 config：
+可运行配置：
 
-- `configs/llm/llama_lora_demo.py`
-
-训练命令：
+- `configs/llama/llama_lora_demo.py`
 
 ```bash
-python3 tools/train.py configs/llm/llama_lora_demo.py
+python3 tools/train.py configs/llama/llama_lora_demo.py
 ```
 
-## Checkpoint 语义
+注入 LoRA 后，base 参数会被冻结，只有匹配到的 adapter 参数和按配置开放的 bias
+参与训练。LoRA 子模块默认使用 `checkpoint_format='lora'`，只把 adapter tensor
+写入 `checkpoint-*/model.pt`，不会重复保存冻结的 base checkpoint。
 
-HF-Trainer 会把 adapter-only 权重写到 `checkpoint-*/model.pt`，同时保存每个模块的 checkpoint format metadata。
+只有确实需要整个 LoRA 注入后模块的 state 时，才使用
+`checkpoint_format='full'`。
 
-对于 LoRA checkpoint，默认情况下 `model.pt` 只包含 adapter 权重，不包含冻结的 base model 权重。这样 checkpoint 更小，`load_scope='model'` 的加载也更快。
+checkpoint 加载范围与 adapter 格式相互独立：
 
-`load_scope='model'`：
+- `load_scope='model'` 只加载 bundle 选择的模型状态；
+- `load_scope='full'` 还会通过 runner 恢复 optimizer、scheduler 和 RNG 状态。
 
-- 只加载选择性的 bundle 权重
-
-`load_scope='full'`：
-
-- 通过 `accelerator.load_state(...)` 做完整 resume
-- 恢复 optimizer / scheduler / RNG state
-
-## 保存 / 加载 / 合并流程
+## 保存、加载与合并
 
 ```mermaid
 flowchart LR
-    A["Config: trainable='lora'"] --> B["PEFT 包装子模块"]
-    B --> C["训练时只更新 adapter 参数"]
-    C --> D["checkpoint_format='lora'"]
-    D --> E["checkpoint-*/model.pt"]
-    E --> F["tools/infer.py"]
-    F --> G["加载 adapter 权重"]
-    G --> H["--merge-lora"]
-    H --> I["用于推理的 merged base model"]
+    A["Config: trainable='lora'"] --> B["注入本地 LoRALinear"]
+    B --> C["只更新 adapter 参数"]
+    C --> D["adapter-only checkpoint"]
+    D --> E["加载到同一本地模型"]
+    E --> F["可选 --merge-lora"]
+    F --> G["普通合并后 Linear 权重"]
 ```
 
-## 推理与合并
-
-推理时可以直接加载 LoRA checkpoint，并在运行前把 adapter 合并进 base weight：
+使用保存的 adapter 推理：
 
 ```bash
 python3 tools/infer.py \
-  --config configs/llm/llama_lora_demo.py \
+  --config configs/llama/llama_lora_demo.py \
   --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
   --merge-lora \
   --prompt "What is the capital of France?"
 ```
 
-`--merge-lora` 会在真正执行 pipeline 之前，在内存中把 adapter weight 合并到 base weight。
+`--merge-lora` 会在内存中把低秩更新加到 base weight，并在推理前用普通 linear
+layer 替换 adapter wrapper。
 
-## 适用范围
+## 能力边界与失败行为
 
-HF-Trainer 在 `ModelBundle` 层暴露 LoRA，因此不同任务的配置模式是一致的。但是否能真正使用，仍然取决于 PEFT 是否支持对应模型类型，以及你配置的 `target_modules` 是否正确。
+本地 injector 当前面向 `torch.nn.Linear`。没有 target 命中、重复注入，或 adapter
+checkpoint 出现缺失/意外 key 时都会报错，避免静默训练或加载不完整 adapter。
 
-当前已经做过端到端验证的 LoRA 路径是 Causal LM。
+在 HFTrainer 拥有并验证本地 4-bit linear 实现前，QLoRA 会明确拒绝执行。当前请
+使用本地 LoRA 或全量微调。

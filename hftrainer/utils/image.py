@@ -1,6 +1,6 @@
 """Image helpers that keep basic data paths usable without torchvision."""
 
-from typing import Sequence, Tuple
+from typing import Sequence
 
 import numpy as np
 import torch

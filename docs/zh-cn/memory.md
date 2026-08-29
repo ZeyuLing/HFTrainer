@@ -1,48 +1,54 @@
 # 显存与精度
 
-这一页整理 HF-Trainer 当前已经支持的、可通过 config 控制的显存与精度策略。
+本页说明 HFTrainer 已实现的 config 级显存与精度控制。模型专属加载参数由仓库
+本地 component class 解释，不会被透传给外部模型 loader。
 
 ## 1. 全局运行时精度
 
-用 runner 级别的 `accelerator` 配置全局 AMP 和梯度累积：
+用 runner 级 `accelerator` 配置自动混合精度与梯度累积：
 
 ```python
 accelerator = dict(
-    mixed_precision='bf16',          # 'no' | 'fp16' | 'bf16'
+    mixed_precision='bf16',  # 'no' | 'fp16' | 'bf16'
     gradient_accumulation_steps=4,
 )
 ```
 
-- `mixed_precision` 控制全局 `accelerate` AMP 策略。
-- `gradient_accumulation_steps` 通过减少单步 activation 占用来换吞吐。
+- `mixed_precision` 选择 Accelerate 的 AMP 策略。
+- `gradient_accumulation_steps` 减少每次 optimizer step 的 activation 峰值，
+  通常会牺牲部分吞吐。
+
+Accelerate 是运行时基础设施，不提供 HFTrainer 的模型数学、tokenizer、scheduler、
+trainer 或 pipeline 实现。
 
 ## 2. 按模块控制 dtype
 
-HF-Trainer 现在支持两层按模块 dtype 控制。
+HFTrainer 提供两层本地 dtype 控制。
 
-### 2.1 透传给官方 HF Loader
+### 2.1 Artifact loader 的 dtype
 
-如果底层 `transformers` / `diffusers` 类本来就支持 `torch_dtype` 或 `dtype`，优先继续沿用官方 loader 接口：
+本地 component loader 可以在自己的 `from_pretrained` 合约中声明
+`torch_dtype` 或 `dtype`。例如仓库自有的 Wan encoder：
 
 ```python
-model = dict(
-    type='SD15Bundle',
-    text_encoder=dict(
-        type='CLIPTextModel',
-        from_pretrained=dict(
-            pretrained_model_name_or_path=CKPT_PATH,
-            subfolder='text_encoder',
-            torch_dtype='bf16',
-        ),
-        trainable=False,
-        save_ckpt=False,
+text_encoder=dict(
+    type='UMT5EncoderModel',
+    from_pretrained=dict(
+        pretrained_model_name_or_path=CKPT_PATH + '/text_encoder',
+        torch_dtype='bf16',
     ),
+    trainable=False,
+    save_ckpt=False,
 )
 ```
 
-### 2.2 HF-Trainer 的 Post-Load Cast
+这个类名通过 `MODEL_COMPONENTS` 解析到 `hftrainer.models.wan` 下的代码；
+`from_pretrained` 描述磁盘 artifact，不表示选择外部实现。
 
-如果你希望框架在模块构建完成后统一 cast，或者底层 loader 本身没有合适的 dtype 参数，就用 `module_dtype`：
+### 2.2 Bundle 的 post-load cast
+
+使用 `module_dtype` 可以在本地组件构建完成后统一调用
+`nn.Module.to(dtype=...)`：
 
 ```python
 model = dict(
@@ -72,90 +78,67 @@ model = dict(
 
 `module_dtype` 支持：
 
-- `'fp32'`、`'float32'`、`'torch.float32'`
-- `'fp16'`、`'float16'`、`'torch.float16'`
-- `'bf16'`、`'bfloat16'`、`'torch.bfloat16'`
-- 真实的 `torch.dtype`
+- `'fp32'`、`'float32'`、`'torch.float32'`；
+- `'fp16'`、`'float16'`、`'torch.float16'`；
+- `'bf16'`、`'bfloat16'`、`'torch.bfloat16'`；
+- 真实的 `torch.dtype`。
 
-### 重要注意事项
+如果需要严格的 `vae=fp32`、`transformer=bf16`，请逐模块设置 dtype，并使用
+`accelerator.mixed_precision='no'`。否则全局 AMP 仍可能 autocast 合适的算子。
 
-如果你需要严格的“`vae=fp32`、`transformer=bf16`”策略，建议组合是：
+## 3. Gradient checkpointing
 
-- 按模块设置 `torch_dtype` / `module_dtype`
-- `accelerator.mixed_precision='no'`
-
-如果同时开启全局 AMP，`accelerate` 仍然可能在 eligible op 上继续 autocast。
-
-## 3. Gradient Checkpointing
-
-现在任意 bundle 子模块都可以直接声明：
+任意 bundle 子模块都可以请求 activation checkpointing：
 
 ```python
 transformer=dict(
     type='WanTransformer3DModel',
-    from_pretrained=dict(pretrained_model_name_or_path=CKPT_PATH),
+    from_pretrained=dict(
+        pretrained_model_name_or_path=CKPT_PATH + '/transformer',
+    ),
     gradient_checkpointing=True,
 )
 ```
 
-或者：
+`ModelBundle` 会调用本地模块的 `gradient_checkpointing_enable(...)` 或
+`enable_gradient_checkpointing(...)`。只有本地 hook 明确记录了关键字参数时，
+才应传 dict。两者都不存在，或已记录参数不被接受时，会直接抛出明确的配置错误。
 
-```python
-model=dict(
-    type='AutoModelForCausalLM',
-    from_pretrained=dict(pretrained_model_name_or_path=CKPT_PATH),
-    gradient_checkpointing=dict(use_reentrant=False),
-)
-```
+## 4. 其他已支持控制
 
-HF-Trainer 会在模块暴露下列 hook 时自动接通：
+- `trainable=False`：冻结模块，不为其创建 optimizer state。
+- `trainable='lora'`：注入 HFTrainer 本地低秩层，只训练 adapter；详见
+  [LoRA](lora.md)。
+- `checkpoint_format='lora'`：只保存 adapter checkpoint。
+- `save_ckpt=False`：选择性保存/加载时跳过冻结模块；它减少 checkpoint I/O 与
+  磁盘占用，不直接减少运行时显存。
+- optimizer 只从 `torch.optim` 解析。HFTrainer 命名 schedule 使用
+  `hftrainer.optim.schedulers`；显式 PyTorch scheduler class 可以从
+  `torch.optim.lr_scheduler` 解析。
 
-- `gradient_checkpointing_enable(...)`
-- `enable_gradient_checkpointing(...)`
+HFTrainer 尚未拥有经过验证的本地 4-bit linear kernel，因此不开放 QLoRA。
 
-如果模块没有兼容 hook，会直接抛出明确的配置错误。
+## 5. 模型专属参数
 
-## 4. 已支持的其他省显存手段
+只传入当前仓库本地模型明确记录的 loader 参数。HFTrainer 有意不提供把任意参数
+透传给另一模型框架的通用逃逸入口；不支持的参数会在本地 constructor/loader
+边界报错。
 
-- `trainable=False`：冻结模块，不为它创建 optimizer state。
-- `trainable='lora'`：只训练 adapter，而不是整个模块。
-- `checkpoint_format='lora'`：LoRA 模块默认只存 adapter checkpoint。
-- `save_ckpt=False`：保存/恢复时跳过大模块。这个主要节省 checkpoint IO 和磁盘，不直接减少运行时 GPU 显存。
-- optimizer 也是 config 驱动的：可以直接切到 `Adafactor`、`SGD` 等较轻量方案。
+## 6. 尚未统一的能力
 
-## 5. 模型专属 Loader 参数
+以下能力目前还不是跨模型统一 config 合约：
 
-HF-Trainer 也支持在 `from_pretrained` 下直接透传模型专属参数，例如：
+- memory-efficient attention backend；
+- attention slicing 与 VAE tiling helper；
+- 8-bit optimizer preset；
+- 按模块关闭 autocast 或强制 fp32 island；
+- Accelerate 配置之外的打包 ZeRO/FSDP offload preset。
 
-```python
-model=dict(
-    type='AutoModelForCausalLM',
-    from_pretrained=dict(
-        pretrained_model_name_or_path=CKPT_PATH,
-        torch_dtype='bf16',
-        low_cpu_mem_usage=True,
-        attn_implementation='flash_attention_2',
-    ),
-)
-```
+当前稳定的跨模型控制包括：
 
-这些参数会直接传给底层 HF 类。HF-Trainer 不会统一规范或校验每一个模型专属开关。
-
-## 6. 还没有统一成框架契约的能力
-
-下面这些可以作为后续演进方向，但目前还没有做成统一配置接口：
-
-- xFormers / memory-efficient attention 开关
-- attention slicing / VAE tiling 这类 helper
-- 8-bit optimizer 预设
-- 按模块关闭 autocast / 强制 fp32 island
-- 除原生 `accelerate` 用法外的 ZeRO/FSDP offload 预设
-
-当前已经标准化的 HF-Trainer 显存契约是：
-
-- `accelerator.mixed_precision`
-- `accelerator.gradient_accumulation_steps`
-- `from_pretrained.torch_dtype` / `dtype`
-- `module_dtype`
-- `gradient_checkpointing`
-- `trainable` / `save_ckpt` / `checkpoint_format`
+- `accelerator.mixed_precision`；
+- `accelerator.gradient_accumulation_steps`；
+- 各本地实现明确支持的 `from_pretrained.torch_dtype` / `dtype`；
+- `module_dtype`；
+- `gradient_checkpointing`；
+- `trainable`、`save_ckpt` 与 `checkpoint_format`。

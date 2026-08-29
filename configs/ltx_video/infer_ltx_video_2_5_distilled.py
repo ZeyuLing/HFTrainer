@@ -46,3 +46,5 @@ pipeline = dict(
     frame_rate=24.0,
     seed=42,
 )
+
+inference = dict(task='text_to_video')

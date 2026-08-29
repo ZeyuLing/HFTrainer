@@ -22,8 +22,6 @@ Coverage:
 """
 from __future__ import annotations
 
-import os
-
 import pytest
 import torch
 import torch.nn as nn

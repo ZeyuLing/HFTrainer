@@ -157,8 +157,9 @@ def test_managed_trainer_builds_official_schema_and_forwards_step_callback(
             events['config'] = self
 
     class FakeOfficialTrainer:
-        def __init__(self, config):
+        def __init__(self, config, *, component_registry):
             self.config = config
+            self.component_registry = component_registry
             events['trainer'] = self
 
         def train(self, *, disable_progress_bars, step_callback):
@@ -199,6 +200,11 @@ def test_managed_trainer_builds_official_schema_and_forwards_step_callback(
     )
     assert events['config'].values['model']['model_path'] == DEV_TRANSFORMER
     assert events['trainer'].config is events['config']
+    assert events['trainer'].component_registry is trainer.components.training_registry
+    assert (
+        events['trainer'].component_registry
+        is not trainer.components.inference_registry
+    )
     assert events['train_kwargs'] == {
         'disable_progress_bars': True,
         'step_callback': callback,
@@ -252,6 +258,28 @@ def test_managed_runner_builder_selects_ltx_without_accelerate(tmp_path):
     assert isinstance(runner, LTXVideoTrainer)
 
 
+def test_framework_config_preserves_an_injected_component_store_identity(tmp_path):
+    from hftrainer.models.ltx_video.component_loader import LTXComponentStore
+
+    components = LTXComponentStore()
+    cfg = SimpleNamespace(
+        trainer={
+            'type': 'LTXVideoTrainer',
+            'native_config': native_training_config(),
+            'require_files': False,
+            'require_linux': False,
+            'components': components,
+        },
+        work_dir=str(tmp_path / 'managed'),
+        load_from=None,
+        auto_resume=False,
+    )
+
+    trainer = LTXVideoTrainer.from_framework_config(cfg)
+
+    assert trainer.components is components
+
+
 def _touch(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
@@ -259,9 +287,11 @@ def _touch(path: Path) -> Path:
 
 
 def test_preprocess_argv_contains_all_split_components_and_boolean_flags(tmp_path):
-    ltx_repo = tmp_path / 'LTX-2'
-    script = _touch(
-        ltx_repo / 'packages' / 'ltx-trainer' / 'scripts' / 'process_dataset.py'
+    import hftrainer.trainers.ltx_video.preprocess as preprocess_module
+
+    script = (
+        Path(preprocess_module.__file__).with_name('preprocess_scripts')
+        / 'process_dataset.py'
     )
     model_path = _touch(tmp_path / DEV_TRANSFORMER)
     text_encoder_path = _touch(tmp_path / TEXT_ENCODER)
@@ -270,7 +300,6 @@ def test_preprocess_argv_contains_all_split_components_and_boolean_flags(tmp_pat
     output_dir = tmp_path / 'preprocessed'
 
     command = build_ltx_preprocess_command(
-        ltx_repo=ltx_repo,
         dataset_path=tmp_path / 'dataset.jsonl',
         resolution_buckets='960x544x49',
         model_path=model_path,
@@ -312,14 +341,11 @@ def test_preprocess_argv_contains_all_split_components_and_boolean_flags(tmp_pat
 
 
 def test_preprocess_requires_audio_vae_unless_audio_is_skipped(tmp_path):
-    ltx_repo = tmp_path / 'LTX-2'
-    _touch(ltx_repo / 'packages' / 'ltx-trainer' / 'scripts' / 'process_dataset.py')
     model_path = _touch(tmp_path / DEV_TRANSFORMER)
     text_encoder_path = _touch(tmp_path / TEXT_ENCODER)
     video_vae_path = _touch(tmp_path / VIDEO_VAE)
 
     kwargs = {
-        'ltx_repo': ltx_repo,
         'dataset_path': tmp_path / 'dataset.jsonl',
         'resolution_buckets': '960x544x49',
         'model_path': model_path,

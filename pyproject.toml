@@ -1,20 +1,21 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "hftrainer"
-version = "0.2.0"
-description = "A config-driven training and inference framework for Hugging Face and native model stacks"
+version = "0.3.0"
+description = "A config-driven training and inference framework with repository-local model implementations"
 readme = "README.md"
+license-files = [
+    "THIRD_PARTY_NOTICES.md",
+    "hftrainer/models/ltx_video/LICENSE.ltx-2.x",
+]
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.0",
     "torchvision>=0.15",
     "accelerate>=1.2.1,<2",
-    "transformers>=4.30,<6",
-    "diffusers>=0.20,<1",
-    "peft>=0.17,<1",
     "mmengine>=0.7,<1",
     "safetensors>=0.5",
     "datasets>=2.0",
@@ -37,27 +38,50 @@ dev = [
     "ruff>=0.8",
 ]
 
-# LTX packages are pinned to one reviewed upstream source revision. At the time
-# of integration, PyPI only carries an older ltx-core/ltx-pipelines line and no
-# current ltx-trainer distribution, so an unpinned PyPI requirement would mix
-# incompatible APIs. Keep the three URLs on the same commit when upgrading.
+# LTX's model, pipeline, and trainer source is pinned inside this repository.
+# These extras contain only supporting media/runtime libraries; no external
+# model-framework or LTX package supplies executable model code.
 ltx-video-inference = [
-    # The pinned source imports torch.compiler.nested_compile_region, which is
-    # absent from torch 2.7.x despite the upstream package's broad metadata.
     "torch>=2.8,<3",
-    "ltx-core @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-core",
-    "ltx-pipelines @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-pipelines",
+    "av>=14,<17",
+    "einops>=0.8,<1",
+    "scipy>=1.11,<2",
+    "tqdm>=4.66,<5",
 ]
 ltx-video-train = [
     "torch>=2.8,<3",
-    "ltx-core @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-core",
-    "ltx-trainer @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-trainer",
+    "torchaudio>=2.8,<3",
+    "av>=14,<17",
+    "einops>=0.8,<1",
+    "pandas>=2.0,<3",
+    "pillow-heif>=0.20,<2",
+    "pydantic>=2.10,<3",
+    "rich>=13,<15",
+    "scipy>=1.11,<2",
+    "tqdm>=4.66,<5",
+    "typer>=0.15,<1",
 ]
 ltx-video = [
     "torch>=2.8,<3",
-    "ltx-core @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-core",
-    "ltx-pipelines @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-pipelines",
-    "ltx-trainer @ git+https://github.com/Lightricks/LTX-2.git@400fd31054597515f47125691032c04b1c3ee24e#subdirectory=packages/ltx-trainer",
+    "torchaudio>=2.8,<3",
+    "av>=14,<17",
+    "einops>=0.8,<1",
+    "pandas>=2.0,<3",
+    "pillow-heif>=0.20,<2",
+    "pydantic>=2.10,<3",
+    "rich>=13,<15",
+    "scipy>=1.11,<2",
+    "tqdm>=4.66,<5",
+    "typer>=0.15,<1",
+]
+ltx-video-integrations = [
+    "huggingface-hub>=0.28,<2",
+    "imageio>=2.35,<3",
+    "wandb>=0.19,<1",
+]
+ltx-video-hdr = [
+    "OpenImageIO>=3.0,<4",
+    "opencv-python-headless>=4.10,<5",
 ]
 
 [project.scripts]
@@ -66,15 +90,25 @@ hftrainer-infer = "tools.infer:main"
 hftrainer-ltx-infer = "tools.infer_ltx_video:main"
 hftrainer-ltx-preprocess = "tools.preprocess_ltx_video:main"
 
+[tool.setuptools]
+# All wheel data is declared below.  Keeping manifest-derived package data
+# disabled avoids ambiguous package discovery for nested license files.
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hftrainer*", "tools*"]
 namespaces = true
+
+[tool.setuptools.package-data]
+"hftrainer.models.ltx_video" = ["LICENSE.ltx-2.x", "UPSTREAM.md"]
+"hftrainer.models.ltx_video.network.text_encoders.gemma.encoders" = ["prompts/*.txt"]
+"hftrainer.models.wan" = ["SOURCES.md"]
+"tools" = ["*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "smoke: startup smoke tests for training and inference entry points",
     "gpu: tests that require CUDA-capable hardware and local pretrained checkpoints",
-    "upstream: optional contracts against a pinned external source checkout",
 ]

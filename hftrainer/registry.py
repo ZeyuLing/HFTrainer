@@ -2,7 +2,7 @@
 Registry system for hftrainer.
 
 Registries:
-  HF_MODELS    — HuggingFace model classes (from_pretrained / from_config / from_single_file)
+  MODEL_COMPONENTS — repository-owned model and scheduler classes
   MODEL_BUNDLES — ModelBundle subclasses
   TRAINERS      — Trainer subclasses
   PIPELINES     — Pipeline subclasses
@@ -14,7 +14,46 @@ Registries:
 """
 
 import copy
-from mmengine.registry import Registry, TRANSFORMS as MMENGINE_TRANSFORMS
+from collections.abc import Mapping
+from mmengine.registry import Registry
+
+
+class RepositoryRegistry(Registry):
+    """Registry whose string lookup is limited to explicitly registered names.
+
+    MMEngine's default :meth:`Registry.get` treats an unknown dotted string as
+    an import path.  That is convenient for a general plugin system, but it
+    violates HFTrainer's ownership boundary: a config such as
+    ``types.SimpleNamespace`` or ``some_model_package.Model`` must not turn
+    into executable code merely because that package is installed.  Extension
+    modules remain supported, but they must explicitly register their classes
+    (for example through ``custom_imports``) before a config can build them.
+    """
+
+    def get(self, key: str):
+        if not isinstance(key, str):
+            raise TypeError(
+                'The key argument of RepositoryRegistry.get must be a string, '
+                f'got {type(key).__name__}.'
+            )
+        return self.module_dict.get(key)
+
+    def build(self, cfg, *args, **kwargs):
+        """Build only classes that were explicitly registered by identity."""
+
+        entries = cfg if isinstance(cfg, (list, tuple)) else (cfg,)
+        for entry in entries:
+            if not isinstance(entry, Mapping) or 'type' not in entry:
+                continue
+            obj_type = entry['type']
+            if isinstance(obj_type, str):
+                continue
+            if not any(obj_type is value for value in self.module_dict.values()):
+                raise KeyError(
+                    f"{obj_type!r} is not explicitly registered in '{self.name}'. "
+                    'Register the local class before using it in a config.'
+                )
+        return super().build(cfg, *args, **kwargs)
 
 # Map string shorthand to torch.dtype
 _DTYPE_MAP = {
@@ -40,7 +79,7 @@ def _resolve_dtype(kwargs: dict) -> dict:
                 kwargs['torch_dtype'] = getattr(torch, attr)
             else:
                 kwargs['torch_dtype'] = resolved
-    # Also handle 'dtype' (used by some transformers classes)
+    # Also handle the generic ``dtype`` spelling used by local components.
     if 'dtype' in kwargs:
         val = kwargs['dtype']
         if isinstance(val, str):
@@ -54,9 +93,9 @@ def _resolve_dtype(kwargs: dict) -> dict:
     return kwargs
 
 
-def build_hf_model_from_cfg(cfg, registry):
+def build_model_component_from_cfg(cfg, registry):
     """
-    Build a HuggingFace model (or any class) from config dict.
+    Build a repository-local model component from a config dictionary.
 
     Handles three loading patterns:
       - from_pretrained: cls.from_pretrained(**from_pretrained_kwargs)
@@ -70,17 +109,25 @@ def build_hf_model_from_cfg(cfg, registry):
     cfg = copy.deepcopy(cfg)
     obj_type = cfg.pop('type')
 
-    # Get the class from registry
+    # Model execution must have one visible, repository-owned implementation.
+    # Falling back to arbitrary import discovery made a config appear local
+    # while silently handing execution to whichever package happened to be
+    # installed in the environment.
     if isinstance(obj_type, str):
         cls = registry.get(obj_type)
         if cls is None:
-            # Try importing from transformers/diffusers by name
-            cls = _import_hf_class(obj_type)
-        if cls is None:
-            raise KeyError(f"Class '{obj_type}' not found in registry '{registry.name}' "
-                           f"and could not be imported from transformers/diffusers.")
+            available = sorted(registry.module_dict)
+            raise KeyError(
+                f"Model component '{obj_type}' is not registered in "
+                f"'{registry.name}'. Import its hftrainer.models.<implementation> "
+                f"package through config.custom_imports. Available: {available}"
+            )
     else:
         cls = obj_type
+        if not any(cls is value for value in registry.module_dict.values()):
+            raise KeyError(
+                f"{cls!r} is not explicitly registered in '{registry.name}'."
+            )
 
     # Check for special loading patterns
     if 'from_pretrained' in cfg:
@@ -96,38 +143,16 @@ def build_hf_model_from_cfg(cfg, registry):
         return cls(**cfg)
 
 
-def _import_hf_class(class_name: str):
-    """Try to import a class by name from transformers, diffusers, or torch.optim."""
-    import_modules = [
-        'transformers',
-        'diffusers',
-        'diffusers.schedulers',
-        'peft',
-        'torch.optim',
-        'torch.optim.lr_scheduler',
-    ]
-    for module_name in import_modules:
-        try:
-            import importlib
-            module = importlib.import_module(module_name)
-            if hasattr(module, class_name):
-                return getattr(module, class_name)
-        except ImportError:
-            continue
-    return None
-
-
 # Core registries
-HF_MODELS = Registry('hf_model', build_func=build_hf_model_from_cfg)
-# Compatibility alias for vendored model code that expects a generic model
-# registry. HF_MODELS can already build plain nn.Module classes, not only
-# HuggingFace-native ones, so reusing it keeps the migration surface small.
-MODELS = HF_MODELS
-MODEL_BUNDLES = Registry('model_bundle')
-TRAINERS = Registry('trainer')
-PIPELINES = Registry('pipeline')
-DATASETS = Registry('dataset')
-TRANSFORMS = MMENGINE_TRANSFORMS
-HOOKS = Registry('hook')
-EVALUATORS = Registry('evaluator')
-VISUALIZERS = Registry('visualizer')
+MODEL_COMPONENTS = RepositoryRegistry(
+    'model_component', build_func=build_model_component_from_cfg
+)
+MODELS = MODEL_COMPONENTS
+MODEL_BUNDLES = RepositoryRegistry('model_bundle')
+TRAINERS = RepositoryRegistry('trainer')
+PIPELINES = RepositoryRegistry('pipeline')
+DATASETS = RepositoryRegistry('dataset')
+TRANSFORMS = RepositoryRegistry('transform')
+HOOKS = RepositoryRegistry('hook')
+EVALUATORS = RepositoryRegistry('evaluator')
+VISUALIZERS = RepositoryRegistry('visualizer')

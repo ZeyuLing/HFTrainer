@@ -1,0 +1,39 @@
+# MODIFIED BY HFTRAINER: relocated into repository-owned layers and adapted for local execution.
+# See hftrainer/models/ltx_video/UPSTREAM.md and LICENSE.ltx-2.x.
+from dataclasses import replace
+from typing import Protocol
+
+import torch
+
+from hftrainer.models.ltx_video.network.types import LatentState
+
+
+class Noiser(Protocol):
+    """Protocol for adding noise to a latent state during diffusion."""
+
+    def __call__(self, latent_state: LatentState, noise_scale: float) -> LatentState: ...
+
+
+class GaussianNoiser(Noiser):
+    """Adds Gaussian noise to a latent state, scaled by the denoise mask."""
+
+    def __init__(self, generator: torch.Generator):
+        super().__init__()
+        self.generator = generator
+
+    def _sample_noise(self, latent_state: LatentState) -> torch.Tensor:
+        return torch.randn(
+            *latent_state.latent.shape,
+            device=latent_state.latent.device,
+            dtype=latent_state.latent.dtype,
+            generator=self.generator,
+        )
+
+    def __call__(self, latent_state: LatentState, noise_scale: float = 1.0) -> LatentState:
+        noise = self._sample_noise(latent_state)
+        latent = torch.lerp(latent_state.latent.float(), noise.float(), noise_scale)
+        latent = torch.lerp(latent_state.clean_latent.float(), latent, latent_state.denoise_mask)
+        return replace(
+            latent_state,
+            latent=latent.to(latent_state.latent.dtype),
+        )

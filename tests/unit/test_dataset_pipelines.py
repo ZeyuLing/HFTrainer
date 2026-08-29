@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from hftrainer.datasets.classification.imagefolder_dataset import ImageFolderDataset
+from hftrainer.datasets.image_classification.image_folder import ImageFolderDataset
 
 
 def test_imagefolder_dataset_uses_mmengine_style_pipeline(tmp_path):

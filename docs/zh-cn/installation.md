@@ -4,7 +4,6 @@
 
 - Python 3.10 或更高版本
 - 与本机 CPU/CUDA 环境匹配的 PyTorch
-- 安装 LTX-Video 这类固定源码版本的可选集成时需要 Git
 
 在仓库根目录安装可编辑核心环境：
 
@@ -30,25 +29,38 @@ python -m pip install -e ".[dev]"
 
 ## LTX-Video 2.5
 
-LTX 不属于核心依赖。按用途选择推理、训练或完整安装：
+HFTrainer 已经包含经过修改并固定版本的 LTX 模型、trainer、预处理与 pipeline
+源码。LTX 不进入基础依赖，是因为 22B 工作流还需要额外的媒体与科学计算支持库。
+按用途选择推理、训练或完整安装：
 
 ```bash
 python -m pip install -e ".[ltx-video-inference]"
 python -m pip install -e ".[ltx-video-train]"
 python -m pip install -e ".[ltx-video]"
+
+# 可选：实验跟踪 / Hub 发布
+python -m pip install -e ".[ltx-video-integrations]"
+
+# 可选：EXR/HDR 媒体路径
+python -m pip install -e ".[ltx-video-hdr]"
 ```
 
-这些 extra 会从官方 Lightricks/LTX-2 的已审查 commit
-`400fd31054597515f47125691032c04b1c3ee24e` 安装 `ltx-core`、
-`ltx-pipelines` 和/或 `ltx-trainer`。固定 Git 版本是有意设计：PyPI 当前版本线
-不包含适配器所需的最新 trainer/API 组合。
+这些 extra 只安装 PyAV、Einops、SciPy、Pydantic、Rich、torchaudio、pandas、
+Pillow-HEIF 等支持库；W&B/Hub 发布与 EXR/HDR 处理保持为独立的显式可选组。
+任何一组都**不会**安装 `ltx-core`、`ltx-pipelines`、`ltx-trainer` 或其他模型
+框架，也不需要第二份 LTX checkout。
 
-这些 extra 会强制 `torch>=2.8`，因为固定源码在 import 时使用
-`torch.compiler.nested_compile_region`，而 PyTorch 2.7.x 没有该 API；但 extra
-不会替你选择与 GPU 匹配的 CUDA PyTorch index。LTX 训练应在 Linux + NVIDIA
-CUDA 环境运行，推荐先用官方源码的 `uv sync` 准备隔离运行时，再把 HFTrainer
-安装进去。gated 模型访问、许可证、硬件规划和完整命令见
+extra 要求 `torch>=2.8`；请先为目标机器选择正确的 CUDA PyTorch wheel。完整
+训练路径当前支持 Linux + NVIDIA CUDA。源码与许可证边界、gated 权重访问、完整
+命令、验证范围和硬件规划见
 [LTX-Video 2.5 指南](models/ltx_video_2_5.md)。
+
+## 模型依赖边界
+
+模型实现、tokenizer、采样 scheduler、LoRA、artifact loader、trainer 与 pipeline
+都从 `hftrainer.*` 执行。项目仍正常依赖 PyTorch、Accelerate、MMEngine、
+safetensors、NumPy、Pillow 等通用基础设施，但不要求安装外部模型实现包；是否
+安装这类包也不能改变 config 最终解析到的模型代码。
 
 ## Console 命令
 

@@ -17,12 +17,12 @@ HF-Trainer 在 runner 和 trainer API 层已经支持多 optimizer，并且现�
 
 已存在的参考 trainer：
 
-- `GANTrainer`
+- `StyleGAN2Trainer`
 - `DMDTrainer`
 
 ## 判别器调度
 
-`GANTrainer` 和 `DMDTrainer` 现在都支持延迟启用判别器。
+`StyleGAN2Trainer` 和 `DMDTrainer` 现在都支持延迟启用判别器。
 
 可用 trainer 字段：
 

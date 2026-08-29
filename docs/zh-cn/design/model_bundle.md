@@ -1,76 +1,57 @@
 # ModelBundle
 
-`ModelBundle` 是训练和推理共享的任务核心。
+`ModelBundle` 是仓库本地模型数学与训练/推理编排之间的边界。
 
-## 职责
+## Bundle 应负责什么
 
-- 从 config 构建子模块
-- 对每个子模块应用 `trainable` / `save_ckpt`
-- 暴露任务级原子前向函数
-- 提供选择性 checkpoint save/load
-- 暴露统一的 `from_config(...)` 父类入口
-- 暴露统一的 `from_pretrained(...)` 父类入口
+- 明确构造本地组件；
+- 管理组件的冻结、训练、LoRA 和 checkpoint 策略；
+- 提供 trainer 与 pipeline 共用的原子操作；
+- 严格读写 artifact；
+- 校验模型族的配置、角色和 shape 不变量。
 
-## 为什么需要它
+## Bundle 不应负责什么
 
-如果没有共享 bundle，同一套任务逻辑通常会在 trainer 和 inference pipeline 中各写一遍。HF-Trainer 把共享逻辑收敛到 bundle 中，让 trainer 和 pipeline 只负责各自的控制流。
+- import 另一套模型实现；
+- 任意点分类路径解析；
+- 完整训练循环或 optimizer step；
+- CLI、结果编码或可视化；
+- 再维护一份只给 pipeline 使用的去噪实现。
 
-## 当前示例
+## 本地组件
 
-- `ViTBundle`
-- `SD15Bundle`
-- `CausalLMBundle`
-- `WanBundle`
+`_build_modules()` 只通过 `MODEL_COMPONENTS` 解析组件名。未知名字会直接报错并显示当前已注册的本地名称；点分类路径不会被当成 import 指令。
 
-## 构造约定
+组件 config 可以使用：
 
-`ModelBundle` 现在有一套统一的父类构造约定：
+```python
+transformer=dict(
+    type='MyTransformer',
+    from_pretrained=dict(
+        pretrained_model_name_or_path='checkpoints/my-method/transformer',
+    ),
+    trainable='lora',       # True、False 或 'lora'
+    lora_cfg=dict(rank=16, alpha=16, target_modules=['to_q', 'to_v']),
+    save_ckpt=True,
+    checkpoint_format='lora',
+    module_dtype='bf16',
+    gradient_checkpointing=True,
+)
+```
 
-- `from_config(...)` 是通用方法，所有 bundle 都能用
-- `from_pretrained(...)` 也定义在父类上
-- 大多数 HF-native bundle 应该通过声明 `HF_PRETRAINED_SPEC` 来完成加载映射，而不是手写 `_bundle_config_from_pretrained(...)`
-- 大多数 HF-native bundle 应该通过声明 `HF_SAVE_PRETRAINED_SPEC` 来完成导出，而不是手写 `save_pretrained(...)`
-- 只有在 artifact 结构很特殊，或者导出还有额外副作用时，才需要自己覆盖方法
+这里的 `from_pretrained` 表示“把受支持的 artifact 加载到本地类”，不表示选择外部类。
 
-这样用户只需要记一套 public API，普通 bundle 作者通常也只需要写声明式 spec。
+## `PRETRAINED_SPEC`
 
-## 两条接入路径
-
-### 路径 A：HuggingFace 原生模型
-
-如果 `transformers` 或 `diffusers` 已经有这个模型类：
-
-- 在 bundle 内继续使用官方类
-- 对外入口用 `Bundle.from_pretrained(...)`
-- 通过声明 `HF_PRETRAINED_SPEC` 把官方 artifact 映射成 bundle 组件
-- 通过 `trainable`、`save_ckpt`、`checkpoint_format`、`lora_cfg` 这些 config 覆盖项附加训练行为
-- 如果希望训练产物能回到官方推理 API，就声明 `HF_SAVE_PRETRAINED_SPEC`
-
-### 路径 B：自研模型
-
-如果 HuggingFace 生态里还没有这个模型：
-
-- 自己实现 `nn.Module`
-- 通过 `Bundle.from_config(...)` 实例化
-- 只有在你需要稳定导出 artifact，且声明式 spec 不足以表达时，再补自定义 `from_pretrained(...)` / `save_pretrained(...)`
-
-具体例子见 [模型接入](../integration.md)。
-
-## 声明式 HF Spec
-
-对大多数 HF-native bundle，父类已经把模板代码准备好了。
-
-### `HF_PRETRAINED_SPEC`
-
-用它描述“一个 pretrained artifact 如何变成 bundle config”：
+简单 bundle 可以声明单个 artifact root 如何映射到本地组件：
 
 ```python
 class MyBundle(ModelBundle):
-    HF_PRETRAINED_SPEC = {
+    PRETRAINED_SPEC = {
         'components': {
             'model': {
-                'default_type': 'AutoModelForCausalLM',
-                'pretrained_kwargs_arg': 'model_kwargs',
+                'default_type': 'MyLocalModel',
+                'subfolder': 'model',
                 'overrides_arg': 'model_overrides',
             },
         },
@@ -78,63 +59,53 @@ class MyBundle(ModelBundle):
             'tokenizer_path': {
                 'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
             },
-            'max_length': 1024,
         },
     }
 ```
 
-### `HF_SAVE_PRETRAINED_SPEC`
+最终类仍然只能来自 `MODEL_COMPONENTS`。需要角色校验或格式转换的复杂模型族，可以覆盖 `_bundle_config_from_pretrained()`。
 
-用它描述“bundle 如何导出回推理 artifact”：
+## 导出
 
-```python
-class MyBundle(ModelBundle):
-    HF_SAVE_PRETRAINED_SPEC = {
-        'kind': 'module',
-        'module': 'model',
-        'merge_lora_modules': ['model'],
-        'extra_artifacts': ['tokenizer'],
-    }
-```
+每个具体 bundle 都要实现 `save_pretrained()`。框架不提供“动态 import 一个 pipeline 再让它保存”的通用路径。具体实现必须定义：
 
-这样普通 bundle 一般只需要写 `__init__` 和任务原子方法。
+- 配置 schema；
+- tensor 文件与分片索引；
+- tokenizer/processor 资源；
+- 共享权重别名；
+- manifest、hash 和版本；
+- 严格恢复校验。
 
-## 按模块控制
+这样训练产物就不会依赖推理环境中恰好安装了哪套模型包。
 
-每个子模块都可以声明：
+## 原子操作
 
-- `trainable=True/False/'lora'`
-- `save_ckpt=True/False`
-- `checkpoint_format='full'|'lora'`
-- `gradient_checkpointing=True` 或 kwargs dict
-- `module_dtype='fp32'|'fp16'|'bf16'`（或 `torch.dtype`）
-- `from_pretrained` / `from_config` / `from_single_file`
-
-这样 optimizer 只会看到需要训练的参数，checkpoint 也可以跳过冻结模块。
-
-如果底层 HF loader 已经支持目标 dtype，优先用 `from_pretrained.torch_dtype`；如果你希望在 load 之后由 HF-Trainer 统一 cast，就用 `module_dtype`。具体示例和 AMP 注意事项见 [显存与精度](../memory.md)。
-
-## LoRA
-
-推荐配置方式：
+扩散模型 bundle 可能提供：
 
 ```python
-model = dict(
-    type='CausalLMBundle',
-    model=dict(
-        type='AutoModelForCausalLM',
-        from_pretrained=dict(pretrained_model_name_or_path=CKPT_PATH),
-        trainable='lora',
-        checkpoint_format='lora',
-        lora_cfg=dict(
-            task_type='CAUSAL_LM',
-            target_modules='all-linear',
-            r=16,
-            lora_alpha=32,
-            lora_dropout=0.05,
-        ),
-    ),
-)
+encode_text(prompts)
+encode_image(images)
+add_noise(latents, noise, timesteps)
+predict_noise(noisy_latents, timesteps, conditioning)
+decode_latent(latents)
 ```
 
-LoRA 模块默认使用 `checkpoint_format='lora'`，也就是 adapter-only save/load。如果你明确希望保存完整的 LoRA 包装模块 state dict，再改成 `checkpoint_format='full'`。
+Trainer 用这些操作组成 loss；pipeline 用同一组操作组成采样。两者都不应绕过 bundle 重写组件内部行为。
+
+## Checkpoint 范围
+
+HFTrainer checkpoint 可以保存选定组件和 bundle 直属参数。组件格式必须明确：
+
+- `full`：完整组件 state dict；
+- `lora`：本地 adapter-only state dict。
+
+当冻结组件能从基础 artifact 确定性恢复时，可以不写入训练 checkpoint。Bundle artifact 导出是另一条完整推理产物路径，应遵循该实现自己的 schema。
+
+## 测试不变量
+
+- model 层源码没有动态 import 逃逸路径；
+- 内置 registry 组件都定义在 `hftrainer.models` 下；
+- frozen module 在训练时仍保持 eval；
+- LoRA state 不会静默丢 key；
+- artifact round-trip 保持输出一致；
+- trainer 与 pipeline config 能独立解析。

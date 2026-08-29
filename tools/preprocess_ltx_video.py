@@ -1,4 +1,4 @@
-"""Preprocess an LTX-2.5 dataset through the pinned official script."""
+"""Preprocess an LTX-2.5 dataset through HFTrainer's local implementation."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def parse_args():
     parser = argparse.ArgumentParser(description='Preprocess data for LTX-2.5 training')
     parser.add_argument('dataset', help='CSV/JSON/JSONL dataset manifest')
-    parser.add_argument('--ltx-repo', required=True, help='Pinned Lightricks/LTX-2 checkout root')
     parser.add_argument('--resolution-buckets', required=True, help='e.g. 960x544x49')
     parser.add_argument('--model-path', required=True, help='LTX-2.5 dev transformer')
     parser.add_argument('--text-encoder-path', required=True, help='Packed LTX-2.5 Gemma 4 encoder')
@@ -32,7 +31,6 @@ def main():
     from hftrainer.trainers.ltx_video.preprocess import run_ltx_preprocess
 
     run_ltx_preprocess(
-        ltx_repo=args.ltx_repo,
         dataset_path=args.dataset,
         resolution_buckets=args.resolution_buckets,
         model_path=args.model_path,

@@ -1,242 +1,178 @@
-# 模型接入
+# 模型接入规范
 
-这一页回答三个直接的问题：
+HFTrainer 的“接入”是源码级接入，不是在外部模型框架外面再包一层。
+只有当可执行的模型核心代码由当前仓库维护，并遵守统一目录边界时，才算完成接入。
 
-1. 如果 `diffusers` 或 `transformers` 已经实现了某个模型，我们应该怎么改造成 HF-Trainer 的训练实现？
-2. 如果 `diffusers` / `transformers` 还没有这个模型，或者这是用户自研模型，我们应该怎么接入？
-3. 如果上游项目已经完整持有耦合紧密的训练与推理栈，HFTrainer 应如何接入而不
-   fork 算法实现？
+## 不可绕过的边界
 
-## 统一约定
+HFTrainer 发布的模型代码不能 import、动态查找或把执行委托给另一套模型实现包。
+这条规则覆盖会影响数值行为的模型类、tokenizer、adapter、scheduler 和 pipeline。
 
-`ModelBundle` 现在暴露两类公共构造 API：
+PyTorch、Accelerate、MMEngine、safetensors、NumPy、Pillow、torchvision 以及媒体/科学计算工具仍然可以作为基础依赖。这里限制的是“模型执行权”必须在仓库内，而不是要求重写张量和系统基础设施。
 
-- `ModelBundle.from_config(cfg, **kwargs)`：通用父类方法，负责 config 驱动构造
-- `ModelBundle.from_pretrained(pretrained_model_name_or_path, **kwargs)`：通用父类方法，负责 HuggingFace 风格加载
+测试会在新进程中主动拦截禁用模型包。把 import 移进 `bundle.py`、藏进
+`importlib` 或通过点分类路径动态加载，都不符合规范。
 
-职责划分是：
+## 标准纵向切片
 
-- 父类负责统一 public API 形状
-- 普通 HF-native bundle 优先通过 `HF_PRETRAINED_SPEC` 和 `HF_SAVE_PRETRAINED_SPEC` 完成接入
-- 只有在 artifact 结构特殊到声明式 spec 表达不了时，才需要覆盖 `_bundle_config_from_pretrained(...)` 或 `save_pretrained(...)`
-
-## 新代码应该放在哪里
-
-先为模型族、论文方法或上游适配器选择一个稳定的 `implementation_id`。Bundle 和
-模型专属协议只能放在：
+同一个具体实现，在各层使用同一个稳定的 `implementation_id`：
 
 ```text
-hftrainer/models/<implementation_id>/
+hftrainer/models/my_method/
+  __init__.py
+  bundle.py
+  checkpoint.py       # artifact 较复杂时使用
+  network/
+    __init__.py
+    configuration.py
+    modeling.py
+    tokenization.py   # 模型专用时使用
+
+hftrainer/trainers/my_method/
+  trainer.py
+
+hftrainer/pipelines/my_method/
+  pipeline.py
+
+configs/my_method/
+  train.py
+  infer.py
 ```
 
-不要再创建第二套 `models/<task_name>/` 转发包。Trainer、Pipeline、Dataset、
-Evaluator 如果表达的是可复用任务契约，就放在各自层的任务/能力目录中，再由 config
-或注册目录同时导入这些 owner；如果组件直接依赖某个算法的 scheduler、checkpoint
-格式、loss 或外部 runtime，则在对应层按该方法归类。
+只有当训练器或推理接口确实能被多个实现复用时，才放到
+`hftrainer/tasks/<task_contract>`。例如 ViT 可以复用 `image_classification`；一个方法专用的扩散算法不应被塞进泛化的 `models/text_to_image` 目录。
 
-canonical model package 必须持有类定义和 registry decorator。它的 `__init__.py`
-可以导出本包的 public symbol，但不能转发到第二套 model 层级。
+## 分层职责
 
-## 路径 1：从现有 HuggingFace 模型开始
+### `network/`
 
-当核心模型类已经存在于 `transformers` 或 `diffusers` 中时，走这条路径。
+负责模型数学和模型专用基础组件：
 
-### 保留什么
+- 网络层与 forward；
+- 配置对象；
+- 模型所需 tokenizer/processor；
+- 属于算法行为的采样 scheduler；
+- 与 checkpoint 对齐的模块和参数命名。
 
-- 官方模型类，例如 `AutoModelForCausalLM`、`UNet2DConditionModel`、`WanTransformer3DModel`
-- 官方 tokenizer / processor / scheduler
-- 组件级别的官方 `from_pretrained(...)` 语义
+这里不能感知 runner、dataloader、CLI 或可视化逻辑。
 
-### 你需要补什么
+### `bundle.py`
 
-1. 一个 `ModelBundle` 子类，用来组织任务所需组件。
-2. 一组任务原子前向函数，例如 `encode_text`、`predict_noise`、`generate`、`classify`。
-3. 一个 task trainer，定义 loss 和优化顺序。
-4. 通常只要声明导出 spec；只有导出格式特殊时才需要手写 `save_pretrained(...)`。
+负责具体实现边界：
 
-显存和精度控制也应该放在 bundle config 这一层完成，而不是去改写官方模型类。常见 override 包括 `trainable`、`save_ckpt`、`checkpoint_format`、`lora_cfg`、`gradient_checkpointing`、`from_pretrained.torch_dtype` 和 `module_dtype`。
+- 只构造本地 `network` 中明确列出的类；
+- 校验组件组合；
+- 提供训练和推理共用的原子操作；
+- 控制冻结、训练、LoRA 和 checkpoint 保存范围；
+- 维护严格的本地 artifact 读写协议。
 
-### 最小模式
+`ModelBundle.PRETRAINED_SPEC` 可以声明一个受支持的磁盘 artifact 如何映射到本地组件，但不能用于任意动态 import。导出必须由具体 bundle 实现，因为 artifact 的 schema 和校验责任属于该实现。
+
+### Trainer
+
+负责 loss、更新顺序、优化器分组和训练期验证。Trainer 调用 bundle 原子操作，不能再维护一套模型 forward。
+
+### Pipeline
+
+负责推理图和公开输入输出。通用 CLI 根据 `cfg.pipeline.type` 选择推理图，根据
+`cfg.inference.task` 选择 I/O 适配；不能通过 trainer 名称猜测任务。
+
+## 组件注册
+
+可执行组件注册到 `MODEL_COMPONENTS`：
 
 ```python
-@MODEL_BUNDLES.register_module()
-class MyLMBundle(ModelBundle):
-    HF_PRETRAINED_SPEC = {
-        'components': {
-            'model': {
-                'default_type': 'AutoModelForCausalLM',
-                'pretrained_kwargs_arg': 'model_kwargs',
-                'overrides_arg': 'model_overrides',
-            },
-        },
-        'init_args': {
-            'tokenizer_path': {
-                'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
-            },
-        },
-    }
-    HF_SAVE_PRETRAINED_SPEC = {
-        'kind': 'module',
-        'module': 'model',
-        'extra_artifacts': ['tokenizer'],
-    }
+from hftrainer.registry import MODEL_COMPONENTS
 
-    def __init__(self, model, tokenizer_path=None):
-        super().__init__()
-        self._build_modules({'model': model})
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
+@MODEL_COMPONENTS.register_module()
+class MyTransformer(torch.nn.Module):
+    ...
 ```
 
-### 如何把官方推理模型改成可训练
-
-通过 `config_overrides` 或子模块 override，在官方加载路径上附加训练行为：
+类定义必须位于 `hftrainer.models.<implementation>` 下。config 只引用本地注册名：
 
 ```python
-bundle = CausalLMBundle.from_pretrained(
-    'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-    config_overrides=dict(
-        model=dict(
-            trainable='lora',
-            checkpoint_format='lora',
-            lora_cfg=dict(
-                task_type='CAUSAL_LM',
-                target_modules='all-linear',
-                r=16,
-                lora_alpha=32,
-            ),
+model = dict(
+    type='MyMethodBundle',
+    transformer=dict(
+        type='MyTransformer',
+        from_pretrained=dict(
+            pretrained_model_name_or_path='checkpoints/my-method/transformer',
         ),
+        trainable=True,
+        save_ckpt=True,
     ),
-    max_length=1024,
 )
 ```
 
-对 diffusion 类任务也是同样模式，只是一个 pretrained 目录会在 bundle 中展开成多个子模块：
+未知名字和点分类路径会被拒绝。不能增加“安装了什么包就从什么包找类”的 fallback。
 
-```python
-bundle = SD15Bundle.from_pretrained(
-    '/path/to/stable-diffusion-v1-5',
-    unet_overrides=dict(trainable=True, save_ckpt=True),
-    text_encoder_overrides=dict(trainable=False, save_ckpt=False),
-)
+## 接入公开实现
+
+公开代码可以作为只读参考；许可证允许时，也可以以固定 revision 的修改快照纳入仓库。两种情况都必须：
+
+1. 记录仓库、不可变 revision 和许可证；
+2. 保留许可证要求的版权和署名；
+3. 按要求给修改文件增加显著变更声明；
+4. 按 HFTrainer 的 model/trainer/pipeline 边界重新组织；
+5. 把内部 import 改为仓库本地命名空间；
+6. 移除通过外部模型框架构造运行对象的路径；
+7. 在隔离的开发环境做参考对齐测试，但不能把参考实现变成产品依赖。
+
+不能把纳入或参考改写的代码描述成 HFTrainer 原创。LTX-2.5 已随包附带固定源码 revision、修改说明和单独许可证。
+
+## Artifact 协议
+
+本地 artifact 通常包括：
+
+```text
+artifact/
+  config.json 或 bundle_config.json
+  model.safetensors（或带索引的分片）
+  必要的 tokenizer/processor 资源
+  manifest.json
 ```
 
-关于全局 AMP 和按模块 dtype 的区别，以及推荐的配置写法，见 [显存与精度](memory.md)。
+loader 应根据 artifact 风险校验：
 
-### 如何导出回官方推理 API
+- schema/format 版本；
+- 组件类和配置；
+- state-dict key 与 tensor shape；
+- manifest 中记录的文件或分片哈希；
+- tied/shared 参数别名；
+- 权重覆盖率，默认拒绝危险的低覆盖加载。
 
-HF-native bundle 通常应该声明 `HF_SAVE_PRETRAINED_SPEC`。只有少数导出格式特殊的任务才需要手写 `save_pretrained(...)`。
+`strict=False` 不是兼容方案。需要格式转换时，应提供明确的转换工具并记录来源格式。
 
-当前已实现：
+## LoRA
 
-- `CausalLMBundle.save_pretrained(...)`
-- `ViTBundle.save_pretrained(...)`
-- `SD15Bundle.save_pretrained(...)`
-- `WanBundle.save_pretrained(...)`
+使用 `hftrainer.models.lora.apply_lora`。它注入本地 `LoRALinear`，支持 adapter-only 保存和确定性的推理合并。QLoRA 在仓库拥有并验证本地 4-bit linear 之前不会开放。
 
-示例：
+## 必须具备的测试
 
-```python
-bundle.save_pretrained('exports/tinyllama', merge_lora=True)
-model = AutoModelForCausalLM.from_pretrained('exports/tinyllama')
-```
+每个新实现至少需要：
 
-```python
-bundle.save_pretrained('exports/sd15')
-pipe = StableDiffusionPipeline.from_pretrained('exports/sd15')
-```
+1. 符合真实 tensor rank 的 tiny forward；
+2. 训练 loss 与 backward；
+3. tiny 推理/采样；
+4. 保存恢复后输出一致；
+5. 错误、缺失、篡改 artifact 的拒绝测试；
+6. config import 与 registry 解析；
+7. 主动拦截外部模型包后的新进程导入；
+8. 存在参考实现时的 key/shape 与数值对齐。
 
-如果 LoRA bundle 用 `merge_lora=False` 导出，产物仍然是 adapter 语义，这时应该走 PEFT 的加载 API，而不是普通 `AutoModel...`。
+大规模 gated 模型如果无法在本地分配真实权重，可以做 contract/tiny 测试，但文档必须准确说明做过什么、没做过什么。
 
-## 路径 2：从自研模型开始
+## Review 清单
 
-当 HuggingFace 还没有提供核心模型类时，走这条路径。
-
-### 你需要实现什么
-
-1. 自己的 `nn.Module` 或模块组。
-2. 在 `HF_MODELS` 中注册，或者直接在 config 里传类对象。
-3. 一个调用 `_build_modules(...)` 的 `ModelBundle` 子类。
-4. 任务原子前向函数。
-5. 一个 task trainer。
-
-### 最小模式
-
-```python
-class MyBackbone(nn.Module):
-    def __init__(self, hidden_size=512):
-        super().__init__()
-        ...
-
-@MODEL_BUNDLES.register_module()
-class MyCustomBundle(ModelBundle):
-    def __init__(self, backbone, head):
-        super().__init__()
-        self._build_modules({
-            'backbone': backbone,
-            'head': head,
-        })
-
-    def forward_features(self, x):
-        x = self.backbone(x)
-        return self.head(x)
-```
-
-通过通用父类 API 构造：
-
-```python
-bundle = MyCustomBundle.from_config(
-    dict(
-        backbone=dict(type=MyBackbone, hidden_size=1024),
-        head=dict(type=MyHead, num_classes=1000),
-    )
-)
-```
-
-### 什么时候需要自己实现 `from_pretrained(...)`
-
-只有当你需要下面这些能力时，才有必要给 bundle 增加专门的 pretrained 路径：
-
-- 用户可以直接调用 `MyCustomBundle.from_pretrained(...)`
-- 你的导出产物有稳定的磁盘格式
-- 你希望把这个自定义任务桥接到第三方推理 API
-
-这时需要：
-
-1. 先尝试 `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC`
-2. 如果声明式 spec 表达不了，再实现 `_bundle_config_from_pretrained(...)`
-3. 只有当导出还需要任务相关逻辑时，再实现 `save_pretrained(...)`
-4. 文档里明确导出 artifact 的格式
-
-如果不需要这些保证，只用 `from_config(...)` 加 checkpoint save/load 就够了。
-
-## 路径 3：适配完整的原生算法栈
-
-当官方项目已经把模型加载、数据预处理、Accelerator、optimizer/checkpoint、
-validation 和推理 pipeline 绑定成一个整体时走这条路径。只把它的
-`train_step` 重写进 `AccelerateRunner` 会形成第二套算法实现，并可能悄悄改变
-checkpoint 或 resume 语义。
-
-LTX-Video 2.5 是这一模式的参考实现：
-
-1. `ModelBundle` 持有分体权重合约，并延迟创建官方推理 backend；它不会重复注册
-   一套 22B module tree。
-2. `Pipeline` 把稳定的 HFTrainer 参数映射到固定版本的官方 pipeline，并调用官方
-   media encoder。
-3. 注册 trainer 声明 `manages_training_loop=True`，校验官方 config schema 后把
-   完整 loop 委托给官方 trainer。
-4. config 使用精确的 `custom_imports`，因此导入 HFTrainer 核心不要求安装可选
-   原生栈。
-5. package extra 把所有上游子包固定到同一个已审查 commit。
-
-这类适配应保持轻薄：HFTrainer 只负责稳定的框架关注点（配置、registry discovery、
-路径/角色校验、命令入口与清晰错误），模型数学与生命周期仍交给上游。完整示例见
-[LTX-Video 2.5](models/ltx_video_2_5.md)。
-
-## 设计原则
-
-保持 public API 简单：
-
-- 已有 HuggingFace artifact 的任务，用 `from_pretrained(...)`
-- 自定义模型或不适合映射到单一官方 artifact 的任务，用 `from_config(...)`
-- 不要为了统一表面形式，再包一层改变官方类的语义
-- 官方栈已经完整拥有训练 loop 时，应固定并适配该 loop，而不是局部重写
+- [ ] model/trainer/pipeline/config 使用同一个实现标识；
+- [ ] 模型数学位于 `network/`；
+- [ ] 没有外部模型 import 或动态逃逸路径；
+- [ ] bundle 只导入明确的本地组件；
+- [ ] trainer/pipeline 复用 bundle 原子操作；
+- [ ] artifact 覆盖率和不匹配可见；
+- [ ] 来源与许可证完整；
+- [ ] tiny 训练、推理、round-trip 全部通过；
+- [ ] 所有 leaf config 能解析到本地组件；
+- [ ] wheel 在没有禁用模型包的环境中可安装和导入。

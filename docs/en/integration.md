@@ -1,251 +1,205 @@
-# Integrating Models
+# Integrating a model
 
-This page answers three practical questions:
+HFTrainer integrations are source integrations, not runtime wrappers around a
+second model framework. A model is integrated only when the executable core is
+owned by this repository and follows the same layer boundaries as the existing
+implementations.
 
-1. If `diffusers` or `transformers` already implements the model, what should you change to train it with HF-Trainer?
-2. If the model is not in `diffusers` / `transformers`, or is fully custom, what should you implement yourself?
-3. If an upstream project already owns a complete, tightly coupled training and
-   inference stack, how should HFTrainer integrate it without forking the
-   algorithm?
+## Non-negotiable boundary
 
-## The Contract
+Model code shipped by HFTrainer must not import, dynamically resolve, or
+delegate execution to another model implementation package. This includes
+tokenizers, adapter layers, schedulers, model classes, and pipeline objects
+that determine numerical behavior.
 
-`ModelBundle` now exposes two public construction APIs:
+General infrastructure dependencies remain allowed: PyTorch, Accelerate,
+MMEngine, safetensors, NumPy, Pillow, torchvision, and media/scientific helper
+libraries. The distinction is ownership of model execution, not a requirement
+to rewrite tensor or operating-system primitives.
 
-- `ModelBundle.from_config(cfg, **kwargs)`: generic parent-class method for config-driven construction
-- `ModelBundle.from_pretrained(pretrained_model_name_or_path, **kwargs)`: generic parent-class method for HuggingFace-style loading
+The CI boundary test blocks the forbidden model packages in a fresh process.
+Moving an import into `bundle.py`, hiding it behind `importlib`, or loading a
+dotted class path does not satisfy the contract.
 
-The split is:
+## Canonical vertical slice
 
-- the parent class owns the public API shape
-- ordinary HF-native bundles should prefer `HF_PRETRAINED_SPEC` and `HF_SAVE_PRETRAINED_SPEC`
-- override `_bundle_config_from_pretrained(...)` or `save_pretrained(...)` only when the artifact layout is unusual enough that the declarative specs are not enough
-
-## Where New Code Lives
-
-Choose one stable `implementation_id` for the model family, paper method, or
-upstream adapter. Put its bundle and model-specific support code only in:
+Use one stable implementation identifier across all method-specific layers:
 
 ```text
-hftrainer/models/<implementation_id>/
+hftrainer/models/my_method/
+  __init__.py
+  bundle.py
+  checkpoint.py       # when the artifact schema is non-trivial
+  network/
+    __init__.py
+    configuration.py
+    modeling.py
+    tokenization.py   # when model-specific
+
+hftrainer/trainers/my_method/
+  trainer.py
+
+hftrainer/pipelines/my_method/
+  pipeline.py
+
+configs/my_method/
+  train.py
+  infer.py
 ```
 
-Do not create a second `models/<task_name>/` re-export package. If the trainer,
-pipeline, dataset, or evaluator implements a reusable task contract, place it
-under that layer's task/capability package and import both owners from the
-runnable config or registration catalogue. If a component directly depends on
-one algorithm's scheduler, checkpoint format, loss, or external runtime, group
-it by that method in the corresponding layer.
+Use `hftrainer/tasks/<task_contract>` only when the trainer or pipeline is
+genuinely reusable across multiple implementations. ViT uses the reusable
+`image_classification` contract; a method-specific diffusion algorithm should
+not be placed under a generic `text_to_image` model directory.
 
-The canonical model package must own the class definition and registry
-decorator. Its `__init__.py` may re-export local public symbols, but it must not
-forward to a second model hierarchy.
+## Responsibilities
 
-## Path 1: Start From An Existing HuggingFace Model
+### `network/`
 
-Use this path when the core model class already exists in `transformers` or `diffusers`.
+Owns model mathematics and model-specific primitives:
 
-### What You Keep
+- layers and forward functions;
+- configuration objects;
+- tokenizer/processor logic required by the model;
+- sampling schedulers whose behavior is part of the method;
+- checkpoint-key-compatible module names.
 
-- the official model class such as `AutoModelForCausalLM`, `UNet2DConditionModel`, `WanTransformer3DModel`
-- the official tokenizer / processor / scheduler classes
-- the official `from_pretrained(...)` semantics for individual components
+It must not know about an experiment runner, dataloader, CLI, or visualization.
 
-### What You Add
+### `bundle.py`
 
-1. A `ModelBundle` subclass that groups the task components.
-2. Task atomic forward methods such as `encode_text`, `predict_noise`, `generate`, or `classify`.
-3. A task trainer that defines losses and optimization order.
-4. Usually just a declarative export spec, and only a custom `save_pretrained(...)` override when the export format is unusual.
+Owns the implementation boundary:
 
-Memory and precision control are also added at the bundle-config layer, not by rewriting the official model class. Common overrides include `trainable`, `save_ckpt`, `checkpoint_format`, `lora_cfg`, `gradient_checkpointing`, `from_pretrained.torch_dtype`, and `module_dtype`.
+- constructs only explicit classes from the local network package;
+- validates component combinations;
+- exposes atomic operations shared by training and inference;
+- controls trainable/frozen/LoRA components;
+- loads and saves the implementation's strict artifact schema.
 
-### Minimal Pattern
+`ModelBundle.PRETRAINED_SPEC` may describe how one supported artifact directory
+maps to local components. It never authorizes arbitrary class imports. Export
+is always implemented by the concrete bundle because the bundle must define
+and validate its own schema.
+
+### Trainer
+
+Owns losses, update order, optimizer grouping, and training-only validation.
+It calls bundle operations instead of recreating model forwards.
+
+### Pipeline
+
+Owns the inference graph and public inputs/outputs. The generic CLI selects a
+pipeline from `cfg.pipeline.type` and an I/O adapter from `cfg.inference.task`;
+it never dispatches from a trainer name.
+
+## Component registration
+
+Register executable components in `MODEL_COMPONENTS`:
 
 ```python
-@MODEL_BUNDLES.register_module()
-class MyLMBundle(ModelBundle):
-    HF_PRETRAINED_SPEC = {
-        'components': {
-            'model': {
-                'default_type': 'AutoModelForCausalLM',
-                'pretrained_kwargs_arg': 'model_kwargs',
-                'overrides_arg': 'model_overrides',
-            },
-        },
-        'init_args': {
-            'tokenizer_path': {
-                'default': ModelBundle._PRETRAINED_PATH_SENTINEL,
-            },
-        },
-    }
-    HF_SAVE_PRETRAINED_SPEC = {
-        'kind': 'module',
-        'module': 'model',
-        'extra_artifacts': ['tokenizer'],
-    }
+from hftrainer.registry import MODEL_COMPONENTS
 
-    def __init__(self, model, tokenizer_path=None):
-        super().__init__()
-        self._build_modules({'model': model})
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
+@MODEL_COMPONENTS.register_module()
+class MyTransformer(torch.nn.Module):
+    ...
 ```
 
-### How To Make It Trainable
-
-Use `config_overrides` or nested module overrides to add training behavior on top of the official load path:
+The class must be defined under `hftrainer.models.<implementation>`. Configs
+refer to the registered local name:
 
 ```python
-bundle = CausalLMBundle.from_pretrained(
-    'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-    config_overrides=dict(
-        model=dict(
-            trainable='lora',
-            checkpoint_format='lora',
-            lora_cfg=dict(
-                task_type='CAUSAL_LM',
-                target_modules='all-linear',
-                r=16,
-                lora_alpha=32,
-            ),
+model = dict(
+    type='MyMethodBundle',
+    transformer=dict(
+        type='MyTransformer',
+        from_pretrained=dict(
+            pretrained_model_name_or_path='checkpoints/my-method/transformer',
         ),
+        trainable=True,
+        save_ckpt=True,
     ),
-    max_length=1024,
 )
 ```
 
-For diffusion-style tasks the pattern is the same, but the bundle expands one pretrained directory into multiple components:
+Unknown names and dotted paths are rejected. Do not add a fallback that imports
+whatever package happens to be installed.
 
-```python
-bundle = SD15Bundle.from_pretrained(
-    '/path/to/stable-diffusion-v1-5',
-    unet_overrides=dict(trainable=True, save_ckpt=True),
-    text_encoder_overrides=dict(trainable=False, save_ckpt=False),
-)
+## Importing an existing public implementation
+
+Public source can be used as a reference or, when its license permits,
+incorporated as a pinned modified snapshot. In both cases:
+
+1. Record the repository, immutable revision, and license.
+2. Preserve required copyright and attribution notices.
+3. Mark modified files when the license requires it.
+4. Relocate code into HFTrainer's model/trainer/pipeline boundaries.
+5. Rewrite internal imports to local namespaces.
+6. Remove runtime construction through external model packages.
+7. Add parity tests against the reference in an isolated development
+   environment; do not install the reference as a product dependency.
+
+Never describe incorporated or reference-derived code as original HFTrainer
+work. LTX-2.5 is the concrete example: its pinned source, modification record,
+and separate license are included with the package.
+
+## Artifact contract
+
+A local artifact should normally contain:
+
+```text
+artifact/
+  config.json or bundle_config.json
+  model.safetensors (or an indexed shard set)
+  tokenizer/processor assets when required
+  manifest.json
 ```
 
-See [Memory and Precision](memory.md) for the full config contract and caveats around global AMP vs per-module dtype.
+The loader should validate, in proportion to the artifact:
 
-### Export Back To Official Inference APIs
+- schema/format version;
+- component class and configuration;
+- expected state-dict keys and tensor shapes;
+- shard or file hashes when a manifest is present;
+- tied/shared parameter aliases;
+- weight coverage, rejecting dangerously low coverage by default.
 
-HF-native bundles should usually declare `HF_SAVE_PRETRAINED_SPEC`. Only special export formats need a hand-written `save_pretrained(...)`.
+Do not treat `strict=False` as compatibility. If conversion is required,
+provide an explicit conversion tool and record the source format.
 
-Current implementations:
+## LoRA
 
-- `CausalLMBundle.save_pretrained(...)`
-- `ViTBundle.save_pretrained(...)`
-- `SD15Bundle.save_pretrained(...)`
-- `WanBundle.save_pretrained(...)`
+Use `hftrainer.models.lora.apply_lora`. It injects local `LoRALinear` modules,
+saves adapter-only state, and supports deterministic merge for inference.
+QLoRA is intentionally unavailable until HFTrainer owns and validates a local
+4-bit linear path.
 
-Examples:
+## Required tests
 
-```python
-bundle.save_pretrained('exports/tinyllama', merge_lora=True)
-model = AutoModelForCausalLM.from_pretrained('exports/tinyllama')
-```
+Every new integration needs:
 
-```python
-bundle.save_pretrained('exports/sd15')
-pipe = StableDiffusionPipeline.from_pretrained('exports/sd15')
-```
+1. tiny forward with realistic tensor ranks;
+2. training loss and backward;
+3. tiny inference/sampling path;
+4. save/load round-trip with output equivalence;
+5. malformed/missing/tampered artifact rejection;
+6. config import and registry resolution;
+7. fresh-process import with external model packages blocked;
+8. reference key/shape and numerical parity where a reference exists.
 
-If you save a LoRA bundle with `merge_lora=False`, the result stays adapter-style and should be loaded with PEFT-native APIs instead of plain `AutoModel...`.
+Large gated models may use contract/tiny tests when production weights cannot
+be allocated locally, but the documentation must state exactly what was and
+was not run.
 
-## Path 2: Start From A Custom Or Self-Developed Model
+## Review checklist
 
-Use this path when HuggingFace does not already provide the core model class.
-
-### What You Implement
-
-1. Your own `nn.Module` or family of modules.
-2. Registration in `HF_MODELS` or direct use of the class in config.
-3. A `ModelBundle` subclass that calls `_build_modules(...)`.
-4. Task atomic forward methods.
-5. A task trainer.
-
-### Minimal Pattern
-
-```python
-class MyBackbone(nn.Module):
-    def __init__(self, hidden_size=512):
-        super().__init__()
-        ...
-
-@MODEL_BUNDLES.register_module()
-class MyCustomBundle(ModelBundle):
-    def __init__(self, backbone, head):
-        super().__init__()
-        self._build_modules({
-            'backbone': backbone,
-            'head': head,
-        })
-
-    def forward_features(self, x):
-        x = self.backbone(x)
-        return self.head(x)
-```
-
-Construct it with the generic parent-class API:
-
-```python
-bundle = MyCustomBundle.from_config(
-    dict(
-        backbone=dict(type=MyBackbone, hidden_size=1024),
-        head=dict(type=MyHead, num_classes=1000),
-    )
-)
-```
-
-### When To Implement `from_pretrained(...)` Yourself
-
-You only need a bundle-specific pretrained path when you want one of these:
-
-- users can type `MyCustomBundle.from_pretrained(...)`
-- your exported artifact has a stable on-disk format
-- you want to bridge your custom task to a third-party inference API
-
-In that case:
-
-1. try `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC` first
-2. only if the spec cannot express the mapping, implement `_bundle_config_from_pretrained(...)`
-3. implement `save_pretrained(...)` only when export also needs task-specific logic
-4. document the exported artifact format
-
-If you do not need those guarantees, `from_config(...)` plus checkpoint save/load is enough.
-
-## Path 3: Adapt A Complete Native Stack
-
-Use this path when an official project already couples model loading,
-preprocessing, Accelerator setup, optimizer/checkpoint logic, validation, and
-inference pipelines. Rewriting only its `train_step` inside
-`AccelerateRunner` would create a second algorithm implementation and can
-silently change checkpoint or resume semantics.
-
-The LTX-Video 2.5 integration is the reference pattern:
-
-1. A `ModelBundle` owns the split-checkpoint contract and lazily creates the
-   official inference backend; it does not register a duplicate 22B module
-   tree.
-2. A `Pipeline` translates stable HFTrainer arguments to the pinned official
-   pipeline and uses the official media encoder.
-3. A registered trainer declares `manages_training_loop=True`, validates the
-   official config schema, then delegates the entire loop to the official
-   trainer.
-4. The config uses focused `custom_imports`, so importing HFTrainer core does
-   not require the optional native stack.
-5. Package extras pin every upstream subpackage to one reviewed commit.
-
-This path should remain thin. Put stable framework concerns in HFTrainer
-(configuration, registry discovery, path/role validation, entry points, and
-clear errors), and leave model mathematics and lifecycle behavior upstream.
-See [LTX-Video 2.5](models/ltx_video_2_5.md) for a complete example.
-
-## Design Rule
-
-Keep the public API simple:
-
-- use `from_pretrained(...)` when there is already a HuggingFace-native model artifact
-- use `from_config(...)` when the model is custom or the task is not naturally represented by one official artifact
-- do not wrap official model classes just to rename their semantics
-- when an official stack already owns the full loop, adapt and pin that loop
-  instead of partially reimplementing it
+- [ ] one implementation identifier across model/trainer/pipeline/config;
+- [ ] model math is under `network/`;
+- [ ] no executable external model import or dynamic escape hatch;
+- [ ] bundle imports explicit local components;
+- [ ] trainer and pipeline share bundle operations;
+- [ ] artifact coverage and mismatches are visible;
+- [ ] provenance and licenses are present;
+- [ ] tiny train/infer/round-trip tests pass;
+- [ ] all leaf configs resolve local component classes;
+- [ ] wheel installs and imports without forbidden packages.

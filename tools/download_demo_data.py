@@ -30,7 +30,6 @@ def download_classification(n_samples: int = 20):
     try:
         from datasets import load_dataset
         ds = load_dataset('zh-plus/tiny-imagenet', split='train', streaming=True)
-        classes = {}
         count = 0
         for item in ds:
             label = str(item.get('label', count % 4))

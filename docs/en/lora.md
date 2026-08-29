@@ -1,97 +1,103 @@
 # LoRA
 
-HF-Trainer supports config-driven LoRA at the sub-module level.
+HFTrainer implements LoRA locally in `hftrainer.models.lora`. It injects
+`LoRALinear` into repository-owned `torch.nn.Linear` modules; no adapter
+framework is imported or required.
 
-## Config Pattern
+## Config pattern
 
-Use `trainable='lora'` on any bundle sub-module that is supported by PEFT:
+Set `trainable='lora'` on a bundle sub-module and provide the local LoRA
+options:
 
 ```python
 model = dict(
-    type='CausalLMBundle',
+    type='LlamaBundle',
     model=dict(
-        type='AutoModelForCausalLM',
+        type='LocalLlamaForCausalLM',
         from_pretrained=dict(
             pretrained_model_name_or_path='checkpoints/TinyLlama-1.1B-Chat-v1.0',
             torch_dtype='auto',
         ),
         trainable='lora',
-        checkpoint_format='lora',  # optional; this is the default for LoRA modules
+        checkpoint_format='lora',
         lora_cfg=dict(
-            task_type='CAUSAL_LM',
             r=16,
             lora_alpha=32,
             lora_dropout=0.05,
             target_modules='all-linear',
+            bias='none',
         ),
     ),
 )
 ```
 
-Supported checkpoint formats for LoRA modules:
+Supported local options:
 
-- `checkpoint_format='lora'`: save adapter weights only
-- `checkpoint_format='full'`: save the full wrapped module state dict
+- `r` or `rank`: positive adapter rank;
+- `lora_alpha` or `alpha`: residual scale numerator;
+- `lora_dropout` or `dropout`: input dropout in `[0, 1)`;
+- `target_modules`: `'all-linear'`, one qualified-name suffix, or a list of
+  suffixes;
+- `bias`: `'none'`, `'all'`, or `'lora_only'`.
 
-When `trainable='lora'`, HF-Trainer defaults to `checkpoint_format='lora'`.
+The legacy `task_type` key is accepted and ignored so existing HFTrainer
+recipes remain readable; it does not select another implementation.
 
-## Recommended Demo
+## Training and checkpoints
 
-Runnable reference config:
+Runnable config:
 
-- `configs/llm/llama_lora_demo.py`
-
-Train:
+- `configs/llama/llama_lora_demo.py`
 
 ```bash
-python3 tools/train.py configs/llm/llama_lora_demo.py
+python3 tools/train.py configs/llama/llama_lora_demo.py
 ```
 
-## Checkpoint Behavior
+When LoRA is injected, base parameters are frozen and only the matched adapter
+parameters (plus configured biases) are trainable. `checkpoint_format='lora'`
+is the default for a LoRA sub-module and writes adapter-only tensors into
+`checkpoint-*/model.pt`; the frozen base checkpoint is not duplicated.
 
-HF-Trainer writes adapter-only weights into `checkpoint-*/model.pt` together with metadata describing each module's checkpoint format.
+Use `checkpoint_format='full'` only when the complete LoRA-injected module state
+is intentionally required.
 
-For LoRA checkpoints, `model.pt` contains only adapter weights by default, not the frozen base model weights. This keeps checkpoint size small and makes model-only loading fast.
+Checkpoint loading scopes remain independent from the adapter format:
 
-`load_scope='model'`:
+- `load_scope='model'` loads the bundle's selected model state;
+- `load_scope='full'` resumes optimizer, scheduler, and RNG state through the
+  runner in addition to the model state.
 
-- loads the selective bundle weights only
-
-`load_scope='full'`:
-
-- resumes through `accelerator.load_state(...)`
-- restores optimizer / scheduler / RNG state
-
-## Save / Load / Merge Flow
+## Save, load, and merge
 
 ```mermaid
 flowchart LR
-    A["Config: trainable='lora'"] --> B["PEFT wraps sub-module"]
-    B --> C["Training updates adapter params only"]
-    C --> D["checkpoint_format='lora'"]
-    D --> E["checkpoint-*/model.pt"]
-    E --> F["tools/infer.py"]
-    F --> G["load adapter weights"]
-    G --> H["--merge-lora"]
-    H --> I["merged base model for inference"]
+    A["Config: trainable='lora'"] --> B["Local LoRALinear injection"]
+    B --> C["Update adapter parameters"]
+    C --> D["Adapter-only checkpoint"]
+    D --> E["Load into the same local model"]
+    E --> F["Optional --merge-lora"]
+    F --> G["Plain merged linear weights"]
 ```
 
-## Inference and Merge
-
-Load the LoRA checkpoint and merge it into the base model for inference:
+For inference with a saved adapter:
 
 ```bash
 python3 tools/infer.py \
-  --config configs/llm/llama_lora_demo.py \
+  --config configs/llama/llama_lora_demo.py \
   --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
   --merge-lora \
   --prompt "What is the capital of France?"
 ```
 
-`--merge-lora` merges adapter weights into the base weights in memory before running the pipeline.
+`--merge-lora` adds each low-rank update to its base weight in memory and
+replaces the adapter wrapper with a plain linear layer before inference.
 
-## Scope
+## Scope and failure behavior
 
-HF-Trainer exposes LoRA at the `ModelBundle` level, so the pattern is the same across tasks. In practice, LoRA still depends on PEFT support for the specific model class and the configured `target_modules`.
+The local injector currently targets `torch.nn.Linear`. It raises an error
+when no configured target matches, when an adapter is injected twice, or when
+an adapter checkpoint has missing/unexpected keys. This prevents silently
+training or loading a partial adapter.
 
-The currently verified end-to-end demo is the Causal LM LoRA path.
+QLoRA is deliberately unavailable until HFTrainer owns and validates a local
+4-bit linear implementation. Use local LoRA or full fine-tuning instead.

@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from hftrainer.models.ltx_video.bundle import LTXVideoBundle
+from hftrainer.models.ltx_video.component_loader import LTXComponentStore
 from hftrainer.pipelines.ltx_video.pipeline import LTXVideoPipeline
 
 DEV_TRANSFORMER = (
@@ -135,8 +136,8 @@ def fake_backend_api(recorder):
     )
 
 
-def make_bundle(*, mode='distilled', loras=None, api=None):
-    bundle = LTXVideoBundle(
+def make_bundle(*, mode='distilled', loras=None):
+    return LTXVideoBundle(
         transformer_path=(
             DISTILLED_TRANSFORMER if mode == 'distilled' else DEV_TRANSFORMER
         ),
@@ -151,82 +152,131 @@ def make_bundle(*, mode='distilled', loras=None, api=None):
         device='cpu',
         validate_paths=False,
     )
-    if api is not None:
-        object.__setattr__(bundle, '_backend_api', api)
-    return bundle
+
+
+def make_pipeline(bundle, *, api=None, backend=None, **kwargs):
+    pipeline = LTXVideoPipeline(bundle, **kwargs)
+    pipeline._backend_api = api
+    pipeline._backend = backend
+    return pipeline
+
+
+def test_bundle_lazily_owns_the_registry_passed_to_inference_backend():
+    recorder = {}
+    bundle = make_bundle()
+    assert bundle._components is None
+
+    pipeline = make_pipeline(bundle, api=fake_backend_api(recorder))
+    pipeline.load_backend()
+
+    registry = recorder['constructors'][0][1]['registry']
+    assert registry is bundle.component_registry
+    assert registry is bundle.components.inference_registry
+    assert bundle.component_registry is registry
+    bundle.clear_components()
+
+
+def test_standard_pipeline_builder_preserves_injected_component_store_identity():
+    from hftrainer.pipelines.builder import build_pipeline_from_cfg
+
+    store = LTXComponentStore()
+    cfg = SimpleNamespace(
+        model={
+            'type': 'LTXVideoBundle',
+            'transformer_path': DISTILLED_TRANSFORMER,
+            'text_encoder_path': TEXT_ENCODER,
+            'video_vae_path': VIDEO_VAE,
+            'audio_vae_path': AUDIO_VAE,
+            'duration_head_path': DURATION_HEAD,
+            'spatial_upsampler_path': SPATIAL_UPSAMPLER,
+            'mode': 'distilled',
+            'device': 'cpu',
+            'validate_paths': False,
+            'components': store,
+        },
+        pipeline={'type': 'LTXVideoPipeline'},
+    )
+
+    pipeline = build_pipeline_from_cfg(cfg)
+    assert pipeline.bundle.components is store
+
+    recorder = {}
+    pipeline._backend_api = fake_backend_api(recorder)
+    pipeline.load_backend()
+
+    registry = recorder['constructors'][0][1]['registry']
+    assert registry is store.inference_registry
+    store.clear()
 
 
 def test_explicit_cuda_inference_fails_before_backend_import(monkeypatch):
     bundle = make_bundle()
     bundle.device_name = 'cuda'
+    pipeline = make_pipeline(bundle)
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
 
     def fail_if_imported():
         raise AssertionError('backend import should not run without CUDA')
 
     monkeypatch.setattr(
-        LTXVideoBundle,
+        LTXVideoPipeline,
         '_import_backend_api',
         staticmethod(fail_if_imported),
     )
 
-    with pytest.raises(RuntimeError, match='configured for a CUDA device'):
-        bundle.load_model()
+    with pytest.raises(RuntimeError, match='configured for CUDA'):
+        pipeline.load_backend()
 
 
 def test_generic_cli_device_override_updates_registered_model_config(monkeypatch):
     from hftrainer.pipelines import builder
-    from tools.infer import infer_registered_pipeline
+    from hftrainer.registry import MODEL_BUNDLES, PIPELINES
 
     captured = {}
 
-    class FakeConfig:
-        def __init__(self):
-            self.model = {'device': 'cuda'}
+    class FakeBundle:
+        def eval(self):
+            captured['bundle_eval'] = True
+            return self
 
-        def merge_from_dict(self, values):
-            captured['override'] = values
-            self.model['device'] = values['model.device']
+        def to(self, device):
+            captured['bundle_device'] = device
+            return self
 
     class FakePipeline:
-        def infer_text_to_video(self, prompt, **kwargs):
-            captured['call'] = (prompt, kwargs)
-            return {'output_path': kwargs['output_path']}
+        pass
 
-    def build_pipeline(cfg):
-        captured['device_at_build'] = cfg.model['device']
+    def build_bundle(config):
+        captured['model_config'] = config
+        return FakeBundle()
+
+    def build_pipeline(config):
+        captured['pipeline_config'] = config
         return FakePipeline()
 
-    monkeypatch.setattr(builder, 'build_pipeline_from_cfg', build_pipeline)
-    args = SimpleNamespace(
-        device='cpu',
-        prompt='test prompt',
-        output='result.mp4',
-        image=[],
-        height=None,
-        width=None,
-        num_frames=None,
-        frame_rate=None,
-        seed=None,
-        num_steps=None,
-        negative_prompt=None,
+    monkeypatch.setattr(MODEL_BUNDLES, 'build', build_bundle)
+    monkeypatch.setattr(PIPELINES, 'build', build_pipeline)
+    cfg = SimpleNamespace(
+        model={'type': 'LTXVideoBundle', 'device': 'cuda'},
+        pipeline={'type': 'LTXVideoPipeline'},
     )
+    result = builder.build_pipeline_from_cfg(cfg, device='cpu')
 
-    result = infer_registered_pipeline(FakeConfig(), args)
+    assert isinstance(result, FakePipeline)
+    assert captured['model_config']['device'] == 'cpu'
+    assert captured['bundle_device'] == 'cpu'
+    assert captured['bundle_eval'] is True
+    assert captured['pipeline_config']['bundle'].__class__ is FakeBundle
 
-    assert captured['override'] == {'model.device': 'cpu'}
-    assert captured['device_at_build'] == 'cpu'
-    assert result['output_path'] == 'result.mp4'
 
-
-def test_distilled_bundle_passes_explicit_empty_loras_and_complete_split_pack():
+def test_distilled_pipeline_passes_explicit_empty_loras_and_complete_split_pack():
     recorder = {}
     api = fake_backend_api(recorder)
-    bundle = make_bundle(api=api)
+    pipeline = make_pipeline(make_bundle(), api=api)
 
-    backend = bundle.load_model()
+    backend = pipeline.load_backend()
 
-    assert bundle.load_model() is backend
+    assert pipeline.load_backend() is backend
     assert [kind for kind, _ in recorder['constructors']] == ['distilled']
     constructor = recorder['constructors'][0][1]
     assert constructor['loras'] == []
@@ -254,7 +304,7 @@ def test_distilled_bundle_passes_explicit_empty_loras_and_complete_split_pack():
     assert constructor['diffvae_optimization'] is _DiffVAEMode.CHUNKED_EAGER
 
 
-def test_dev_two_stage_separates_official_distilled_lora_from_user_loras():
+def test_dev_two_stage_separates_distilled_lora_from_user_loras():
     recorder = {}
     api = fake_backend_api(recorder)
     bundle = make_bundle(
@@ -263,10 +313,10 @@ def test_dev_two_stage_separates_official_distilled_lora_from_user_loras():
             {'path': 'adapters/character.safetensors', 'strength': 0.8},
             ('adapters/style.safetensors', 0.3),
         ],
-        api=api,
     )
+    pipeline = make_pipeline(bundle, api=api)
 
-    bundle.load_model()
+    pipeline.load_backend()
 
     kind, constructor = recorder['constructors'][0]
     assert kind == 'dev_two_stage'
@@ -286,10 +336,15 @@ def test_dev_two_stage_separates_official_distilled_lora_from_user_loras():
 def test_distilled_pipeline_forwards_native_arguments_and_encodes_output(tmp_path):
     recorder = {}
     api = fake_backend_api(recorder)
-    bundle = make_bundle(api=api)
+    bundle = make_bundle()
     backend = _Backend(recorder, 'distilled-runtime')
-    object.__setattr__(bundle, '_backend', backend)
-    pipeline = LTXVideoPipeline(bundle, seed=7, frame_rate=25.0)
+    pipeline = make_pipeline(
+        bundle,
+        api=api,
+        backend=backend,
+        seed=7,
+        frame_rate=25.0,
+    )
     output = tmp_path / 'nested' / 'clip.mp4'
 
     result = pipeline.infer_text_to_video(
@@ -328,9 +383,13 @@ def test_distilled_pipeline_forwards_native_arguments_and_encodes_output(tmp_pat
 def test_distilled_pipeline_uses_duration_head_auto_sentinel():
     recorder = {}
     api = fake_backend_api(recorder)
-    bundle = make_bundle(api=api)
-    object.__setattr__(bundle, '_backend', _Backend(recorder, 'distilled-runtime'))
-    pipeline = LTXVideoPipeline(bundle, num_frames=None)
+    bundle = make_bundle()
+    pipeline = make_pipeline(
+        bundle,
+        api=api,
+        backend=_Backend(recorder, 'distilled-runtime'),
+        num_frames=None,
+    )
 
     result = pipeline('An abstract ink cloud expanding in water')
 
@@ -341,9 +400,12 @@ def test_distilled_pipeline_uses_duration_head_auto_sentinel():
 def test_distilled_pipeline_rejects_guided_only_controls_before_backend_call():
     recorder = {}
     api = fake_backend_api(recorder)
-    bundle = make_bundle(api=api)
-    object.__setattr__(bundle, '_backend', _Backend(recorder, 'distilled-runtime'))
-    pipeline = LTXVideoPipeline(bundle)
+    bundle = make_bundle()
+    pipeline = make_pipeline(
+        bundle,
+        api=api,
+        backend=_Backend(recorder, 'distilled-runtime'),
+    )
 
     with pytest.raises(ValueError, match='does not accept a negative prompt'):
         pipeline('A red kite', negative_prompt='blur')
@@ -355,10 +417,11 @@ def test_distilled_pipeline_rejects_guided_only_controls_before_backend_call():
 def test_dev_pipeline_forwards_guidance_steps_and_user_overrides():
     recorder = {}
     api = fake_backend_api(recorder)
-    bundle = make_bundle(mode='dev_two_stage', api=api)
-    object.__setattr__(bundle, '_backend', _Backend(recorder, 'dev-runtime'))
-    pipeline = LTXVideoPipeline(
+    bundle = make_bundle(mode='dev_two_stage')
+    pipeline = make_pipeline(
         bundle,
+        api=api,
+        backend=_Backend(recorder, 'dev-runtime'),
         negative_prompt='default negative',
         num_inference_steps=30,
         video_guider={'cfg_scale': 4.0},
@@ -386,16 +449,21 @@ def test_dev_pipeline_forwards_guidance_steps_and_user_overrides():
     assert result['mode'] == 'dev_two_stage'
 
 
-def test_bundle_backend_is_lazy_and_does_not_import_ltx_for_validation(monkeypatch):
+def test_pipeline_backend_is_lazy_and_bundle_validation_has_no_pipeline_import(monkeypatch):
     imports = []
 
     def fail_if_imported():
         imports.append('called')
         raise AssertionError('heavy backend must remain lazy')
 
-    monkeypatch.setattr(LTXVideoBundle, '_import_backend_api', staticmethod(fail_if_imported))
+    monkeypatch.setattr(
+        LTXVideoPipeline,
+        '_import_backend_api',
+        staticmethod(fail_if_imported),
+    )
 
     bundle = make_bundle()
+    make_pipeline(bundle)
     bundle.validate()
 
     assert imports == []

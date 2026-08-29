@@ -3,17 +3,15 @@ ModelBundle base class.
 
 ModelBundle holds all sub-modules for a task and serves as the shared core
 between Trainer and Pipeline. It handles:
-  - Module instantiation via HF_MODELS registry
+  - Module instantiation via the repository-local model registry
   - Per-module trainable / save_ckpt control
   - Per-module precision and gradient-checkpointing control
-  - LoRA injection via peft
+  - Repository-local LoRA injection
   - Selective checkpoint save / load
-  - Bundle-level construction helpers aligned with HuggingFace-style APIs
+  - Bundle-level construction helpers for repository-owned artifacts
 """
 
 import copy
-import importlib
-import os
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -56,15 +54,10 @@ class ModelBundle(nn.Module):
     }
     _PRETRAINED_PATH_SENTINEL = '__pretrained__'
 
-    # Optional declarative specs for HF-native bundles. Common single-model and
-    # diffusers-style bundles can set these instead of hand-writing
-    # _bundle_config_from_pretrained() / save_pretrained().
-    #
-    # HF_PRETRAINED_SPEC describes how one pretrained artifact maps to bundle
-    # component configs. HF_SAVE_PRETRAINED_SPEC describes how the bundle
-    # exports back to an inference artifact.
-    HF_PRETRAINED_SPEC: Optional[Dict[str, Any]] = None
-    HF_SAVE_PRETRAINED_SPEC: Optional[Dict[str, Any]] = None
+    # Optional declarative mapping from one supported on-disk artifact to the
+    # bundle's repository-owned components. Export stays implementation-owned
+    # because every model family has a different artifact schema.
+    PRETRAINED_SPEC: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def _to_plain_dict(cfg: Optional[dict]) -> Dict[str, Any]:
@@ -79,16 +72,6 @@ class ModelBundle(nn.Module):
         if value == cls._PRETRAINED_PATH_SENTINEL:
             return pretrained_model_name_or_path
         return copy.deepcopy(value)
-
-    @staticmethod
-    def _import_object(obj_or_path):
-        if not isinstance(obj_or_path, str):
-            return obj_or_path
-        module_name, _, attr_name = obj_or_path.rpartition('.')
-        if not module_name or not attr_name:
-            raise ValueError(f"Expected import path like 'pkg.mod.Class', got: {obj_or_path!r}")
-        module = importlib.import_module(module_name)
-        return getattr(module, attr_name)
 
     @classmethod
     def _build_bundle_config_from_spec(
@@ -157,68 +140,6 @@ class ModelBundle(nn.Module):
             )
 
         return bundle_cfg
-
-    def _save_pretrained_from_spec(
-        self,
-        save_directory: str,
-        spec: Dict[str, Any],
-        merge_lora: bool = True,
-        safe_serialization: bool = True,
-        **kwargs,
-    ):
-        from hftrainer.utils.hf_export import safe_hf_export
-
-        os.makedirs(save_directory, exist_ok=True)
-
-        merge_modules = [
-            name for name in spec.get('merge_lora_modules', [])
-            if self.is_lora_module(name)
-        ]
-        if merge_lora and merge_modules:
-            self.merge_lora_weights(merge_modules)
-
-        export_kind = spec.get('kind', 'module')
-        if export_kind == 'module':
-            module = getattr(self, spec['module'])
-            with safe_hf_export():
-                module.save_pretrained(
-                    save_directory,
-                    safe_serialization=safe_serialization,
-                    **kwargs,
-                )
-        elif export_kind == 'pipeline':
-            pipeline_cls = self._import_object(spec['pipeline_class'])
-            pipeline_kwargs = {}
-            for ctor_key, attr_name in spec.get('components', {}).items():
-                pipeline_kwargs[ctor_key] = getattr(self, attr_name)
-            pipeline_kwargs.update(copy.deepcopy(spec.get('pipeline_kwargs', {})))
-            pipeline = pipeline_cls(**pipeline_kwargs)
-            with safe_hf_export():
-                pipeline.save_pretrained(
-                    save_directory,
-                    safe_serialization=safe_serialization,
-                    **kwargs,
-                )
-        else:
-            raise ValueError(
-                f"Unsupported HF_SAVE_PRETRAINED_SPEC kind '{export_kind}' "
-                f"for {type(self).__name__}."
-            )
-
-        for extra_spec in spec.get('extra_artifacts', []):
-            if isinstance(extra_spec, str):
-                extra_spec = {'attr': extra_spec}
-            attr_name = extra_spec['attr']
-            artifact = getattr(self, attr_name, None)
-            if artifact is None or not hasattr(artifact, 'save_pretrained'):
-                continue
-            subdir = extra_spec.get('subdir')
-            artifact_dir = (
-                save_directory
-                if subdir in (None, '', '.')
-                else os.path.join(save_directory, subdir)
-            )
-            artifact.save_pretrained(artifact_dir)
 
     @classmethod
     def _resolve_module_dtype(cls, dtype_spec) -> torch.dtype:
@@ -312,7 +233,7 @@ class ModelBundle(nn.Module):
     @classmethod
     def from_config(cls, cfg: Optional[dict] = None, **kwargs):
         """
-        Construct a bundle from an MMEngine/HF-Trainer-style config dict.
+        Construct a bundle from an MMEngine-style config dict.
 
         If ``cfg`` contains a ``type`` field pointing at another registered
         bundle subclass, dispatch through the registry. Otherwise instantiate
@@ -342,16 +263,16 @@ class ModelBundle(nn.Module):
         pretrained_model_name_or_path: str,
         **kwargs,
     ) -> Dict[str, Any]:
-        if cls.HF_PRETRAINED_SPEC is not None:
+        if cls.PRETRAINED_SPEC is not None:
             return cls._build_bundle_config_from_spec(
                 pretrained_model_name_or_path=pretrained_model_name_or_path,
-                spec=cls.HF_PRETRAINED_SPEC,
+                spec=cls.PRETRAINED_SPEC,
                 **kwargs,
             )
         raise NotImplementedError(
             f"{cls.__name__}.from_pretrained() is only available for bundles that "
-            "define how a HuggingFace/diffusers pretrained artifact maps to bundle "
-            "sub-modules. Override _bundle_config_from_pretrained(), or use "
+            "define how a supported artifact maps to repository-owned bundle "
+            "components. Override _bundle_config_from_pretrained(), or use "
             f"{cls.__name__}.from_config(...) for custom/self-developed models."
         )
 
@@ -363,7 +284,7 @@ class ModelBundle(nn.Module):
         **kwargs,
     ):
         """
-        Construct a bundle from a HuggingFace/diffusers-style pretrained artifact.
+        Construct a bundle from a repository-supported pretrained artifact.
 
         The public API is generic, but subclasses can override
         ``_bundle_config_from_pretrained()`` to describe how one artifact should
@@ -377,18 +298,9 @@ class ModelBundle(nn.Module):
         return cls.from_config(bundle_cfg)
 
     def save_pretrained(self, save_directory: str, **kwargs):
-        if type(self).HF_SAVE_PRETRAINED_SPEC is not None:
-            return self._save_pretrained_from_spec(
-                save_directory=save_directory,
-                spec=type(self).HF_SAVE_PRETRAINED_SPEC,
-                **kwargs,
-            )
         raise NotImplementedError(
-            f"{type(self).__name__}.save_pretrained() is task-specific. "
-            "HF-native bundles should override it to export an artifact that "
-            "official diffusers/transformers APIs can read. Custom bundles can "
-            "continue to rely on checkpoint save/load, or implement save_pretrained() "
-            "for their own artifact format."
+            f"{type(self).__name__}.save_pretrained() is implementation-specific. "
+            "Each bundle must export and validate its own repository-owned artifact schema."
         )
 
     def _build_modules(self, modules_cfg: dict):
@@ -400,10 +312,10 @@ class ModelBundle(nn.Module):
           - save_ckpt: bool (default: True if trainable else False)
           - module_dtype: torch dtype override applied after construction
           - gradient_checkpointing: bool | dict
-          - All other keys are passed to HF_MODELS.build()
+          - All other keys are passed to MODEL_COMPONENTS.build()
         """
-        from hftrainer.registry import HF_MODELS
-        from hftrainer.models.peft_utils import apply_lora
+        from hftrainer.registry import MODEL_COMPONENTS
+        from hftrainer.models.lora import apply_lora
 
         self._save_ckpt_modules = []
         self._trainable_modules = []
@@ -448,7 +360,7 @@ class ModelBundle(nn.Module):
             self._module_build_configs[name] = normalized_cfg
 
             # Build the module
-            module = HF_MODELS.build(sub_cfg)
+            module = MODEL_COMPONENTS.build(sub_cfg)
 
             if isinstance(module, nn.Module) and gradient_checkpointing:
                 self._enable_gradient_checkpointing(module, name, gradient_checkpointing)
@@ -604,7 +516,7 @@ class ModelBundle(nn.Module):
         Automatically unwraps DDP/FSDP wrappers so checkpoint keys are clean
         (without ``module.`` prefix).
         """
-        from hftrainer.models.peft_utils import get_lora_state_dict
+        from hftrainer.models.lora import get_lora_state_dict
 
         sd = {}
         meta = self.checkpoint_metadata()
@@ -649,7 +561,7 @@ class ModelBundle(nn.Module):
         if not state_dict:
             return
 
-        from hftrainer.models.peft_utils import (
+        from hftrainer.models.lora import (
             looks_like_lora_state_dict,
             set_lora_state_dict,
         )
@@ -723,14 +635,14 @@ class ModelBundle(nn.Module):
 
     def merge_lora_weights(self, module_names: Optional[List[str]] = None):
         """Merge LoRA adapters into their base modules for inference/export."""
-        from hftrainer.models.peft_utils import is_peft_model, merge_lora
+        from hftrainer.models.lora import is_lora_model, merge_lora
 
         target_names = module_names or list(self._lora_modules)
         for name in target_names:
             module = getattr(self, name, None)
             if module is None or not isinstance(module, nn.Module):
                 continue
-            if not is_peft_model(module):
+            if not is_lora_model(module):
                 continue
 
             merged_module = merge_lora(module)

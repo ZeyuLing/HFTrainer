@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
 
 from hftrainer.registry import TRANSFORMS
 
@@ -49,11 +48,11 @@ class TokenizeAlpacaSample:
         add_eos_token: bool = True,
         padding_side: str = 'right',
     ):
-        from transformers import AutoTokenizer
+        from hftrainer.tokenization import LocalTokenizer
 
         self.max_length = max_length
         self.add_eos_token = add_eos_token
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+        self.tokenizer = LocalTokenizer.from_pretrained(tokenizer_name_or_path)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id

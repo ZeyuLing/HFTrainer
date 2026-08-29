@@ -8,16 +8,14 @@ an import-time requirement.
 from importlib import import_module
 from threading import RLock
 
-from hftrainer.registry import HF_MODELS
-
 # Framework-level components shared by all methods.
 _FRAMEWORK_MODULES = (
     'hftrainer.hooks.checkpoint_hook',
     'hftrainer.hooks.logger_hook',
     'hftrainer.hooks.ema_hook',
     'hftrainer.hooks.lr_scheduler_hook',
-    'hftrainer.evaluation.classification.accuracy_evaluator',
-    'hftrainer.evaluation.llm.perplexity_evaluator',
+    'hftrainer.evaluation.image_classification.accuracy',
+    'hftrainer.evaluation.causal_language_modeling.perplexity',
     'hftrainer.visualization.tensorboard_visualizer',
     'hftrainer.visualization.file_visualizer',
     'hftrainer.datasets.transforms',
@@ -28,36 +26,40 @@ _FRAMEWORK_MODULES = (
 _BUILTIN_METHOD_MODULES = (
     # Classification / ViT
     'hftrainer.models.vit.bundle',
-    'hftrainer.trainers.classification.classification_trainer',
-    'hftrainer.pipelines.classification.classification_pipeline',
-    'hftrainer.datasets.classification.hf_image_classification_dataset',
-    'hftrainer.datasets.classification.imagefolder_dataset',
+    'hftrainer.tasks.image_classification.trainer',
+    'hftrainer.tasks.image_classification.pipeline',
+    'hftrainer.datasets.image_classification.hf_dataset',
+    'hftrainer.datasets.image_classification.image_folder',
     # Text-to-image / Stable Diffusion 1.5
     'hftrainer.models.sd15.bundle',
-    'hftrainer.trainers.text2image.sd15_trainer',
-    'hftrainer.pipelines.text2image.sd15_pipeline',
-    'hftrainer.datasets.text2image.hf_imagefolder_dataset',
+    'hftrainer.trainers.sd15.trainer',
+    'hftrainer.pipelines.sd15.pipeline',
+    'hftrainer.datasets.text_to_image.hf_image_folder',
     # Causal language modelling
-    'hftrainer.models.causal_lm.bundle',
-    'hftrainer.trainers.llm.causal_lm_trainer',
-    'hftrainer.pipelines.llm.causal_lm_pipeline',
-    'hftrainer.datasets.llm.alpaca_dataset',
+    'hftrainer.models.llama.bundle',
+    'hftrainer.tasks.causal_language_modeling.trainer',
+    'hftrainer.tasks.causal_language_modeling.pipeline',
+    'hftrainer.datasets.instruction_sft.alpaca',
     # Text-to-video / Wan
     'hftrainer.models.wan.bundle',
-    'hftrainer.trainers.text2video.wan_trainer',
-    'hftrainer.pipelines.text2video.wan_pipeline',
-    'hftrainer.datasets.text2video.hf_video_dataset',
+    'hftrainer.trainers.wan.trainer',
+    'hftrainer.pipelines.wan.pipeline',
+    'hftrainer.datasets.text_to_video.hf_video',
     # StyleGAN2
-    'hftrainer.models.stylegan2.model',
+    'hftrainer.models.stylegan2.network',
     'hftrainer.models.stylegan2.bundle',
-    'hftrainer.trainers.gan.gan_trainer',
-    'hftrainer.pipelines.gan.stylegan2_pipeline',
-    'hftrainer.datasets.gan.image_folder_gan_dataset',
+    'hftrainer.trainers.stylegan2.trainer',
+    'hftrainer.pipelines.stylegan2.pipeline',
+    'hftrainer.datasets.unconditional_image.image_folder',
     # Distribution Matching Distillation
     'hftrainer.models.dmd.bundle',
-    'hftrainer.trainers.distillation.dmd_trainer',
-    'hftrainer.pipelines.text2image.dmd_pipeline',
-    'hftrainer.datasets.distillation.dmd_image_pair_dataset',
+    'hftrainer.trainers.dmd.trainer',
+    'hftrainer.pipelines.dmd.pipeline',
+    'hftrainer.datasets.dmd.image_pair',
+    # LTX-Video 2.5 (heavy numerical modules remain lazy behind wrappers)
+    'hftrainer.models.ltx_video.bundle',
+    'hftrainer.trainers.ltx_video.trainer',
+    'hftrainer.pipelines.ltx_video.pipeline',
 )
 
 _REGISTRATION_LOCK = RLock()
@@ -89,71 +91,6 @@ def import_custom_modules(cfg):
     return import_modules_from_strings(**dict(custom_imports))
 
 
-def _register_hf_classes() -> None:
-    """Register common Hugging Face classes when their packages are present."""
-    classes_to_register = []
-
-    try:
-        from transformers import (
-            AutoModelForCausalLM,
-            CLIPTextModel,
-            T5EncoderModel,
-            UMT5EncoderModel,
-            ViTForImageClassification,
-        )
-
-        classes_to_register.extend(
-            [
-                ('ViTForImageClassification', ViTForImageClassification),
-                ('CLIPTextModel', CLIPTextModel),
-                ('AutoModelForCausalLM', AutoModelForCausalLM),
-                ('UMT5EncoderModel', UMT5EncoderModel),
-                ('T5EncoderModel', T5EncoderModel),
-            ]
-        )
-    except ImportError:
-        pass
-
-    try:
-        from diffusers import (
-            AutoencoderKL,
-            DDIMScheduler,
-            DDPMScheduler,
-            FlowMatchEulerDiscreteScheduler,
-            PNDMScheduler,
-            UNet2DConditionModel,
-        )
-
-        classes_to_register.extend(
-            [
-                ('AutoencoderKL', AutoencoderKL),
-                ('UNet2DConditionModel', UNet2DConditionModel),
-                ('DDPMScheduler', DDPMScheduler),
-                ('DDIMScheduler', DDIMScheduler),
-                ('PNDMScheduler', PNDMScheduler),
-                ('FlowMatchEulerDiscreteScheduler', FlowMatchEulerDiscreteScheduler),
-            ]
-        )
-    except ImportError:
-        pass
-
-    try:
-        from diffusers import AutoencoderKLWan, WanTransformer3DModel
-
-        classes_to_register.extend(
-            [
-                ('AutoencoderKLWan', AutoencoderKLWan),
-                ('WanTransformer3DModel', WanTransformer3DModel),
-            ]
-        )
-    except ImportError:
-        pass
-
-    for name, cls in classes_to_register:
-        if HF_MODELS.get(name) is None:
-            HF_MODELS.register_module(name=name, module=cls)
-
-
 def register_all_modules() -> None:
     """Import and register every framework and built-in method component."""
     global _REGISTERED
@@ -165,7 +102,6 @@ def register_all_modules() -> None:
         if _REGISTERED:
             return
 
-        _register_hf_classes()
         for module_name in (*_FRAMEWORK_MODULES, *_BUILTIN_METHOD_MODULES):
             import_module(module_name)
 

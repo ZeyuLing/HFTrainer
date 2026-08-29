@@ -1,145 +1,84 @@
-"""ViT classification ModelBundle."""
+"""ViT classification bundle backed only by repository-local components."""
 
-import torch
+from __future__ import annotations
+
 from typing import Optional, Tuple
 
+import torch
+
 from hftrainer.models.base_model_bundle import ModelBundle
+from hftrainer.models.vit.network import LocalViTForImageClassification
+from hftrainer.models.vit.processing import ViTImageProcessor
 from hftrainer.registry import MODEL_BUNDLES
-from hftrainer.utils.image import IMAGENET_MEAN, IMAGENET_STD, normalize_image, pil_to_tensor
 
 
 @MODEL_BUNDLES.register_module()
 class ViTBundle(ModelBundle):
-    """
-    ModelBundle for ViT-based image classification.
+    """Training/inference boundary for the local ViT implementation."""
 
-    Sub-modules:
-      - model: ViTForImageClassification (trainable)
-
-    Atomic forward functions shared by Trainer and Pipeline:
-      - preprocess(images) → pixel_values
-      - forward_features(pixel_values) → logits
-      - classify(pixel_values) → (pred_ids, scores)
-    """
-
-    HF_PRETRAINED_SPEC = {
+    PRETRAINED_SPEC = {
         'components': {
             'model': {
-                'default_type': 'AutoModelForImageClassification',
+                'default_type': 'LocalViTForImageClassification',
                 'type_arg': 'model_type',
                 'pretrained_kwargs_arg': 'model_kwargs',
                 'overrides_arg': 'model_overrides',
             },
         },
-        'init_args': {
-            'num_labels': None,
-            'image_size': 224,
-        },
+        'init_args': {'num_labels': None, 'image_size': 224},
     }
-    HF_SAVE_PRETRAINED_SPEC = {
-        'kind': 'module',
-        'module': 'model',
-        'merge_lora_modules': ['model'],
-        'extra_artifacts': ['_image_processor'],
-    }
-
     def __init__(
         self,
-        model: dict,
+        model: dict | LocalViTForImageClassification,
         num_labels: Optional[int] = None,
         image_size: int = 224,
     ):
         super().__init__()
-        self.image_size = image_size
+        self.image_size = int(image_size)
         self.num_labels = num_labels
-
-        # Build sub-modules
-        self._build_modules({'model': model})
-
-        # Load feature extractor / image processor for preprocessing
         pretrained_path = None
-        if hasattr(model, 'get'):
-            fp = model.get('from_pretrained', {})
-            pretrained_path = fp.get('pretrained_model_name_or_path') if fp else None
-
-        self._image_processor = None
-        if pretrained_path:
-            try:
-                from transformers import AutoImageProcessor
-                self._image_processor = AutoImageProcessor.from_pretrained(pretrained_path)
-            except Exception:
-                pass
-
-    @classmethod
-    def _bundle_config_from_pretrained(
-        cls,
-        pretrained_model_name_or_path: str,
-        num_labels: Optional[int] = None,
-        **kwargs,
-    ):
-        bundle_cfg = cls._build_bundle_config_from_spec(
-            pretrained_model_name_or_path=pretrained_model_name_or_path,
-            spec=cls.HF_PRETRAINED_SPEC,
-            num_labels=num_labels,
-            **kwargs,
-        )
-        if num_labels is not None:
-            bundle_cfg['model']['from_pretrained']['num_labels'] = num_labels
-            bundle_cfg['model']['from_pretrained'].setdefault(
-                'ignore_mismatched_sizes',
-                True,
+        if isinstance(model, dict):
+            from_pretrained = model.get('from_pretrained') or {}
+            pretrained_path = from_pretrained.get('pretrained_model_name_or_path')
+            if num_labels is not None and from_pretrained:
+                model = dict(model)
+                model['from_pretrained'] = dict(from_pretrained)
+                model['from_pretrained'].setdefault('num_labels', num_labels)
+                model['from_pretrained'].setdefault('ignore_mismatched_sizes', True)
+        self._build_modules({'model': model})
+        if type(self.model) is not LocalViTForImageClassification:
+            raise TypeError(
+                'ViTBundle.model must be LocalViTForImageClassification; '
+                f'got {type(self.model).__module__}.{type(self.model).__name__}.'
             )
-        return bundle_cfg
+        self._image_processor = (
+            ViTImageProcessor.from_pretrained(pretrained_path, self.image_size)
+            if pretrained_path else ViTImageProcessor(size=self.image_size)
+        )
 
     def preprocess(self, images) -> torch.Tensor:
-        """
-        Preprocess images to pixel_values tensor.
-
-        Args:
-            images: list of PIL Images, or Tensor[B, C, H, W] in [0,1]
-
-        Returns:
-            pixel_values: Tensor[B, 3, H, W] normalized
-        """
         if isinstance(images, torch.Tensor):
-            return images  # assume already preprocessed
-
-        if self._image_processor is not None:
-            inputs = self._image_processor(images=images, return_tensors='pt')
-            return inputs['pixel_values']
-
-        # Fallback: manual normalization
-        tensors = [pil_to_tensor(img) for img in images]
-        pixel_values = torch.stack(tensors)
-        mean = torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1)
-        std = torch.tensor(IMAGENET_STD).view(1, 3, 1, 1)
-        return normalize_image(pixel_values, mean.flatten().tolist(), std.flatten().tolist())
+            return images
+        return self._image_processor(images=images, return_tensors='pt')['pixel_values']
 
     def forward_features(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        """
-        Run ViT forward pass and return logits.
-
-        Args:
-            pixel_values: Tensor[B, 3, H, W]
-
-        Returns:
-            logits: Tensor[B, num_classes]
-        """
-        outputs = self.model(pixel_values=pixel_values)
-        return outputs.logits
+        return self.model(pixel_values=pixel_values).logits
 
     def classify(self, pixel_values: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Classify images.
-
-        Args:
-            pixel_values: Tensor[B, 3, H, W]
-
-        Returns:
-            pred_ids: Tensor[B] — predicted class indices
-            scores: Tensor[B, num_classes] — softmax probabilities
-        """
         logits = self.forward_features(pixel_values)
         scores = torch.softmax(logits, dim=-1)
-        pred_ids = scores.argmax(dim=-1)
-        return pred_ids, scores
+        return scores.argmax(dim=-1), scores
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        merge_lora: bool = True,
+        safe_serialization: bool = True,
+        **kwargs,
+    ) -> None:
+        if merge_lora and self.is_lora_module('model'):
+            self.merge_lora_weights(['model'])
+        self.model.save_pretrained(
+            save_directory, safe_serialization=safe_serialization, **kwargs
+        )
+        self._image_processor.save_pretrained(save_directory)

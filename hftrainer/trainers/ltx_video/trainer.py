@@ -1,4 +1,4 @@
-"""HFTrainer adapter for Lightricks' native LTX-2.5 training loop."""
+"""HFTrainer entry point for the pinned repository-local LTX-2.5 loop."""
 
 from __future__ import annotations
 
@@ -11,11 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from hftrainer.models.ltx_video.checkpoints import validate_ltx25_training_config
+from hftrainer.models.ltx_video.component_loader import LTXComponentStore
 from hftrainer.models.ltx_video.runtime import require_ltx_torch_capabilities
 from hftrainer.registry import TRAINERS
-from hftrainer.utils.optional import require_modules
-
-_LTX_TRAIN_INSTALL_HINT = 'python -m pip install -e ".[ltx-video-train]"'
 
 
 def _plain_dict(value: Any) -> dict[str, Any]:
@@ -37,7 +35,7 @@ def _deep_merge(base: dict[str, Any], updates: Mapping[str, Any]) -> dict[str, A
 
 @TRAINERS.register_module()
 class LTXVideoTrainer:
-    """Run the official LTX trainer behind HFTrainer's config and CLI.
+    """Run HFTrainer's repository-local LTX training implementation.
 
     LTX's trainer owns Accelerator, optimizer construction, checkpointing,
     validation and preprocessing contracts as one tightly coupled algorithm
@@ -64,6 +62,7 @@ class LTXVideoTrainer:
         step_callback: Callable[[int, int, list[Path]], None] | None = None,
         load_from: Mapping[str, Any] | str | None = None,
         auto_resume: bool = False,
+        components: LTXComponentStore | None = None,
     ):
         if (native_config is None) == (native_config_path is None):
             raise ValueError(
@@ -89,12 +88,28 @@ class LTXVideoTrainer:
         self.step_callback = step_callback
         self.load_from = copy.deepcopy(load_from)
         self.auto_resume = bool(auto_resume)
+        self.components = components if components is not None else LTXComponentStore()
         self._resolved_config: dict[str, Any] | None = None
         self._native_trainer = None
 
     @classmethod
     def from_framework_config(cls, cfg) -> LTXVideoTrainer:
-        trainer_cfg = _plain_dict(cfg.trainer)
+        raw_trainer_cfg = cfg.trainer
+        if hasattr(raw_trainer_cfg, 'to_dict'):
+            raw_trainer_cfg = raw_trainer_cfg.to_dict()
+        if not isinstance(raw_trainer_cfg, Mapping):
+            raise TypeError(
+                f"Expected a mapping, got {type(raw_trainer_cfg).__name__}."
+            )
+        # Component stores contain registry locks and are intentionally opaque
+        # runtime dependencies. Preserve their identity while copying the
+        # serializable config payload around them.
+        components = raw_trainer_cfg.get('components')
+        trainer_cfg = _plain_dict(
+            {key: value for key, value in raw_trainer_cfg.items() if key != 'components'}
+        )
+        if components is not None:
+            trainer_cfg['components'] = components
         trainer_cfg.pop('type', None)
 
         config_path = trainer_cfg.get('native_config_path')
@@ -172,7 +187,7 @@ class LTXVideoTrainer:
         return config
 
     def dump_resolved_config(self, path: str | Path | None = None) -> Path:
-        """Render the exact official schema consumed by ``LtxTrainerConfig``."""
+        """Render the exact local schema consumed by ``LtxTrainerConfig``."""
 
         config = self.resolve_config()
         output = (
@@ -192,7 +207,8 @@ class LTXVideoTrainer:
     def _validate_runtime(self) -> None:
         if self.require_linux and sys.platform != 'linux':
             raise RuntimeError(
-                "The official LTX-2.5 training stack uses Triton and is supported "
+                "The repository-local LTX-Video 2.5 training implementation uses "
+                "Triton and is supported "
                 "on Linux/CUDA. Prepare and test configs on this platform, then run "
                 "training in a Linux GPU environment. Native Windows training is not "
                 "advertised as supported."
@@ -202,7 +218,7 @@ class LTXVideoTrainer:
 
             if not torch.cuda.is_available():
                 raise RuntimeError(
-                    "The official LTX-2.5 training stack requires an NVIDIA CUDA "
+                    "The repository-local LTX-Video 2.5 trainer requires an NVIDIA CUDA "
                     "runtime, but torch.cuda.is_available() is false. Install a "
                     "CUDA-enabled PyTorch build matched to the host driver before "
                     "starting the 22B trainer."
@@ -218,24 +234,22 @@ class LTXVideoTrainer:
     @staticmethod
     def _import_training_api():
         require_ltx_torch_capabilities('LTX-2.5 training')
-        modules = require_modules(
-            ['ltx_trainer.config', 'ltx_trainer.trainer'],
-            feature='LTX-2.5 training',
-            install_hint=_LTX_TRAIN_INSTALL_HINT,
-        )
-        return (
-            modules['ltx_trainer.config'].LtxTrainerConfig,
-            modules['ltx_trainer.trainer'].LtxvTrainer,
-        )
+        from hftrainer.trainers.ltx_video.native.config import LtxTrainerConfig
+        from hftrainer.trainers.ltx_video.native.trainer import LtxvTrainer
+
+        return LtxTrainerConfig, LtxvTrainer
 
     def build_native_trainer(self):
         self._validate_runtime()
         config_data = self.resolve_config()
         config_cls, trainer_cls = self._import_training_api()
-        # The official Pydantic schema uses extra='forbid', so framework-only
+        # The local Pydantic schema uses extra='forbid', so framework-only
         # fields cannot leak silently into the algorithm configuration.
         native_config = config_cls(**config_data)
-        self._native_trainer = trainer_cls(native_config)
+        self._native_trainer = trainer_cls(
+            native_config,
+            component_registry=self.components.training_registry,
+        )
         return self._native_trainer
 
     @staticmethod

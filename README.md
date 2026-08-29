@@ -2,145 +2,134 @@
 
 <img src="assets/hftrainer_logo.png" alt="HFTrainer logo" width="420" />
 
-# HF-Trainer
+# HFTrainer
 
-**Config-driven training and inference for HuggingFace-native and official model stacks.**
+**A config-driven training and inference framework with repository-owned model implementations.**
 
-One shared task core for training and inference, native `transformers` /
-`diffusers` / `peft` integration, and thin pinned adapters when an upstream
-project already owns the complete algorithm lifecycle.
+One implementation tree per model family, one shared bundle for training and
+inference, and no runtime delegation to an external model framework.
 
 <p>
   <a href="docs/en/index.md"><strong>Documentation</strong></a> •
   <a href="docs/en/quickstart.md"><strong>Quick Start</strong></a> •
-  <a href="docs/en/integration.md"><strong>Integration</strong></a> •
-  <a href="docs/en/api_reference.md"><strong>API Reference</strong></a> •
-  <a href="docs/en/tasks.md"><strong>Task Matrix</strong></a> •
+  <a href="docs/en/integration.md"><strong>Integration Guide</strong></a> •
+  <a href="docs/zh-cn/index.md"><strong>中文文档</strong></a> •
   <a href="https://github.com/ZeyuLing/HFTrainer/issues"><strong>Issues</strong></a>
-</p>
-
-<p>
-  <a href="docs/en/index.md">English Docs</a> |
-  <a href="docs/zh-cn/index.md">简体中文文档</a>
-</p>
-
-<p>
-  <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c?logo=pytorch&logoColor=white">
-  <img alt="Accelerate" src="https://img.shields.io/badge/Accelerate-native-4f46e5">
-  <img alt="HuggingFace" src="https://img.shields.io/badge/HuggingFace-transformers%20%7C%20diffusers-facc15?logo=huggingface&logoColor=black">
-  <img alt="Config System" src="https://img.shields.io/badge/MMEngine-config%20%2B%20registry-0ea5e9">
 </p>
 
 </div>
 
-## Why HF-Trainer
+## Why HFTrainer
 
-HF-Trainer is for teams that like MMEngine-style `.py` configs, but want the runtime behavior, model ecosystem, and export path of HuggingFace instead of another custom engine.
+Research repositories often combine a model package, a training package, an
+inference package, and a separate adapter package. The resulting experiment
+may run, but its numerical behavior and artifact format depend on whichever
+versions happen to be installed.
 
-It is built for a specific workflow:
+HFTrainer uses a stricter boundary:
 
-- keep experiment configuration declarative
-- keep model classes and inference artifacts HuggingFace-native
-- avoid writing one copy of task logic for training and another for inference
-- fine-tune large models with per-module freeze, LoRA, dtype, and checkpoint control
+- model math lives in `hftrainer/models/<implementation>/network/`;
+- the bundle owns components, artifact loading, and atomic forward operations;
+- the trainer owns losses and update order;
+- the pipeline owns inference orchestration and public inputs/outputs;
+- configs refer only to classes registered from this repository;
+- LoRA, schedulers, tokenizers, and checkpoint loading used by a model are
+  implemented locally as part of that execution path.
 
-## What You Get
+PyTorch, Accelerate, MMEngine, safetensors, NumPy, Pillow, and similar
+infrastructure libraries are still normal dependencies. The hard rule is that
+HFTrainer model execution does not import or dynamically resolve another model
+implementation such as `transformers`, `diffusers`, `peft`, or separately
+installed LTX packages.
 
-| You want | HF-Trainer gives you |
-| --- | --- |
-| reproducible experiments instead of ad-hoc scripts | MMEngine-style `.py` configs and registry-based construction |
-| native large-model runtime behavior | `accelerate` for DDP, FSDP, DeepSpeed, mixed precision, logging, and state save/load |
-| direct use of HuggingFace components | native `transformers`, `diffusers`, and `peft` classes without framework-specific wrapper semantics |
-| one place to implement task logic | `ModelBundle` shared by `Trainer` and `Pipeline` |
-| safe adoption of a complete upstream stack | managed trainers and lazy adapters preserve the official loop instead of forking it |
-| less framework glue for HF-native tasks | parent-level `from_config` / `from_pretrained` plus declarative bundle specs instead of per-bundle boilerplate |
-| memory-aware fine-tuning | config-driven freeze, LoRA, per-module dtype, gradient checkpointing, and accumulation |
-| reliable restart and export | `auto_resume`, model-only load, full accelerator resume, and task-native `save_pretrained(...)` |
+This rule is enforced by source-tree AST checks and fresh-process import hooks,
+not only documented as a convention.
 
-## Runnable Today
+## Implementations
 
-| Task | Core Stack | Example Config | Status |
-| --- | --- | --- | --- |
-| Classification | `ViTBundle` + `ClassificationTrainer` + `ClassificationPipeline` | `configs/classification/vit_base_demo.py` | verified |
-| Text-to-image | `SD15Bundle` + `SD15Trainer` + `SD15Pipeline` | `configs/text2image/sd15_demo.py` | verified |
-| Causal LM SFT | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_sft_demo.py` | verified |
-| Causal LM LoRA | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_lora_demo.py` | verified |
-| Text-to-video | `WanBundle` + `WanTrainer` + `WanPipeline` | `configs/text2video/wan_demo.py` | verified |
-| LTX-2.5 distilled audio-video inference | `LTXVideoBundle` + `LTXVideoPipeline` | `configs/ltx_video/infer_ltx_video_2_5_distilled.py` | API/config contract verified; 22B GPU run not performed |
-| LTX-2.5 LoRA training + dev inference | managed `LTXVideoTrainer` + `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | API/config contract verified; 22B GPU run not performed |
-| GAN | `StyleGAN2Bundle` + `GANTrainer` + `StyleGAN2Pipeline` | `configs/gan/gan_demo.py` | verified reference |
-| DMD | `DMDBundle` + `DMDTrainer` + `DMDPipeline` | `configs/distillation/dmd_demo.py` | verified reference |
+| Implementation | Training | Inference | Local core | Current verification |
+| --- | --- | --- | --- | --- |
+| ViT classification | yes | yes | ViT, image processor, artifact loader | tiny forward/loss/backward; reference logits aligned; `.bin`/safetensors round-trip |
+| LLaMA causal LM | full + LoRA | yes | LLaMA, KV cache, generation, BPE/WordPiece/Unigram tokenizer | tiny forward/loss/backward/generation; reference logits aligned; sharded artifact support |
+| Stable Diffusion 1.5 | yes | yes | CLIP, byte-BPE tokenizer, VAE, conditional UNet, DDPM/DDIM/PNDM | checkpoint schema aligned; tiny numerical parity and train/infer round-trip |
+| DMD | yes | one-step | reuses the local SD1.5 core | distribution matching, fake-score and teacher paths tested |
+| StyleGAN2 | yes | yes | generator and discriminator | tiny adversarial path and artifact round-trip |
+| Wan T2V | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | local tiny train/denoise/artifact tests; see compatibility note below |
+| LTX-Video 2.5 | LoRA | distilled and dev+LoRA | pinned source reorganized into local model/trainer/pipeline layers; local Gemma text runtime and LoRA | API/config/checkpoint contracts and tiny Gemma path tested; full 22B GPU run not performed here |
 
-`verified reference` means the training / inference path is smoke-validated and runnable, but the default project is positioned as a framework reference implementation rather than a benchmark-tuned reproduction.
+“Reference aligned” refers to isolated development-time numerical checks. The
+reference packages are not installed as product dependencies and are not
+imported by HFTrainer at runtime.
 
-For LTX-2.5, “API/config contract verified” is deliberately narrower: tests
-exercise registry construction, split-checkpoint roles, managed-trainer
-dispatch, preprocessing command construction, and the pinned official Python
-API through fakes. The gated 22B weights were not allocated in the repository
-test environment, so this status does not claim model quality, throughput, or
-training convergence.
+Wan currently validates the framework-owned T2V contract and common checkpoint
+names, but it does not claim bitwise compatibility with every historical Wan
+release. Low checkpoint coverage is rejected instead of silently leaving most
+weights randomly initialized. Its current compact VAE may require explicit
+conversion for some full upstream artifacts.
+
+LTX-2.5 is large and gated. The repository tests do not claim 22B model quality,
+throughput, convergence, or end-to-end GPU execution. Standard text encoding,
+training, and video generation are wired locally; image-conditioned *prompt
+enhancement* is explicitly rejected until the Gemma vision tower is also
+implemented locally. Image conditioning for the LTX video model is a separate
+pipeline feature.
 
 ## Installation
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
-`pyproject.toml` is the sole dependency source of truth. LTX-Video remains an
-optional, source-pinned integration:
+The base installation intentionally does not install an external model
+framework. LTX uses additional media/runtime utilities:
 
 ```bash
-# Inference only, training only, or both
 python -m pip install -e ".[ltx-video-inference]"
 python -m pip install -e ".[ltx-video-train]"
+# or both
 python -m pip install -e ".[ltx-video]"
 ```
 
-The LTX extras enforce the PyTorch API floor needed by the pinned source, but
-they do **not** choose a CUDA wheel/index for your machine. For a production
-GPU runtime, prepare the pinned official LTX checkout with its `uv sync`
-workflow first, then install HFTrainer into that isolated environment. The
-step-by-step commands are in the LTX guide linked below.
+Choose the correct CUDA-enabled PyTorch wheel for the target machine before
+installing LTX extras. LTX-2.5 requires the capabilities guarded by the local
+runtime and a suitable Linux/CUDA environment for the real 22B workflow.
 
-The LTX extras use the official
-[Lightricks/LTX-2](https://github.com/Lightricks/LTX-2) repository at commit
-`400fd31054597515f47125691032c04b1c3ee24e`, because the current trainer/API
-combination is not represented by the older PyPI package line.
+## Quick Start
 
-Prepare local demo assets:
+Train ViT:
 
 ```bash
-bash tools/download_checkpoints.sh
-python3 tools/download_demo_data.py --task all
+python tools/train.py configs/vit/vit_base_demo.py
 ```
 
-## Get Started
-
-Run the simplest verified training path:
+Train and run a local LLaMA LoRA:
 
 ```bash
-python3 tools/train.py configs/classification/vit_base_demo.py
-```
+python tools/train.py configs/llama/llama_lora_demo.py
 
-Run the verified LoRA path:
-
-```bash
-python3 tools/train.py configs/llm/llama_lora_demo.py
-python3 tools/infer.py \
-  --config configs/llm/llama_lora_demo.py \
+python tools/infer.py \
+  --config configs/llama/llama_lora_demo.py \
   --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
   --merge-lora \
   --prompt "Name one primary color."
 ```
 
-Run distributed training:
+Run SD1.5 inference:
 
 ```bash
-bash tools/dist_train.sh configs/text2video/wan_demo.py 8
+python tools/infer.py \
+  --config configs/sd15/sd15_demo.py \
+  --checkpoint work_dirs/sd15_smoke/checkpoint-iter_10 \
+  --prompt "A paper boat in a rain-filled street at dusk." \
+  --output outputs/inference/paper_boat.png
 ```
 
-Run LTX-2.5 distilled inference after accepting the gated model terms and
-downloading its split checkpoint pack:
+The inference CLI reads `cfg.pipeline.type` and `cfg.inference.task`. It never
+guesses inference behavior from a trainer or implementation class name.
+
+## LTX-Video 2.5
+
+Point the configs at an accepted and downloaded split checkpoint pack:
 
 ```bash
 export LTX25_CHECKPOINT_ROOT="$PWD/checkpoints/LTX-2.5"
@@ -151,11 +140,10 @@ hftrainer-ltx-infer \
   --output outputs/ltx_video_2_5/distilled.mp4
 ```
 
-Preprocess data and launch the managed official LoRA trainer:
+Preprocess a dataset using the packaged local script, then train:
 
 ```bash
-hftrainer-ltx-preprocess data/ltx_video_2_5/dataset.json \
-  --ltx-repo third_party/LTX-2 \
+hftrainer-ltx-preprocess data/ltx_video_2_5/dataset.jsonl \
   --resolution-buckets 960x544x49 \
   --model-path "$LTX25_CHECKPOINT_ROOT/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors" \
   --text-encoder-path "$LTX25_CHECKPOINT_ROOT/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors" \
@@ -167,186 +155,106 @@ export LTX25_PREPROCESSED_DATA="$PWD/data/ltx_video_2_5/.precomputed"
 hftrainer-train configs/ltx_video/train_ltx_video_2_5_lora.py
 ```
 
-The preprocessing wrapper expects an official LTX-2 checkout at the same
-pinned commit. The full gated-download, license, Linux/CUDA/VRAM, distilled vs
-dev+LoRA, and inference instructions are in the
-[LTX-Video 2.5 guide](docs/en/models/ltx_video_2_5.md) and the
-[中文指南](docs/zh-cn/models/ltx_video_2_5.md).
+No second LTX checkout or installed `ltx-core`, `ltx-pipelines`, or
+`ltx-trainer` package is used. The modified pinned snapshot is organized under
+HFTrainer's own layers.
 
-Run the startup smoke suite:
+Important: the included LTX source is governed by the
+[LTX-2.x Community License Agreement](hftrainer/models/ltx_video/LICENSE.ltx-2.x),
+which contains use restrictions and commercial-license conditions. See the
+[upstream and modification record](hftrainer/models/ltx_video/UPSTREAM.md) and
+[third-party notices](THIRD_PARTY_NOTICES.md) before use or redistribution.
 
-```bash
-python3 -m pytest -m smoke tests/smoke/test_task_startup.py
+## Repository Standard
+
+```text
+hftrainer/
+  models/
+    <implementation_id>/
+      network/          model math and model-specific primitives
+      bundle.py         components, atomic forwards, artifact boundary
+      checkpoint.py     implementation artifact schema when needed
+  trainers/
+    <implementation_id>/
+      trainer.py        losses and update order
+  pipelines/
+    <implementation_id>/
+      pipeline.py       inference graph and public I/O
+  tasks/
+    <reusable_task>/    only genuinely reusable task contracts
+  datasets/
+    <data_contract>/    records, transforms, and batching
+  evaluation/
+    <task_contract>/    reusable metrics
+configs/
+  <implementation_id>/
 ```
 
-The smoke suite uses reduced temporary configs to verify that each task stack can start training and inference through the real CLI entry points.
+The same `implementation_id` is used across model, trainer, pipeline, and
+config whenever behavior belongs to one concrete method. A task directory is
+used only when the code is truly reusable across implementations. For example,
+ViT uses the reusable `image_classification` task trainer/pipeline, while
+SD1.5, DMD, Wan, StyleGAN2, and LTX keep method-specific trainers and
+pipelines.
 
-## Core Design
+Do not add task aliases such as `models/classification` or mix task names and
+paper/model names at the same model-package level.
 
-HF-Trainer keeps the framework surface small:
+## Adding a Model
 
-- `AccelerateRunner` builds the full runtime from one config and owns the loop
-- `build_runner_from_cfg` selects either `AccelerateRunner` or a registered
-  managed trainer whose official upstream stack owns the complete loop
-- `ModelBundle` holds task sub-modules and shared atomic forward functions
-- `Trainer` assembles training-time control flow and optimization
-- `Pipeline` assembles inference-time control flow without duplicating task internals
+An integration is complete only when all of the following are true:
 
-This is the main reason the project exists: training and inference stay aligned without forcing users into a non-HuggingFace inference API.
+1. Core model code is present under `hftrainer/models/<implementation>/network`.
+2. Config component types resolve through `MODEL_COMPONENTS` to classes whose
+   module starts with `hftrainer.models.`.
+3. `bundle.py` imports only local model components and owns atomic operations.
+4. The bundle provides strict local artifact loading/saving; missing keys,
+   shape mismatches, and low coverage are not silently accepted.
+5. Trainer and pipeline reuse bundle operations instead of maintaining another
+   model copy.
+6. Tiny forward, loss, backward, inference, and artifact round-trip tests pass.
+7. The forbidden-dependency test still passes in a process that actively blocks
+   external model packages.
 
-Imports are lightweight by default. `import hftrainer` creates the registries
-without importing every model library; call `hftrainer.register_all_modules()`
-for the built-in catalogue, or use config-level `custom_imports` to register
-only one vertical slice. Optional LTX packages are imported only when an LTX
-backend is constructed.
+See the [English integration guide](docs/en/integration.md) or
+[中文模型接入指南](docs/zh-cn/integration.md).
 
-## Memory Control From Config
+## Verification
 
-Supported today:
+```bash
+python -m pytest -q
+python -m compileall -q hftrainer tools
+python -m build
+```
 
-- global AMP via `accelerator.mixed_precision='no'|'fp16'|'bf16'`
-- per-module loader dtype via `from_pretrained.torch_dtype` or `dtype`
-- per-module post-load cast via `module_dtype='fp32'|'fp16'|'bf16'`
-- activation memory reduction via `gradient_checkpointing=True`
-- optimizer/state reduction via `trainable=False`, `trainable='lora'`, and `accelerator.gradient_accumulation_steps`
+The focused tests include:
 
-Important caveat:
-
-- if you need a strict policy like `vae=fp32` and `transformer=bf16`, prefer per-module dtype settings and keep `accelerator.mixed_precision='no'`
-- global AMP can still autocast eligible ops on top of module weights
-
-See:
-
-- [English Memory and Precision Guide](docs/en/memory.md)
-- [简体中文 显存与精度指南](docs/zh-cn/memory.md)
-
-## Integration Paths
-
-HF-Trainer exposes three clear ways to adopt the framework:
-
-| Starting point | What you implement | What stays HuggingFace-native |
-| --- | --- | --- |
-| an existing `transformers` / `diffusers` model | a task bundle plus task training logic | `from_pretrained`, official component classes, tokenizer / processor, and exported inference artifact |
-| a custom or self-developed model | your own `nn.Module` plus a task bundle | config-driven construction, checkpointing, hooks, runner, and optional custom `save_pretrained` |
-| a complete official algorithm stack | a thin bundle/pipeline adapter and, when needed, a managed trainer | upstream model math, preprocessing, optimizer, checkpoint, validation, and resume semantics |
-
-Rule of thumb:
-
-- if HuggingFace already has the model class, keep the official class inside the bundle and only add training wiring
-- if HuggingFace already has the artifact layout, declare `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC` on the bundle instead of hand-writing loader/export methods
-- if HuggingFace does not have the model class, use `ModelBundle.from_config(...)` and add custom `from_pretrained/save_pretrained` logic only when you need a stable exported artifact
-- if upstream already owns a tightly coupled loop, pin and delegate to it
-  instead of partially copying the algorithm into `AccelerateRunner`
+- source-tree forbidden-import scanning;
+- blocked-package fresh-process imports;
+- local tokenizer and LoRA contracts;
+- tiny model forward/loss/backward/generation tests;
+- artifact checksum, schema, tamper, and round-trip tests;
+- all shipped config imports and registry resolution;
+- LTX split-checkpoint, preprocessing, packaged trainer, and inference contracts.
 
 ## Documentation
 
 | Topic | English | 简体中文 |
 | --- | --- | --- |
-| Docs Home | [Home](docs/en/index.md) | [首页](docs/zh-cn/index.md) |
-| Installation | [Installation](docs/en/installation.md) | [安装说明](docs/zh-cn/installation.md) |
-| Quick Start | [Quick Start](docs/en/quickstart.md) | [快速开始](docs/zh-cn/quickstart.md) |
-| LTX-Video 2.5 | [LTX-Video 2.5](docs/en/models/ltx_video_2_5.md) | [LTX-Video 2.5](docs/zh-cn/models/ltx_video_2_5.md) |
-| Integration Guide | [Integration](docs/en/integration.md) | [模型接入](docs/zh-cn/integration.md) |
-| API Reference | [API Reference](docs/en/api_reference.md) | [API 参考](docs/zh-cn/api_reference.md) |
-| Memory and Precision | [Memory](docs/en/memory.md) | [显存与精度](docs/zh-cn/memory.md) |
-| LoRA | [LoRA](docs/en/lora.md) | [LoRA](docs/zh-cn/lora.md) |
-| Architecture | [Architecture](docs/en/architecture.md) | [架构设计](docs/zh-cn/architecture.md) |
-| Hook System | [Hook System](docs/en/design/hooks.md) | [Hook 系统](docs/zh-cn/design/hooks.md) |
-| Distributed Training | [Distributed](docs/en/distributed.md) | [分布式训练](docs/zh-cn/distributed.md) |
-| Experiment Directory | [Experiment Dir](docs/en/experiment_dir.md) | [实验目录](docs/zh-cn/experiment_dir.md) |
-| Task Matrix | [Tasks](docs/en/tasks.md) | [任务矩阵](docs/zh-cn/tasks.md) |
-| Design Docs | [Design Index](docs/en/design/index.md) | [设计文档](docs/zh-cn/design/index.md) |
+| Home | [docs/en/index.md](docs/en/index.md) | [docs/zh-cn/index.md](docs/zh-cn/index.md) |
+| Installation | [docs/en/installation.md](docs/en/installation.md) | [docs/zh-cn/installation.md](docs/zh-cn/installation.md) |
+| Quick start | [docs/en/quickstart.md](docs/en/quickstart.md) | [docs/zh-cn/quickstart.md](docs/zh-cn/quickstart.md) |
+| Integration standard | [docs/en/integration.md](docs/en/integration.md) | [docs/zh-cn/integration.md](docs/zh-cn/integration.md) |
+| Architecture | [docs/en/architecture.md](docs/en/architecture.md) | [docs/zh-cn/architecture.md](docs/zh-cn/architecture.md) |
+| ModelBundle | [docs/en/design/model_bundle.md](docs/en/design/model_bundle.md) | [docs/zh-cn/design/model_bundle.md](docs/zh-cn/design/model_bundle.md) |
+| LTX-Video 2.5 | [docs/en/models/ltx_video_2_5.md](docs/en/models/ltx_video_2_5.md) | [docs/zh-cn/models/ltx_video_2_5.md](docs/zh-cn/models/ltx_video_2_5.md) |
 
-## Public API Surface
+## Acknowledgements and Provenance
 
-The public API reference covers the user-facing framework surface:
+HFTrainer uses MMEngine for configuration/registries and Accelerate for
+distributed runtime orchestration. Model execution is repository-owned.
 
-- runner: `AccelerateRunner` and managed-trainer dispatch
-- model core: `ModelBundle`
-- training / inference base classes: `BaseTrainer`, `BasePipeline`
-- runtime helpers: hooks, evaluators, visualizers, checkpoint utils
-- CLI entry points: `hftrainer-train`, `hftrainer-infer`,
-  `hftrainer-ltx-infer`, and `hftrainer-ltx-preprocess`
-
-Start here:
-
-- [English API Reference](docs/en/api_reference.md)
-- [简体中文 API 参考](docs/zh-cn/api_reference.md)
-
-## Repository Layout
-
-```text
-configs/      runnable experiment configs
-hftrainer/    framework package
-tools/        train / infer / utility entry points
-docs/         English + Chinese documentation
-data/         demo datasets
-checkpoints/  local pretrained checkpoints for demos
-tests/        startup smoke tests and focused unit tests
-```
-
-Model implementations, task runtime, and data contracts are intentionally
-separated. Each namespace has one classification rule:
-
-```text
-hftrainer/models/<implementation_id>/
-  bundle.py
-  ...
-hftrainer/trainers/<training_task_or_method>/
-  ...
-hftrainer/pipelines/<inference_capability>/
-  ...
-hftrainer/datasets/<data_contract>/
-  ...
-```
-
-`models/` has exactly one owner package for each concrete model family or
-algorithm adapter: `vit`, `sd15`, `causal_lm`, `wan`, `stylegan2`, `dmd`, and
-`ltx_video`. Do not add task aliases such as `models/classification` or
-`models/text2video`; task-level reuse belongs in trainers, pipelines, datasets,
-and evaluators instead of a second model namespace.
-
-Optional/native integrations declare focused `custom_imports`; built-in demo
-configs without them use the explicit built-in registration catalogue. This
-keeps stacks such as `models/ltx_video`, `pipelines/ltx_video`, and
-`trainers/ltx_video` out of the lightweight core import path while preserving
-the older built-in config workflow.
-
-The early-0.x task-shaped model aliases were removed because they contained no
-implementation or registry ownership. Direct imports should use the canonical
-paths:
-
-| Removed alias | Canonical package |
-|---|---|
-| `hftrainer.models.classification` | `hftrainer.models.vit` |
-| `hftrainer.models.text2image` | `hftrainer.models.sd15` |
-| `hftrainer.models.llm` | `hftrainer.models.causal_lm` |
-| `hftrainer.models.text2video` | `hftrainer.models.wan` |
-| `hftrainer.models.gan` | `hftrainer.models.stylegan2` |
-| `hftrainer.models.distillation` | `hftrainer.models.dmd` |
-
-Datasets follow an MMEngine-style split:
-
-```text
-dataset.load_data_list()  -> raw records
-dataset.pipeline          -> decoding / tokenize / resize / pack transforms
-collate_fn                -> batch assembly
-```
-
-## Scope Notes
-
-- `docs/en/` and `docs/zh-cn/` are the source-of-truth public docs
-- root-level `docs/*.md` pages are compatibility entry pages
-- the GAN and DMD stacks are runnable framework references, not benchmark-tuned reproductions out of the box
-- LTX-2.5 is pinned to one official source revision and contract-tested; full
-  22B GPU inference/training still requires gated weights and a suitable Linux
-  CUDA environment
-
-## Acknowledgements
-
-HF-Trainer is built around three complementary ecosystems:
-
-- MMEngine for config-driven experiment construction and registry ergonomics
-- HuggingFace for model classes, inference artifacts, and runtime interoperability
-- Lightricks for the native LTX-2.5 model, pipeline, and training stack used by
-  the optional adapter
+Some local implementations were validated against public reference
+implementations during development. Those references are not runtime
+dependencies. LTX is a modified pinned source snapshot and retains its own
+license, notices, and use restrictions as described above.

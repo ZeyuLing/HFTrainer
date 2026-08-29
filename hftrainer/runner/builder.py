@@ -4,11 +4,12 @@ from __future__ import annotations
 
 
 def build_runner_from_cfg(cfg):
-    """Build a native HFTrainer runner or a managed external trainer.
+    """Build the HFTrainer-owned runner selected by the implementation config.
 
-    Most tasks use :class:`AccelerateRunner`.  Algorithm stacks such as LTX-2.5
-    already provide a complete, tightly coupled Accelerator loop; their
-    registered trainer sets ``manages_training_loop=True`` and implements
+    Most implementations use :class:`AccelerateRunner`. Tightly coupled
+    algorithms such as LTX-Video 2.5 keep their local loop under the matching
+    ``hftrainer.trainers.<implementation>`` package; the registered trainer
+    declares ``manages_training_loop=True`` and implements
     ``from_framework_config``.
     """
 
@@ -23,7 +24,15 @@ def build_runner_from_cfg(cfg):
 
     from hftrainer.registry import TRAINERS
 
-    trainer_cls = TRAINERS.get(trainer_type) if isinstance(trainer_type, str) else trainer_type
+    if isinstance(trainer_type, str):
+        trainer_cls = TRAINERS.get(trainer_type)
+    elif any(trainer_type is value for value in TRAINERS.module_dict.values()):
+        trainer_cls = trainer_type
+    else:
+        raise KeyError(
+            f"{trainer_type!r} is not explicitly registered in 'trainer'. "
+            'Import and register the repository-owned trainer before using it.'
+        )
     if trainer_cls is None:
         raise KeyError(
             f"Unknown trainer type {trainer_type!r}. Import its package through "

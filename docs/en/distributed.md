@@ -1,23 +1,24 @@
 # Distributed Training
 
-HF-Trainer delegates distributed execution to HuggingFace `accelerate`.
+HFTrainer delegates distributed runtime orchestration to Accelerate. Model
+implementations and training algorithms remain repository-owned.
 
 ## Single Process
 
 ```bash
-python3 tools/train.py configs/classification/vit_base_demo.py
+python3 tools/train.py configs/vit/vit_base_demo.py
 ```
 
 ## Multi-GPU
 
 ```bash
-bash tools/dist_train.sh configs/text2video/wan_demo.py 8
+bash tools/dist_train.sh configs/wan/wan_demo.py 8
 ```
 
 Or call `accelerate` directly:
 
 ```bash
-accelerate launch --num_processes=8 tools/train.py configs/text2video/wan_demo.py
+accelerate launch --num_processes=8 tools/train.py configs/wan/wan_demo.py
 ```
 
 ## FSDP / DeepSpeed

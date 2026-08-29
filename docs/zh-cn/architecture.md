@@ -5,125 +5,138 @@
 ```mermaid
 flowchart LR
     A["Config .py"] --> B["custom_imports"]
-    B --> C["build_runner_from_cfg"]
-    C -->|HFTrainer loop| D["AccelerateRunner"]
-    C -->|managed native loop| E["外部 Trainer"]
-    D --> F["ModelBundle + Trainer"]
-    D --> G["Data / Optimizers / Hooks"]
-    E --> H["官方算法栈"]
-    A --> I["build_pipeline_from_cfg"]
-    I --> J["ModelBundle + Pipeline"]
+    B --> C["本地 Registry"]
+    C --> D["build_runner_from_cfg"]
+    D -->|标准循环| E["AccelerateRunner"]
+    D -->|managed 本地循环| F["LTXVideoTrainer"]
+    E --> G["ModelBundle + Trainer"]
+    E --> H["Data + torch.optim + Hooks"]
+    F --> I["随包 LTX native 实现"]
+    C --> J["build_pipeline_from_cfg"]
+    J --> K["ModelBundle + Pipeline"]
 ```
 
-## 核心组件
+两条分支执行的都是当前仓库随包代码。managed trainer 表示它拥有一套耦合紧密的
+生命周期，不表示从另一个 checkout 或已安装模型包中导入 trainer。
+
+## 分层职责
 
 `ModelBundle`
 
-- 持有任务子模块
-- 定义训练与推理共享的原子前向函数
-- 提供选择性 checkpoint save/load
+- 持有一个实现需要的组件；
+- 暴露训练与推理共享的原子操作；
+- 记录 trainable、dtype、gradient checkpointing 与选择性 checkpoint 策略；
+- 加载并导出该实现自有的 artifact schema。
 
 `Trainer`
 
-- 组装训练图
-- 计算 loss
-- 在多 optimizer 场景下可接管优化流程
+- 持有 loss、更新顺序和训练专属 validation；
+- 通常运行在 `AccelerateRunner` 中；只有当算法的预处理/checkpoint 生命周期无法
+  拆开时，才明确声明 managed 本地循环。
 
 `Pipeline`
 
-- 组织推理阶段控制流
-- 复用和训练相同的 bundle 逻辑
+- 持有推理编排和公共输入输出；
+- 调用与训练相同的 bundle 操作，不再构建第二份模型图。
 
 `AccelerateRunner`
 
-- 从 config 构建完整实验
-- 通过 `accelerate` prepare 可训练模块
-- 负责 validation、logging、checkpoint 和 resume
+- 从 config 构建完整实验；
+- 通过 Accelerate prepare 本地模型模块与 `torch.optim` 对象；
+- 负责 validation、logging、checkpoint 和 resume。
 
-`Managed Trainer`
+`Hook`、evaluator 与 visualizer
 
-- 注册 trainer 声明 `manages_training_loop=True` 时由 builder 选择
-- 让耦合紧密的上游算法完整持有 Accelerator、optimizer、checkpoint、
-  validation 和 resume 行为
-- 路径、输出目录、override 和模块注册仍由 HFTrainer config/CLI 统一提供
+- hook 处理 logging、checkpoint、EMA 等运行时副作用；
+- evaluator 从标准 validation 输出计算指标；
+- visualizer 序列化可人工检查的结果。
 
-`Hook`
-
-- 是 runner 持有的运行时回调
-- 从 `default_hooks` 构建，并按 `priority` 排序
-- 适合处理 logging / checkpoint / EMA，不负责任务 loss 或前向逻辑
-
-validation 指标和可视化由 evaluator / visualizer 单独处理。详见 [Hook 系统](design/hooks.md)。
+回调顺序见 [Hook 系统](design/hooks.md)。
 
 ## 目录分类规范
 
-目录表达代码所有权；不同框架层不需要机械重复同一个名字。每个命名空间使用自己
-唯一的分类轴：
+目录表达代码所有权；同一个命名空间不能在同一层混合任务名与模型/论文名。
 
-| 命名空间 | 分类依据 | 示例 |
-|---|---|---|
-| `hftrainer/models/` | 具体模型族或算法适配器 | `vit`、`sd15`、`causal_lm`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
-| `hftrainer/trainers/` | 可复用训练任务或优化方法 | `classification`、`text2image`、`distillation` |
-| `hftrainer/pipelines/` | 推理能力 | `classification`、`text2image`、`text2video` |
-| `hftrainer/datasets/` | 样本与 collate 数据契约 | `classification`、`llm`、`text2video` |
-| `configs/` | 用户可理解的 workload 或 integration | `classification`、`distillation`、`ltx_video` |
+| 命名空间 | 所有权分类轴 | 规范示例 |
+| --- | --- | --- |
+| `hftrainer/models/` | 具体实现 | `vit`、`llama`、`sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `hftrainer/models/<id>/network/` | 模型数学与模型专属原语 | attention block、VAE、tokenizer、scheduler |
+| `hftrainer/trainers/` | 实现专属优化逻辑 | `sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `hftrainer/pipelines/` | 实现专属推理逻辑 | `sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `hftrainer/tasks/` | 真正可复用的任务合约 | `image_classification`、`causal_language_modeling` |
+| `hftrainer/datasets/` | 样本/collation 合约 | `image_classification`、`instruction_sft`、`text_to_image`、`text_to_video`、`unconditional_image`、`dmd` |
+| `hftrainer/evaluation/` | 可复用指标合约 | `image_classification`、`causal_language_modeling` |
+| `configs/` | 用户选择的具体实现 | `vit`、`llama`、`sd15`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
 
-关键约束是同一个命名空间不能并存两套平行分类。每个 `ModelBundle` 在
-`models/<implementation_id>/` 下只有一个 canonical owner；不允许再创建任务形状的
-model 别名目录。任务级复用应该放在 trainer、pipeline、dataset 和 evaluator 中。
+行为属于具体方法时，model、trainer、pipeline 与 config 使用同一个
+`implementation_id`。只有逻辑确实可被多个模型族复用时，trainer/pipeline 才放入
+`tasks/<task_contract>`。当前 ViT 与 LLaMA 使用可复用 task contract；SD1.5、Wan、
+StyleGAN2、DMD 与 LTX 保留实现专属 trainer/pipeline。
 
-这种区分是有意的。`ClassificationTrainer` 是可复用的分类任务逻辑，不能仅仅因为
-当前示例模型是 ViT，就把它归 ViT 私有。相反，`DMDTrainer` 本身就是算法专属的优化
-方法，因此放在 `trainers/distillation` 有明确的训练语义。LTX 这类耦合紧密的可选
-上游栈可以在 model、trainer、pipeline 三层统一使用 integration ID，因为这些组件
-共享同一组依赖和生命周期边界。
+每个注册模型组件必须只有一个实现 owner、一次 registry 注册和一个规范 package
+export。结构测试会拒绝任务形状的 model 别名，以及从第二套模型层级导出的组件。
 
-因此每个注册模型类必须满足：
+## 模型依赖边界
 
-1. 只有一个实现模块；
-2. 只有一个 registry decorator；
-3. 只有一个 canonical package-level export。
+`MODEL_COMPONENTS` 是唯一的组件构建 registry。组件名必须解析到
+`hftrainer.models.*` 下的仓库代码；点分类路径与任意 import fallback 会被拒绝。
 
-结构回归测试会拒绝重新引入任务别名，或让 package export 指向第二套 model 层级。
+模型执行边界包括：
+
+- 模型层与前向数学；
+- 模型使用的 tokenizer/processor；
+- 属于算法行为的采样/噪声 scheduler；
+- LoRA 注入、adapter 保存/加载与合并；
+- artifact 解析与校验；
+- 训练与推理编排。
+
+PyTorch、Accelerate、MMEngine、safetensors、NumPy、Pillow 等通用基础设施仍是
+正常依赖，但它们不选择、也不拥有具体模型实现。源码 AST 检查与主动阻断模型包的
+新进程 import 测试共同保护这条边界。
+
+LTX 通过 `LTXComponentStore` 遵守同一规则：`LTXVideoBundle` 持有并向所有本地
+推理 builder 注入 inference registry；托管 trainer 使用独立且不缓存模型实例的
+training registry，并继续注入 validation 与每一个 component loader。这样可训练的
+可变模型不会与推理 shell 共享实例，loader 也不能暗中创建另一套模型实现或私有缓存。
 
 ## 轻量注册
 
-`import hftrainer` 只创建 registry 和轻量 public symbol，不会立即导入所有任务、
-Accelerate、Transformers、Diffusers 或 LTX 可选包。需要全部内置任务的应用可以调用
-`hftrainer.register_all_modules()`；普通 config 应只声明当前纵向模块：
+`import hftrainer` 只创建 registry 与轻量 symbol。具体实现通过 config 中精确的
+`custom_imports` 纵向切片注册，或由 `hftrainer.register_all_modules()` 统一注册：
 
 ```python
 custom_imports = dict(
-    imports=['hftrainer.models.ltx_video', 'hftrainer.pipelines.ltx_video'],
+    imports=[
+        'hftrainer.models.ltx_video',
+        'hftrainer.trainers.ltx_video',
+        'hftrainer.pipelines.ltx_video',
+    ],
     allow_failed_imports=False,
 )
 ```
 
-这样可选依赖才是真正可选的，缺少依赖的异常也只会在构建对应功能时出现。
+因此缺少支持工具时，只会在构建对应功能时失败；模型 class 解析始终留在本地。
 
 ## 训练与推理复用
 
 ```mermaid
 flowchart TB
-    A["Trainer.train_step"] --> B["ModelBundle 原子前向"]
-    C["Pipeline.__call__"] --> B
-    B --> D["共享任务子模块"]
+    A["Trainer loss/update"] --> B["ModelBundle 原子操作"]
+    C["Pipeline 推理编排"] --> B
+    B --> D["唯一的仓库自有组件图"]
 ```
 
-## 当前已实现的任务栈
+## 已实现任务栈与验证边界
 
-- `ViTBundle` + `ClassificationTrainer` + `ClassificationPipeline`
-- `SD15Bundle` + `SD15Trainer` + `SD15Pipeline`
-- `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline`
-- `WanBundle` + `WanTrainer` + `WanPipeline`
-- `StyleGAN2Bundle` + `GANTrainer` + `StyleGAN2Pipeline`
-- `DMDBundle` + `DMDTrainer` + `DMDPipeline`
-- `LTXVideoBundle` + `LTXVideoPipeline`，以及委托给固定官方 LTX 栈的
-  managed `LTXVideoTrainer`
+- `ViTBundle` + 可复用图像分类 trainer/pipeline；
+- `LlamaBundle` + 可复用因果语言建模 trainer/pipeline；
+- `SD15Bundle` + `SD15Trainer` + `SD15Pipeline`；
+- `WanBundle` + `WanTrainer` + `WanPipeline`；
+- `StyleGAN2Bundle` + `StyleGAN2Trainer` + `StyleGAN2Pipeline`；
+- `DMDBundle` + `DMDTrainer` + `DMDPipeline`；
+- `LTXVideoBundle` + 本地 managed `LTXVideoTrainer` + `LTXVideoPipeline`。
 
-GAN 和 DMD 这两条线现在是可运行的参考实现。它们对齐了 StyleGAN2 和
-DMD 的核心训练结构，但默认 config 的目标仍然是验证框架集成，而不是
-直接声明 benchmark 级别复现。
-
-LTX 集成已经完成 config/API 合约测试，但仓库测试环境没有加载完整 22B 权重实跑。
-精确验证边界见 [LTX-Video 2.5](models/ltx_video_2_5.md)。
+StyleGAN2 与 DMD 是框架导向的 reference implementation，不直接声明 benchmark
+复现。LTX 的 config/合约和 tiny 本地 Gemma 路径已测试，但仓库测试环境未执行
+gated 22B 工作流。精确边界见
+[LTX-Video 2.5](models/ltx_video_2_5.md)。

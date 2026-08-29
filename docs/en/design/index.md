@@ -1,11 +1,13 @@
 # Design Overview
 
-HF-Trainer is built around a small set of ideas:
+HFTrainer is built around a small set of ideas:
 
 - config-driven construction with MMEngine `Config` and `Registry`
 - `accelerate` as the runtime layer
-- direct use of HuggingFace-native components
-- shared task logic through `ModelBundle`
+- repository-owned model components resolved through local registries
+- shared training/inference operations through `ModelBundle`
+- implementation-owned artifact schemas and local LoRA
+- external model-package imports rejected by structural tests
 
 ## Design Pages
 

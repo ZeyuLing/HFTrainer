@@ -1,6 +1,6 @@
-"""ModelBundle base class and peft utilities."""
+"""Model bundle primitives and repository-local adapter utilities."""
 
 from hftrainer.models.base_model_bundle import ModelBundle
-from hftrainer.models.peft_utils import apply_lora
+from hftrainer.models.lora import apply_lora
 
 __all__ = ['ModelBundle', 'apply_lora']

@@ -1,140 +1,155 @@
 # Architecture
 
-## High-Level Flow
+## High-level flow
 
 ```mermaid
 flowchart LR
     A["Config .py"] --> B["custom_imports"]
-    B --> C["build_runner_from_cfg"]
-    C -->|HFTrainer loop| D["AccelerateRunner"]
-    C -->|managed native loop| E["External Trainer"]
-    D --> F["ModelBundle + Trainer"]
-    D --> G["Data / Optimizers / Hooks"]
-    E --> H["Official algorithm stack"]
-    A --> I["build_pipeline_from_cfg"]
-    I --> J["ModelBundle + Pipeline"]
+    B --> C["Local registries"]
+    C --> D["build_runner_from_cfg"]
+    D -->|standard loop| E["AccelerateRunner"]
+    D -->|managed local loop| F["LTXVideoTrainer"]
+    E --> G["ModelBundle + Trainer"]
+    E --> H["Data + torch.optim + Hooks"]
+    F --> I["Packaged LTX native implementation"]
+    C --> J["build_pipeline_from_cfg"]
+    J --> K["ModelBundle + Pipeline"]
 ```
 
-## Key Pieces
+Both branches execute code shipped in this repository. A managed trainer owns
+an unusually coupled lifecycle; it is not an adapter that imports a trainer
+from another checkout or installed model package.
+
+## Layer responsibilities
 
 `ModelBundle`
 
-- owns task sub-modules
-- defines shared atomic forward functions
-- controls selective checkpoint save/load
+- owns the components required by one implementation;
+- exposes atomic operations shared by training and inference;
+- records trainability, dtype, gradient-checkpointing, and selective checkpoint
+  policy;
+- loads and exports an implementation-owned artifact schema.
 
 `Trainer`
 
-- assembles the training graph
-- computes losses
-- optionally owns optimization for multi-optimizer tasks
+- owns losses, update order, and training-only validation;
+- either runs inside `AccelerateRunner`, or explicitly declares a managed local
+  loop when one algorithm's preprocessing/checkpoint lifecycle cannot be split.
 
 `Pipeline`
 
-- assembles inference-time control flow
-- reuses the same bundle logic as training
+- owns inference orchestration and public inputs/outputs;
+- calls the same bundle operations as training rather than constructing a
+  second model graph.
 
 `AccelerateRunner`
 
-- builds everything from config
-- prepares trainable modules with `accelerate`
-- handles validation, logging, checkpointing, and resume
+- builds the experiment from config;
+- prepares local model modules and `torch.optim` objects through Accelerate;
+- handles validation, logging, checkpointing, and resume.
 
-`Managed Trainer`
+`Hook`, evaluator, and visualizer
 
-- is selected when a registered trainer declares `manages_training_loop=True`
-- lets a tightly coupled upstream algorithm own its Accelerator, optimizer,
-  checkpoint, validation, and resume behavior
-- still receives paths, output directories, overrides, and imports from the
-  HFTrainer config/CLI surface
+- hooks handle runtime side effects such as logging, checkpointing, and EMA;
+- evaluators compute metrics from standardized validation outputs;
+- visualizers serialize human-inspectable results.
 
-`Hook`
+See [Hook System](design/hooks.md) for callback ordering.
 
-- is a runner callback for runtime side effects
-- is built from `default_hooks` and sorted by `priority`
-- should handle logging / checkpoint / EMA, not task loss or forward logic
+## Package taxonomy
 
-Validation metrics and rendering are handled separately by evaluators and visualizers. See [Hook System](design/hooks.md).
+The package tree expresses ownership. One namespace must not mix task names
+with model/paper names at the same level.
 
-## Package Taxonomy
+| Namespace | Ownership axis | Canonical examples |
+| --- | --- | --- |
+| `hftrainer/models/` | concrete implementation | `vit`, `llama`, `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `hftrainer/models/<id>/network/` | model math and model-specific primitives | attention blocks, VAE, tokenizer, scheduler |
+| `hftrainer/trainers/` | implementation-specific optimization | `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `hftrainer/pipelines/` | implementation-specific inference | `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `hftrainer/tasks/` | genuinely reusable task contract | `image_classification`, `causal_language_modeling` |
+| `hftrainer/datasets/` | record/collation contract | `image_classification`, `instruction_sft`, `text_to_image`, `text_to_video`, `unconditional_image`, `dmd` |
+| `hftrainer/evaluation/` | reusable metric contract | `image_classification`, `causal_language_modeling` |
+| `configs/` | implementation selected by the user | `vit`, `llama`, `sd15`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
 
-Directories express code ownership; different framework layers do not need to
-repeat the same label. The rule for each namespace is:
+Use the same `implementation_id` across model, trainer, pipeline, and config
+when behavior belongs to one concrete method. Move a trainer/pipeline into
+`tasks/<task_contract>` only when its logic is truly reusable by multiple model
+families. ViT and LLaMA currently use those reusable task contracts; SD1.5,
+Wan, StyleGAN2, DMD, and LTX keep implementation-specific trainers/pipelines.
 
-| Namespace | Classification axis | Examples |
-|---|---|---|
-| `hftrainer/models/` | concrete model family or algorithm adapter | `vit`, `sd15`, `causal_lm`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
-| `hftrainer/trainers/` | reusable training task or optimization method | `classification`, `text2image`, `distillation` |
-| `hftrainer/pipelines/` | inference capability | `classification`, `text2image`, `text2video` |
-| `hftrainer/datasets/` | record and collation contract | `classification`, `llm`, `text2video` |
-| `configs/` | user-facing workload or integration | `classification`, `distillation`, `ltx_video` |
+Every registered model component must have one implementation owner, one
+registry registration, and one canonical package export. Structural tests
+reject task-shaped model aliases and components exported from a second model
+hierarchy.
 
-The important constraint is that one namespace never contains two parallel
-taxonomies. In particular, each `ModelBundle` has one canonical owner under
-`models/<implementation_id>/`; task-shaped model aliases are not allowed.
-Task-level reuse belongs in trainer, pipeline, dataset, and evaluator packages.
+## Model dependency boundary
 
-This distinction is intentional. `ClassificationTrainer` is reusable task
-logic and should not become owned by ViT merely because ViT is the current demo
-bundle. Conversely, `DMDTrainer` is an algorithm-specific optimization method,
-so `trainers/distillation` is a meaningful training classification. A tightly
-coupled optional upstream stack such as LTX may use the same integration ID
-across model, trainer, and pipeline packages because those components share one
-dependency and lifecycle boundary.
+`MODEL_COMPONENTS` is the only component-construction registry. A component
+name must resolve to repository code under `hftrainer.models.*`; dotted class
+paths and arbitrary import fallbacks are rejected.
 
-Every registered model class must therefore have:
+The model execution boundary includes:
 
-1. one implementation module;
-2. one registry decorator;
-3. one canonical package-level export.
+- model layers and forward math;
+- tokenizers/processors used by the model;
+- sampling/noise schedulers whose behavior is part of the method;
+- LoRA injection, adapter save/load, and merge;
+- artifact parsing and validation;
+- training and inference orchestration.
 
-The structural unit test rejects accidental reintroduction of task aliases or
-package exports owned by a second model hierarchy.
+General infrastructure libraries remain dependencies, including PyTorch,
+Accelerate, MMEngine, safetensors, NumPy, and Pillow. They do not select or own
+the concrete model implementation. Source-tree AST checks and fresh-process
+import blockers guard the forbidden model-package boundary.
+
+LTX follows the same rule through `LTXComponentStore`. An `LTXVideoBundle`
+owns the inference registry passed into every local backend builder, while the
+managed trainer owns a separate non-caching training registry and injects it
+through validation and every component loader. Mutable training modules can
+therefore never alias an inference shell, and no loader creates a hidden model
+implementation or private cache.
 
 ## Lightweight registration
 
-`import hftrainer` creates registries and lightweight public symbols only. It
-does not eagerly import every task, Accelerate, Transformers, Diffusers, or
-optional LTX packages. Built-in applications can call
-`hftrainer.register_all_modules()`, while normal configs should declare the
-smallest vertical slice they need:
+`import hftrainer` creates registries and lightweight symbols. Concrete
+implementations are registered either by a config's precise `custom_imports`
+slice or by `hftrainer.register_all_modules()`:
 
 ```python
 custom_imports = dict(
-    imports=['hftrainer.models.ltx_video', 'hftrainer.pipelines.ltx_video'],
+    imports=[
+        'hftrainer.models.ltx_video',
+        'hftrainer.trainers.ltx_video',
+        'hftrainer.pipelines.ltx_video',
+    ],
     allow_failed_imports=False,
 )
 ```
 
-This makes optional dependencies genuinely optional and keeps import failures
-local to the feature being built.
+Missing support utilities therefore fail only when the corresponding feature
+is built, while model-class resolution always stays local.
 
-## Training vs Inference Reuse
+## Training and inference reuse
 
 ```mermaid
 flowchart TB
-    A["Trainer.train_step"] --> B["ModelBundle atomic forwards"]
-    C["Pipeline.__call__"] --> B
-    B --> D["Shared task sub-modules"]
+    A["Trainer loss/update"] --> B["ModelBundle atomic operations"]
+    C["Pipeline orchestration"] --> B
+    B --> D["One repository-owned component graph"]
 ```
 
-## What Is Actually Implemented
+## Implemented stacks and validation limits
 
-End-to-end task stacks currently exist for:
+- `ViTBundle` + reusable image-classification trainer/pipeline;
+- `LlamaBundle` + reusable causal-language-modeling trainer/pipeline;
+- `SD15Bundle` + `SD15Trainer` + `SD15Pipeline`;
+- `WanBundle` + `WanTrainer` + `WanPipeline`;
+- `StyleGAN2Bundle` + `StyleGAN2Trainer` + `StyleGAN2Pipeline`;
+- `DMDBundle` + `DMDTrainer` + `DMDPipeline`;
+- `LTXVideoBundle` + local managed `LTXVideoTrainer` + `LTXVideoPipeline`.
 
-- `ViTBundle` + `ClassificationTrainer` + `ClassificationPipeline`
-- `SD15Bundle` + `SD15Trainer` + `SD15Pipeline`
-- `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline`
-- `WanBundle` + `WanTrainer` + `WanPipeline`
-- `StyleGAN2Bundle` + `GANTrainer` + `StyleGAN2Pipeline`
-- `DMDBundle` + `DMDTrainer` + `DMDPipeline`
-- `LTXVideoBundle` + `LTXVideoPipeline`, plus the managed
-  `LTXVideoTrainer` adapter over the pinned official LTX stack
-
-The GAN and DMD stacks are reference implementations. They align with the core
-training structure of StyleGAN2 and DMD, but they are not intended to claim
-benchmark-level reproduction without additional tuning.
-
-The LTX integration has contract/config tests but has not been exercised with
-the full 22B checkpoint in the repository test environment. See
-[LTX-Video 2.5](models/ltx_video_2_5.md) for the exact validation boundary.
+StyleGAN2 and DMD are framework-oriented reference implementations rather than
+benchmark claims. LTX contract/config and tiny local Gemma paths are tested,
+but the repository test environment has not executed the gated 22B workflow.
+See [LTX-Video 2.5](models/ltx_video_2_5.md) for the exact boundary.

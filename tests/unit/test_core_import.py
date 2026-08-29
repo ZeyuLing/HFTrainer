@@ -49,7 +49,7 @@ def test_register_all_modules_is_idempotent():
 
     assert MODEL_BUNDLES.get('ViTBundle') is not None
     assert MODEL_BUNDLES.get('SD15Bundle') is not None
-    assert MODEL_BUNDLES.get('CausalLMBundle') is not None
+    assert MODEL_BUNDLES.get('LlamaBundle') is not None
     assert MODEL_BUNDLES.get('WanBundle') is not None
     assert MODEL_BUNDLES.get('StyleGAN2Bundle') is not None
     assert MODEL_BUNDLES.get('DMDBundle') is not None

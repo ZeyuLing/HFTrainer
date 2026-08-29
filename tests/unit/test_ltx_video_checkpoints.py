@@ -99,7 +99,7 @@ def test_dev_two_stage_requires_the_official_distilled_lora():
         distilled_lora_path=None,
     )
 
-    with pytest.raises(ValueError, match='requires the official.*distilled LoRA'):
+    with pytest.raises(ValueError, match='requires the LTX-Video 2.5 distilled LoRA'):
         checkpoints.validate(mode='dev_two_stage', require_files=False)
 
 

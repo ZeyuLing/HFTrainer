@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from typing import Iterable, Optional
+from typing import Iterable
 
 import numpy as np
 import torch

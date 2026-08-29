@@ -1,4 +1,4 @@
-"""Distribution Matching Distillation model bundle."""
+"""Distribution Matching Distillation using the local SD1.5 core."""
 
 from .bundle import DMDBundle
 

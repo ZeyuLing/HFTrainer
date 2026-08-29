@@ -12,15 +12,15 @@ from importlib import import_module
 from hftrainer.registry import (
     DATASETS,
     EVALUATORS,
-    HF_MODELS,
     HOOKS,
     MODEL_BUNDLES,
     MODELS,
+    MODEL_COMPONENTS,
     PIPELINES,
     TRAINERS,
     TRANSFORMS,
     VISUALIZERS,
-    build_hf_model_from_cfg,
+    build_model_component_from_cfg,
 )
 
 
@@ -67,10 +67,10 @@ def register_all_modules() -> None:
     _register()
 
 
-__version__ = '0.2.0'
+__version__ = '0.3.0'
 
 __all__ = [
-    'HF_MODELS',
+    'MODEL_COMPONENTS',
     'MODELS',
     'MODEL_BUNDLES',
     'TRAINERS',
@@ -80,7 +80,7 @@ __all__ = [
     'HOOKS',
     'EVALUATORS',
     'VISUALIZERS',
-    'build_hf_model_from_cfg',
+    'build_model_component_from_cfg',
     'ModelBundle',
     'BasePipeline',
     'BaseTrainer',

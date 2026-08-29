@@ -2,9 +2,9 @@
 tools/train.py — Main training entry point for hftrainer.
 
 Usage:
-    python tools/train.py configs/classification/vit_base_demo.py [--work-dir WORK_DIR]
+    python tools/train.py configs/vit/vit_base_demo.py [--work-dir WORK_DIR]
     # or with accelerate:
-    accelerate launch tools/train.py configs/classification/vit_base_demo.py
+    accelerate launch tools/train.py configs/vit/vit_base_demo.py
 """
 
 import argparse

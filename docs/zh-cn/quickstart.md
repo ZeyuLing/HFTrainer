@@ -5,7 +5,7 @@
 当前最稳妥的首个运行命令是分类 demo：
 
 ```bash
-python3 tools/train.py configs/classification/vit_base_demo.py
+python3 tools/train.py configs/vit/vit_base_demo.py
 ```
 
 这条路径会覆盖：
@@ -19,10 +19,10 @@ python3 tools/train.py configs/classification/vit_base_demo.py
 ## 其他 Demo
 
 ```bash
-python3 tools/train.py configs/text2image/sd15_demo.py
-python3 tools/train.py configs/llm/llama_sft_demo.py
-python3 tools/train.py configs/llm/llama_lora_demo.py
-python3 tools/train.py configs/text2video/wan_demo.py
+python3 tools/train.py configs/sd15/sd15_demo.py
+python3 tools/train.py configs/llama/llama_sft_demo.py
+python3 tools/train.py configs/llama/llama_lora_demo.py
+python3 tools/train.py configs/wan/wan_demo.py
 ```
 
 这些任务需要对应的 `checkpoints/` 资源和足够的 GPU 显存。
@@ -30,9 +30,9 @@ python3 tools/train.py configs/text2video/wan_demo.py
 LoRA 快速开始：
 
 ```bash
-python3 tools/train.py configs/llm/llama_lora_demo.py
+python3 tools/train.py configs/llama/llama_lora_demo.py
 python3 tools/infer.py \
-  --config configs/llm/llama_lora_demo.py \
+  --config configs/llama/llama_lora_demo.py \
   --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
   --merge-lora \
   --prompt "Name one primary color."
@@ -44,7 +44,7 @@ python3 tools/infer.py \
 
 ```bash
 python3 tools/infer.py \
-  --config configs/classification/vit_base_demo.py \
+  --config configs/vit/vit_base_demo.py \
   --checkpoint work_dirs/vit_smoke/checkpoint-iter_10 \
   --input data/classification/demo/images/cat/cat_000.jpg \
   --device cpu

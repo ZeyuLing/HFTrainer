@@ -1,6 +1,8 @@
-# HF-Trainer 文档
+# HFTrainer 文档
 
-HF-Trainer 是一个面向 HuggingFace 生态的配置驱动训练框架。当前代码库重点覆盖一组可运行任务栈，以及一组核心框架原语：`ModelBundle`、`Trainer`、`Pipeline`、`AccelerateRunner`、hooks、evaluators 和 visualizers。
+HFTrainer 是模型实现归当前仓库所有的配置驱动训练与推理框架。`ModelBundle`、
+trainer 与 pipeline 共享同一份本地组件图；Accelerate 负责分布式运行时编排，
+不提供模型定义。
 
 ## 建议阅读顺序
 
@@ -38,7 +40,7 @@ HF-Trainer 是一个面向 HuggingFace 生态的配置驱动训练框架。当�
 - 文生视频
 - StyleGAN2 风格 GAN 训练
 - DMD 风格蒸馏
-- LTX-Video 2.5 蒸馏/Dev 推理与 managed LoRA 训练适配器
+- LTX-Video 2.5 蒸馏/Dev 推理与本地 managed LoRA 训练
 
-LTX 接口已针对固定官方源码版本完成合约测试；仓库 CI/测试环境没有执行 gated
-22B 权重。
+随包 LTX 实现是固定到一个源码 revision 的修改版快照。本地 config/API 合约和
+tiny Gemma 路径已经测试；仓库测试环境没有执行 gated 22B 工作流。

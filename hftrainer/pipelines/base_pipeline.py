@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-import torch
 
 from hftrainer.models.base_model_bundle import ModelBundle
 
@@ -35,7 +34,7 @@ class BasePipeline(ABC):
         bundle_kwargs: Optional[dict] = None,
         **kwargs,
     ):
-        """Build a pipeline from a HuggingFace/diffusers-style pretrained artifact."""
+        """Build a pipeline from a repository-supported pretrained artifact."""
         bundle = bundle_cls.from_pretrained(
             pretrained_model_name_or_path,
             **(bundle_kwargs or {}),

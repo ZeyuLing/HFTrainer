@@ -1,48 +1,58 @@
 # Memory and Precision
 
-This page documents the config-level memory controls that HF-Trainer supports today.
+This page documents the config-level memory controls implemented by HFTrainer.
+Model-specific loading options are interpreted by repository-local component
+classes; they are not forwarded to an external model loader.
 
-## 1. Global Runtime Precision
+## 1. Global runtime precision
 
-Use the runner-level `accelerator` config for global AMP and accumulation:
+Use the runner-level `accelerator` config for automatic mixed precision and
+gradient accumulation:
 
 ```python
 accelerator = dict(
-    mixed_precision='bf16',          # 'no' | 'fp16' | 'bf16'
+    mixed_precision='bf16',  # 'no' | 'fp16' | 'bf16'
     gradient_accumulation_steps=4,
 )
 ```
 
-- `mixed_precision` controls the global `accelerate` AMP policy.
-- `gradient_accumulation_steps` reduces per-step activation memory at the cost of throughput.
+- `mixed_precision` selects the Accelerate AMP policy.
+- `gradient_accumulation_steps` reduces the activation footprint per optimizer
+  step, usually at a throughput cost.
 
-## 2. Per-Module Dtype
+Accelerate is runtime infrastructure. It does not provide HFTrainer's model
+math, tokenizer, scheduler, trainer, or pipeline implementation.
 
-HF-Trainer supports two layers of per-module dtype control.
+## 2. Per-module dtype
 
-### 2.1 Pass Through To The Official HF Loader
+HFTrainer supports two local dtype controls.
 
-If the underlying `transformers` / `diffusers` class already supports `torch_dtype` or `dtype`, keep using that loader API inside the sub-module config:
+### 2.1 Artifact-loader dtype
+
+A local component loader may document `torch_dtype` or `dtype` in its
+`from_pretrained` contract. For example, the repository-owned Wan encoder
+accepts:
 
 ```python
-model = dict(
-    type='SD15Bundle',
-    text_encoder=dict(
-        type='CLIPTextModel',
-        from_pretrained=dict(
-            pretrained_model_name_or_path=CKPT_PATH,
-            subfolder='text_encoder',
-            torch_dtype='bf16',
-        ),
-        trainable=False,
-        save_ckpt=False,
+text_encoder=dict(
+    type='UMT5EncoderModel',
+    from_pretrained=dict(
+        pretrained_model_name_or_path=CKPT_PATH + '/text_encoder',
+        torch_dtype='bf16',
     ),
+    trainable=False,
+    save_ckpt=False,
 )
 ```
 
-### 2.2 HF-Trainer Post-Load Cast
+The class name is resolved through `MODEL_COMPONENTS` to code under
+`hftrainer.models.wan`; `from_pretrained` describes an on-disk artifact, not an
+external implementation.
 
-If you want a framework-level cast that works for any `nn.Module`, use `module_dtype`:
+### 2.2 Bundle post-load cast
+
+Use `module_dtype` for a uniform `nn.Module.to(dtype=...)` cast after the local
+component has been constructed:
 
 ```python
 model = dict(
@@ -72,90 +82,72 @@ model = dict(
 
 Accepted `module_dtype` values:
 
-- `'fp32'`, `'float32'`, `'torch.float32'`
-- `'fp16'`, `'float16'`, `'torch.float16'`
-- `'bf16'`, `'bfloat16'`, `'torch.bfloat16'`
-- a real `torch.dtype`
+- `'fp32'`, `'float32'`, `'torch.float32'`;
+- `'fp16'`, `'float16'`, `'torch.float16'`;
+- `'bf16'`, `'bfloat16'`, `'torch.bfloat16'`;
+- a real `torch.dtype`.
 
-### Important Caveat
+For a strict policy such as `vae=fp32` and `transformer=bf16`, configure each
+module and use `accelerator.mixed_precision='no'`. Global AMP may otherwise
+autocast eligible operations even when parameter storage dtypes differ.
 
-If you need a strict policy like `vae=fp32` and `transformer=bf16`, prefer:
+## 3. Gradient checkpointing
 
-- per-module `torch_dtype` / `module_dtype`
-- `accelerator.mixed_precision='no'`
-
-If global AMP is also enabled, `accelerate` may still autocast eligible ops on top of your module weights.
-
-## 3. Gradient Checkpointing
-
-Any bundle sub-module can now declare:
+Any bundle sub-module may request activation checkpointing:
 
 ```python
 transformer=dict(
     type='WanTransformer3DModel',
-    from_pretrained=dict(pretrained_model_name_or_path=CKPT_PATH),
+    from_pretrained=dict(
+        pretrained_model_name_or_path=CKPT_PATH + '/transformer',
+    ),
     gradient_checkpointing=True,
 )
 ```
 
-or:
+`ModelBundle` calls `gradient_checkpointing_enable(...)` or
+`enable_gradient_checkpointing(...)` on the local module. A dict may be used
+only when that local hook documents keyword arguments. The bundle raises an
+explicit configuration error when neither hook exists or documented arguments
+are rejected.
 
-```python
-model=dict(
-    type='AutoModelForCausalLM',
-    from_pretrained=dict(pretrained_model_name_or_path=CKPT_PATH),
-    gradient_checkpointing=dict(use_reentrant=False),
-)
-```
+## 4. Other supported controls
 
-HF-Trainer enables checkpointing when the module exposes one of these hooks:
+- `trainable=False` freezes a module and avoids optimizer state for it.
+- `trainable='lora'` injects HFTrainer's local low-rank layers and trains only
+  adapters; see [LoRA](lora.md).
+- `checkpoint_format='lora'` saves adapter-only checkpoints.
+- `save_ckpt=False` skips a frozen module during selective save/load. This
+  reduces checkpoint I/O and disk use, not runtime GPU memory.
+- Optimizers resolve only from `torch.optim`. Named HFTrainer schedules use
+  `hftrainer.optim.schedulers`; explicit PyTorch scheduler classes may resolve
+  from `torch.optim.lr_scheduler`.
 
-- `gradient_checkpointing_enable(...)`
-- `enable_gradient_checkpointing(...)`
+QLoRA is not exposed because HFTrainer does not yet own a validated local
+4-bit linear kernel.
 
-If the module does not expose a supported hook, HF-Trainer raises an explicit config error.
+## 5. Model-specific options
 
-## 4. Other Memory-Saving Controls Already Supported
+Only pass loader options documented by the selected repository-local model
+implementation. HFTrainer deliberately does not provide a generic escape hatch
+that forwards arbitrary arguments to another model framework. Unsupported
+options fail at the local constructor/loader boundary.
 
-- `trainable=False`: freeze the module and avoid optimizer state for it.
-- `trainable='lora'`: only train adapters instead of the full module.
-- `checkpoint_format='lora'`: save adapter-only checkpoints by default for LoRA modules.
-- `save_ckpt=False`: skip large frozen modules during save/load. This helps checkpoint IO and disk usage, not runtime GPU memory.
-- optimizer choice is config-driven: you can switch to `Adafactor`, `SGD`, or other supported optimizers directly in config.
+## 6. Not yet standardized
 
-## 5. Model-Specific Loader Knobs
+The following are not currently one cross-model config contract:
 
-HF-Trainer also lets you pass through model-specific loading arguments under `from_pretrained`, for example:
+- memory-efficient attention backends;
+- attention slicing and VAE tiling helpers;
+- 8-bit optimizer presets;
+- module-level autocast-disable or force-fp32 islands;
+- packaged ZeRO/FSDP offload presets beyond Accelerate configuration.
 
-```python
-model=dict(
-    type='AutoModelForCausalLM',
-    from_pretrained=dict(
-        pretrained_model_name_or_path=CKPT_PATH,
-        torch_dtype='bf16',
-        low_cpu_mem_usage=True,
-        attn_implementation='flash_attention_2',
-    ),
-)
-```
+The stable cross-model controls are:
 
-These are passed directly to the underlying HF class. HF-Trainer does not normalize or validate every model-specific knob.
-
-## 6. Not Yet Standardized By HF-Trainer
-
-These memory features are still possible future framework work, but are not yet exposed as one unified config contract:
-
-- xFormers / memory-efficient attention toggles
-- attention slicing / VAE tiling style helpers
-- 8-bit optimizer presets
-- module-level autocast disable / force-fp32 islands
-- packaged ZeRO/FSDP offload presets beyond raw `accelerate` usage
-
-For now, use HF-native pass-through kwargs where available, and keep the standardized HF-Trainer contract to:
-
-- `accelerator.mixed_precision`
-- `accelerator.gradient_accumulation_steps`
-- `from_pretrained.torch_dtype` / `dtype`
-- `module_dtype`
-- `gradient_checkpointing`
-- `trainable` / `save_ckpt` / `checkpoint_format`
+- `accelerator.mixed_precision`;
+- `accelerator.gradient_accumulation_steps`;
+- locally documented `from_pretrained.torch_dtype` / `dtype`;
+- `module_dtype`;
+- `gradient_checkpointing`;
+- `trainable`, `save_ckpt`, and `checkpoint_format`.

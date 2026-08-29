@@ -56,3 +56,5 @@ pipeline = dict(
     num_inference_steps=30,
     negative_prompt='blurry, distorted, low quality, artifacts',
 )
+
+inference = dict(task='text_to_video')

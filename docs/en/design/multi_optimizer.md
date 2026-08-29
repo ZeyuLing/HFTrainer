@@ -17,12 +17,12 @@ Implemented framework pieces:
 
 Existing reference trainers:
 
-- `GANTrainer`
+- `StyleGAN2Trainer`
 - `DMDTrainer`
 
 ## Discriminator Scheduling
 
-`GANTrainer` and `DMDTrainer` now support delayed discriminator activation.
+`StyleGAN2Trainer` and `DMDTrainer` now support delayed discriminator activation.
 
 Use these trainer fields:
 

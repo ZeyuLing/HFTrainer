@@ -4,7 +4,6 @@
 
 - Python 3.10 or newer
 - a PyTorch build appropriate for your CPU/CUDA platform
-- Git when installing a source-pinned optional integration such as LTX-Video
 
 Install the editable core environment from the repository root:
 
@@ -31,28 +30,43 @@ python -m pip install -e ".[dev]"
 
 ## LTX-Video 2.5
 
-LTX is intentionally not part of the core installation. Select inference,
-training, or both:
+HFTrainer contains its modified, pinned LTX model, trainer, preprocessing, and
+pipeline source. LTX is not part of the base dependency set because the 22B
+workflow needs additional media and scientific-computing utilities. Select
+inference, training, or both:
 
 ```bash
 python -m pip install -e ".[ltx-video-inference]"
 python -m pip install -e ".[ltx-video-train]"
 python -m pip install -e ".[ltx-video]"
+
+# Optional experiment tracking / Hub publication
+python -m pip install -e ".[ltx-video-integrations]"
+
+# Optional EXR/HDR media paths
+python -m pip install -e ".[ltx-video-hdr]"
 ```
 
-The extras install `ltx-core`, `ltx-pipelines`, and/or `ltx-trainer` directly
-from the reviewed official Lightricks/LTX-2 commit
-`400fd31054597515f47125691032c04b1c3ee24e`. This pin is deliberate: the PyPI
-package line does not expose the current trainer/API combination used by the
-adapter.
+These extras install only supporting libraries such as PyAV, Einops, SciPy,
+Pydantic, Rich, torchaudio, pandas, and Pillow-HEIF. W&B/Hub publication and
+EXR/HDR handling remain separate opt-in groups. None of the groups installs
+`ltx-core`, `ltx-pipelines`, `ltx-trainer`, or another model framework. No
+second LTX checkout is required.
 
-The extras enforce `torch>=2.8` because the pinned source imports
-`torch.compiler.nested_compile_region`, an API missing from PyTorch 2.7.x.
-They do not select the CUDA-specific PyTorch index for your GPU. LTX training
-should run on Linux with NVIDIA CUDA; use the official checkout's `uv sync`
-workflow for the recommended isolated runtime, then install HFTrainer into
-that environment. See the complete [LTX-Video 2.5 guide](models/ltx_video_2_5.md)
-for exact commands, gated model access, licensing, and hardware planning.
+The extras require `torch>=2.8`; choose the CUDA-specific PyTorch wheel for the
+target machine before installing them. The supported full training path is
+Linux with NVIDIA CUDA. See the complete
+[LTX-Video 2.5 guide](models/ltx_video_2_5.md) for the source/license boundary,
+gated model access, exact commands, validation limits, and hardware planning.
+
+## Model dependency boundary
+
+Model implementations, tokenizers, sampling schedulers, LoRA layers, artifact
+loaders, trainers, and pipelines execute from `hftrainer.*`. The project uses
+general infrastructure libraries such as PyTorch, Accelerate, MMEngine,
+safetensors, NumPy, and Pillow, but does not require an installed external
+model implementation package. Installing such a package must not change which
+model code a config resolves.
 
 ## Console commands
 

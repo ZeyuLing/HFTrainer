@@ -2,7 +2,7 @@
 Training loop abstractions for EpochBased and IterBased training.
 """
 
-from typing import Iterator, Tuple, Any, Optional
+from typing import Optional
 from torch.utils.data import DataLoader
 
 

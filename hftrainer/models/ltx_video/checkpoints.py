@@ -44,7 +44,7 @@ def _require_existing_file(path: str | Path, role: str) -> None:
 
 @dataclass(frozen=True)
 class LTXVideoLoraSpec:
-    """One LoRA artifact and the strength used by the official loader."""
+    """One LoRA artifact and the strength used by the local loader."""
 
     path: str
     strength: float = 1.0
@@ -145,7 +145,7 @@ class LTX25InferenceCheckpoints:
 
         if mode == 'dev_two_stage' and not self.distilled_lora_path:
             raise ValueError(
-                "dev_two_stage inference requires the official LTX-2.5 distilled "
+                "dev_two_stage inference requires the LTX-Video 2.5 distilled "
                 "LoRA for the refinement stage."
             )
 
@@ -184,7 +184,7 @@ def validate_ltx25_training_config(
     require_files: bool = False,
     strict_roles: bool = True,
 ) -> None:
-    """Validate LTX-2.5-specific invariants before official Pydantic parsing."""
+    """Validate LTX-Video-specific invariants before local Pydantic parsing."""
 
     model = dict(config.get('model') or {})
     missing = [
@@ -213,7 +213,7 @@ def validate_ltx25_training_config(
         )
     if strict_roles and 'ltx-2.5' in _basename(model_path) and 'dev-transformer' not in _basename(model_path):
         raise ValueError(
-            "An official LTX-2.5 training base must be the dev transformer; "
+            "An LTX-Video 2.5 training base must be the dev transformer; "
             f"got {model_path}."
         )
 

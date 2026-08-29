@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC
+from collections.abc import Mapping
 from typing import Callable, List, Optional, Sequence, Union
 
 from mmengine.dataset import BaseDataset
@@ -20,9 +21,21 @@ class PipelineDataset(BaseDataset, ABC):
         lazy_init: bool = False,
         max_refetch: int = 1000,
     ):
-        # Ensure HFTrainer's transform registry is populated before MMEngine
-        # Compose tries to build config dicts.
+        # Resolve config dictionaries through HFTrainer's strict local registry
+        # before handing callables to MMEngine's Compose. This avoids MMEngine's
+        # global transform registry and its dotted-import fallback.
         import hftrainer.datasets.transforms  # noqa: F401
+        from hftrainer.registry import TRANSFORMS
+
+        raw_pipeline = (
+            list(pipeline) if pipeline is not None else self.build_default_pipeline()
+        )
+        resolved_pipeline = [
+            TRANSFORMS.build(dict(transform))
+            if isinstance(transform, Mapping)
+            else transform
+            for transform in raw_pipeline
+        ]
 
         data_root = getattr(self, 'data_root', '')
         super().__init__(
@@ -31,7 +44,7 @@ class PipelineDataset(BaseDataset, ABC):
             data_root=data_root,
             data_prefix={},
             serialize_data=serialize_data,
-            pipeline=list(pipeline) if pipeline is not None else self.build_default_pipeline(),
+            pipeline=resolved_pipeline,
             test_mode=test_mode,
             lazy_init=lazy_init,
             max_refetch=max_refetch,

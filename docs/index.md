@@ -1,4 +1,4 @@
-# HF-Trainer documentation
+# HFTrainer documentation
 
 Choose the canonical documentation set:
 

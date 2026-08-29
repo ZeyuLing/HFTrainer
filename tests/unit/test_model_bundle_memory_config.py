@@ -3,7 +3,7 @@ import torch.nn as nn
 import pytest
 
 from hftrainer.models.base_model_bundle import ModelBundle
-from hftrainer.registry import HF_MODELS
+from hftrainer.registry import MODEL_COMPONENTS
 
 
 class _DummyBundle(ModelBundle):
@@ -42,17 +42,17 @@ class DummyPlainModule(nn.Module):
         self.proj = nn.Linear(4, 4)
 
 
-HF_MODELS.register_module(
+MODEL_COMPONENTS.register_module(
     name='TestGradientCheckpointModule',
     module=DummyGradientCheckpointModule,
     force=True,
 )
-HF_MODELS.register_module(
+MODEL_COMPONENTS.register_module(
     name='TestEnableGradientCheckpointModule',
     module=DummyEnableGradientCheckpointModule,
     force=True,
 )
-HF_MODELS.register_module(
+MODEL_COMPONENTS.register_module(
     name='TestPlainModule',
     module=DummyPlainModule,
     force=True,

@@ -88,7 +88,8 @@ runner.train()
 
 普通 `BaseTrainer` 子类会构建 `AccelerateRunner`。若注册 trainer 声明
 `manages_training_loop=True` 并实现 `from_framework_config(cfg)`，builder 会直接
-返回它，让 LTX 这类固定官方栈保留完整 optimization/checkpoint 生命周期。
+返回它。LTX 使用该路径，让随包本地 trainer 保留耦合紧密的预处理、优化、
+validation 与 checkpoint 生命周期，不导入另一套 trainer 包。
 
 ## `ModelBundle`
 
@@ -112,14 +113,14 @@ from hftrainer.models import ModelBundle
 | 键 | 类型 | 含义 |
 | --- | --- | --- |
 | `type` | `str` | registry key / 类名 |
-| `from_pretrained` | `dict` | HuggingFace 风格 pretrained 加载参数 |
+| `from_pretrained` | `dict` | 当前本地 class 支持的 artifact loader 参数 |
 | `from_config` | `dict` | 按配置构建的参数 |
-| `from_single_file` | `dict` | 单文件加载参数 |
+| `from_single_file` | `dict` | 本地 class 明确实现单文件加载时使用的参数 |
 | `trainable` | `bool` 或 `'lora'` | 全量训练、冻结，或注入 LoRA |
 | `save_ckpt` | `bool` | 是否参与选择性 checkpoint save/load |
 | `checkpoint_format` | `'full'` 或 `'lora'` | 保存全量权重或 adapter-only 权重 |
-| `lora_cfg` | `dict` | `trainable='lora'` 时的 PEFT LoRA 配置 |
-| `gradient_checkpointing` | `bool` 或 `dict` | 对暴露兼容 HF hook 的模块开启 activation checkpointing |
+| `lora_cfg` | `dict` | `trainable='lora'` 时的本地 LoRA 配置 |
+| `gradient_checkpointing` | `bool` 或 `dict` | 对暴露兼容 hook 的模块开启 activation checkpointing |
 | `module_dtype` | dtype 字符串或 `torch.dtype` | 模块构建完成后施加的 dtype cast |
 
 ### 主要 API
@@ -127,7 +128,7 @@ from hftrainer.models import ModelBundle
 | 方法 | 作用 | 输入 |
 | --- | --- | --- |
 | `from_config(cfg=None, **kwargs)` | 通用父类 bundle 构造入口 | config dict 或 `mmengine.ConfigDict` |
-| `from_pretrained(path, config_overrides=None, **kwargs)` | 通用 HuggingFace 风格 bundle 构造入口 | pretrained 路径和任务相关参数 |
+| `from_pretrained(path, config_overrides=None, **kwargs)` | 从仓库支持的 artifact 构造 bundle | artifact 路径和实现相关参数 |
 | `_build_modules(modules_cfg)` | 实例化并配置子模块 | `modules_cfg: dict` |
 | `trainable_parameters()` | 返回所有可训练参数 | 无 |
 | `trainable_named_parameters()` | 产生可训练 `(name, param)` 对 | 无 |
@@ -142,11 +143,10 @@ from hftrainer.models import ModelBundle
 
 ### 构造语义
 
-- `from_config(...)` 是完全通用的，应该作为自研模型的默认入口。
-- `from_pretrained(...)` 是父类上的统一 public API。普通 HF-native bundle 应该优先通过 `HF_PRETRAINED_SPEC` 完成映射，而不是手写 `_bundle_config_from_pretrained(...)`。
-- `save_pretrained(...)` 保持任务相关，但普通 HF-native bundle 应该优先通过 `HF_SAVE_PRETRAINED_SPEC` 完成导出，而不是手写方法。
-- 只有当 artifact 结构特殊到声明式 spec 不足以表达时，才需要覆盖 `_bundle_config_from_pretrained(...)` 或 `save_pretrained(...)`。
-- `from_pretrained.torch_dtype` / `dtype` 会直接透传给底层 HF loader，`module_dtype` 则是 HF-Trainer 自己的 post-load cast。
+- `from_config(...)` 是仓库本地组件的常规构造入口。
+- `from_pretrained(...)` 把受支持的 artifact 映射到本地类。简单 bundle 可声明 `PRETRAINED_SPEC`；复杂 bundle 可覆盖 `_bundle_config_from_pretrained(...)`。
+- 每个具体 bundle 都负责自己的 `save_pretrained(...)` 和 artifact schema 校验。
+- `from_pretrained.torch_dtype` / `dtype` 由本地组件 loader 解释，`module_dtype` 是 bundle 层的 post-load cast。
 - 全局 AMP、按模块 dtype 和 gradient checkpointing 的推荐写法见 [显存与精度](memory.md)。
 
 ### `load_state_dict_selective(...)`
@@ -331,11 +331,11 @@ hftrainer-infer --config CONFIG.py [--checkpoint CKPT_DIR] [OPTIONS]
 
 ```bash
 hftrainer-ltx-infer CONFIG.py --prompt TEXT --output OUTPUT.mp4
-hftrainer-ltx-preprocess DATASET.json --ltx-repo PATH [MODEL OPTIONS]
+hftrainer-ltx-preprocess DATASET.json [MODEL OPTIONS]
 ```
 
 推理入口提供条件图、尺寸/帧数 override、`--auto-duration`、Dev 模式 guidance
-参数和 config override。预处理入口委托给固定版本的官方 `process_dataset.py`。
+参数和 config override。预处理入口执行 HFTrainer 随包发布的修改版 `process_dataset.py`。
 完整 checkpoint 与命令合约见 [LTX-Video 2.5](models/ltx_video_2_5.md)。
 
 ## 任务类映射
@@ -344,9 +344,9 @@ hftrainer-ltx-preprocess DATASET.json --ltx-repo PATH [MODEL OPTIONS]
 | --- | --- | --- | --- |
 | Classification | `ViTBundle` | `ClassificationTrainer` | `ClassificationPipeline` |
 | Text-to-image | `SD15Bundle` | `SD15Trainer` | `SD15Pipeline` |
-| Causal LM | `CausalLMBundle` | `CausalLMTrainer` | `CausalLMPipeline` |
+| Causal LM | `LlamaBundle` | `CausalLMTrainer` | `CausalLMPipeline` |
 | Text-to-video | `WanBundle` | `WanTrainer` | `WanPipeline` |
-| GAN | `StyleGAN2Bundle` | `GANTrainer` | `StyleGAN2Pipeline` |
+| GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` |
 | DMD | `DMDBundle` | `DMDTrainer` | `DMDPipeline` |
 | LTX-Video 2.5 | `LTXVideoBundle` | `LTXVideoTrainer`（managed） | `LTXVideoPipeline` |
 

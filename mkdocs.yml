@@ -1,5 +1,5 @@
 site_name: HF-Trainer
-site_description: A unified, config-driven training framework built on the HuggingFace ecosystem
+site_description: A config-driven framework with repository-owned model, training, and inference implementations
 repo_url: https://github.com/ZeyuLing/HFTrainer
 repo_name: ZeyuLing/HFTrainer
 docs_dir: docs/en

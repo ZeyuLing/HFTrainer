@@ -12,7 +12,7 @@ import os
 import copy
 import math
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -25,7 +25,7 @@ from mmengine.config import Config
 from hftrainer.utils.logger import get_logger, add_file_handler
 from hftrainer.utils.checkpoint_utils import find_latest_checkpoint
 from hftrainer.utils.env import collect_env_info
-from hftrainer.runner.loops import EpochBasedLoop, IterBasedLoop
+from hftrainer.runner.loops import IterBasedLoop
 
 logger = get_logger()
 
@@ -712,23 +712,17 @@ class AccelerateRunner:
         opt_cfg = copy.deepcopy(opt_cfg)
         opt_type = opt_cfg.pop('type')
 
-        # Import from torch.optim, then transformers.optimization, then registry
+        # Optimizers are explicit PyTorch primitives.  There is no dynamic
+        # model-framework fallback because that makes identical configs depend
+        # on whichever unrelated package is installed in the environment.
         import torch.optim as optim
         if hasattr(optim, opt_type):
             cls = getattr(optim, opt_type)
         else:
-            # Try transformers.optimization (Adafactor, etc.)
-            try:
-                import transformers.optimization as tf_optim
-                if hasattr(tf_optim, opt_type):
-                    cls = getattr(tf_optim, opt_type)
-                else:
-                    raise ImportError
-            except (ImportError, AttributeError):
-                from hftrainer.registry import _import_hf_class
-                cls = _import_hf_class(opt_type)
-                if cls is None:
-                    raise ValueError(f"Unknown optimizer type: {opt_type}")
+            available = sorted(name for name in dir(optim) if name[:1].isupper())
+            raise ValueError(
+                f"Unknown PyTorch optimizer type: {opt_type}. Available: {available}"
+            )
 
         return cls(params, **opt_cfg)
 
@@ -764,28 +758,27 @@ class AccelerateRunner:
 
     @staticmethod
     def _build_single_scheduler(sched_cfg: dict, optimizer, num_training_steps: int):
-        """Build a single LR scheduler. Supports HF get_scheduler API."""
+        """Build a single repository-owned or PyTorch LR scheduler."""
         sched_cfg = copy.deepcopy(sched_cfg)
         sched_type = sched_cfg.pop('type')
 
         # Alias mapping for convenience
         SCHEDULER_ALIASES = {
-            'cosine_with_warmup': 'cosine',  # transformers uses 'cosine'
+            'cosine_with_warmup': 'cosine',
         }
         sched_type = SCHEDULER_ALIASES.get(sched_type, sched_type)
 
-        # Try transformers get_scheduler first
-        HF_SCHEDULER_TYPES = {
+        LOCAL_SCHEDULER_TYPES = {
             'linear', 'cosine', 'cosine_with_restarts', 'polynomial',
             'constant', 'constant_with_warmup', 'inverse_sqrt',
             'reduce_lr_on_plateau', 'cosine_with_min_lr',
             'cosine_warmup_with_min_lr', 'warmup_stable_decay',
         }
 
-        if sched_type in HF_SCHEDULER_TYPES:
-            from transformers import get_scheduler
+        if sched_type in LOCAL_SCHEDULER_TYPES:
+            from hftrainer.optim import build_scheduler
             num_warmup_steps = sched_cfg.pop('num_warmup_steps', 0)
-            return get_scheduler(
+            return build_scheduler(
                 name=sched_type,
                 optimizer=optimizer,
                 num_warmup_steps=num_warmup_steps,
@@ -1051,7 +1044,7 @@ class AccelerateRunner:
         null_ctxt_input) and buffers (e.g. mean, std) that live outside any
         sub-module.  These are stored under the key ``'__bundle_params__'``.
         """
-        from hftrainer.models.peft_utils import get_lora_state_dict
+        from hftrainer.models.lora import get_lora_state_dict
 
         state_dict = {'__hftrainer_meta__': self.bundle.checkpoint_metadata()}
         for name in self.bundle._save_ckpt_modules:

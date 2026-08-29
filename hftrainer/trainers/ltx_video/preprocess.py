@@ -1,4 +1,4 @@
-"""Command construction for the official LTX-2.5 dataset preprocessor."""
+"""Command construction for HFTrainer's local LTX-2.5 preprocessor."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from hftrainer.models.ltx_video.checkpoints import validate_ltx25_training_confi
 
 def build_ltx_preprocess_command(
     *,
-    ltx_repo: str | Path,
     dataset_path: str | Path,
     resolution_buckets: str,
     model_path: str | Path,
@@ -28,14 +27,12 @@ def build_ltx_preprocess_command(
     vae_tiling: bool = False,
     extra_args: Iterable[str] | None = None,
 ) -> list[str]:
-    """Build a reproducible argv for the pinned official preprocessing script."""
+    """Build a reproducible argv for the repository-local preprocessing script."""
 
-    root = Path(ltx_repo).expanduser().resolve()
-    script = root / 'packages' / 'ltx-trainer' / 'scripts' / 'process_dataset.py'
+    script = Path(__file__).with_name('preprocess_scripts') / 'process_dataset.py'
     if not script.is_file():
         raise FileNotFoundError(
-            f"Could not find the official LTX preprocessor under {root}. "
-            "Pass the root of a Lightricks/LTX-2 checkout."
+            f"HFTrainer installation is missing its LTX preprocessor: {script}"
         )
 
     validation_config = {

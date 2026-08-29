@@ -1,6 +1,9 @@
-# HF-Trainer Docs
+# HFTrainer Docs
 
-HF-Trainer is a config-driven framework for training HuggingFace-native models with `accelerate`. The current codebase focuses on runnable task stacks plus a small set of framework primitives: `ModelBundle`, `Trainer`, `Pipeline`, `AccelerateRunner`, hooks, evaluators, and visualizers.
+HFTrainer is a config-driven training and inference framework whose model
+implementations live in this repository. `ModelBundle`, trainer, and pipeline
+layers share one local component graph; Accelerate provides distributed
+runtime orchestration rather than model definitions.
 
 ## Start Here
 
@@ -38,7 +41,8 @@ Runnable demos:
 - Text-to-video
 - StyleGAN2-style GAN training
 - DMD-style distillation
-- LTX-Video 2.5 distilled/dev inference and managed LoRA training adapters
+- LTX-Video 2.5 distilled/dev inference and local managed LoRA training
 
-The LTX entry is contract-tested against one pinned official source revision;
-the repository CI/test environment does not execute the gated 22B weights.
+The packaged LTX implementation is a modified snapshot pinned to one source
+revision. Its local config/API contracts and tiny Gemma path are tested; the
+repository test environment does not execute the gated 22B workflow.
