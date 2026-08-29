@@ -56,6 +56,41 @@ flowchart LR
 
 Validation metrics and rendering are handled separately by evaluators and visualizers. See [Hook System](design/hooks.md).
 
+## Package Taxonomy
+
+Directories express code ownership; different framework layers do not need to
+repeat the same label. The rule for each namespace is:
+
+| Namespace | Classification axis | Examples |
+|---|---|---|
+| `hftrainer/models/` | concrete model family or algorithm adapter | `vit`, `sd15`, `causal_lm`, `wan`, `stylegan2`, `dmd`, `ltx_video` |
+| `hftrainer/trainers/` | reusable training task or optimization method | `classification`, `text2image`, `distillation` |
+| `hftrainer/pipelines/` | inference capability | `classification`, `text2image`, `text2video` |
+| `hftrainer/datasets/` | record and collation contract | `classification`, `llm`, `text2video` |
+| `configs/` | user-facing workload or integration | `classification`, `distillation`, `ltx_video` |
+
+The important constraint is that one namespace never contains two parallel
+taxonomies. In particular, each `ModelBundle` has one canonical owner under
+`models/<implementation_id>/`; task-shaped model aliases are not allowed.
+Task-level reuse belongs in trainer, pipeline, dataset, and evaluator packages.
+
+This distinction is intentional. `ClassificationTrainer` is reusable task
+logic and should not become owned by ViT merely because ViT is the current demo
+bundle. Conversely, `DMDTrainer` is an algorithm-specific optimization method,
+so `trainers/distillation` is a meaningful training classification. A tightly
+coupled optional upstream stack such as LTX may use the same integration ID
+across model, trainer, and pipeline packages because those components share one
+dependency and lifecycle boundary.
+
+Every registered model class must therefore have:
+
+1. one implementation module;
+2. one registry decorator;
+3. one canonical package-level export.
+
+The structural unit test rejects accidental reintroduction of task aliases or
+package exports owned by a second model hierarchy.
+
 ## Lightweight registration
 
 `import hftrainer` creates registries and lightweight public symbols only. It

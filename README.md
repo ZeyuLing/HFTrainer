@@ -285,23 +285,45 @@ checkpoints/  local pretrained checkpoints for demos
 tests/        startup smoke tests and focused unit tests
 ```
 
-Model code, task runtime, and data code are intentionally separated:
+Model implementations, task runtime, and data contracts are intentionally
+separated. Each namespace has one classification rule:
 
 ```text
-hftrainer/models/<model_name>/
+hftrainer/models/<implementation_id>/
   bundle.py
   ...
-hftrainer/trainers/<task_name>/
+hftrainer/trainers/<training_task_or_method>/
   ...
-hftrainer/pipelines/<task_name>/
+hftrainer/pipelines/<inference_capability>/
   ...
-hftrainer/datasets/<task_name>/
+hftrainer/datasets/<data_contract>/
   ...
 ```
 
-Each runnable config declares focused `custom_imports`; this keeps optional
-vertical slices such as `models/ltx_video`, `pipelines/ltx_video`, and
-`trainers/ltx_video` out of the core import path.
+`models/` has exactly one owner package for each concrete model family or
+algorithm adapter: `vit`, `sd15`, `causal_lm`, `wan`, `stylegan2`, `dmd`, and
+`ltx_video`. Do not add task aliases such as `models/classification` or
+`models/text2video`; task-level reuse belongs in trainers, pipelines, datasets,
+and evaluators instead of a second model namespace.
+
+Optional/native integrations declare focused `custom_imports`; built-in demo
+configs without them use the explicit built-in registration catalogue. This
+keeps stacks such as `models/ltx_video`, `pipelines/ltx_video`, and
+`trainers/ltx_video` out of the lightweight core import path while preserving
+the older built-in config workflow.
+
+The early-0.x task-shaped model aliases were removed because they contained no
+implementation or registry ownership. Direct imports should use the canonical
+paths:
+
+| Removed alias | Canonical package |
+|---|---|
+| `hftrainer.models.classification` | `hftrainer.models.vit` |
+| `hftrainer.models.text2image` | `hftrainer.models.sd15` |
+| `hftrainer.models.llm` | `hftrainer.models.causal_lm` |
+| `hftrainer.models.text2video` | `hftrainer.models.wan` |
+| `hftrainer.models.gan` | `hftrainer.models.stylegan2` |
+| `hftrainer.models.distillation` | `hftrainer.models.dmd` |
 
 Datasets follow an MMEngine-style split:
 

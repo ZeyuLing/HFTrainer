@@ -21,6 +21,26 @@ The split is:
 - ordinary HF-native bundles should prefer `HF_PRETRAINED_SPEC` and `HF_SAVE_PRETRAINED_SPEC`
 - override `_bundle_config_from_pretrained(...)` or `save_pretrained(...)` only when the artifact layout is unusual enough that the declarative specs are not enough
 
+## Where New Code Lives
+
+Choose one stable `implementation_id` for the model family, paper method, or
+upstream adapter. Put its bundle and model-specific support code only in:
+
+```text
+hftrainer/models/<implementation_id>/
+```
+
+Do not create a second `models/<task_name>/` re-export package. If the trainer,
+pipeline, dataset, or evaluator implements a reusable task contract, place it
+under that layer's task/capability package and import both owners from the
+runnable config or registration catalogue. If a component directly depends on
+one algorithm's scheduler, checkpoint format, loss, or external runtime, group
+it by that method in the corresponding layer.
+
+The canonical model package must own the class definition and registry
+decorator. Its `__init__.py` may re-export local public symbols, but it must not
+forward to a second model hierarchy.
+
 ## Path 1: Start From An Existing HuggingFace Model
 
 Use this path when the core model class already exists in `transformers` or `diffusers`.

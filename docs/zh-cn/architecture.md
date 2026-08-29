@@ -55,6 +55,37 @@ flowchart LR
 
 validation 指标和可视化由 evaluator / visualizer 单独处理。详见 [Hook 系统](design/hooks.md)。
 
+## 目录分类规范
+
+目录表达代码所有权；不同框架层不需要机械重复同一个名字。每个命名空间使用自己
+唯一的分类轴：
+
+| 命名空间 | 分类依据 | 示例 |
+|---|---|---|
+| `hftrainer/models/` | 具体模型族或算法适配器 | `vit`、`sd15`、`causal_lm`、`wan`、`stylegan2`、`dmd`、`ltx_video` |
+| `hftrainer/trainers/` | 可复用训练任务或优化方法 | `classification`、`text2image`、`distillation` |
+| `hftrainer/pipelines/` | 推理能力 | `classification`、`text2image`、`text2video` |
+| `hftrainer/datasets/` | 样本与 collate 数据契约 | `classification`、`llm`、`text2video` |
+| `configs/` | 用户可理解的 workload 或 integration | `classification`、`distillation`、`ltx_video` |
+
+关键约束是同一个命名空间不能并存两套平行分类。每个 `ModelBundle` 在
+`models/<implementation_id>/` 下只有一个 canonical owner；不允许再创建任务形状的
+model 别名目录。任务级复用应该放在 trainer、pipeline、dataset 和 evaluator 中。
+
+这种区分是有意的。`ClassificationTrainer` 是可复用的分类任务逻辑，不能仅仅因为
+当前示例模型是 ViT，就把它归 ViT 私有。相反，`DMDTrainer` 本身就是算法专属的优化
+方法，因此放在 `trainers/distillation` 有明确的训练语义。LTX 这类耦合紧密的可选
+上游栈可以在 model、trainer、pipeline 三层统一使用 integration ID，因为这些组件
+共享同一组依赖和生命周期边界。
+
+因此每个注册模型类必须满足：
+
+1. 只有一个实现模块；
+2. 只有一个 registry decorator；
+3. 只有一个 canonical package-level export。
+
+结构回归测试会拒绝重新引入任务别名，或让 package export 指向第二套 model 层级。
+
 ## 轻量注册
 
 `import hftrainer` 只创建 registry 和轻量 public symbol，不会立即导入所有任务、

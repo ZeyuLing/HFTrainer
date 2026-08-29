@@ -1,8 +1,10 @@
-from hftrainer.models.stylegan2.model import StyleGAN2Generator, StyleGAN2Discriminator
-from hftrainer.models.stylegan2.bundle import StyleGAN2Bundle
+"""StyleGAN2 network and model bundle."""
+
+from .bundle import StyleGAN2Bundle
+from .model import StyleGAN2Discriminator, StyleGAN2Generator
 
 __all__ = [
-    'StyleGAN2Generator',
-    'StyleGAN2Discriminator',
     'StyleGAN2Bundle',
+    'StyleGAN2Discriminator',
+    'StyleGAN2Generator',
 ]

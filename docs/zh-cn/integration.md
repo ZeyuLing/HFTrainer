@@ -20,6 +20,23 @@
 - 普通 HF-native bundle 优先通过 `HF_PRETRAINED_SPEC` 和 `HF_SAVE_PRETRAINED_SPEC` 完成接入
 - 只有在 artifact 结构特殊到声明式 spec 表达不了时，才需要覆盖 `_bundle_config_from_pretrained(...)` 或 `save_pretrained(...)`
 
+## 新代码应该放在哪里
+
+先为模型族、论文方法或上游适配器选择一个稳定的 `implementation_id`。Bundle 和
+模型专属协议只能放在：
+
+```text
+hftrainer/models/<implementation_id>/
+```
+
+不要再创建第二套 `models/<task_name>/` 转发包。Trainer、Pipeline、Dataset、
+Evaluator 如果表达的是可复用任务契约，就放在各自层的任务/能力目录中，再由 config
+或注册目录同时导入这些 owner；如果组件直接依赖某个算法的 scheduler、checkpoint
+格式、loss 或外部 runtime，则在对应层按该方法归类。
+
+canonical model package 必须持有类定义和 registry decorator。它的 `__init__.py`
+可以导出本包的 public symbol，但不能转发到第二套 model 层级。
+
 ## 路径 1：从现有 HuggingFace 模型开始
 
 当核心模型类已经存在于 `transformers` 或 `diffusers` 中时，走这条路径。
