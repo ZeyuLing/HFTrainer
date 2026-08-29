@@ -1,8 +1,9 @@
-# Installation
+# Installation compatibility page
 
-Choose a language:
+Canonical documentation is maintained by language:
 
-- [English](en/installation.md)
-- [简体中文](zh-cn/installation.md)
+- [English installation](en/installation.md)
+- [简体中文安装说明](zh-cn/installation.md)
 
-The maintained installation guide lives in the language-specific pages above. This root page is kept only as a compatibility landing page.
+This compatibility path is intentionally short so dependency versions are not
+duplicated outside `pyproject.toml` and the canonical language pages.

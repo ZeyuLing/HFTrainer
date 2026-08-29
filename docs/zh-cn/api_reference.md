@@ -8,10 +8,11 @@
 
 这一页覆盖：
 
-- 框架主入口：`AccelerateRunner`、`ModelBundle`、`BaseTrainer`、`BasePipeline`
+- 框架主入口：`AccelerateRunner`、managed-trainer 分发、`ModelBundle`、
+  `BaseTrainer`、`BasePipeline`
 - validation / runtime 扩展点：hooks、evaluators、visualizers
 - checkpoint 工具：`find_latest_checkpoint`、`load_checkpoint`、`save_checkpoint`
-- 命令行入口：`tools/train.py`、`tools/infer.py`
+- 命令行入口：`hftrainer-*` console scripts 及对应的 `tools/*.py` 源码入口
 
 可运行任务栈见 [任务矩阵](tasks.md)。
 
@@ -73,6 +74,21 @@ runner.train()
 | `current_epoch` | 已完成的 epoch 数 |
 | `work_dir` | checkpoint 根目录 |
 | `run_dir` | 带时间戳的日志 / config / tensorboard 目录 |
+
+## Runner 分发与 Managed Trainer
+
+公共训练 CLI 使用：
+
+```python
+from hftrainer.runner.builder import build_runner_from_cfg
+
+runner = build_runner_from_cfg(cfg)
+runner.train()
+```
+
+普通 `BaseTrainer` 子类会构建 `AccelerateRunner`。若注册 trainer 声明
+`manages_training_loop=True` 并实现 `from_framework_config(cfg)`，builder 会直接
+返回它，让 LTX 这类固定官方栈保留完整 optimization/checkpoint 生命周期。
 
 ## `ModelBundle`
 
@@ -271,12 +287,12 @@ from hftrainer.utils.checkpoint_utils import (
 
 ## CLI 参考
 
-### `tools/train.py`
+### `hftrainer-train` / `tools/train.py`
 
 用法：
 
 ```bash
-python3 tools/train.py CONFIG.py [OPTIONS]
+hftrainer-train CONFIG.py [OPTIONS]
 ```
 
 | 参数 | 含义 |
@@ -288,18 +304,18 @@ python3 tools/train.py CONFIG.py [OPTIONS]
 | `--load-scope` | `model` 或 `full` |
 | `--cfg-options` | 从命令行覆盖配置项 |
 
-### `tools/infer.py`
+### `hftrainer-infer` / `tools/infer.py`
 
 用法：
 
 ```bash
-python3 tools/infer.py --config CONFIG.py --checkpoint CKPT_DIR [OPTIONS]
+hftrainer-infer --config CONFIG.py [--checkpoint CKPT_DIR] [OPTIONS]
 ```
 
 | 参数 | 含义 |
 | --- | --- |
 | `--config` | config 文件路径 |
-| `--checkpoint` | checkpoint 目录或 checkpoint 文件 |
+| `--checkpoint` | legacy 任务的 checkpoint；registry pipeline config 可自行持有模型路径 |
 | `--prompt` | 生成类任务的文本 prompt |
 | `--input` | 分类类任务的输入文件 |
 | `--output` | 输出图片 / 视频路径 |
@@ -311,6 +327,17 @@ python3 tools/infer.py --config CONFIG.py --checkpoint CKPT_DIR [OPTIONS]
 | `--merge-lora` | 推理前把 LoRA adapter 合并进 base weight |
 | `--device` | `cuda` 或 `cpu` |
 
+### LTX-Video Console 命令
+
+```bash
+hftrainer-ltx-infer CONFIG.py --prompt TEXT --output OUTPUT.mp4
+hftrainer-ltx-preprocess DATASET.json --ltx-repo PATH [MODEL OPTIONS]
+```
+
+推理入口提供条件图、尺寸/帧数 override、`--auto-duration`、Dev 模式 guidance
+参数和 config override。预处理入口委托给固定版本的官方 `process_dataset.py`。
+完整 checkpoint 与命令合约见 [LTX-Video 2.5](models/ltx_video_2_5.md)。
+
 ## 任务类映射
 
 | 任务 | Bundle | Trainer | Pipeline |
@@ -321,5 +348,6 @@ python3 tools/infer.py --config CONFIG.py --checkpoint CKPT_DIR [OPTIONS]
 | Text-to-video | `WanBundle` | `WanTrainer` | `WanPipeline` |
 | GAN | `StyleGAN2Bundle` | `GANTrainer` | `StyleGAN2Pipeline` |
 | DMD | `DMDBundle` | `DMDTrainer` | `DMDPipeline` |
+| LTX-Video 2.5 | `LTXVideoBundle` | `LTXVideoTrainer`（managed） | `LTXVideoPipeline` |
 
 可运行 config 和任务相关说明见 [任务矩阵](tasks.md)。

@@ -1,8 +1,9 @@
-# Architecture
+# Architecture compatibility page
 
-Choose a language:
+Canonical documentation is maintained by language:
 
-- [English](en/architecture.md)
-- [简体中文](zh-cn/architecture.md)
+- [English architecture](en/architecture.md)
+- [简体中文架构设计](zh-cn/architecture.md)
 
-The maintained architecture documentation lives in the language-specific pages above. This root page is kept only as a compatibility landing page.
+The canonical pages cover lightweight registration, the standard
+`AccelerateRunner`, and managed upstream training loops such as LTX-Video 2.5.

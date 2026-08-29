@@ -6,6 +6,7 @@ HF-Trainer is a config-driven framework for training HuggingFace-native models w
 
 - [Installation](installation.md)
 - [Quick Start](quickstart.md)
+- [LTX-Video 2.5](models/ltx_video_2_5.md)
 - [Integration Guide](integration.md)
 - [API Reference](api_reference.md)
 - [Memory and Precision](memory.md)
@@ -37,3 +38,7 @@ Runnable demos:
 - Text-to-video
 - StyleGAN2-style GAN training
 - DMD-style distillation
+- LTX-Video 2.5 distilled/dev inference and managed LoRA training adapters
+
+The LTX entry is contract-tested against one pinned official source revision;
+the repository CI/test environment does not execute the gated 22B weights.

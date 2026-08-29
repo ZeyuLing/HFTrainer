@@ -8,10 +8,12 @@ It does not try to list every internal helper function in the repository. Intern
 
 This reference covers:
 
-- framework entry points: `AccelerateRunner`, `ModelBundle`, `BaseTrainer`, `BasePipeline`
+- framework entry points: `AccelerateRunner`, managed-trainer dispatch,
+  `ModelBundle`, `BaseTrainer`, `BasePipeline`
 - validation/runtime extension points: hooks, evaluators, visualizers
 - checkpoint utilities: `find_latest_checkpoint`, `load_checkpoint`, `save_checkpoint`
-- command-line entry points: `tools/train.py`, `tools/infer.py`
+- command-line entry points: the `hftrainer-*` console scripts and matching
+  `tools/*.py` source entry points
 
 For runnable task stacks, see [Task Matrix](tasks.md).
 
@@ -73,6 +75,22 @@ runner.train()
 | `current_epoch` | completed epochs |
 | `work_dir` | checkpoint root |
 | `run_dir` | timestamped log / config / tensorboard dir |
+
+## Runner dispatch and managed trainers
+
+The public training CLI uses:
+
+```python
+from hftrainer.runner.builder import build_runner_from_cfg
+
+runner = build_runner_from_cfg(cfg)
+runner.train()
+```
+
+Ordinary `BaseTrainer` subclasses return an `AccelerateRunner`. A registered
+trainer with `manages_training_loop=True` and
+`from_framework_config(cfg)` is returned directly, allowing a pinned official
+stack such as LTX to preserve its complete optimization/checkpoint lifecycle.
 
 ## `ModelBundle`
 
@@ -271,12 +289,12 @@ from hftrainer.utils.checkpoint_utils import (
 
 ## CLI Reference
 
-### `tools/train.py`
+### `hftrainer-train` / `tools/train.py`
 
 Usage:
 
 ```bash
-python3 tools/train.py CONFIG.py [OPTIONS]
+hftrainer-train CONFIG.py [OPTIONS]
 ```
 
 | Argument | Meaning |
@@ -288,18 +306,18 @@ python3 tools/train.py CONFIG.py [OPTIONS]
 | `--load-scope` | `model` or `full` |
 | `--cfg-options` | override config values from CLI |
 
-### `tools/infer.py`
+### `hftrainer-infer` / `tools/infer.py`
 
 Usage:
 
 ```bash
-python3 tools/infer.py --config CONFIG.py --checkpoint CKPT_DIR [OPTIONS]
+hftrainer-infer --config CONFIG.py [--checkpoint CKPT_DIR] [OPTIONS]
 ```
 
 | Argument | Meaning |
 | --- | --- |
 | `--config` | config file path |
-| `--checkpoint` | checkpoint directory or checkpoint file |
+| `--checkpoint` | checkpoint directory/file for legacy tasks; registry-driven pipeline configs can own model paths |
 | `--prompt` | text prompt for generation tasks |
 | `--input` | input file for classification-style tasks |
 | `--output` | output image / video path |
@@ -311,6 +329,19 @@ python3 tools/infer.py --config CONFIG.py --checkpoint CKPT_DIR [OPTIONS]
 | `--merge-lora` | merge LoRA adapters into base weights before infer |
 | `--device` | `cuda` or `cpu` |
 
+### LTX-Video console commands
+
+```bash
+hftrainer-ltx-infer CONFIG.py --prompt TEXT --output OUTPUT.mp4
+hftrainer-ltx-preprocess DATASET.json --ltx-repo PATH [MODEL OPTIONS]
+```
+
+The inference command exposes conditioning images, shape/frame overrides,
+`--auto-duration`, guidance arguments for dev mode, and config overrides. The
+preprocessor delegates to the pinned official `process_dataset.py`. See
+[LTX-Video 2.5](models/ltx_video_2_5.md) for the full checkpoint and command
+contract.
+
 ## Task Class Map
 
 | Task | Bundle | Trainer | Pipeline |
@@ -321,5 +352,6 @@ python3 tools/infer.py --config CONFIG.py --checkpoint CKPT_DIR [OPTIONS]
 | Text-to-video | `WanBundle` | `WanTrainer` | `WanPipeline` |
 | GAN | `StyleGAN2Bundle` | `GANTrainer` | `StyleGAN2Pipeline` |
 | DMD | `DMDBundle` | `DMDTrainer` | `DMDPipeline` |
+| LTX-Video 2.5 | `LTXVideoBundle` | `LTXVideoTrainer` (managed) | `LTXVideoPipeline` |
 
 For runnable configs and task-specific notes, see [Task Matrix](tasks.md).

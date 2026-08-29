@@ -40,7 +40,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def parse_args():
     parser = argparse.ArgumentParser(description='Run inference with hftrainer pipeline')
     parser.add_argument('--config', required=True, help='Path to config file (.py)')
-    parser.add_argument('--checkpoint', required=True, help='Path to checkpoint directory')
+    parser.add_argument(
+        '--checkpoint',
+        help=(
+            'Path to an HFTrainer checkpoint directory. Required by legacy '
+            'task configs; registry-driven cfg.pipeline configs own their model paths.'
+        ),
+    )
     parser.add_argument('--prompt', help='Text prompt for generation tasks')
     parser.add_argument('--input', help='Input file path (e.g., image for classification)')
     parser.add_argument('--output', help='Output file path (e.g., image.png, video.mp4)')
@@ -50,14 +56,63 @@ def parse_args():
                         help='Number of samples for unconditional generation tasks')
     parser.add_argument('--num-frames', type=int, default=None,
                         help='Number of output frames (video tasks)')
+    parser.add_argument('--frame-rate', type=float, default=None,
+                        help='Output frame rate (video tasks)')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Generation seed')
+    parser.add_argument('--negative-prompt', default=None,
+                        help='Negative prompt for guided generation')
+    parser.add_argument('--image', action='append', default=[],
+                        help='Optional conditioning image; repeat as needed')
     parser.add_argument('--max-new-tokens', type=int, default=200,
                         help='Maximum number of new tokens for LLM generation.')
     parser.add_argument('--height', type=int, default=None, help='Output height')
     parser.add_argument('--width', type=int, default=None, help='Output width')
     parser.add_argument('--merge-lora', action='store_true',
                         help='Merge LoRA adapters into base weights before inference.')
-    parser.add_argument('--device', default='cuda', help='Device (cuda, cpu)')
+    parser.add_argument(
+        '--device',
+        default=None,
+        help=(
+            'Override cfg.model.device for registered pipelines. Legacy configs '
+            'default to cuda and fall back to cpu when CUDA is unavailable.'
+        ),
+    )
     return parser.parse_args()
+
+
+def infer_registered_pipeline(cfg, args):
+    """Run the config-declared pipeline without trainer-name dispatch."""
+    from hftrainer.pipelines.builder import build_pipeline_from_cfg
+
+    if args.device is not None:
+        cfg.merge_from_dict({'model.device': args.device})
+    pipeline = build_pipeline_from_cfg(cfg)
+    if hasattr(pipeline, 'infer_text_to_video'):
+        prompt = args.prompt or 'a cat walking in the park'
+        output = args.output or 'outputs/inference/output_video.mp4'
+        kwargs = {
+            key: value
+            for key, value in {
+                'output_path': output,
+                'images': args.image,
+                'height': args.height,
+                'width': args.width,
+                'num_frames': args.num_frames,
+                'frame_rate': args.frame_rate,
+                'seed': args.seed,
+                'num_inference_steps': args.num_steps,
+                'negative_prompt': args.negative_prompt,
+            }.items()
+            if value is not None
+        }
+        result = pipeline.infer_text_to_video(prompt, **kwargs)
+        print(f"Saved output to: {result.get('output_path', output)}")
+        return result
+    raise TypeError(
+        f"Registered pipeline {type(pipeline).__name__} does not expose a supported "
+        "task API. Implement infer_text_to_video() or use its Python API directly."
+    )
 
 
 def load_bundle_from_checkpoint(cfg, checkpoint_path: str, device: str):
@@ -95,7 +150,6 @@ def load_bundle_from_checkpoint(cfg, checkpoint_path: str, device: str):
 
 def infer_text2video(bundle, args):
     """Run WAN text-to-video inference."""
-    import torch
     from hftrainer.pipelines.text2video.wan_pipeline import WanPipeline
 
     pipeline = WanPipeline(
@@ -234,14 +288,24 @@ def infer_llm(bundle, args):
 def main():
     args = parse_args()
 
-    if args.device == 'cuda':
-        import torch
-        if not torch.cuda.is_available():
-            print('CUDA is not available, falling back to cpu.')
-            args.device = 'cpu'
-
     from mmengine.config import Config
-    cfg = Config.fromfile(args.config)
+    cfg = Config.fromfile(args.config, import_custom_modules=False)
+
+    from hftrainer.utils.setup_env import import_custom_modules
+    import_custom_modules(cfg)
+
+    # New configs declare their inference pipeline explicitly. This removes the
+    # old coupling between trainer class names and inference behavior and also
+    # supports split external artifacts such as LTX-2.5 without a synthetic
+    # HFTrainer checkpoint directory.
+    if getattr(cfg, 'pipeline', None) is not None:
+        infer_registered_pipeline(cfg, args)
+        return
+
+    if not args.checkpoint:
+        raise ValueError(
+            '--checkpoint is required for legacy configs that do not define cfg.pipeline.'
+        )
 
     # Determine task type from config
     trainer_cfg = getattr(cfg, 'trainer', {})
@@ -250,10 +314,20 @@ def main():
     trainer_type = trainer_cfg.get('type', '')
 
     # Import modules
-    import hftrainer  # noqa: trigger auto-imports
+    import hftrainer
+    hftrainer.register_all_modules()
+
+    legacy_device = args.device or 'cuda'
+    if legacy_device.startswith('cuda'):
+        import torch
+
+        if not torch.cuda.is_available():
+            print('CUDA is not available, falling back to cpu.')
+            legacy_device = 'cpu'
+    args.device = legacy_device
 
     print(f'Loading bundle from config: {args.config}')
-    bundle = load_bundle_from_checkpoint(cfg, args.checkpoint, args.device)
+    bundle = load_bundle_from_checkpoint(cfg, args.checkpoint, legacy_device)
     if args.merge_lora:
         bundle.merge_lora_weights()
         print('Merged LoRA adapters into base weights.')

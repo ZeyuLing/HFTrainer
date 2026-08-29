@@ -1,9 +1,12 @@
 # Integrating Models
 
-This page answers two practical questions:
+This page answers three practical questions:
 
 1. If `diffusers` or `transformers` already implements the model, what should you change to train it with HF-Trainer?
 2. If the model is not in `diffusers` / `transformers`, or is fully custom, what should you implement yourself?
+3. If an upstream project already owns a complete, tightly coupled training and
+   inference stack, how should HFTrainer integrate it without forking the
+   algorithm?
 
 ## The Contract
 
@@ -190,6 +193,33 @@ In that case:
 
 If you do not need those guarantees, `from_config(...)` plus checkpoint save/load is enough.
 
+## Path 3: Adapt A Complete Native Stack
+
+Use this path when an official project already couples model loading,
+preprocessing, Accelerator setup, optimizer/checkpoint logic, validation, and
+inference pipelines. Rewriting only its `train_step` inside
+`AccelerateRunner` would create a second algorithm implementation and can
+silently change checkpoint or resume semantics.
+
+The LTX-Video 2.5 integration is the reference pattern:
+
+1. A `ModelBundle` owns the split-checkpoint contract and lazily creates the
+   official inference backend; it does not register a duplicate 22B module
+   tree.
+2. A `Pipeline` translates stable HFTrainer arguments to the pinned official
+   pipeline and uses the official media encoder.
+3. A registered trainer declares `manages_training_loop=True`, validates the
+   official config schema, then delegates the entire loop to the official
+   trainer.
+4. The config uses focused `custom_imports`, so importing HFTrainer core does
+   not require the optional native stack.
+5. Package extras pin every upstream subpackage to one reviewed commit.
+
+This path should remain thin. Put stable framework concerns in HFTrainer
+(configuration, registry discovery, path/role validation, entry points, and
+clear errors), and leave model mathematics and lifecycle behavior upstream.
+See [LTX-Video 2.5](models/ltx_video_2_5.md) for a complete example.
+
 ## Design Rule
 
 Keep the public API simple:
@@ -197,3 +227,5 @@ Keep the public API simple:
 - use `from_pretrained(...)` when there is already a HuggingFace-native model artifact
 - use `from_config(...)` when the model is custom or the task is not naturally represented by one official artifact
 - do not wrap official model classes just to rename their semantics
+- when an official stack already owns the full loop, adapt and pin that loop
+  instead of partially reimplementing it

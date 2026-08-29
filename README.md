@@ -4,9 +4,11 @@
 
 # HF-Trainer
 
-**Config-driven training for HuggingFace-native models, built on `accelerate`.**
+**Config-driven training and inference for HuggingFace-native and official model stacks.**
 
-One shared task core for training and inference, native `transformers` / `diffusers` / `peft` integration, and per-module control from config.
+One shared task core for training and inference, native `transformers` /
+`diffusers` / `peft` integration, and thin pinned adapters when an upstream
+project already owns the complete algorithm lifecycle.
 
 <p>
   <a href="docs/en/index.md"><strong>Documentation</strong></a> •
@@ -50,6 +52,7 @@ It is built for a specific workflow:
 | native large-model runtime behavior | `accelerate` for DDP, FSDP, DeepSpeed, mixed precision, logging, and state save/load |
 | direct use of HuggingFace components | native `transformers`, `diffusers`, and `peft` classes without framework-specific wrapper semantics |
 | one place to implement task logic | `ModelBundle` shared by `Trainer` and `Pipeline` |
+| safe adoption of a complete upstream stack | managed trainers and lazy adapters preserve the official loop instead of forking it |
 | less framework glue for HF-native tasks | parent-level `from_config` / `from_pretrained` plus declarative bundle specs instead of per-bundle boilerplate |
 | memory-aware fine-tuning | config-driven freeze, LoRA, per-module dtype, gradient checkpointing, and accumulation |
 | reliable restart and export | `auto_resume`, model-only load, full accelerator resume, and task-native `save_pretrained(...)` |
@@ -63,16 +66,46 @@ It is built for a specific workflow:
 | Causal LM SFT | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_sft_demo.py` | verified |
 | Causal LM LoRA | `CausalLMBundle` + `CausalLMTrainer` + `CausalLMPipeline` | `configs/llm/llama_lora_demo.py` | verified |
 | Text-to-video | `WanBundle` + `WanTrainer` + `WanPipeline` | `configs/text2video/wan_demo.py` | verified |
+| LTX-2.5 distilled audio-video inference | `LTXVideoBundle` + `LTXVideoPipeline` | `configs/ltx_video/infer_ltx_video_2_5_distilled.py` | API/config contract verified; 22B GPU run not performed |
+| LTX-2.5 LoRA training + dev inference | managed `LTXVideoTrainer` + `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | API/config contract verified; 22B GPU run not performed |
 | GAN | `StyleGAN2Bundle` + `GANTrainer` + `StyleGAN2Pipeline` | `configs/gan/gan_demo.py` | verified reference |
 | DMD | `DMDBundle` + `DMDTrainer` + `DMDPipeline` | `configs/distillation/dmd_demo.py` | verified reference |
 
 `verified reference` means the training / inference path is smoke-validated and runnable, but the default project is positioned as a framework reference implementation rather than a benchmark-tuned reproduction.
+
+For LTX-2.5, “API/config contract verified” is deliberately narrower: tests
+exercise registry construction, split-checkpoint roles, managed-trainer
+dispatch, preprocessing command construction, and the pinned official Python
+API through fakes. The gated 22B weights were not allocated in the repository
+test environment, so this status does not claim model quality, throughput, or
+training convergence.
 
 ## Installation
 
 ```bash
 pip install -e .
 ```
+
+`pyproject.toml` is the sole dependency source of truth. LTX-Video remains an
+optional, source-pinned integration:
+
+```bash
+# Inference only, training only, or both
+python -m pip install -e ".[ltx-video-inference]"
+python -m pip install -e ".[ltx-video-train]"
+python -m pip install -e ".[ltx-video]"
+```
+
+The LTX extras enforce the PyTorch API floor needed by the pinned source, but
+they do **not** choose a CUDA wheel/index for your machine. For a production
+GPU runtime, prepare the pinned official LTX checkout with its `uv sync`
+workflow first, then install HFTrainer into that isolated environment. The
+step-by-step commands are in the LTX guide linked below.
+
+The LTX extras use the official
+[Lightricks/LTX-2](https://github.com/Lightricks/LTX-2) repository at commit
+`400fd31054597515f47125691032c04b1c3ee24e`, because the current trainer/API
+combination is not represented by the older PyPI package line.
 
 Prepare local demo assets:
 
@@ -106,6 +139,40 @@ Run distributed training:
 bash tools/dist_train.sh configs/text2video/wan_demo.py 8
 ```
 
+Run LTX-2.5 distilled inference after accepting the gated model terms and
+downloading its split checkpoint pack:
+
+```bash
+export LTX25_CHECKPOINT_ROOT="$PWD/checkpoints/LTX-2.5"
+
+hftrainer-ltx-infer \
+  configs/ltx_video/infer_ltx_video_2_5_distilled.py \
+  --prompt "A paper boat drifts through a rain-filled street at dusk." \
+  --output outputs/ltx_video_2_5/distilled.mp4
+```
+
+Preprocess data and launch the managed official LoRA trainer:
+
+```bash
+hftrainer-ltx-preprocess data/ltx_video_2_5/dataset.json \
+  --ltx-repo third_party/LTX-2 \
+  --resolution-buckets 960x544x49 \
+  --model-path "$LTX25_CHECKPOINT_ROOT/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors" \
+  --text-encoder-path "$LTX25_CHECKPOINT_ROOT/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors" \
+  --video-vae-path "$LTX25_CHECKPOINT_ROOT/vae/ltx-2.5-video-vae-bf16.safetensors" \
+  --audio-vae-path "$LTX25_CHECKPOINT_ROOT/vae/ltx-2.5-audio-vae-bf16.safetensors" \
+  --output-dir data/ltx_video_2_5/.precomputed
+
+export LTX25_PREPROCESSED_DATA="$PWD/data/ltx_video_2_5/.precomputed"
+hftrainer-train configs/ltx_video/train_ltx_video_2_5_lora.py
+```
+
+The preprocessing wrapper expects an official LTX-2 checkout at the same
+pinned commit. The full gated-download, license, Linux/CUDA/VRAM, distilled vs
+dev+LoRA, and inference instructions are in the
+[LTX-Video 2.5 guide](docs/en/models/ltx_video_2_5.md) and the
+[中文指南](docs/zh-cn/models/ltx_video_2_5.md).
+
 Run the startup smoke suite:
 
 ```bash
@@ -119,11 +186,19 @@ The smoke suite uses reduced temporary configs to verify that each task stack ca
 HF-Trainer keeps the framework surface small:
 
 - `AccelerateRunner` builds the full runtime from one config and owns the loop
+- `build_runner_from_cfg` selects either `AccelerateRunner` or a registered
+  managed trainer whose official upstream stack owns the complete loop
 - `ModelBundle` holds task sub-modules and shared atomic forward functions
 - `Trainer` assembles training-time control flow and optimization
 - `Pipeline` assembles inference-time control flow without duplicating task internals
 
 This is the main reason the project exists: training and inference stay aligned without forcing users into a non-HuggingFace inference API.
+
+Imports are lightweight by default. `import hftrainer` creates the registries
+without importing every model library; call `hftrainer.register_all_modules()`
+for the built-in catalogue, or use config-level `custom_imports` to register
+only one vertical slice. Optional LTX packages are imported only when an LTX
+backend is constructed.
 
 ## Memory Control From Config
 
@@ -147,18 +222,21 @@ See:
 
 ## Integration Paths
 
-HF-Trainer exposes two clear ways to adopt the framework:
+HF-Trainer exposes three clear ways to adopt the framework:
 
 | Starting point | What you implement | What stays HuggingFace-native |
 | --- | --- | --- |
 | an existing `transformers` / `diffusers` model | a task bundle plus task training logic | `from_pretrained`, official component classes, tokenizer / processor, and exported inference artifact |
 | a custom or self-developed model | your own `nn.Module` plus a task bundle | config-driven construction, checkpointing, hooks, runner, and optional custom `save_pretrained` |
+| a complete official algorithm stack | a thin bundle/pipeline adapter and, when needed, a managed trainer | upstream model math, preprocessing, optimizer, checkpoint, validation, and resume semantics |
 
 Rule of thumb:
 
 - if HuggingFace already has the model class, keep the official class inside the bundle and only add training wiring
 - if HuggingFace already has the artifact layout, declare `HF_PRETRAINED_SPEC` / `HF_SAVE_PRETRAINED_SPEC` on the bundle instead of hand-writing loader/export methods
 - if HuggingFace does not have the model class, use `ModelBundle.from_config(...)` and add custom `from_pretrained/save_pretrained` logic only when you need a stable exported artifact
+- if upstream already owns a tightly coupled loop, pin and delegate to it
+  instead of partially copying the algorithm into `AccelerateRunner`
 
 ## Documentation
 
@@ -167,6 +245,7 @@ Rule of thumb:
 | Docs Home | [Home](docs/en/index.md) | [首页](docs/zh-cn/index.md) |
 | Installation | [Installation](docs/en/installation.md) | [安装说明](docs/zh-cn/installation.md) |
 | Quick Start | [Quick Start](docs/en/quickstart.md) | [快速开始](docs/zh-cn/quickstart.md) |
+| LTX-Video 2.5 | [LTX-Video 2.5](docs/en/models/ltx_video_2_5.md) | [LTX-Video 2.5](docs/zh-cn/models/ltx_video_2_5.md) |
 | Integration Guide | [Integration](docs/en/integration.md) | [模型接入](docs/zh-cn/integration.md) |
 | API Reference | [API Reference](docs/en/api_reference.md) | [API 参考](docs/zh-cn/api_reference.md) |
 | Memory and Precision | [Memory](docs/en/memory.md) | [显存与精度](docs/zh-cn/memory.md) |
@@ -182,11 +261,12 @@ Rule of thumb:
 
 The public API reference covers the user-facing framework surface:
 
-- runner: `AccelerateRunner`
+- runner: `AccelerateRunner` and managed-trainer dispatch
 - model core: `ModelBundle`
 - training / inference base classes: `BaseTrainer`, `BasePipeline`
 - runtime helpers: hooks, evaluators, visualizers, checkpoint utils
-- CLI entry points: `tools/train.py`, `tools/infer.py`
+- CLI entry points: `hftrainer-train`, `hftrainer-infer`,
+  `hftrainer-ltx-infer`, and `hftrainer-ltx-preprocess`
 
 Start here:
 
@@ -219,6 +299,10 @@ hftrainer/datasets/<task_name>/
   ...
 ```
 
+Each runnable config declares focused `custom_imports`; this keeps optional
+vertical slices such as `models/ltx_video`, `pipelines/ltx_video`, and
+`trainers/ltx_video` out of the core import path.
+
 Datasets follow an MMEngine-style split:
 
 ```text
@@ -232,10 +316,15 @@ collate_fn                -> batch assembly
 - `docs/en/` and `docs/zh-cn/` are the source-of-truth public docs
 - root-level `docs/*.md` pages are compatibility entry pages
 - the GAN and DMD stacks are runnable framework references, not benchmark-tuned reproductions out of the box
+- LTX-2.5 is pinned to one official source revision and contract-tested; full
+  22B GPU inference/training still requires gated weights and a suitable Linux
+  CUDA environment
 
 ## Acknowledgements
 
-HF-Trainer is heavily inspired by two ecosystems:
+HF-Trainer is built around three complementary ecosystems:
 
 - MMEngine for config-driven experiment construction and registry ergonomics
 - HuggingFace for model classes, inference artifacts, and runtime interoperability
+- Lightricks for the native LTX-2.5 model, pipeline, and training stack used by
+  the optional adapter

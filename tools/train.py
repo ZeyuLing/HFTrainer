@@ -15,6 +15,30 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def _bind_local_cuda_device():
+    """Bind each distributed worker to its local GPU before model creation."""
+    local_rank = os.environ.get('LOCAL_RANK')
+    if local_rank is None:
+        return
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            device_count = torch.cuda.device_count()
+            if device_count > 0:
+                torch.cuda.set_device(int(local_rank) % device_count)
+    except Exception as exc:
+        print(
+            f"Warning: failed to bind CUDA device for LOCAL_RANK={local_rank}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+_bind_local_cuda_device()
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a model with hftrainer')
     parser.add_argument('config', help='Path to config file (.py)')
@@ -36,15 +60,44 @@ def parse_args():
     return parser.parse_args()
 
 
+def _load_and_register_config(config_path, cfg_options=None):
+    """Load overrides before importing the config-selected vertical slice."""
+    from mmengine.config import Config
+
+    from hftrainer.utils.setup_env import import_custom_modules
+
+    # MMEngine otherwise imports ``custom_imports`` while parsing, before CLI
+    # overrides can replace them.
+    cfg = Config.fromfile(config_path, import_custom_modules=False)
+    if cfg_options:
+        cfg.merge_from_dict(_parse_cfg_options(cfg_options))
+    import_custom_modules(cfg)
+
+    # Focused configs register their own vertical slice. Fall back to the full
+    # built-in catalogue only for legacy configs whose trainer is still
+    # unresolved; this keeps managed native stacks such as LTX isolated from
+    # unrelated Transformers/Diffusers imports.
+    from hftrainer.registry import TRAINERS
+
+    trainer_cfg = getattr(cfg, 'trainer', {})
+    if hasattr(trainer_cfg, 'to_dict'):
+        trainer_cfg = trainer_cfg.to_dict()
+    trainer_type = trainer_cfg.get('type') if isinstance(trainer_cfg, dict) else None
+    if isinstance(trainer_type, str) and TRAINERS.get(trainer_type) is None:
+        import hftrainer
+
+        hftrainer.register_all_modules()
+    return cfg
+
+
 def main():
     args = parse_args()
 
     if args.local_rank is not None and 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
+        _bind_local_cuda_device()
 
-    # Load config
-    from mmengine.config import Config
-    cfg = Config.fromfile(args.config)
+    cfg = _load_and_register_config(args.config, args.cfg_options)
 
     # Apply CLI overrides
     if args.work_dir:
@@ -53,9 +106,6 @@ def main():
         cfg.auto_resume = True
     if args.load_from:
         cfg.load_from = dict(path=args.load_from, load_scope=args.load_scope)
-    if args.cfg_options:
-        cfg.merge_from_dict(_parse_cfg_options(args.cfg_options))
-
     # Set default work_dir if not specified
     if not getattr(cfg, 'work_dir', None):
         cfg.work_dir = os.path.join(
@@ -70,9 +120,13 @@ def main():
     logger.info(f"Work dir: {cfg.work_dir}")
 
     # Build runner and train
-    from hftrainer import AccelerateRunner
-    runner = AccelerateRunner.from_cfg(cfg)
-    runner.train()
+    from hftrainer.runner.builder import build_runner_from_cfg
+    try:
+        runner = build_runner_from_cfg(cfg)
+        runner.train()
+    except Exception:
+        logger.exception("Training failed with exception:")
+        raise
 
 
 def _parse_cfg_options(options):

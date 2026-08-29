@@ -6,6 +6,7 @@ HF-Trainer 是一个面向 HuggingFace 生态的配置驱动训练框架。当�
 
 - [安装说明](installation.md)
 - [快速开始](quickstart.md)
+- [LTX-Video 2.5](models/ltx_video_2_5.md)
 - [模型接入](integration.md)
 - [API 参考](api_reference.md)
 - [显存与精度](memory.md)
@@ -37,3 +38,7 @@ HF-Trainer 是一个面向 HuggingFace 生态的配置驱动训练框架。当�
 - 文生视频
 - StyleGAN2 风格 GAN 训练
 - DMD 风格蒸馏
+- LTX-Video 2.5 蒸馏/Dev 推理与 managed LoRA 训练适配器
+
+LTX 接口已针对固定官方源码版本完成合约测试；仓库 CI/测试环境没有执行 gated
+22B 权重。

@@ -1,8 +1,9 @@
-# Tasks
+# Task-matrix compatibility page
 
-Choose a language:
+Canonical documentation is maintained by language:
 
-- [English](en/tasks.md)
-- [简体中文](zh-cn/tasks.md)
+- [English task matrix](en/tasks.md)
+- [简体中文任务矩阵](zh-cn/tasks.md)
 
-The maintained task matrix lives in the language-specific pages above. This root page is kept only as a compatibility landing page.
+Validation status is documented separately from feature availability so a
+lightweight API-contract test is not confused with a full-checkpoint GPU run.

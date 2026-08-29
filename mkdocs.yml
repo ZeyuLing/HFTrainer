@@ -1,6 +1,8 @@
 site_name: HF-Trainer
 site_description: A unified, config-driven training framework built on the HuggingFace ecosystem
-repo_url: https://github.com/your-org/hf-trainer
+repo_url: https://github.com/ZeyuLing/HFTrainer
+repo_name: ZeyuLing/HFTrainer
+docs_dir: docs/en
 
 theme:
   name: material
@@ -19,6 +21,12 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quick Start: quickstart.md
+  - Integration: integration.md
+  - API Reference: api_reference.md
+  - Memory and Precision: memory.md
+  - LoRA: lora.md
+  - Models:
+    - LTX-Video 2.5: models/ltx_video_2_5.md
   - Distributed Training: distributed.md
   - Experiment Directory: experiment_dir.md
   - Architecture: architecture.md
@@ -28,6 +36,7 @@ nav:
     - Overview: design/index.md
     - ModelBundle: design/model_bundle.md
     - Checkpoint: design/checkpoint.md
+    - Hooks: design/hooks.md
     - Multi-Optimizer: design/multi_optimizer.md
     - Dataset: design/dataset.md
     - Evaluation: design/evaluation.md

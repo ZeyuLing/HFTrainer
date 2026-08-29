@@ -1,9 +1,11 @@
 # 模型接入
 
-这一页回答两个直接的问题：
+这一页回答三个直接的问题：
 
 1. 如果 `diffusers` 或 `transformers` 已经实现了某个模型，我们应该怎么改造成 HF-Trainer 的训练实现？
 2. 如果 `diffusers` / `transformers` 还没有这个模型，或者这是用户自研模型，我们应该怎么接入？
+3. 如果上游项目已经完整持有耦合紧密的训练与推理栈，HFTrainer 应如何接入而不
+   fork 算法实现？
 
 ## 统一约定
 
@@ -190,6 +192,29 @@ bundle = MyCustomBundle.from_config(
 
 如果不需要这些保证，只用 `from_config(...)` 加 checkpoint save/load 就够了。
 
+## 路径 3：适配完整的原生算法栈
+
+当官方项目已经把模型加载、数据预处理、Accelerator、optimizer/checkpoint、
+validation 和推理 pipeline 绑定成一个整体时走这条路径。只把它的
+`train_step` 重写进 `AccelerateRunner` 会形成第二套算法实现，并可能悄悄改变
+checkpoint 或 resume 语义。
+
+LTX-Video 2.5 是这一模式的参考实现：
+
+1. `ModelBundle` 持有分体权重合约，并延迟创建官方推理 backend；它不会重复注册
+   一套 22B module tree。
+2. `Pipeline` 把稳定的 HFTrainer 参数映射到固定版本的官方 pipeline，并调用官方
+   media encoder。
+3. 注册 trainer 声明 `manages_training_loop=True`，校验官方 config schema 后把
+   完整 loop 委托给官方 trainer。
+4. config 使用精确的 `custom_imports`，因此导入 HFTrainer 核心不要求安装可选
+   原生栈。
+5. package extra 把所有上游子包固定到同一个已审查 commit。
+
+这类适配应保持轻薄：HFTrainer 只负责稳定的框架关注点（配置、registry discovery、
+路径/角色校验、命令入口与清晰错误），模型数学与生命周期仍交给上游。完整示例见
+[LTX-Video 2.5](models/ltx_video_2_5.md)。
+
 ## 设计原则
 
 保持 public API 简单：
@@ -197,3 +222,4 @@ bundle = MyCustomBundle.from_config(
 - 已有 HuggingFace artifact 的任务，用 `from_pretrained(...)`
 - 自定义模型或不适合映射到单一官方 artifact 的任务，用 `from_config(...)`
 - 不要为了统一表面形式，再包一层改变官方类的语义
+- 官方栈已经完整拥有训练 loop 时，应固定并适配该 loop，而不是局部重写

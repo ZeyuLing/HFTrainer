@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+site/
 work_dirs/
 data/
 checkpoints/

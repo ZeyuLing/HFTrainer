@@ -1,159 +1,91 @@
-"""
-hftrainer full package init.
-Imports all sub-modules to trigger registry registrations.
+"""HFTrainer's lightweight public API.
+
+Importing :mod:`hftrainer` only creates the framework registries. Components
+that pull in PyTorch or Accelerate are loaded when their public attributes are
+first accessed, while concrete models, trainers, datasets, and pipelines are
+registered explicitly through :func:`register_all_modules` or a config's
+``custom_imports`` entry.
 """
 
-# Core infrastructure
+from importlib import import_module
+
 from hftrainer.registry import (
-    HF_MODELS, MODELS, MODEL_BUNDLES, TRAINERS, PIPELINES,
-    DATASETS, TRANSFORMS, HOOKS, EVALUATORS, VISUALIZERS,
+    DATASETS,
+    EVALUATORS,
+    HF_MODELS,
+    HOOKS,
+    MODEL_BUNDLES,
+    MODELS,
+    PIPELINES,
+    TRAINERS,
+    TRANSFORMS,
+    VISUALIZERS,
     build_hf_model_from_cfg,
 )
-from hftrainer.models.base_model_bundle import ModelBundle
-from hftrainer.trainers.base_trainer import BaseTrainer
-from hftrainer.runner.accelerate_runner import AccelerateRunner
-
-# ── Register HF model classes in HF_MODELS registry ──
-# (These are loaded on-demand via _import_hf_class, but explicit registration
-#  allows configs to reference them by name)
-def _register_hf_classes():
-    """Register common HF classes so they're available in HF_MODELS registry."""
-    _classes_to_register = []
-
-    # transformers
-    try:
-        from transformers import (
-            ViTForImageClassification,
-            CLIPTextModel,
-            CLIPTokenizer,
-            AutoModelForCausalLM,
-            AutoTokenizer,
-            UMT5EncoderModel,
-            T5EncoderModel,
-        )
-        _classes_to_register.extend([
-            ('ViTForImageClassification', ViTForImageClassification),
-            ('CLIPTextModel', CLIPTextModel),
-            ('AutoModelForCausalLM', AutoModelForCausalLM),
-            ('UMT5EncoderModel', UMT5EncoderModel),
-            ('T5EncoderModel', T5EncoderModel),
-        ])
-    except ImportError:
-        pass
-
-    # diffusers
-    try:
-        from diffusers import (
-            AutoencoderKL,
-            UNet2DConditionModel,
-            DDPMScheduler,
-            DDIMScheduler,
-            PNDMScheduler,
-            FlowMatchEulerDiscreteScheduler,
-        )
-        _classes_to_register.extend([
-            ('AutoencoderKL', AutoencoderKL),
-            ('UNet2DConditionModel', UNet2DConditionModel),
-            ('DDPMScheduler', DDPMScheduler),
-            ('DDIMScheduler', DDIMScheduler),
-            ('PNDMScheduler', PNDMScheduler),
-            ('FlowMatchEulerDiscreteScheduler', FlowMatchEulerDiscreteScheduler),
-        ])
-    except ImportError:
-        pass
-
-    # WAN-specific
-    try:
-        from diffusers import AutoencoderKLWan, WanTransformer3DModel
-        _classes_to_register.extend([
-            ('AutoencoderKLWan', AutoencoderKLWan),
-            ('WanTransformer3DModel', WanTransformer3DModel),
-        ])
-    except ImportError:
-        pass
-
-    for name, cls in _classes_to_register:
-        if not HF_MODELS.get(name):
-            HF_MODELS.register_module(name=name, module=cls)
 
 
-_register_hf_classes()
-
-# ── Import task-specific modules to trigger @register_module decorators ──
-def _import_task_modules():
-    import importlib, warnings
-
-    modules_to_import = [
-        # Hooks
-        'hftrainer.hooks.checkpoint_hook',
-        'hftrainer.hooks.logger_hook',
-        'hftrainer.hooks.ema_hook',
-        'hftrainer.hooks.lr_scheduler_hook',
-        # Evaluation
-        'hftrainer.evaluation.classification.accuracy_evaluator',
-        # Visualization
-        'hftrainer.visualization.tensorboard_visualizer',
-        'hftrainer.visualization.file_visualizer',
-        # Generic dataset transforms
-        'hftrainer.datasets.transforms',
-        # ViT
-        'hftrainer.models.vit.bundle',
-        'hftrainer.trainers.classification.classification_trainer',
-        'hftrainer.pipelines.classification.classification_pipeline',
-        'hftrainer.datasets.classification.hf_image_classification_dataset',
-        'hftrainer.datasets.classification.imagefolder_dataset',
-    ]
-
-    # Conditionally import task modules (may not all exist yet)
-    optional_modules = [
-        'hftrainer.models.sd15.bundle',
-        'hftrainer.trainers.text2image.sd15_trainer',
-        'hftrainer.pipelines.text2image.sd15_pipeline',
-        'hftrainer.pipelines.text2image.dmd_pipeline',
-        'hftrainer.datasets.text2image.hf_imagefolder_dataset',
-        'hftrainer.models.causal_lm.bundle',
-        'hftrainer.trainers.llm.causal_lm_trainer',
-        'hftrainer.pipelines.llm.causal_lm_pipeline',
-        'hftrainer.datasets.llm.alpaca_dataset',
-        'hftrainer.evaluation.llm.perplexity_evaluator',
-        'hftrainer.models.wan.bundle',
-        'hftrainer.trainers.text2video.wan_trainer',
-        'hftrainer.pipelines.text2video.wan_pipeline',
-        'hftrainer.datasets.text2video.hf_video_dataset',
-        # StyleGAN2
-        'hftrainer.models.stylegan2.model',
-        'hftrainer.models.stylegan2.bundle',
-        'hftrainer.trainers.gan.gan_trainer',
-        'hftrainer.pipelines.gan.stylegan2_pipeline',
-        'hftrainer.datasets.gan.image_folder_gan_dataset',
-        # DMD
-        'hftrainer.models.dmd.bundle',
-        'hftrainer.trainers.distillation.dmd_trainer',
-        'hftrainer.datasets.distillation.dmd_image_pair_dataset',
-    ]
-
-    for mod_name in modules_to_import:
-        try:
-            importlib.import_module(mod_name)
-        except ImportError as e:
-            warnings.warn(f"Could not import {mod_name}: {e}")
-
-    for mod_name in optional_modules:
-        try:
-            importlib.import_module(mod_name)
-        except (ImportError, ModuleNotFoundError):
-            pass
+_LAZY_IMPORTS = {
+    'AccelerateRunner': ('hftrainer.runner.accelerate_runner', 'AccelerateRunner'),
+    'BasePipeline': ('hftrainer.pipelines.base_pipeline', 'BasePipeline'),
+    'BaseTrainer': ('hftrainer.trainers.base_trainer', 'BaseTrainer'),
+    'ModelBundle': ('hftrainer.models.base_model_bundle', 'ModelBundle'),
+    'build_pipeline_from_cfg': (
+        'hftrainer.pipelines.builder',
+        'build_pipeline_from_cfg',
+    ),
+    'build_runner_from_cfg': ('hftrainer.runner.builder', 'build_runner_from_cfg'),
+}
 
 
-_import_task_modules()
+def __getattr__(name):
+    """Load compatibility exports without making the package import heavy."""
+    target = _LAZY_IMPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name), attribute_name)
+    # Cache the resolved object so subsequent accesses have normal module
+    # attribute semantics and do not repeat import-system work.
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_IMPORTS))
+
+
+def register_all_modules() -> None:
+    """Register framework components and the built-in method implementations.
+
+    The operation is idempotent. Applications that only need one custom
+    method can instead import that method from ``custom_imports`` and avoid
+    loading the complete built-in catalogue.
+    """
+    from hftrainer.utils.setup_env import register_all_modules as _register
+
+    _register()
+
 
 __version__ = '0.1.0'
 
 __all__ = [
-    'HF_MODELS', 'MODELS', 'MODEL_BUNDLES', 'TRAINERS', 'PIPELINES',
-    'DATASETS', 'TRANSFORMS', 'HOOKS', 'EVALUATORS', 'VISUALIZERS',
+    'HF_MODELS',
+    'MODELS',
+    'MODEL_BUNDLES',
+    'TRAINERS',
+    'PIPELINES',
+    'DATASETS',
+    'TRANSFORMS',
+    'HOOKS',
+    'EVALUATORS',
+    'VISUALIZERS',
     'build_hf_model_from_cfg',
     'ModelBundle',
+    'BasePipeline',
     'BaseTrainer',
     'AccelerateRunner',
+    'build_pipeline_from_cfg',
+    'build_runner_from_cfg',
+    'register_all_modules',
 ]
