@@ -399,3 +399,20 @@ assert not any(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_managed_trainer_uses_bundle_paths_and_component_store():
+    from hftrainer.models.ltx_video import LTXVideoBundle
+    bundle = LTXVideoBundle(
+        transformer_path=DEV_TRANSFORMER, text_encoder_path=TEXT_ENCODER,
+        video_vae_path=VIDEO_VAE, audio_vae_path=AUDIO_VAE,
+        spatial_upsampler_path='weights/upscaler.safetensors',
+        distilled_lora_path='weights/distilled-lora.safetensors',
+        mode='dev_two_stage', validate_paths=False,
+    )
+    native = native_training_config()
+    native['model']['model_path'] = 'stale/checkpoint.safetensors'
+    trainer = LTXVideoTrainer(native_config=native, bundle=bundle, require_files=False,
+                              require_cuda=False, require_linux=False)
+    assert trainer.components is bundle.components
+    assert trainer.resolve_config()['model']['model_path'] == DEV_TRANSFORMER

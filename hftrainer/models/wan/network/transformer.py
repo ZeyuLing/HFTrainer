@@ -25,11 +25,12 @@ class WanRMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim)) if elementwise_affine else None
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        input_dtype = hidden_states.dtype
         variance = hidden_states.float().square().mean(dim=-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
         if self.weight is not None:
             hidden_states = hidden_states * self.weight
-        return hidden_states
+        return hidden_states.to(input_dtype)
 
 
 def _rotate_half(hidden_states: torch.Tensor) -> torch.Tensor:
@@ -259,6 +260,14 @@ class WanTimeTextConditioning(nn.Module):
         )
 
 
+class WanFP32LayerNorm(nn.LayerNorm):
+    def forward(self, hidden_states):
+        return F.layer_norm(hidden_states.float(), self.normalized_shape,
+                            self.weight.float() if self.weight is not None else None,
+                            self.bias.float() if self.bias is not None else None,
+                            self.eps).to(hidden_states.dtype)
+
+
 class WanTransformerBlock(nn.Module):
     def __init__(
         self,
@@ -271,7 +280,7 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool,
     ):
         super().__init__()
-        self.norm1 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.norm1 = WanFP32LayerNorm(dim, eps=eps, elementwise_affine=False)
         self.attn1 = WanAttention(
             dim,
             heads=num_attention_heads,
@@ -280,7 +289,7 @@ class WanTransformerBlock(nn.Module):
             qk_norm=qk_norm,
         )
         self.norm2 = (
-            nn.LayerNorm(dim, eps=eps, elementwise_affine=True)
+            WanFP32LayerNorm(dim, eps=eps, elementwise_affine=True)
             if cross_attn_norm
             else nn.Identity()
         )
@@ -292,7 +301,7 @@ class WanTransformerBlock(nn.Module):
             eps=eps,
             qk_norm=qk_norm,
         )
-        self.norm3 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.norm3 = WanFP32LayerNorm(dim, eps=eps, elementwise_affine=False)
         self.ffn = WanFeedForward(dim, ffn_dim)
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 

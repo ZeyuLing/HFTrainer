@@ -53,10 +53,7 @@ def build_pipeline_from_cfg(
         model_data['device'] = device
     bundle = MODEL_BUNDLES.build(model_data)
     if checkpoint_path is not None:
-        from hftrainer.utils.checkpoint_utils import load_checkpoint
-
-        state = load_checkpoint(checkpoint_path, map_location='cpu')
-        bundle.load_state_dict_selective(state, strict=strict_checkpoint)
+        bundle.load_training_checkpoint(checkpoint_path, strict=strict_checkpoint)
     if merge_lora:
         bundle.merge_lora_weights()
     if device is not None:

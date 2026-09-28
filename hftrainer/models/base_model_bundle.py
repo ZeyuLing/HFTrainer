@@ -250,6 +250,9 @@ class ModelBundle(nn.Module):
                 return MODEL_BUNDLES.build(cfg_dict)
             cfg_dict.pop('type')
 
+        if 'from_pretrained' in cfg_dict:
+            from hftrainer.registry import MODEL_BUNDLES
+            return MODEL_BUNDLES.build(dict(cfg_dict, type=cls))
         return cls(**cfg_dict)
 
     @classmethod
@@ -296,6 +299,12 @@ class ModelBundle(nn.Module):
         )
         bundle_cfg = cls._merge_nested_dict(bundle_cfg, config_overrides)
         return cls.from_config(bundle_cfg)
+
+    def load_training_checkpoint(self, checkpoint_path: str, *, strict: bool = True):
+        """Restore a training artifact at the shared bundle boundary."""
+        from hftrainer.utils.checkpoint_utils import load_checkpoint
+        state = load_checkpoint(checkpoint_path, map_location='cpu')
+        return self.load_state_dict_selective(state, strict=strict)
 
     def save_pretrained(self, save_directory: str, **kwargs):
         raise NotImplementedError(

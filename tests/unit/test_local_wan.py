@@ -31,7 +31,6 @@ def _tiny_bundle_config():
             "base_dim": 8,
             "z_dim": 4,
             "num_res_blocks": 1,
-            "norm_num_groups": 4,
             "latents_mean": [0.0] * 4,
             "latents_std": [1.0] * 4,
             "trainable": False,

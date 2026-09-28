@@ -1,8 +1,8 @@
 # Wan local implementation: provenance and compatibility scope
 
 The code in this directory is a repository-owned PyTorch implementation. It is
-not presented as an original invention, an official Wan release, or a verbatim
-copy of another project.
+not presented as an original invention or an official Wan release. Modified
+upstream source retains its original attribution and license.
 
 Its architecture and public configuration/API contracts were informed by:
 
@@ -12,8 +12,9 @@ Its architecture and public configuration/API contracts were informed by:
   scheduler APIs.
 
 Those upstream projects publish relevant implementation work under Apache-2.0
-licenses. This directory contains a compact adaptation written for HFTrainer's
-local bundle contract. It uses familiar state-dictionary names where practical
+licenses. The complete causal VAE is adapted from pinned Diffusers source;
+see UPSTREAM.md and LICENSE.apache-2.0. Other components retain the local
+bundle contract. It uses compatible state-dictionary names
 to make checkpoint conversion auditable, but it is not bit-for-bit equivalent
 to every upstream release. Foreign checkpoints are shape-checked and produce a
 coverage report; low-coverage loads fail unless the caller explicitly opts into

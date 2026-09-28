@@ -45,3 +45,20 @@ Apache-2.0 Transformers implementation at commit
 `a08ace4bbd97e721c98751deec37d87b026acadc`. It does not require that package
 at runtime. Copyright and license details for the reference project are at
 https://github.com/huggingface/transformers/blob/a08ace4bbd97e721c98751deec37d87b026acadc/LICENSE
+
+## Wan 2.1
+
+The checkpoint-compatible Wan VAE incorporates modified Apache-2.0 source from
+Hugging Face Diffusers and the Wan team. See
+[hftrainer/models/wan/UPSTREAM.md](hftrainer/models/wan/UPSTREAM.md) and its
+[Apache-2.0 license](hftrainer/models/wan/LICENSE.apache-2.0).
+
+## StyleGAN2-ADA
+
+The real-checkpoint graph and reference operators under
+`hftrainer/models/stylegan2/network/ada` are modified NVIDIA StyleGAN2-ADA
+source. They are subject to the **NVIDIA Source Code License**, including its
+non-commercial research/evaluation restriction. The repository's general
+license does not replace those terms. See the
+[license](hftrainer/models/stylegan2/LICENSE.nvidia) and
+[provenance](hftrainer/models/stylegan2/UPSTREAM.md).

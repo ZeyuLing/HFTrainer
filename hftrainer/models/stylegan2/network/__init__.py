@@ -6,3 +6,5 @@ from hftrainer.models.stylegan2.network.model import (
 )
 
 __all__ = ['StyleGAN2Discriminator', 'StyleGAN2Generator']
+
+from .ada_adapter import StyleGAN2ADAGenerator, StyleGAN2ADADiscriminator

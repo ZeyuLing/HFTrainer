@@ -6,7 +6,7 @@ Instruction fine-tuning and text generation with local tokenization, KV caching 
 
 **Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
 
-[All models](index.md) · [Setup](#setup) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
 
 ## At a glance
 
@@ -18,13 +18,34 @@ Instruction fine-tuning and text generation with local tokenization, KV caching 
 
 ## Setup
 
-Run commands from the repository root. Prepare the listed weights and data first; a command is not a self-contained download or a claim of convergence.
+Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
 
 ```bash
 python -m pip install -e .
+python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-Place the compatible checkpoint and tokenizer/config assets at `checkpoints/TinyLlama-1.1B-Chat-v1.0`. Weights are not bundled.
+Download the complete HFTrainer bundle below. Model weights are hosted separately from the code.
+
+## Checkpoint
+
+[ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat/tree/b23a22f572ca8d25e3d10411e90932826b9875f1)
+
+This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
+
+```bash
+hf download ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat \
+  --revision b23a22f572ca8d25e3d10411e90932826b9875f1 \
+  --local-dir checkpoints/hftrainer/llama
+export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/llama"
+```
+
+[Conversion and validation record](evidence/checkpoints/llama.json). Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
+
+```bash
+python tools/export_model.py --config configs/pretrained/train_llama.py \
+  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/llama_export
+```
 
 ## Data
 
@@ -33,22 +54,25 @@ Ten instruction/input/output records at `data/llm/demo/alpaca_sample.json`. A fu
 ## Train
 
 ```bash
-python tools/train.py configs/llama/llama_lora_demo.py
+python tools/train.py configs/pretrained/train_llama.py
 ```
 
 ## Infer
 
-After training, use the saved checkpoint (adjust the step to a checkpoint that exists):
+Run the published pretrained model:
 
 ```bash
-python tools/infer.py --config configs/llama/llama_lora_demo.py \
-  --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
-  --merge-lora --prompt "Name one primary color."
+python tools/infer.py --config configs/pretrained/infer_llama.py --device cuda \
+  --prompt "The capital of France is" --max-new-tokens 32
 ```
+
+For fine-tuned weights, pass `--checkpoint` with the training output and a matching training model config (including LoRA settings or a changed classification head).
 
 ## Evidence and loss
 
-Tiny forward, loss, backward, generation, reference-logit and sharded-artifact checks.
+Full pretrained export/reload produced identical logits. Real TinyLlama tokenizer encodings and decodings match the reference for Unicode, whitespace and special-token cases. Tiny numerical and sharded-artifact checks also pass.
+
+The new pretrained training entry point completed one optimizer step and saved a checkpoint on an H200. These synthetic execution checks are recorded with the checkpoint evidence; they do not establish useful fine-tuning.
 
 **Loss curve: not published.** No sustained-decrease or convergence result is claimed.
 

@@ -1,0 +1,31 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-DMD2-SD15-Initialization",
+  "revision": "f3f9cbe23e677f9b555039b7ff0aa1b0c7e8d20d",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "export_reload_exact": true,
+    "source_checkpoint": "model/sdv1.5/laion6.25_sd_baseline_8node_guidance1.75_lr1e-5_seed10_dfake10_from_scratch_fid9.28_checkpoint_model_039000/pytorch_model.bin",
+    "source_method": "DMD2 SD1.5 non-GAN checkpoint; usable as DMD initialization, not an original DMD paper reproduction",
+    "all_three_unets_strictly_loaded": true
+  },
+  "distribution_verification": "Fresh complete snapshot downloaded; SHA256 matched every exported file",
+  "gated": false,
+  "training_entrypoint_check": {
+    "optimizer_step_completed": true,
+    "checkpoint_saved": true,
+    "changed_pretrained_parameters": {
+      "generator_unet": [
+        "conv_in.weight",
+        "time_embedding.linear_1.weight"
+      ],
+      "fake_score_unet": [
+        "conv_in.weight",
+        "time_embedding.linear_1.weight"
+      ]
+    },
+    "data": "Four generated colored-square captioned images; 64x64 execution check",
+    "loss_dm": 0.3308,
+    "loss_reg": 0.7447,
+    "loss_fake_score": 0.549
+  }
+}

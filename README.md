@@ -55,8 +55,8 @@ not only documented as a convention.
 | [LLaMA causal LM](docs/en/models/llama.md) | full + LoRA | yes | LLaMA, KV cache, generation, BPE/WordPiece/Unigram tokenizer | tiny forward/loss/backward/generation; reference logits aligned; sharded artifact support |
 | [Stable Diffusion 1.5](docs/en/models/sd15.md) | yes | yes | CLIP, byte-BPE tokenizer, VAE, conditional UNet, DDPM/DDIM/PNDM | checkpoint schema aligned; tiny numerical parity and train/infer round-trip |
 | [DMD](docs/en/models/dmd.md) | yes | one-step | reuses the local SD1.5 core | distribution matching, fake-score and teacher paths tested |
-| [StyleGAN2](docs/en/models/stylegan2.md) | yes | yes | generator and discriminator | tiny adversarial path and artifact round-trip |
-| [Wan T2V](docs/en/models/wan.md) | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | local tiny train/denoise/artifact tests; see compatibility note below |
+| [StyleGAN2](docs/en/models/stylegan2.md) | yes | yes | generator and discriminator | official FFHQ 1024 output and native reload match exactly |
+| [Wan T2V](docs/en/models/wan.md) | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | full pretrained component export/reload and tiny reference checks |
 | [LTX-Video 2.5](docs/en/models/ltx_video_2_5.md) | LoRA | distilled and dev+LoRA | pinned source reorganized into local model/trainer/pipeline layers; local Gemma text runtime and LoRA | H200 full dev generation, official sample parity, LoRA train/resume/infer and 20-step demo loss measured |
 | [MiniMax-H3 Base 768p](docs/en/models/minimax_h3.md) | experimental full/LoRA | T2VA, FL2VA, Ref2VA synchronized A/V | 50-layer Omni Transformer, Qwen3-VL-32B conditioner, visual/audio VAEs, processor and dual flow schedulers | H200 sequential full T2VA, exact official denoising latents, LoRA train/resume/infer and 20-step demo loss measured |
 
@@ -64,11 +64,13 @@ not only documented as a convention.
 reference packages are not installed as product dependencies and are not
 imported by HFTrainer at runtime.
 
-Wan currently validates the framework-owned T2V contract and common checkpoint
-names, but it does not claim bitwise compatibility with every historical Wan
-release. Low checkpoint coverage is rejected instead of silently leaving most
-weights randomly initialized. Its current compact VAE may require explicit
-conversion for some full upstream artifacts.
+Wan now uses the complete causal VAE and UMT5 component graph for the published
+Wan 2.1 T2V 1.3B checkpoint. Full-weight component outputs match after native
+export/reload; tiny numerical checks compare against pinned references. This
+does not establish full-resolution video quality or compatibility with every
+Wan release. StyleGAN2 additionally includes the native NVIDIA ADA graph and
+pretrained FFHQ 1024 generator/discriminator; the original compact demo remains
+available separately.
 
 LTX-2.5 is large and gated. Full dev-model GPU execution and independent official
 sample parity were verified on 2026-09-28; short demo runs do not establish
@@ -111,19 +113,25 @@ runtime and a suitable Linux/CUDA environment for the real 22B workflow.
 
 ## Quick Start
 
+Install the download CLI with `python -m pip install "huggingface_hub>=0.34,<2"`.
+Prepare the data described in each model card before training. These commands
+download the processed base checkpoints; dataset preparation is separate.
+
 Train ViT:
 
 ```bash
-python tools/train.py configs/vit/vit_base_demo.py
+hf download ZeyuLing/HFTrainer-ViT-Base-Patch16-224 --local-dir checkpoints/hftrainer/vit
+python tools/train.py configs/pretrained/train_vit.py
 ```
 
 Train and run a local LLaMA LoRA:
 
 ```bash
-python tools/train.py configs/llama/llama_lora_demo.py
+hf download ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat --local-dir checkpoints/hftrainer/llama
+python tools/train.py configs/pretrained/train_llama.py
 
 python tools/infer.py \
-  --config configs/llama/llama_lora_demo.py \
+  --config configs/pretrained/train_llama.py \
   --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
   --merge-lora \
   --prompt "Name one primary color."
@@ -132,9 +140,9 @@ python tools/infer.py \
 Run SD1.5 inference:
 
 ```bash
+hf download ZeyuLing/HFTrainer-Stable-Diffusion-1.5 --local-dir checkpoints/hftrainer/sd15
 python tools/infer.py \
-  --config configs/sd15/sd15_demo.py \
-  --checkpoint work_dirs/sd15_smoke/checkpoint-iter_10 \
+  --config configs/pretrained/infer_sd15.py --device cuda \
   --prompt "A paper boat in a rain-filled street at dusk." \
   --output outputs/inference/paper_boat.png
 ```
@@ -144,7 +152,8 @@ guesses inference behavior from a trainer or implementation class name.
 
 ## Video models: verified launch paths
 
-The examples below reproduce the **base inference settings** used for the
+Accept each video model agreement and authenticate with `hf auth login` before
+downloading. H3 access requires manual approval. The examples below reproduce the **base inference settings** used for the
 2026-09-28 comparison, after preparing the environment and checkpoint assets.
 Both models ran on one H200. They are not download-and-run commands for an
 unprepared machine. The English model cards contain setup, preprocessing,
@@ -157,12 +166,11 @@ Install `.[ltx-video]` and prepare the split checkpoint pack described in the
 PyTorch 2.8.0+cu128:
 
 ```bash
-export LTX25_CHECKPOINT_ROOT="$PWD/checkpoints/LTX-2.5"
-python tools/infer_ltx_video.py configs/ltx_video/infer_ltx_video_2_5_dev_lora.py \
+hf download ZeyuLing/HFTrainer-LTX-2.5-22B-Dev --local-dir checkpoints/hftrainer/ltx_video
+python tools/infer_ltx_video.py configs/pretrained/infer_ltx_video.py \
   --prompt "A dancer performs a dance routine with music." --seed 42 \
   --height 512 --width 768 --num-frames 121 --num-inference-steps 30 \
   --negative-prompt "blurry, distorted, low quality, artifacts" \
-  --cfg-options model.loras=[] model.duration_head_path=None \
   --output outputs/ltx_demo.mp4
 ```
 
@@ -179,7 +187,8 @@ PyTorch 2.11.0+cu130 and the pinned FA3 kernel. The sequential entry point
 releases the text encoder before loading the denoiser:
 
 ```bash
-export MINIMAX_H3_ROOT="$PWD/checkpoints/MiniMax-H3"
+hf download ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA --local-dir checkpoints/hftrainer/minimax_h3
+export MINIMAX_H3_ROOT="$PWD/checkpoints/hftrainer/minimax_h3"
 python tools/validation/infer_h3.py --attention-backend flash_attention_3 \
   --prompt "A dancer performs a dance routine with music." --seed 42 \
   --output outputs/h3_demo.mp4
@@ -198,11 +207,33 @@ assets remain dependencies. Read the respective model agreements and
 
 ## Checkpoint availability
 
-HFTrainer has not published converted H3/LTX base checkpoints or the demo LoRA
-adapters to Hugging Face. Download upstream model assets according to each
-model card. Training outputs remain local HFTrainer checkpoints or local LoRA
-files; a working save/load path does not imply a Hub release or compatibility
-with another framework's `from_pretrained` interface.
+All eight model families have **processed pretrained HFTrainer bundles on
+Hugging Face**. Each English model card provides a pinned revision, one-command
+download, training/inference configs, source licenses and validation scope.
+
+| Model | Processed checkpoint | Access |
+| :--- | :--- | :--- |
+| ViT | [ZeyuLing/HFTrainer-ViT-Base-Patch16-224](https://huggingface.co/ZeyuLing/HFTrainer-ViT-Base-Patch16-224) | Public |
+| TinyLlama | [ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat) | Public |
+| Stable Diffusion 1.5 | [ZeyuLing/HFTrainer-Stable-Diffusion-1.5](https://huggingface.co/ZeyuLing/HFTrainer-Stable-Diffusion-1.5) | Public |
+| DMD (DMD2 initialization) | [ZeyuLing/HFTrainer-DMD2-SD15-Initialization](https://huggingface.co/ZeyuLing/HFTrainer-DMD2-SD15-Initialization) | Public |
+| StyleGAN2-ADA FFHQ 1024 | [ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024](https://huggingface.co/ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024) | Public |
+| Wan 2.1 T2V 1.3B | [ZeyuLing/HFTrainer-Wan2.1-T2V-1.3B](https://huggingface.co/ZeyuLing/HFTrainer-Wan2.1-T2V-1.3B) | Public |
+| LTX 2.5 22B Dev | [ZeyuLing/HFTrainer-LTX-2.5-22B-Dev](https://huggingface.co/ZeyuLing/HFTrainer-LTX-2.5-22B-Dev) | Accept agreement |
+| MiniMax H3 Base FL2VA | [ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA) | Manual access approval |
+
+These are real pretrained weights exported or packaged through our native
+bundle contract. They are not random-initialization artifacts or claims of
+new training. DMD uses the author's trained DMD2 SD1.5 non-GAN checkpoint as
+initialization; it is not an original-DMD-paper reproduction. Demo adapters
+and the private video dataset are separate and have not been released.
+
+Training and inference share `cfg.model.from_pretrained`, with
+`save_pretrained` and `tools/export_model.py` providing the export path.
+[Configs and pinned revisions](configs/pretrained/checkpoints.json) ·
+[Conversion and integrity evidence](docs/en/models/evidence/checkpoints/index.md).
+These are HFTrainer artifacts hosted on the Hub; no compatibility with another
+framework's automatic model loader is implied.
 
 ## Demo data and training evidence
 

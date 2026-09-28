@@ -4,12 +4,12 @@ Choose an implementation, check its verification scope, then prepare weights and
 
 | Model | Task | Published verification |
 | :--- | :--- | :--- |
-| [ViT](vit.md) | Classification | Tiny numerical / artifact tests |
-| [LLaMA](llama.md) | Text generation | Tiny numerical / artifact tests |
-| [Stable Diffusion 1.5](sd15.md) | Text to image | Tiny numerical / artifact tests |
-| [DMD](dmd.md) | One-step image generation | Tiny algorithm tests |
-| [StyleGAN2](stylegan2.md) | Unconditional images | Tiny adversarial tests |
-| [Wan T2V](wan.md) | Text to video | Tiny contracts; compatibility limits |
+| [ViT](vit.md) | Classification | Full pretrained export/reload + tiny numerical tests |
+| [LLaMA](llama.md) | Text generation | Full pretrained export/reload + tiny numerical tests |
+| [Stable Diffusion 1.5](sd15.md) | Text to image | Full pretrained export/reload + tiny numerical tests |
+| [DMD](dmd.md) | One-step image generation | DMD2 trained initialization + exact export/reload |
+| [StyleGAN2](stylegan2.md) | Unconditional images | Official FFHQ 1024 output matches exactly |
+| [Wan T2V](wan.md) | Text to video | Full 1.3B components + exact export/reload |
 | [LTX-Video 2.5](ltx_video_2_5.md) | Video + audio | Full dev samples + short LoRA runs |
 | [MiniMax-H3](minimax_h3.md) | Video + audio | Full T2VA samples + short LoRA runs |
 

@@ -6,7 +6,7 @@ Synchronized text-to-video and stereo audio with the Base 768p model.
 
 **Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
 
-[All models](index.md) · [Setup](#setup) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
 
 ## At a glance
 
@@ -18,16 +18,37 @@ Synchronized text-to-video and stereo audio with the Base 768p model.
 
 ## Setup
 
-Run commands from the repository root. Prepare the listed weights and data first; a command is not a self-contained download or a claim of convergence.
+Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
 
 ```bash
 python -m pip install -e ".[minimax-h3,minimax-h3-fa3]"
-export MINIMAX_H3_ROOT="$PWD/checkpoints/MiniMax-H3"
+python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
 Choose a matching CUDA PyTorch wheel first. Official comparison used PyTorch 2.11.0+cu130 and FA3; training used 2.8.0+cu128 in a separate environment. See the [checkpoint download and placement guide](minimax_h3_reference.md#install-and-download). One H200 fits the demonstrated inference path by loading the conditioner and denoiser sequentially.
 
-HFTrainer-converted base weights and demo adapters have **not been published to Hugging Face**. Use the upstream assets described above; local training outputs are not a Hub release.
+Download the processed base bundle below. The demo adapters are not included in this release.
+
+## Checkpoint
+
+[ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA/tree/179db9782a327566da00d2d06ff067945908d5a2)
+
+Request access on the Hub page, accept the model agreement, wait for manual approval, and run `hf auth login` first. Access is restricted to the territories allowed by the MiniMax agreement. This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
+
+```bash
+hf download ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA \
+  --revision 179db9782a327566da00d2d06ff067945908d5a2 \
+  --local-dir checkpoints/hftrainer/minimax_h3
+export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/minimax_h3"
+export MINIMAX_H3_ROOT="$HFTRAINER_CHECKPOINT"
+```
+
+[Conversion and validation record](evidence/checkpoints/h3.json). For LoRA export, supply a config with the same adapter rank and target modules as training. Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
+
+```bash
+python tools/export_model.py --config configs/pretrained/export_minimax_h3.py \
+  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/minimax_h3_export
+```
 
 ## Data
 
@@ -40,7 +61,7 @@ After preparing compatible H3 caches with train/validation manifests:
 ```bash
 MINIMAX_H3_CACHE_MANIFEST="$PWD/data/h3/train.jsonl" \
 HFTRAINER_WORK_DIR="$PWD/outputs/h3_loss_demo" \
-python tools/train.py configs/minimax_h3/demo_loss.py \
+python tools/train.py configs/pretrained/train_minimax_h3.py \
   --cfg-options val_dataloader.dataset.manifest="$PWD/data/h3/validation.jsonl"
 ```
 
@@ -57,6 +78,8 @@ python tools/validation/infer_h3.py --attention-backend flash_attention_3 \
 The demonstrated output is 768 × 768, 124 frames at 24 FPS with 32 kHz stereo audio. Add `--checkpoint outputs/h3_loss_demo/checkpoint-iter_20` for the rank-2 demo adapter; other ranks require a matching config.
 
 ## Evidence and loss
+
+The complete native export was checked against independently uploaded tensor hashes; its real VAE encoder output matches before and after export. Full MP4 inference was not rerun from this exported directory.
 
 The independent official comparison matched text conditions and complete face-sample denoising latents exactly. Native VAE output retains small differences (video normalized RGB RMSE 0.000630; audio RMSE 0.0000779). This is not MP4 bit equality. The reviewed base face sample was accepted visually.
 

@@ -39,6 +39,16 @@ def main():
             pretrained_model_name_or_path=cfg.root, subfolder=component,
             device='cuda', torch_dtype='fp32', strict=True,
         ), trainable=False, save_ckpt=False)
+    if (Path(cfg.root) / 'minimax_h3_bundle_config.json').is_file():
+        # Native release: use the same manifest-verified bundle contract as
+        # training, while retaining sequential conditioner/denoiser placement.
+        cfg.model = dict(type='MiniMaxH3Bundle', from_pretrained=dict(
+            pretrained_model_name_or_path=cfg.root, load_conditioner=False,
+            transformer_device='cuda', vae_device='cuda', audio_vae_device='cuda',
+            trainable='lora' if args.checkpoint else False,
+            lora_cfg=(dict(rank=2, alpha=2, target_modules=['to_q', 'to_k', 'to_v', 'to_out.0'])
+                      if args.checkpoint else None),
+        ))
     cfg.pipeline = dict(type='MiniMaxH3Pipeline',num_inference_steps=args.steps,attention_backend=args.attention_backend)
     start = time.monotonic()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)

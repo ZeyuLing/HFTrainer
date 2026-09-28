@@ -1,0 +1,25 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024",
+  "revision": "c8ba5e0da3c126780db4be4eab9afe86d1b99db9",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "official_fp32_output_exact": true,
+    "export_reload_exact": true,
+    "seed": 42,
+    "resolution": 1024
+  },
+  "distribution_verification": "Fresh complete snapshot downloaded; SHA256 matched every exported file",
+  "gated": false,
+  "training_entrypoint_check": {
+    "optimizer_step_completed": true,
+    "changed_pretrained_parameters": [
+      "synthesis.b4.conv1.weight",
+      "synthesis.b4.conv1.affine.weight"
+    ],
+    "training_data": "Four generated colored-square images; execution check only"
+  },
+  "inference_entrypoint_check": {
+    "command": "python tools/infer.py --config configs/pretrained/infer_stylegan2.py",
+    "scope": "Full downloaded weights; CLI executed successfully. Not a quality benchmark."
+  }
+}

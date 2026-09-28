@@ -1,0 +1,19 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA",
+  "revision": "179db9782a327566da00d2d06ff067945908d5a2",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "full_export_manifest_sha256_verified": true,
+    "vae_pretrained_encode_export_reload_exact": true,
+    "vae_probe_shape": [
+      1,
+      24,
+      2,
+      2,
+      2
+    ],
+    "prior_quality_reference": "Independent official full denoising comparison recorded in docs/en/models/minimax_h3_reference.md; this export was not rerun as a full MP4 generation"
+  },
+  "distribution_verification": "Complete local manifest SHA256 verified against Hub LFS SHA256; all metadata downloaded and compared",
+  "gated": "manual"
+}

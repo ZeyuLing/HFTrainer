@@ -6,7 +6,7 @@ Two-stage text-to-video and audio generation with local Gemma conditioning and L
 
 **Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
 
-[All models](index.md) · [Setup](#setup) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
 
 ## At a glance
 
@@ -18,16 +18,36 @@ Two-stage text-to-video and audio generation with local Gemma conditioning and L
 
 ## Setup
 
-Run commands from the repository root. Prepare the listed weights and data first; a command is not a self-contained download or a claim of convergence.
+Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
 
 ```bash
 python -m pip install -e ".[ltx-video]"
-export LTX25_CHECKPOINT_ROOT="$PWD/checkpoints/LTX-2.5"
+python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-Tested with PyTorch 2.8.0+cu128. Obtain the accepted split checkpoint pack and place the [required component roles](ltx_video_2_5_reference.md#checkpoint-pack) under this root. The projected Gemma encoder is required; stock Gemma is not interchangeable.
+Tested with PyTorch 2.8.0+cu128. The downloadable artifact preserves all [required component roles](ltx_video_2_5_reference.md#checkpoint-pack). The projected Gemma encoder is required; stock Gemma is not interchangeable.
 
-HFTrainer-converted base weights and demo adapters have **not been published to Hugging Face**. Use the upstream assets described above; local training outputs are not a Hub release.
+Download the processed base bundle below. The demo adapters are not included in this release.
+
+## Checkpoint
+
+[ZeyuLing/HFTrainer-LTX-2.5-22B-Dev](https://huggingface.co/ZeyuLing/HFTrainer-LTX-2.5-22B-Dev) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-LTX-2.5-22B-Dev/tree/d0aabb6aa3e1502d216d0cdd481c2bf116acaf73)
+
+Accept the model agreement on the Hub page and run `hf auth login` first. This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
+
+```bash
+hf download ZeyuLing/HFTrainer-LTX-2.5-22B-Dev \
+  --revision d0aabb6aa3e1502d216d0cdd481c2bf116acaf73 \
+  --local-dir checkpoints/hftrainer/ltx_video
+export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/ltx_video"
+```
+
+[Conversion and validation record](evidence/checkpoints/ltx.json). Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
+
+```bash
+python tools/export_model.py --config configs/pretrained/train_ltx_video.py \
+  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/ltx_video_export
+```
 
 ## Data
 
@@ -38,7 +58,7 @@ The measured run used two training clips (Ballet427 and Popular-Jazz110) and one
 ```bash
 LTX25_PREPROCESSED_DATA="$PWD/data/ltx/.precomputed" \
 HFTRAINER_WORK_DIR="$PWD/outputs/ltx_loss_demo" \
-python tools/train.py configs/ltx_video/demo_loss.py
+python tools/train.py configs/pretrained/train_ltx_video.py
 ```
 
 This runs 20 steps. Local `metrics.jsonl` records loss, step, learning rate and sigma buckets even when W&B is disabled. See the [full LoRA recipe](ltx_video_2_5_reference.md#lora-training).
@@ -46,11 +66,10 @@ This runs 20 steps. Local `metrics.jsonl` records loss, step, learning rate and 
 ## Infer
 
 ```bash
-python tools/infer_ltx_video.py configs/ltx_video/infer_ltx_video_2_5_dev_lora.py \
+python tools/infer_ltx_video.py configs/pretrained/infer_ltx_video.py \
   --prompt "A dancer performs a dance routine with music." --seed 42 \
   --height 512 --width 768 --num-frames 121 --num-inference-steps 30 \
   --negative-prompt "blurry, distorted, low quality, artifacts" \
-  --cfg-options model.loras=[] model.duration_head_path=None \
   --output outputs/ltx_demo.mp4
 ```
 

@@ -213,6 +213,30 @@ def load_compatible_state(
         prefixed = {f'text_model.{key}': value for key, value in state.items()}
         if prefixed.keys() & target.keys():
             state = prefixed
+    # Pre-0.17 Diffusers VAE attention used query/key/value/proj_attn names.
+    # Translate only names that resolve to a real target key, rejecting collisions.
+    if normalize_keys:
+        for key in tuple(state):
+            if '.attentions.' not in key:
+                continue
+            new_key = key
+            for old, new in (('.query.', '.to_q.'), ('.key.', '.to_k.'),
+                             ('.value.', '.to_v.'), ('.proj_attn.', '.to_out.0.')):
+                new_key = new_key.replace(old, new)
+            if new_key != key and new_key in target:
+                if new_key in state:
+                    raise RuntimeError(f'Duplicate legacy attention key: {new_key}')
+                state[new_key] = state.pop(key)
+    # Older CLIP checkpoints persist the deterministic position-id buffer.
+    # Accept only an exact match to the local nonpersistent buffer; never drop
+    # an unknown tensor or a modified positional sequence silently.
+    if normalize_keys:
+        buffers = dict(module.named_buffers())
+        for key in tuple(state):
+            if key.endswith('.position_ids') and key not in target and key in buffers:
+                if not torch.equal(state[key].cpu(), buffers[key].cpu()):
+                    raise RuntimeError(f'Invalid deterministic position buffer: {key}')
+                state.pop(key)
     compatible = {
         key: value
         for key, value in state.items()

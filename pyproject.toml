@@ -9,6 +9,8 @@ description = "A config-driven training and inference framework with repository-
 readme = "README.md"
 license-files = [
     "THIRD_PARTY_NOTICES.md",
+    "hftrainer/models/stylegan2/LICENSE.nvidia",
+    "hftrainer/models/wan/LICENSE.apache-2.0",
     "hftrainer/models/ltx_video/LICENSE.ltx-2.x",
     "hftrainer/models/minimax_h3/LICENSE.minimax-h3",
     "hftrainer/models/minimax_h3/LICENSE.apache-2.0",
@@ -119,7 +121,8 @@ namespaces = true
 [tool.setuptools.package-data]
 "hftrainer.models.ltx_video" = ["LICENSE.ltx-2.x", "UPSTREAM.md"]
 "hftrainer.models.ltx_video.network.text_encoders.gemma.encoders" = ["prompts/*.txt"]
-"hftrainer.models.wan" = ["SOURCES.md"]
+"hftrainer.models.wan" = ["SOURCES.md", "UPSTREAM.md", "LICENSE.apache-2.0"]
+"hftrainer.models.stylegan2" = ["UPSTREAM.md", "LICENSE.nvidia"]
 "hftrainer.models.minimax_h3" = [
     "LICENSE.apache-2.0",
     "LICENSE.minimax-h3",

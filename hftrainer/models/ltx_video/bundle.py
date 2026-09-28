@@ -84,6 +84,32 @@ class LTXVideoBundle(ModelBundle):
         self._components = components
         self.validate()
 
+    def load_training_checkpoint(self, checkpoint_path: str, *, strict: bool = True):
+        """Attach one managed-trainer LoRA; full trainer state is resume-only."""
+        path = Path(checkpoint_path).expanduser().resolve(strict=True)
+        if path.suffix != '.safetensors':
+            raise ValueError('LTX inference/export requires a saved LoRA .safetensors file')
+        from safetensors import safe_open
+        with safe_open(str(path), framework='pt') as weights:
+            keys = list(weights.keys())
+        if not keys or not any('lora' in key.lower() for key in keys):
+            raise ValueError('Checkpoint does not contain LTX LoRA tensors')
+        self.lora_specs = normalize_lora_specs([dict(path=str(path), strength=1.0)])
+        self.clear_components()
+
+    def save_pretrained(self, save_directory: str, **kwargs):
+        """Export a self-contained native checkpoint pack and configured LoRAs."""
+        if kwargs:
+            raise TypeError(f'Unsupported LTX export options: {sorted(kwargs)}')
+        from hftrainer.models.ltx_video.artifact import export_bundle
+        return export_bundle(self, save_directory)
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):
+        """Reload an exported pack after verifying every role and file hash."""
+        from hftrainer.models.ltx_video.artifact import load_bundle_config
+        return cls(**load_bundle_config(pretrained_model_name_or_path, kwargs))
+
     @property
     def components(self) -> LTXComponentStore:
         """Return the bundle-owned lazy store for local LTX components.

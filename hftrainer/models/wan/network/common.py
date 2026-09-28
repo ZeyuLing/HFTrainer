@@ -527,6 +527,9 @@ class LocalWanModelMixin:
             if canonical in incoming:
                 incoming[alias] = incoming[canonical]
         expected = model.state_dict()
+        # HF safetensors stores tied UMT5 embeddings once.
+        if cls.component_name == 'text_encoder' and 'shared.weight' in incoming:
+            incoming.setdefault('encoder.embed_tokens.weight', incoming['shared.weight'])
         matched, report = compatible_state_dict(
             expected, incoming, component_name=cls.component_name
         )
@@ -643,7 +646,7 @@ def make_sinusoidal_embedding(
     exponent = (
         -math.log(max_period)
         * torch.arange(half, device=timesteps.device, dtype=torch.float32)
-        / max(half - 1, 1)
+        / max(half, 1)
     )
     args = timesteps[:, None] * torch.exp(exponent)[None]
     embedding = torch.cat((torch.cos(args), torch.sin(args)), dim=-1)

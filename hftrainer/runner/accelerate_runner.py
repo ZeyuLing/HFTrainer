@@ -220,6 +220,8 @@ class AccelerateRunner:
     @classmethod
     def from_cfg(cls, cfg) -> 'AccelerateRunner':
         """Build all components from a config object or dict."""
+        from hftrainer.utils.setup_env import register_framework_modules
+        register_framework_modules()
         if isinstance(cfg, dict):
             cfg = Config(cfg)
 

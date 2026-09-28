@@ -6,7 +6,7 @@ Image classification with a local ViT encoder and image processor.
 
 **Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
 
-[All models](index.md) · [Setup](#setup) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
 
 ## At a glance
 
@@ -18,13 +18,34 @@ Image classification with a local ViT encoder and image processor.
 
 ## Setup
 
-Run commands from the repository root. Prepare the listed weights and data first; a command is not a self-contained download or a claim of convergence.
+Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
 
 ```bash
 python -m pip install -e .
+python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-Place the compatible checkpoint and tokenizer/config assets at `checkpoints/vit-base-patch16-224`. Weights are not bundled.
+Download the complete HFTrainer bundle below. Model weights are hosted separately from the code.
+
+## Checkpoint
+
+[ZeyuLing/HFTrainer-ViT-Base-Patch16-224](https://huggingface.co/ZeyuLing/HFTrainer-ViT-Base-Patch16-224) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-ViT-Base-Patch16-224/tree/5e1eca66e547fb8759fbc66e9cda8579136c8b26)
+
+This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
+
+```bash
+hf download ZeyuLing/HFTrainer-ViT-Base-Patch16-224 \
+  --revision 5e1eca66e547fb8759fbc66e9cda8579136c8b26 \
+  --local-dir checkpoints/hftrainer/vit
+export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/vit"
+```
+
+[Conversion and validation record](evidence/checkpoints/vit.json). Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
+
+```bash
+python tools/export_model.py --config configs/pretrained/train_vit.py \
+  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/vit_export
+```
 
 ## Data
 
@@ -33,22 +54,25 @@ Place the compatible checkpoint and tokenizer/config assets at `checkpoints/vit-
 ## Train
 
 ```bash
-python tools/train.py configs/vit/vit_base_demo.py
+python tools/train.py configs/pretrained/train_vit.py
 ```
 
 ## Infer
 
-After training, use the saved checkpoint (adjust the step to a checkpoint that exists):
+Run the published pretrained model:
 
 ```bash
-python tools/infer.py --config configs/vit/vit_base_demo.py \
-  --checkpoint work_dirs/vit_smoke/checkpoint-iter_10 \
+python tools/infer.py --config configs/pretrained/infer_vit.py --device cuda \
   --input path/to/image.jpg
 ```
 
+For fine-tuned weights, pass `--checkpoint` with the training output and a matching training model config (including LoRA settings or a changed classification head).
+
 ## Evidence and loss
 
-Tiny forward, loss, backward, reference-logit and artifact round-trip checks.
+Full pretrained export/reload produced identical logits. Tiny forward, loss, backward and reference-logit checks also pass.
+
+The new pretrained training entry point completed one optimizer step and saved a checkpoint on an H200. These synthetic execution checks are recorded with the checkpoint evidence; they do not establish useful fine-tuning.
 
 **Loss curve: not published.** No sustained-decrease or convergence result is claimed.
 

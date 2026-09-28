@@ -1,0 +1,27 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-ViT-Base-Patch16-224",
+  "revision": "5e1eca66e547fb8759fbc66e9cda8579136c8b26",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "export_reload_exact": true,
+    "output_shape": [
+      1,
+      1000
+    ],
+    "finite": true
+  },
+  "distribution_verification": "Fresh complete snapshot downloaded; SHA256 matched every exported file",
+  "gated": false,
+  "training_entrypoint_check": {
+    "optimizer_step_completed": true,
+    "changed_pretrained_parameters": [
+      "vit.embeddings.patch_embeddings.projection.weight",
+      "vit.encoder.layer.0.attention.attention.query.weight"
+    ],
+    "training_data": "Four generated colored-square images; execution check only"
+  },
+  "inference_entrypoint_check": {
+    "command": "python tools/infer.py --config configs/pretrained/infer_vit.py",
+    "scope": "Full downloaded weights; CLI executed successfully. Not a quality benchmark."
+  }
+}

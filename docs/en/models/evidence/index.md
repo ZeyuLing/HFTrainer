@@ -28,3 +28,7 @@ python tools/validation/plot_demo_loss.py \
   --output outputs/demo/plots
 python tools/validation/audit_video_runtime.py
 ```
+
+## Checkpoint releases
+
+See the [pretrained artifact release checks](checkpoints/index.md) for download integrity, native export/reload and one-step entry-point evidence. These are separate from the video loss traces above.

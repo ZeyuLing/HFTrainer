@@ -1,0 +1,29 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-Stable-Diffusion-1.5",
+  "revision": "0d794d6ba0ddabac7c15283a3c0c47fc86a07116",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "export_reload_exact": true,
+    "output_shape": [
+      1,
+      4,
+      8,
+      8
+    ],
+    "finite": true
+  },
+  "distribution_verification": "Fresh complete snapshot downloaded; SHA256 matched every exported file",
+  "gated": false,
+  "training_entrypoint_check": {
+    "optimizer_step_completed": true,
+    "changed_pretrained_parameters": [
+      "conv_in.weight",
+      "time_embedding.linear_1.weight"
+    ],
+    "training_data": "Four generated colored-square images; execution check only"
+  },
+  "inference_entrypoint_check": {
+    "command": "python tools/infer.py --config configs/pretrained/infer_sd15.py",
+    "scope": "Full downloaded weights; CLI executed successfully. Not a quality benchmark."
+  }
+}

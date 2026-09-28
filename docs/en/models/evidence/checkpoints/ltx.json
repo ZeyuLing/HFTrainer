@@ -1,0 +1,20 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-LTX-2.5-22B-Dev",
+  "revision": "d0aabb6aa3e1502d216d0cdd481c2bf116acaf73",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "all_artifact_hashes_verified": true,
+    "mode": "dev_two_stage",
+    "roles": [
+      "transformer_path",
+      "text_encoder_path",
+      "video_vae_path",
+      "audio_vae_path",
+      "spatial_upsampler_path",
+      "duration_head_path",
+      "distilled_lora_path"
+    ]
+  },
+  "distribution_verification": "All local tensor SHA256 equal destination LFS SHA256; all root metadata downloaded and compared",
+  "gated": "auto"
+}

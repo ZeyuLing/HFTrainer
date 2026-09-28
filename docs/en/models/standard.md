@@ -7,12 +7,13 @@ All public model cards are maintained in English. Each model family listed in th
 1. Model name, purpose and precise verification status.
 2. At a glance: implementation ownership, data availability and convergence status.
 3. Setup: dependencies, compatible weights, hardware evidence and prerequisites.
-4. Data: provenance, format, split, download status and preparation.
-5. Train: repository-root launch command and expected artifact.
-6. Infer: launch command, checkpoint and output contract.
-7. Evidence and loss: measured results, raw data and explicit missing evidence.
-8. Limitations: untested modes, unsupported behavior and compatibility restrictions.
-9. Sources and license: implementation provenance and asset terms.
+4. Checkpoint: processed HFTrainer Hub repository, pinned revision, one-command download, bundle format, access prerequisites and conversion evidence. Every model must provide this section.
+5. Data: provenance, format, split, download status and preparation.
+6. Train: repository-root launch command and expected artifact.
+7. Infer: launch command, checkpoint and output contract.
+8. Evidence and loss: measured results, raw data and explicit missing evidence.
+9. Limitations: untested modes, unsupported behavior and compatibility restrictions.
+10. Sources and license: implementation provenance and asset terms.
 
 ## Editorial conventions
 

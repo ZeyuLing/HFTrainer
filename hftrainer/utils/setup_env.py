@@ -96,6 +96,12 @@ def import_custom_modules(cfg):
     return import_modules_from_strings(**dict(custom_imports))
 
 
+def register_framework_modules() -> None:
+    """Register shared runner services without importing every model family."""
+    for module_name in _FRAMEWORK_MODULES:
+        import_module(module_name)
+
+
 def register_all_modules() -> None:
     """Import and register every framework and built-in method component."""
     global _REGISTERED
@@ -113,4 +119,4 @@ def register_all_modules() -> None:
         _REGISTERED = True
 
 
-__all__ = ['import_custom_modules', 'register_all_modules']
+__all__ = ['import_custom_modules', 'register_framework_modules', 'register_all_modules']

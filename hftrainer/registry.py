@@ -148,7 +148,36 @@ MODEL_COMPONENTS = RepositoryRegistry(
     'model_component', build_func=build_model_component_from_cfg
 )
 MODELS = MODEL_COMPONENTS
-MODEL_BUNDLES = RepositoryRegistry('model_bundle')
+def build_model_bundle_from_cfg(cfg, registry, default_args=None):
+    """Build a registered local bundle from components or a complete artifact.
+
+    Both trainer and pipeline registries use this path. Artifact loading never
+    resolves a model class from remote code or a dotted import string.
+    """
+    from mmengine.registry import build_from_cfg
+    values = dict(default_args or {})
+    values.update(dict(cfg))
+    pretrained = values.pop('from_pretrained', None)
+    if pretrained is None:
+        return build_from_cfg(values, registry)
+    requested = values.pop('type')
+    cls = registry.get(requested) if isinstance(requested, str) else requested
+    if cls is None or not any(cls is candidate for candidate in registry.module_dict.values()):
+        raise KeyError(f'Unregistered local bundle: {requested!r}')
+    if isinstance(pretrained, str):
+        pretrained = {'pretrained_model_name_or_path': pretrained}
+    elif isinstance(pretrained, Mapping):
+        pretrained = dict(pretrained)
+    else:
+        raise TypeError('Bundle from_pretrained must be a local path or a mapping')
+    overlap = set(values) & set(pretrained)
+    if overlap:
+        raise ValueError(f'Duplicate bundle loading options: {sorted(overlap)}')
+    pretrained.update(values)
+    return cls.from_pretrained(**pretrained)
+
+
+MODEL_BUNDLES = RepositoryRegistry('model_bundle', build_func=build_model_bundle_from_cfg)
 TRAINERS = RepositoryRegistry('trainer')
 PIPELINES = RepositoryRegistry('pipeline')
 DATASETS = RepositoryRegistry('dataset')

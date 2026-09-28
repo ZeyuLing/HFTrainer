@@ -1,0 +1,34 @@
+{
+  "repo_id": "ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat",
+  "revision": "b23a22f572ca8d25e3d10411e90932826b9875f1",
+  "artifact_type": "repository-owned HFTrainer bundle",
+  "verification": {
+    "export_reload_exact": true,
+    "output_shape": [
+      1,
+      3,
+      32000
+    ],
+    "finite": true,
+    "real_pretrained_reference_logits_max_abs": 0.0,
+    "real_tokenizer_reference_cases": [
+      "English",
+      "leading whitespace",
+      "CRLF and tabs",
+      "Chinese and emoji",
+      "decomposed Unicode",
+      "special tokens"
+    ]
+  },
+  "distribution_verification": "Fresh complete snapshot downloaded; SHA256 matched every exported file",
+  "gated": false,
+  "training_entrypoint_check": {
+    "optimizer_step_completed": true,
+    "nonzero_trained_lora_B_tensors": 155,
+    "training_data": "Four repeated synthetic instruction records; execution check only"
+  },
+  "inference_entrypoint_check": {
+    "command": "python tools/infer.py --config configs/pretrained/infer_llama.py",
+    "scope": "Full downloaded weights; CLI executed successfully. Not a quality benchmark."
+  }
+}

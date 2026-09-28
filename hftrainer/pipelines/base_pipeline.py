@@ -53,16 +53,17 @@ class BasePipeline(ABC):
             ckpt_path: path to checkpoint file or directory
             **kwargs: additional args passed to cls.__init__
         """
-        from hftrainer.utils.checkpoint_utils import load_checkpoint
-
         if hasattr(bundle_cfg, 'to_dict'):
             bundle_cfg = bundle_cfg.to_dict()
 
         bundle = bundle_cls.from_config(bundle_cfg)
-        state_dict = load_checkpoint(ckpt_path, map_location='cpu')
-        bundle.load_state_dict_selective(state_dict)
+        bundle.load_training_checkpoint(ckpt_path)
         bundle.eval()
         return cls(bundle=bundle, **kwargs)
+
+    def save_pretrained(self, save_directory: str, **kwargs):
+        """Export the same complete bundle artifact consumed by training."""
+        return self.bundle.save_pretrained(save_directory, **kwargs)
 
     @abstractmethod
     def __call__(self, *args, **kwargs) -> Any:

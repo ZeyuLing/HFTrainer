@@ -1,0 +1,58 @@
+{
+  "vit": {
+    "repo_id": "ZeyuLing/HFTrainer-ViT-Base-Patch16-224",
+    "revision": "5e1eca66e547fb8759fbc66e9cda8579136c8b26",
+    "bundle": "ViTBundle",
+    "local_dir": "checkpoints/hftrainer/vit",
+    "access": "Public"
+  },
+  "llama": {
+    "repo_id": "ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat",
+    "revision": "b23a22f572ca8d25e3d10411e90932826b9875f1",
+    "bundle": "LlamaBundle",
+    "local_dir": "checkpoints/hftrainer/llama",
+    "access": "Public"
+  },
+  "sd15": {
+    "repo_id": "ZeyuLing/HFTrainer-Stable-Diffusion-1.5",
+    "revision": "0d794d6ba0ddabac7c15283a3c0c47fc86a07116",
+    "bundle": "SD15Bundle",
+    "local_dir": "checkpoints/hftrainer/sd15",
+    "access": "Public"
+  },
+  "dmd": {
+    "repo_id": "ZeyuLing/HFTrainer-DMD2-SD15-Initialization",
+    "revision": "f3f9cbe23e677f9b555039b7ff0aa1b0c7e8d20d",
+    "bundle": "DMDBundle",
+    "local_dir": "checkpoints/hftrainer/dmd",
+    "access": "Public"
+  },
+  "stylegan2": {
+    "repo_id": "ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024",
+    "revision": "c8ba5e0da3c126780db4be4eab9afe86d1b99db9",
+    "bundle": "StyleGAN2Bundle",
+    "local_dir": "checkpoints/hftrainer/stylegan2",
+    "access": "Public"
+  },
+  "wan": {
+    "repo_id": "ZeyuLing/HFTrainer-Wan2.1-T2V-1.3B",
+    "revision": "4fdf8c0e2665a48e722134a28882fc030238003e",
+    "bundle": "WanBundle",
+    "local_dir": "checkpoints/hftrainer/wan",
+    "access": "Public"
+  },
+  "ltx_video": {
+    "repo_id": "ZeyuLing/HFTrainer-LTX-2.5-22B-Dev",
+    "revision": "d0aabb6aa3e1502d216d0cdd481c2bf116acaf73",
+    "bundle": "LTXVideoBundle",
+    "local_dir": "checkpoints/hftrainer/ltx_video",
+    "access": "Accept agreement"
+  },
+  "minimax_h3": {
+    "repo_id": "ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA",
+    "revision": "179db9782a327566da00d2d06ff067945908d5a2",
+    "bundle": "MiniMaxH3Bundle",
+    "local_dir": "checkpoints/hftrainer/minimax_h3",
+    "access": "Manual access approval"
+  }
+}

@@ -267,7 +267,7 @@ class UMT5Stack(nn.Module):
         self.embed_tokens = embed_tokens
         self.block = nn.ModuleList(
             [
-                UMT5Block(config, has_relative_attention_bias=index == 0)
+                UMT5Block(config, has_relative_attention_bias=True)
                 for index in range(config.num_layers)
             ]
         )
@@ -427,6 +427,8 @@ class UMT5EncoderModel(LocalWanModelMixin, nn.Module):
         all_attentions = () if output_attentions else None
         position_bias = None
         for block in self.encoder.block:
+            # UMT5 has independently learned relative bias in every layer.
+            position_bias = None
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 

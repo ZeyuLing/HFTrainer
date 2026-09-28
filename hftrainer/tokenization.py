@@ -174,7 +174,9 @@ class LocalTokenizer:
         normalized_merges = []
         for value in merges or []:
             if isinstance(value, str):
-                parts = value.split()
+                # Serialized BPE merges use one literal space as the separator.
+                # Tabs/newlines/carriage returns can themselves be token pieces.
+                parts = value.split(' ', 1)
             else:
                 parts = list(value)
             if len(parts) != 2:
@@ -402,13 +404,33 @@ class LocalTokenizer:
 
     def _normalize(self, text: str) -> str:
         normalizer = (self._raw_tokenizer or {}).get('normalizer') or {}
-        if normalizer.get('type') == 'Replace':
-            pattern = normalizer.get('pattern', {})
-            if 'String' in pattern:
-                # Gemma 4 uses a literal space-to-metaspace replacement, not
-                # Unicode normalization or a Metaspace pre-tokenizer. Preserve
-                # both leading whitespace and decomposed Unicode verbatim.
-                return text.replace(pattern['String'], normalizer['content'])
+        def apply(value, node):
+            kind = node.get('type')
+            if kind == 'Sequence':
+                for child in node['normalizers']:
+                    value = apply(value, child)
+                return value
+            if kind == 'Prepend':
+                return node['prepend'] + value if value else value
+            if kind == 'Replace':
+                pattern = node['pattern']
+                if 'String' in pattern:
+                    return value.replace(pattern['String'], node['content'])
+                return re.sub(pattern['Regex'], node['content'], value)
+            if kind in {'NFC', 'NFD', 'NFKC', 'NFKD'}:
+                return unicodedata.normalize(kind, value)
+            if kind == 'Lowercase':
+                return value.lower()
+            if kind == 'StripAccents':
+                return ''.join(c for c in value if unicodedata.category(c) != 'Mn')
+            if kind is None:
+                return value
+            raise ValueError(f'Unsupported serialized normalizer: {kind}')
+
+        if self._raw_tokenizer is not None and normalizer.get('type') != 'BertNormalizer':
+            # Execute the graph in order: Llama uses Prepend then Replace,
+            # while Gemma uses Replace only (no implicit NFC normalization).
+            return apply(text, normalizer)
         text = unicodedata.normalize(self.normalizer_form, text)
         if self.lowercase:
             text = text.lower()
@@ -485,6 +507,8 @@ class LocalTokenizer:
                 ''.join(_BYTE_ENCODER[byte] for byte in piece.encode('utf-8'))
                 for piece in raw_pieces
             ]
+        elif self._raw_tokenizer is not None and 'pre_tokenizer' in self._raw_tokenizer and not pre_tokenizer:
+            pieces = [text]
         else:
             pieces = re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)
         output = []
@@ -765,6 +789,50 @@ class LocalTokenizer:
             if skip_special_tokens and token in self._special_tokens:
                 continue
             tokens.append(token)
+        decoder = (self._raw_tokenizer or {}).get('decoder') or {}
+        if decoder.get('type') == 'Sequence' and all(
+            node.get('type') in {'Replace', 'ByteFallback', 'Fuse', 'Strip'}
+            for node in decoder.get('decoders', [])
+        ):
+            for node in decoder['decoders']:
+                kind = node['type']
+                if kind == 'Replace':
+                    pattern = node['pattern']
+                    tokens = [t.replace(pattern['String'], node['content'])
+                              if 'String' in pattern else re.sub(pattern['Regex'], node['content'], t)
+                              for t in tokens]
+                elif kind == 'ByteFallback':
+                    result, pending = [], bytearray()
+                    def flush():
+                        if pending:
+                            try:
+                                result.append(pending.decode('utf-8'))
+                            except UnicodeDecodeError:
+                                result.extend('\ufffd' for _ in pending)
+                            pending.clear()
+                    for token in tokens:
+                        match = re.fullmatch(r'<0x([0-9A-Fa-f]{2})>', token)
+                        if match:
+                            pending.append(int(match.group(1), 16))
+                        else:
+                            flush()
+                            result.append(token)
+                    flush()
+                    tokens = result
+                elif kind == 'Fuse':
+                    tokens = [''.join(tokens)]
+                elif kind == 'Strip':
+                    stripped = []
+                    for token in tokens:
+                        for _ in range(node.get('start', 0)):
+                            if token.startswith(node['content']):
+                                token = token[len(node['content']):]
+                        for _ in range(node.get('stop', 0)):
+                            if token.endswith(node['content']) and node['content']:
+                                token = token[:-len(node['content'])]
+                        stripped.append(token)
+                    tokens = stripped
+            return ''.join(tokens)
         if self.byte_fallback:
             decoded_tokens = []
             pending = bytearray()

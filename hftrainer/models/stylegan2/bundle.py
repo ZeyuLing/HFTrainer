@@ -10,6 +10,9 @@ from hftrainer.models.stylegan2.network import (
 from hftrainer.registry import MODEL_BUNDLES
 
 
+from hftrainer.models.stylegan2.network import StyleGAN2ADAGenerator, StyleGAN2ADADiscriminator
+
+
 @MODEL_BUNDLES.register_module()
 class StyleGAN2Bundle(ModelBundle):
     """ModelBundle for StyleGAN2-style adversarial image generation."""
@@ -21,15 +24,15 @@ class StyleGAN2Bundle(ModelBundle):
             'discriminator': discriminator,
         })
         expected = {
-            'generator': StyleGAN2Generator,
-            'discriminator': StyleGAN2Discriminator,
+            'generator': (StyleGAN2Generator, StyleGAN2ADAGenerator),
+            'discriminator': (StyleGAN2Discriminator, StyleGAN2ADADiscriminator),
         }
         for name, expected_type in expected.items():
             component = getattr(self, name)
-            if type(component) is not expected_type:
+            if type(component) not in expected_type:
                 raise TypeError(
                     f'StyleGAN2Bundle.{name} must be the repository-owned '
-                    f'{expected_type.__module__}.{expected_type.__name__}; got '
+                    f'{[cls.__name__ for cls in expected_type]}; got '
                     f'{type(component).__module__}.{type(component).__name__}.'
                 )
 
@@ -52,8 +55,8 @@ class StyleGAN2Bundle(ModelBundle):
         # The strict registry also accepts the exact repository-owned class
         # object.  Artifacts, however, must remain portable JSON and must not
         # serialize Python object identities.
-        generator_config['type'] = StyleGAN2Generator.__name__
-        discriminator_config['type'] = StyleGAN2Discriminator.__name__
+        generator_config['type'] = type(self.generator).__name__
+        discriminator_config['type'] = type(self.discriminator).__name__
         config = {
             'type': type(self).__name__,
             'generator': generator_config,

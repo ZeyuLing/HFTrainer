@@ -63,6 +63,7 @@ class LTXVideoTrainer:
         load_from: Mapping[str, Any] | str | None = None,
         auto_resume: bool = False,
         components: LTXComponentStore | None = None,
+        bundle=None,
     ):
         if (native_config is None) == (native_config_path is None):
             raise ValueError(
@@ -88,6 +89,14 @@ class LTXVideoTrainer:
         self.step_callback = step_callback
         self.load_from = copy.deepcopy(load_from)
         self.auto_resume = bool(auto_resume)
+        self.bundle = bundle
+        if bundle is not None:
+            from hftrainer.models.ltx_video.bundle import LTXVideoBundle
+            if type(bundle) is not LTXVideoBundle:
+                raise TypeError('LTXVideoTrainer requires a local LTXVideoBundle')
+            if components is not None and components is not bundle.components:
+                raise ValueError('Trainer and bundle must share one component store')
+            components = bundle.components
         self.components = components if components is not None else LTXComponentStore()
         self._resolved_config: dict[str, Any] | None = None
         self._native_trainer = None
@@ -123,6 +132,10 @@ class LTXVideoTrainer:
         trainer_cfg.setdefault('output_dir', getattr(cfg, 'work_dir', None))
         trainer_cfg.setdefault('load_from', getattr(cfg, 'load_from', None))
         trainer_cfg.setdefault('auto_resume', bool(getattr(cfg, 'auto_resume', False)))
+        if getattr(cfg, 'model', None) is not None:
+            from hftrainer.registry import MODEL_BUNDLES
+            from hftrainer.models.ltx_video.bundle import LTXVideoBundle  # register local bundle
+            trainer_cfg['bundle'] = MODEL_BUNDLES.build(cfg.model)
         return cls(**trainer_cfg)
 
     def _load_source_config(self) -> dict[str, Any]:
@@ -155,6 +168,14 @@ class LTXVideoTrainer:
             return copy.deepcopy(self._resolved_config)
 
         config = self._load_source_config()
+        if self.bundle is not None:
+            paths = self.bundle.artifact_paths()
+            model = dict(config.get('model') or {})
+            model.update(model_path=paths['transformer_path'],
+                         text_encoder_path=paths['text_encoder_path'],
+                         video_vae_path=paths['video_vae_path'],
+                         audio_vae_path=paths['audio_vae_path'])
+            config['model'] = model
         if self.output_dir is not None:
             config['output_dir'] = str(self.output_dir)
         output_dir = Path(config.get('output_dir', 'outputs')).expanduser().resolve()
