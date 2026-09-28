@@ -1,0 +1,16 @@
+{
+  "protocol": "First 128 nonempty validation lines; independently truncate to 256 tokens, include EOS when space permits; token-weighted shifted NLL; BF16 autocast.",
+  "seed": 42,
+  "base": {
+    "nll": 2.5015089727689555,
+    "perplexity": 12.200890889089308,
+    "predicted_tokens": 14864,
+    "samples": 128
+  },
+  "trained": {
+    "nll": 2.2327518212990944,
+    "perplexity": 9.325492893073939,
+    "predicted_tokens": 14864,
+    "samples": 128
+  }
+}

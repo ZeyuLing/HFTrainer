@@ -1,0 +1,123 @@
+[2026/09/28 21:21:47] hftrainer INFO: Config: configs/public_data/ltx_video.py
+[2026/09/28 21:21:47] hftrainer INFO: Work dir: work_dirs/public_data/ltx_video
+
+                           ⚙️  Training Configuration                            
+╭──────────────────────┬───────────────────────────────────────────────────────╮
+│ 🎬 Model             │                                                       │
+│   Base               │ <MODEL_CHECKPOINTS>/ltx/components/tran… │
+│   Text Encoder       │ <MODEL_CHECKPOINTS>/ltx/components/text… │
+│   Training Mode      │ LORA                                                  │
+│   Load Checkpoint    │ —                                                     │
+│                      │                                                       │
+│ 🔗 LoRA              │                                                       │
+│   Rank / Alpha       │ 2 / 2                                                 │
+│   Dropout            │ 0.0                                                   │
+│   Target Modules     │ to_k, to_q, to_v, to_out.0                            │
+│                      │                                                       │
+│ 🎯 Strategy          │                                                       │
+│   Name               │ flexible                                              │
+│                      │                                                       │
+│ ⚡ Optimization      │                                                       │
+│   Steps              │ 20                                                    │
+│   Learning Rate      │ 1.00e-04                                              │
+│   Batch Size         │ 1                                                     │
+│   Grad Accumulation  │ 1                                                     │
+│   Optimizer          │ adamw                                                 │
+│   Scheduler          │ linear                                                │
+│   Max Grad Norm      │ 1.0                                                   │
+│   Grad Checkpointing │ ✓                                                     │
+│                      │                                                       │
+│ 🚀 Acceleration      │                                                       │
+│   Mixed Precision    │ bf16                                                  │
+│   Quantization       │ —                                                     │
+│   Text Encoder 8bit  │ ✗                                                     │
+│   Optimizer CPU      │ ✗                                                     │
+│ Offload              │                                                       │
+│                      │                                                       │
+│ 🎥 Validation        │                                                       │
+│   Prompts            │ —                                                     │
+│   Interval           │ Disabled                                              │
+│   Video Dims         │ 256x256, 49 frames                                    │
+│   Frame Rate         │ 24.0 fps                                              │
+│   Inference Steps    │ 30                                                    │
+│   CFG Scale          │ video=3.0; audio=7.0                                  │
+│   STG Scale          │ video=1.0; audio=1.0; blocks=28                       │
+│   Guidance Rescale   │ 0.7                                                   │
+│   Modality Guidance  │ video=3.0; audio=3.0                                  │
+│   Seed               │ 42                                                    │
+│                      │                                                       │
+│ 📂 Data & Output     │                                                       │
+│   Dataset            │ <REPO>/data/hftrainer_crema_d_mini/… │
+│   Dataloader Workers │ 0                                                     │
+│   Output Dir         │ <REPO>/work_dirs/public_data/ltx_vi… │
+│   Seed               │ 42                                                    │
+│                      │                                                       │
+│ 🔌 Integrations      │                                                       │
+│   Checkpoints        │ Every 20 steps (keep 1)                               │
+│   W&B                │ Disabled                                              │
+│   HF Hub             │ Disabled                                              │
+╰──────────────────────┴───────────────────────────────────────────────────────╯
+
+DEBUG    🎯 Using FlexibleStrategy training strategy (audio       __init__.py:89
+         enabled 🔈)                                                            
+DEBUG    Loading video VAE decoder for validation...    validation_runner.py:517
+[2026/09/28 21:24:38] hftrainer.models.ltx_video.network.model.video_vae.transformer.fallback_na WARNING: ================================================================================
+DiffVAE: natten is NOT installed. Falling back to a slower neighborhood-attention
+backend (Triton if available, else pure-PyTorch tiled SDPA). This path is for
+compatibility; install a NATTEN build matching the active PyTorch/CUDA stack
+for the optimized backend.
+================================================================================
+[2026/09/28 21:24:38] hftrainer.models.ltx_video.network.model.video_vae.transformer.fallback_na WARNING: DiffVAE NA fallback: using Triton na3d.
+DEBUG    Loading audio decoder and vocoder for          validation_runner.py:541
+         validation...                                                          
+DEBUG    Loading transformer...                                   trainer.py:428
+[2026/09/28 21:24:39] hftrainer.models.ltx_video.network.model.transformer.model INFO: Building transformer with attention backends -- self: SDPA[CUDNN_ATTENTION>FLASH_ATTENTION>EFFICIENT_ATTENTION>MATH], masked: SDPA[CUDNN_ATTENTION>FLASH_ATTENTION>EFFICIENT_ATTENTION>MATH]
+DEBUG    Loading embeddings processor...                          trainer.py:441
+DEBUG    Adding LoRA adapter with rank 2                          trainer.py:490
+DEBUG    Trainable params count: 13,369,344                       trainer.py:481
+DEBUG    GPU memory usage after models preparation: 39.15 GB      trainer.py:666
+DEBUG    Process 0 using seed: 42                                 trainer.py:171
+DEBUG    Loaded dataset with 24 samples from sources:             trainer.py:705
+         ['conditions', 'latents', 'audio_latents']                             
+INFO     💾 Training configuration saved to:                     trainer.py:1142
+         training_config.yaml                                                   
+INFO     🚀 Starting training...                                  trainer.py:205
+[2026-09-28 21:25:42,128] [INFO] [real_accelerator.py:239:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+INFO     x86_64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare    spawn.py:61
+         -DNDEBUG -g -O2 -Wall -fPIC -c <BUILD_TMP>/test.c -o              
+         <BUILD_TMP>/test.o                                                
+INFO     x86_64-linux-gnu-gcc <BUILD_TMP>/test.o -laio -o       spawn.py:61
+         <BUILD_TMP>/a.out                                                 
+INFO     x86_64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare    spawn.py:61
+         -DNDEBUG -g -O2 -Wall -fPIC -c <BUILD_TMP>/test.c -o              
+         <BUILD_TMP>/test.o                                                
+INFO     x86_64-linux-gnu-gcc <BUILD_TMP>/test.o                spawn.py:61
+         -L/usr/local/cuda -L/usr/local/cuda/lib64 -lcufile -o                  
+         <BUILD_TMP>/a.out                                                 
+INFO     x86_64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare    spawn.py:61
+         -DNDEBUG -g -O2 -Wall -fPIC -c <BUILD_TMP>/test.c -o              
+         <BUILD_TMP>/test.o                                                
+INFO     x86_64-linux-gnu-gcc <BUILD_TMP>/test.o -laio -o       spawn.py:61
+         <BUILD_TMP>/a.out                                                 
+INFO     Saving checkpoint metadata: {'hftrainer_lora_format':   trainer.py:1130
+         'effective-b-v1', 'hftrainer_lora_scaling_folded':                     
+         'true', 'hftrainer_lora_rank': '2',                                    
+         'hftrainer_lora_alpha': '2'}                                           
+INFO     💾 Lora weights for step 20 saved in                    trainer.py:1006
+         checkpoints/lora_weights_step_00020.safetensors                        
+DEBUG    Training state saved to                                 trainer.py:1098
+         checkpoints/training_state_step_00020.pt                               
+Training 20/20 ━━━━━ Loss: 1.2861 | LR: 1.00e-05 | 10.33s/step 0:01:… ETA: 00:00
+INFO     Saving checkpoint metadata: {'hftrainer_lora_format':   trainer.py:1130
+         'effective-b-v1', 'hftrainer_lora_scaling_folded':                     
+         'true', 'hftrainer_lora_rank': '2',                                    
+         'hftrainer_lora_alpha': '2'}                                           
+INFO     💾 Lora weights for step 20 saved in                    trainer.py:1006
+         checkpoints/lora_weights_step_00020.safetensors                        
+DEBUG    Training state saved to                                 trainer.py:1098
+         checkpoints/training_state_step_00020.pt                               
+INFO     📊 Training Statistics:                                  trainer.py:959
+          - Total time: 1.0 minutes                                             
+          - Training speed: 0.32 steps/second                                   
+          - Samples/second: 0.32                                                
+          - Peak GPU memory: 48.12 GB                                           

@@ -1,0 +1,100 @@
+{
+  "checkpoint_only_cli": {
+    "vit": 0,
+    "llama": 0,
+    "sd15": 0,
+    "dmd": 0,
+    "stylegan2": 0,
+    "wan": 0,
+    "ltx_video": 0,
+    "minimax_h3": 0
+  },
+  "ltx_final_checkpoint": {
+    "returncode": 0,
+    "weights_exist": true,
+    "size": 27062864,
+    "tensor_count": 2304,
+    "all_finite": true,
+    "metadata": {
+      "hftrainer_lora_scaling_folded": "true",
+      "hftrainer_lora_format": "effective-b-v1",
+      "hftrainer_lora_rank": "2",
+      "hftrainer_lora_alpha": "2"
+    }
+  },
+  "media": {
+    "wan": {
+      "sha256": "58d8ffeedf5e0d063546560f479005442879ddb54b98385214434ec78b1f2dd8",
+      "bytes": 155831,
+      "duration": 2.125,
+      "streams": [
+        {
+          "codec_type": "video",
+          "codec_name": "h264",
+          "width": 832,
+          "height": 480,
+          "r_frame_rate": "8/1",
+          "nb_frames": "17"
+        }
+      ]
+    },
+    "ltx_video": {
+      "sha256": "26392bd5e44be78c8da5cc5f6072891200c4f9cf319f254be4357577507ea67e",
+      "bytes": 746105,
+      "duration": 5.041667,
+      "streams": [
+        {
+          "codec_type": "video",
+          "codec_name": "h264",
+          "width": 768,
+          "height": 512,
+          "r_frame_rate": "24/1",
+          "nb_frames": "121"
+        },
+        {
+          "codec_type": "audio",
+          "codec_name": "aac",
+          "sample_rate": "48000",
+          "channels": 2,
+          "r_frame_rate": "0/0",
+          "nb_frames": "236"
+        }
+      ]
+    },
+    "minimax_h3": {
+      "sha256": "f54ce0ec557a52a0ae4a680b579f9a14cb377c3337d16612bf31bc80c799b1c6",
+      "bytes": 577202,
+      "duration": 5.175,
+      "streams": [
+        {
+          "codec_type": "video",
+          "codec_name": "h264",
+          "width": 768,
+          "height": 768,
+          "r_frame_rate": "24/1",
+          "nb_frames": "124"
+        },
+        {
+          "codec_type": "audio",
+          "codec_name": "aac",
+          "sample_rate": "32000",
+          "channels": 2,
+          "r_frame_rate": "0/0",
+          "nb_frames": "163"
+        }
+      ]
+    }
+  },
+  "training_scope": "20 optimizer steps per model, real public data; not convergence validation",
+  "wan_correction": "Initial unguided output showed severe artifacts; replacement uses CFG 5, flow shift 3 and FP32 accumulation. No official sampler parity claimed.",
+  "launcher_prepare_checks": {
+    "vit": 0,
+    "llama": 0,
+    "sd15": 0,
+    "dmd": 0,
+    "stylegan2": 0,
+    "wan": 0,
+    "ltx_video": 0,
+    "minimax_h3": 0
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "model": "vit",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_beans",
+    "revision": "712f72df3166cf40eacae68df26330f7096b0685",
+    "local_dir": "data/hftrainer_beans",
+    "files_verified": 1301,
+    "splits": {
+      "train": 1034,
+      "validation": 133,
+      "test": 128
+    },
+    "manifest_sha256": "1311bcb3628f189648bc7b28ecf25d6dbf490386199eb18f3c1eb827fe6c4654"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-ViT-Base-Patch16-224",
+    "revision": "18ca4731e4d1d3f168638a13cd925f759c8cee8c",
+    "bundle": "ViTBundle",
+    "local_dir": "checkpoints/hftrainer/vit",
+    "access": "Public"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/vit/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/vit.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss": 1.0572,
+      "loss_ce": 1.0572
+    },
+    {
+      "step": 2,
+      "loss": 1.2241,
+      "loss_ce": 1.2241
+    },
+    {
+      "step": 3,
+      "loss": 1.0795,
+      "loss_ce": 1.0795
+    },
+    {
+      "step": 4,
+      "loss": 0.9812,
+      "loss_ce": 0.9812
+    },
+    {
+      "step": 5,
+      "loss": 0.9293,
+      "loss_ce": 0.9293
+    },
+    {
+      "step": 6,
+      "loss": 0.9791,
+      "loss_ce": 0.9791
+    },
+    {
+      "step": 7,
+      "loss": 0.825,
+      "loss_ce": 0.825
+    },
+    {
+      "step": 8,
+      "loss": 1.0607,
+      "loss_ce": 1.0607
+    },
+    {
+      "step": 9,
+      "loss": 1.0308,
+      "loss_ce": 1.0308
+    },
+    {
+      "step": 10,
+      "loss": 0.7148,
+      "loss_ce": 0.7148
+    },
+    {
+      "step": 11,
+      "loss": 0.9012,
+      "loss_ce": 0.9012
+    },
+    {
+      "step": 12,
+      "loss": 0.7571,
+      "loss_ce": 0.7571
+    },
+    {
+      "step": 13,
+      "loss": 0.6686,
+      "loss_ce": 0.6686
+    },
+    {
+      "step": 14,
+      "loss": 0.8478,
+      "loss_ce": 0.8478
+    },
+    {
+      "step": 15,
+      "loss": 0.7556,
+      "loss_ce": 0.7556
+    },
+    {
+      "step": 16,
+      "loss": 1.0289,
+      "loss_ce": 1.0289
+    },
+    {
+      "step": 17,
+      "loss": 0.7106,
+      "loss_ce": 0.7106
+    },
+    {
+      "step": 18,
+      "loss": 0.8537,
+      "loss_ce": 0.8537
+    },
+    {
+      "step": 19,
+      "loss": 0.8934,
+      "loss_ce": 0.8934
+    },
+    {
+      "step": 20,
+      "loss": 0.9102,
+      "loss_ce": 0.9102
+    }
+  ],
+  "held_out_metrics": {
+    "top1_accuracy": 0.7218,
+    "samples": 133,
+    "split": "validation"
+  }
+}

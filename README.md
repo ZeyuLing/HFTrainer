@@ -47,18 +47,18 @@ not only documented as a convention.
 
 ## Implementations
 
-[Model cards](docs/en/models/index.md) · [Demo data availability](docs/en/models/demo-data.md) · [Validation evidence](docs/en/models/evidence/index.md)
+[Model cards](docs/en/models/index.md) · [Demo data availability](docs/en/models/demo-data.md) · [Public training evidence](docs/en/models/evidence/public_data/index.md)
 
-| Implementation | Training | Inference | Local core | Current verification |
-| --- | --- | --- | --- | --- |
-| [ViT classification](docs/en/models/vit.md) | yes | yes | ViT, image processor, artifact loader | tiny forward/loss/backward; reference logits aligned; `.bin`/safetensors round-trip |
-| [LLaMA causal LM](docs/en/models/llama.md) | full + LoRA | yes | LLaMA, KV cache, generation, BPE/WordPiece/Unigram tokenizer | tiny forward/loss/backward/generation; reference logits aligned; sharded artifact support |
-| [Stable Diffusion 1.5](docs/en/models/sd15.md) | yes | yes | CLIP, byte-BPE tokenizer, VAE, conditional UNet, DDPM/DDIM/PNDM | checkpoint schema aligned; tiny numerical parity and train/infer round-trip |
-| [DMD](docs/en/models/dmd.md) | yes | one-step | reuses the local SD1.5 core | distribution matching, fake-score and teacher paths tested |
-| [StyleGAN2](docs/en/models/stylegan2.md) | yes | yes | generator and discriminator | official FFHQ 1024 output and native reload match exactly |
-| [Wan T2V](docs/en/models/wan.md) | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | full pretrained component export/reload and tiny reference checks |
-| [LTX-Video 2.5](docs/en/models/ltx_video_2_5.md) | LoRA | distilled and dev+LoRA | pinned source reorganized into local model/trainer/pipeline layers; local Gemma text runtime and LoRA | H200 full dev generation, official sample parity, LoRA train/resume/infer and 20-step demo loss measured |
-| [MiniMax-H3 Base 768p](docs/en/models/minimax_h3.md) | experimental full/LoRA | T2VA, FL2VA, Ref2VA synchronized A/V | 50-layer Omni Transformer, Qwen3-VL-32B conditioner, visual/audio VAEs, processor and dual flow schedulers | H200 sequential full T2VA, exact official denoising latents, LoRA train/resume/infer and 20-step demo loss measured |
+| Model | Task | Public training data | Verification scope |
+| :--- | :--- | :--- | :--- |
+| [ViT-B/16](docs/en/models/vit.md) | Classification | Beans | 20 steps, held-out accuracy, native reload |
+| [TinyLlama 1.1B](docs/en/models/llama.md) | Plain-text LM | WikiText-2 | 20-step LoRA, held-out line-wise perplexity |
+| [Stable Diffusion 1.5](docs/en/models/sd15.md) | Text to image | Smithsonian butterflies | 20-step UNet update, base image demo |
+| [DMD / DMD2 initialization](docs/en/models/dmd.md) | One-step image distillation | Butterfly captions | 20-step generator/fake-score updates |
+| [StyleGAN2-ADA](docs/en/models/stylegan2.md) | Unconditional images | Smithsonian butterflies | 20-step G/D updates; official FFHQ output parity |
+| [Wan 2.1 T2V 1.3B](docs/en/models/wan.md) | Text to video | CREMA-D video | Reduced-resolution training; 480p base preview |
+| [LTX-Video 2.5 Dev](docs/en/models/ltx_video_2_5.md) | Video + audio | CREMA-D audio-video | 20-step LoRA; independent official base comparison |
+| [MiniMax-H3 Base](docs/en/models/minimax_h3.md) | Video + audio | CREMA-D audio-video | 20-step LoRA; independent official T2VA comparison |
 
 “Reference aligned” refers to isolated development-time numerical checks. The
 reference packages are not installed as product dependencies and are not
@@ -113,97 +113,57 @@ runtime and a suitable Linux/CUDA environment for the real 22B workflow.
 
 ## Quick Start
 
-Install the download CLI with `python -m pip install "huggingface_hub>=0.34,<2"`.
-Prepare the data described in each model card before training. These commands
-download the processed base checkpoints; dataset preparation is separate.
-
-Train ViT:
+Install `huggingface_hub` alongside HFTrainer. The public-data launcher downloads
+pinned data and native checkpoints, verifies dataset checksums, prepares caches
+when needed, and starts the normal trainer:
 
 ```bash
-hf download ZeyuLing/HFTrainer-ViT-Base-Patch16-224 --local-dir checkpoints/hftrainer/vit
-python tools/train.py configs/pretrained/train_vit.py
+python -m pip install "huggingface_hub>=0.34,<2"
+python tools/run_public_demo.py vit
+# Also: llama sd15 dmd stylegan2 wan ltx_video minimax_h3
 ```
 
-Train and run a local LLaMA LoRA:
+All examples use real public datasets and run 20 optimizer steps. Use
+`--checkpoint path/to/complete_bundle` to reuse local weights, `--prepare-only`
+to stop before training, or `--work-dir path/to/run` for a separate experiment.
+See the model card for hardware, media dependencies and gated-model access.
+
+Inference accepts a **checkpoint path or Hub ID**; its `config.json` selects
+the registered local model and pipeline. A separate Python config is optional:
 
 ```bash
-hf download ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat --local-dir checkpoints/hftrainer/llama
-python tools/train.py configs/pretrained/train_llama.py
-
-python tools/infer.py \
-  --config configs/pretrained/train_llama.py \
-  --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
-  --merge-lora \
-  --prompt "Name one primary color."
+python tools/infer.py --model ZeyuLing/HFTrainer-Stable-Diffusion-1.5 \
+  --device cuda --seed 42 --num-steps 30 \
+  --prompt "A butterfly on a flower in natural daylight." \
+  --output outputs/butterfly.png
 ```
 
-Run SD1.5 inference:
+Model cards pin exact weight revisions and provide each task's inputs and
+outputs. No remote model code is executed.
+
+## Video models
+
+Both video models use the same checkpoint-only entry point. Accept their Hub
+agreements and authenticate with `hf auth login` first; H3 requires manual
+approval. Install the model-specific extras and FFmpeg as documented in the
+cards. The measured environment is one H200; H3 also needs substantial host RAM.
 
 ```bash
-hf download ZeyuLing/HFTrainer-Stable-Diffusion-1.5 --local-dir checkpoints/hftrainer/sd15
-python tools/infer.py \
-  --config configs/pretrained/infer_sd15.py --device cuda \
-  --prompt "A paper boat in a rain-filled street at dusk." \
-  --output outputs/inference/paper_boat.png
+python tools/infer.py --model ZeyuLing/HFTrainer-LTX-2.5-22B-Dev \
+  --device cuda --seed 42 --height 512 --width 768 --num-frames 121 \
+  --num-steps 30 --prompt "A woman speaks calmly to the camera in soft daylight." \
+  --output outputs/ltx.mp4
+
+python tools/infer.py --model ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA \
+  --device cuda --seed 42 --height 768 --width 768 --num-steps 50 \
+  --prompt "A woman speaks calmly to the camera in soft daylight." \
+  --output outputs/h3.mp4
 ```
 
-The inference CLI reads `cfg.pipeline.type` and `cfg.inference.task`. It never
-guesses inference behavior from a trainer or implementation class name.
-
-## Video models: verified launch paths
-
-Accept each video model agreement and authenticate with `hf auth login` before
-downloading. H3 access requires manual approval. The examples below reproduce the **base inference settings** used for the
-2026-09-28 comparison, after preparing the environment and checkpoint assets.
-Both models ran on one H200. They are not download-and-run commands for an
-unprepared machine. The English model cards contain setup, preprocessing,
-training, adapter inference, licensing and remaining validation limits.
-
-### LTX-Video 2.5
-
-Install `.[ltx-video]` and prepare the split checkpoint pack described in the
-[LTX model card](docs/en/models/ltx_video_2_5.md). The measured dev workflow used
-PyTorch 2.8.0+cu128:
-
-```bash
-hf download ZeyuLing/HFTrainer-LTX-2.5-22B-Dev --local-dir checkpoints/hftrainer/ltx_video
-python tools/infer_ltx_video.py configs/pretrained/infer_ltx_video.py \
-  --prompt "A dancer performs a dance routine with music." --seed 42 \
-  --height 512 --width 768 --num-frames 121 --num-inference-steps 30 \
-  --negative-prompt "blurry, distorted, low quality, artifacts" \
-  --output outputs/ltx_demo.mp4
-```
-
-The command retains the official second-stage LoRA and disables a user adapter.
-The independent official comparison matched both stages' latents; the face
-sample also matched decoded video and audio with deterministic audio decoding.
-This does not establish parity for separate distilled weights or every mode.
-
-### MiniMax-H3
-
-Install `.[minimax-h3,minimax-h3-fa3]` and prepare the assets described in the
-[H3 model card](docs/en/models/minimax_h3.md). Exact denoising comparison used
-PyTorch 2.11.0+cu130 and the pinned FA3 kernel. The sequential entry point
-releases the text encoder before loading the denoiser:
-
-```bash
-hf download ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA --local-dir checkpoints/hftrainer/minimax_h3
-export MINIMAX_H3_ROOT="$PWD/checkpoints/hftrainer/minimax_h3"
-python tools/validation/infer_h3.py --attention-backend flash_attention_3 \
-  --prompt "A dancer performs a dance routine with music." --seed 42 \
-  --output outputs/h3_demo.mp4
-```
-
-The demonstrated T2VA output is 768 × 768, 124 frames at 24 FPS with 32 kHz
-stereo audio. Face-sample text conditions and denoising latents matched the
-independent official implementation exactly. Small native VAE differences
-remain; decoded media is not claimed to be bit-identical. H3 training is an
-experimental rectified-flow recipe, not a released official training recipe.
-
-Both implementations execute locally without a second model repository.
-Infrastructure libraries, optional attention kernels and downloaded model
-assets remain dependencies. Read the respective model agreements and
-[third-party notices](THIRD_PARTY_NOTICES.md) before use or redistribution.
+The H3 path places its conditioner and denoiser on the GPU sequentially. LTX
+retains the dev model's official second-stage LoRA. Historical independent
+reference comparisons, numerical limits and playable demos are linked from
+the cards. No hosted Regenerate-2K or Context-IR implementation is claimed.
 
 ## Checkpoint availability
 
@@ -225,8 +185,8 @@ download, training/inference configs, source licenses and validation scope.
 These are real pretrained weights exported or packaged through our native
 bundle contract. They are not random-initialization artifacts or claims of
 new training. DMD uses the author's trained DMD2 SD1.5 non-GAN checkpoint as
-initialization; it is not an original-DMD-paper reproduction. Demo adapters
-and the private video dataset are separate and have not been released.
+initialization; it is not an original-DMD-paper reproduction. Short-run fine-tuned weights are separate from these pretrained bases. Public
+demo datasets are linked below; historical private clips remain unpublished.
 
 Training and inference share `cfg.model.from_pretrained`, with
 `save_pretrained` and `tools/export_model.py` providing the export path.
@@ -235,42 +195,28 @@ Training and inference share `cfg.model.from_pretrained`, with
 These are HFTrainer artifacts hosted on the Hub; no compatibility with another
 framework's automatic model loader is implied.
 
-## Demo data and training evidence
+## Public data and training evidence
 
-**The H3/LTX demo dataset is not published on Hugging Face.** The measured runs
-used two local dance clips for training and one held-out clip; source media
-and feature caches are not bundled. Redistribution permission has not been
-established. A clean public checkout cannot yet download those exact inputs
-and reproduce the training measurements end to end.
+| Dataset | Tasks / models | Public download |
+| :--- | :--- | :--- |
+| Beans | ViT classification | [hftrainer_beans](https://huggingface.co/datasets/ZeyuLing/hftrainer_beans) |
+| WikiText-2 | TinyLlama plain-text LM | [hftrainer_wikitext2](https://huggingface.co/datasets/ZeyuLing/hftrainer_wikitext2) |
+| Smithsonian butterflies | SD1.5, DMD, StyleGAN2 | [hftrainer_smithsonian_butterflies](https://huggingface.co/datasets/ZeyuLing/hftrainer_smithsonian_butterflies) |
+| CREMA-D mini | H3/LTX audio-video, Wan video-only | [hftrainer_crema_d_mini](https://huggingface.co/datasets/ZeyuLing/hftrainer_crema_d_mini) |
 
-After preparing compatible caches as described in each model card, launch the
-20-step recipes:
+Data is downloaded to `data/hftrainer_*`. Each dataset preserves source
+revision, licensing, transformations, fixed splits and checksums; published
+files were downloaded again and verified. CREMA-D splits are actor-disjoint.
+The earlier private dance clips are not required by these recipes.
 
-```bash
-MINIMAX_H3_CACHE_MANIFEST="$PWD/data/h3/train.jsonl" \
-HFTRAINER_WORK_DIR="$PWD/outputs/h3_loss_demo" \
-python tools/train.py configs/minimax_h3/demo_loss.py \
-  --cfg-options val_dataloader.dataset.manifest="$PWD/data/h3/validation.jsonl"
+Each English model card follows the same structure: original paper/code,
+released settings with config and checkpoint URLs, one-command training and
+inference, measured loss/metrics, produced demos, limitations and BibTeX.
+**Short training proves execution, not convergence or generation quality.**
+Base-model demos are identified separately from fine-tuning results.
 
-LTX25_PREPROCESSED_DATA="$PWD/data/ltx/.precomputed" \
-HFTRAINER_WORK_DIR="$PWD/outputs/ltx_loss_demo" \
-python tools/train.py configs/ltx_video/demo_loss.py
-```
-
-These short LoRA runs verify execution and record real losses. **Neither trace
-demonstrates sustained decrease, convergence or generalization.** The visually
-reviewed base samples were not produced by these demo adapters.
-
-| Evidence | H3 | LTX 2.5 |
-| --- | --- | --- |
-| Full-weight inference | T2VA sample comparison | Dev two-stage sample comparison |
-| Short LoRA train / resume / adapter inference | Completed | Completed |
-| Raw 20-step loss trace | [Curve](docs/en/models/evidence/h3_loss.png) | [Curve](docs/en/models/evidence/ltx_loss.png) |
-| Training convergence | Not established | Not established |
-| Exact demo dataset on Hub | Not published | Not published |
-
-[Dataset provenance and release status](docs/en/models/demo-data.md) ·
-[Raw measurements and methodology](docs/en/models/evidence/index.md) ·
+[Dataset provenance](docs/en/models/demo-data.md) ·
+[Model cards and results](docs/en/models/index.md) ·
 [Model-card standard](docs/en/models/standard.md)
 
 ## Repository Standard

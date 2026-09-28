@@ -1,0 +1,103 @@
+{
+  "scope": "Historical independent official base face-sample comparison, 2026-09-28; separate from the public-data training and new seed-42 checkpoint-only demos. No fine-tuned adapter used.",
+  "prompt": "A close-up of a woman speaking calmly to the camera, natural facial expressions, soft daylight, detailed face, steady camera.",
+  "seed": 7,
+  "h3": {
+    "reference": "https://github.com/sgl-project/sglang/tree/c11ce7c514c4dc30c2d243c43ecfb79c7a871db5",
+    "raw_weights_revision": "a9e1d8408c3453c899d151d0aa448082c10b0185",
+    "geometry": "768x768, 124 frames, 24 FPS",
+    "sampler": "50 sigmas, video/audio shift 12/3, independent CPU noise, FA3 on both sides",
+    "torch": "2.11.0+cu130",
+    "latent_comparison": {
+      "video": {
+        "exact": true,
+        "max_abs": 0.0,
+        "rmse": 0.0
+      },
+      "audio": {
+        "exact": true,
+        "max_abs": 0.0,
+        "rmse": 0.0
+      }
+    },
+    "codec_comparison": {
+      "audio_vae": {
+        "exact": false,
+        "max_abs": 0.0013524293899536133,
+        "rmse": 7.789762457832694e-05
+      },
+      "video_vae": {
+        "exact": false,
+        "max_abs": 0.049146056175231934,
+        "rmse": 0.000629638263490051
+      }
+    }
+  },
+  "ltx_video": {
+    "reference": "https://github.com/Lightricks/LTX-2/tree/400fd31054597515f47125691032c04b1c3ee24e",
+    "geometry": "768x512, 121 frames, 24 FPS",
+    "sampler": "Dev 30 + 3 refinement steps, official stage-two LoRA, no prompt enhancement or quantization, deterministic audio decoding on both sides",
+    "negative_prompt": "blurry, distorted, low quality, artifacts",
+    "torch": "2.8.0+cu128",
+    "tensor_comparison": {
+      "conditioning.pt/0/video": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "conditioning.pt/0/audio": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "conditioning.pt/1/video": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "conditioning.pt/1/audio": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "stage1.pt/0/video": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "stage1.pt/0/audio": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "stage2.pt/0/video": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "stage2.pt/0/audio": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "audio_waveform.pt/0/waveform": {
+        "exact": true,
+        "max_abs": 0.0
+      }
+    },
+    "media_comparison": {
+      "video": {
+        "official_elements": 142737408,
+        "local_elements": 142737408,
+        "official_sha256": "e911bafa812e6465a78e6b3315bcf96fe30d2d5208ec692ee09b92d3f15b708c",
+        "local_sha256": "e911bafa812e6465a78e6b3315bcf96fe30d2d5208ec692ee09b92d3f15b708c",
+        "exact": true,
+        "mae": 0.0,
+        "rmse": 0.0,
+        "max_abs": 0.0
+      },
+      "audio": {
+        "official_elements": 481280,
+        "local_elements": 481280,
+        "official_sha256": "5372299b6d6dd66e850515a8cf76e0876f6c835ac806ea311497bad0a8d75180",
+        "local_sha256": "5372299b6d6dd66e850515a8cf76e0876f6c835ac806ea311497bad0a8d75180",
+        "exact": true,
+        "mae": 0.0,
+        "rmse": 0.0,
+        "max_abs": 0.0
+      }
+    }
+  }
+}

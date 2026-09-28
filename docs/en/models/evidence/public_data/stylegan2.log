@@ -1,0 +1,53 @@
+[2026/09/28 20:22:04] hftrainer INFO: Config: configs/public_data/stylegan2.py
+[2026/09/28 20:22:04] hftrainer INFO: Work dir: work_dirs/public_data/stylegan2
+[2026/09/28 20:22:04] hftrainer INFO: Config saved to: work_dirs/public_data/stylegan2/20260928_202204/config.py
+[2026/09/28 20:22:04] hftrainer INFO: Work dir: work_dirs/public_data/stylegan2
+[2026/09/28 20:22:04] hftrainer INFO: Run dir (logs/tb): work_dirs/public_data/stylegan2/20260928_202204
+[2026/09/28 20:22:06] hftrainer INFO: Environment info:
+Platform: Linux-6.1.158-178.288.amzn2023.x86_64-x86_64-with-glibc2.39
+Python: 3.12.3 (main, Nov  6 2024, 18:32:19) [GCC 13.2.0]
+PyTorch: 2.8.0+cu128
+CUDA available: True
+CUDA version: 12.8
+GPU count: 1
+  GPU 0: NVIDIA H200
+accelerate: 1.15.0
+mmengine: 0.10.7
+safetensors: 0.8.0
+torchvision: 0.23.0+cu128
+datasets: not installed
+[2026/09/28 20:22:09] hftrainer INFO: 
+Model Summary:
+  Module         Total Params  Trainable Params  Trainable  Save Ckpt
+  -------------  ------------  ----------------  ---------  ---------
+  generator        30,370,060        30,370,060  True       True     
+  discriminator    29,012,513        29,012,513  True       True     
+  -------------  ------------  ----------------  ---------  ---------
+  TOTAL            59,382,573        59,382,573
+  Trainable ratio: 100.00%
+
+[2026/09/28 20:22:10] hftrainer INFO: trainer_controls_optimization=True: injected ['generator', 'discriminator'] optimizers into StyleGAN2Trainer
+<VENV>/lib/python3.12/site-packages/torch/autograd/graph.py:829: UserWarning: Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context... (Triggered internally at /pytorch/aten/src/ATen/cuda/CublasHandlePool.cpp:179.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[2026/09/28 20:22:24] hftrainer INFO: step [1/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=2.1408  loss_d_main=0.9812  loss_d_reg=1.1596  loss_g=2.6987  loss_g_main=2.2648  loss_g_reg=0.4339  disc_factor=1.0000  data_time=0.06s  train_time=14.29s  eta=0:04:32
+[2026/09/28 20:22:24] hftrainer INFO: step [2/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=1.3094  loss_d_main=1.3094  loss_d_reg=0.0000  loss_g=4.0929  loss_g_main=4.0929  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.10s  eta=0:02:10
+[2026/09/28 20:22:24] hftrainer INFO: step [3/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=1.2443  loss_d_main=1.2443  loss_d_reg=0.0000  loss_g=1.6883  loss_g_main=1.6883  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.10s  eta=0:01:23
+[2026/09/28 20:22:25] hftrainer INFO: step [4/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.2951  loss_d_main=0.2951  loss_d_reg=0.0000  loss_g=2.4328  loss_g_main=2.4328  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.10s  eta=0:00:59
+[2026/09/28 20:22:29] hftrainer INFO: step [5/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=1.1360  loss_d_main=1.1360  loss_d_reg=0.0000  loss_g=4.0005  loss_g_main=3.7841  loss_g_reg=0.2164  disc_factor=1.0000  data_time=0.08s  train_time=4.66s  eta=0:00:58
+[2026/09/28 20:22:30] hftrainer INFO: step [6/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.8817  loss_d_main=0.8817  loss_d_reg=0.0000  loss_g=1.4136  loss_g_main=1.4136  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.10s  eta=0:00:46
+[2026/09/28 20:22:30] hftrainer INFO: step [7/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.1612  loss_d_main=0.1612  loss_d_reg=0.0000  loss_g=1.2000  loss_g_main=1.2000  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.10s  eta=0:00:37
+[2026/09/28 20:22:30] hftrainer INFO: step [8/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.7715  loss_d_main=0.7715  loss_d_reg=0.0000  loss_g=1.7728  loss_g_main=1.7728  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.10s  eta=0:00:30
+[2026/09/28 20:22:35] hftrainer INFO: step [9/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.8287  loss_d_main=0.8287  loss_d_reg=0.0000  loss_g=1.9033  loss_g_main=1.1758  loss_g_reg=0.7275  disc_factor=1.0000  data_time=0.08s  train_time=4.66s  eta=0:00:30
+[2026/09/28 20:22:35] hftrainer INFO: step [10/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.5973  loss_d_main=0.5973  loss_d_reg=0.0000  loss_g=1.5146  loss_g_main=1.5146  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.09s  train_time=0.16s  eta=0:00:25
+[2026/09/28 20:22:35] hftrainer INFO: step [11/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.5458  loss_d_main=0.5458  loss_d_reg=0.0000  loss_g=1.7500  loss_g_main=1.7500  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.11s  eta=0:00:20
+[2026/09/28 20:22:35] hftrainer INFO: step [12/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.2947  loss_d_main=0.2947  loss_d_reg=0.0000  loss_g=1.5963  loss_g_main=1.5963  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.08s  train_time=0.11s  eta=0:00:17
+[2026/09/28 20:22:40] hftrainer INFO: step [13/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.2798  loss_d_main=0.2798  loss_d_reg=0.0000  loss_g=2.2363  loss_g_main=1.0992  loss_g_reg=1.1371  disc_factor=1.0000  data_time=0.08s  train_time=4.66s  eta=0:00:16
+[2026/09/28 20:22:40] hftrainer INFO: step [14/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.3172  loss_d_main=0.3172  loss_d_reg=0.0000  loss_g=2.0798  loss_g_main=2.0798  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.17s  train_time=0.10s  eta=0:00:13
+[2026/09/28 20:22:40] hftrainer INFO: step [15/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.2778  loss_d_main=0.2778  loss_d_reg=0.0000  loss_g=1.9398  loss_g_main=1.9398  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.10s  train_time=0.10s  eta=0:00:10
+[2026/09/28 20:22:41] hftrainer INFO: step [16/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.1903  loss_d_main=0.1903  loss_d_reg=0.0000  loss_g=0.4040  loss_g_main=0.4040  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.09s  train_time=0.10s  eta=0:00:07
+[2026/09/28 20:22:54] hftrainer INFO: step [17/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=2.1167  loss_d_main=0.2829  loss_d_reg=1.8338  loss_g=4.1753  loss_g_main=3.2118  loss_g_reg=0.9635  disc_factor=1.0000  data_time=0.12s  train_time=13.01s  eta=0:00:07
+[2026/09/28 20:22:54] hftrainer INFO: step [18/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.4606  loss_d_main=0.4606  loss_d_reg=0.0000  loss_g=2.6499  loss_g_main=2.6499  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.12s  train_time=0.11s  eta=0:00:04
+[2026/09/28 20:22:54] hftrainer INFO: step [19/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.4709  loss_d_main=0.4709  loss_d_reg=0.0000  loss_g=1.5778  loss_g_main=1.5778  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.11s  train_time=0.10s  eta=0:00:02
+[2026/09/28 20:22:54] hftrainer INFO: step [20/20]  lr_generator=1.00e-04  lr_discriminator=1.00e-04  loss_d=0.3224  loss_d_main=0.3224  loss_d_reg=0.0000  loss_g=1.7396  loss_g_main=1.7396  loss_g_reg=0.0000  disc_factor=1.0000  data_time=0.11s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:22:58] hftrainer INFO: Saved checkpoint to: work_dirs/public_data/stylegan2/checkpoint-iter_20
+[2026/09/28 20:22:58] hftrainer INFO: Training complete.

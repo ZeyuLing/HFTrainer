@@ -1,0 +1,54 @@
+[2026/09/28 20:46:13] hftrainer INFO: Config: configs/public_data/dmd.py
+[2026/09/28 20:46:13] hftrainer INFO: Work dir: work_dirs/public_data/dmd
+[2026/09/28 20:46:13] hftrainer INFO: Config saved to: work_dirs/public_data/dmd/20260928_204613/config.py
+[2026/09/28 20:46:13] hftrainer INFO: Work dir: work_dirs/public_data/dmd
+[2026/09/28 20:46:13] hftrainer INFO: Run dir (logs/tb): work_dirs/public_data/dmd/20260928_204613
+[2026/09/28 20:46:14] hftrainer INFO: Environment info:
+Platform: Linux-6.1.158-178.288.amzn2023.x86_64-x86_64-with-glibc2.39
+Python: 3.12.3 (main, Nov  6 2024, 18:32:19) [GCC 13.2.0]
+PyTorch: 2.8.0+cu128
+CUDA available: True
+CUDA version: 12.8
+GPU count: 1
+  GPU 0: NVIDIA H200
+accelerate: 1.15.0
+mmengine: 0.10.7
+safetensors: 0.8.0
+torchvision: 0.23.0+cu128
+datasets: not installed
+[2026/09/28 20:47:22] hftrainer INFO: 
+Model Summary:
+  Module            Total Params  Trainable Params  Trainable  Save Ckpt
+  ---------------  -------------  ----------------  ---------  ---------
+  text_encoder       123,060,480                 0  False      False    
+  vae                 83,653,863                 0  False      False    
+  real_score_unet    859,520,964                 0  False      False    
+  fake_score_unet    859,520,964       859,520,964  True       True     
+  generator_unet     859,520,964       859,520,964  True       True     
+  ---------------  -------------  ----------------  ---------  ---------
+  TOTAL            2,785,277,235     1,719,041,928
+  Trainable ratio: 61.72%
+
+[2026/09/28 20:47:25] hftrainer INFO: trainer_controls_optimization=True: injected ['generator', 'fake_score'] optimizers into DMDTrainer
+[2026/09/28 20:47:28] hftrainer INFO: step [1/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.7464  loss_reg=1.1816  loss_fake_score=0.1624  raw_loss_dm=0.7464  raw_loss_reg=1.1816  raw_loss_fake_score=0.1624  score_schedule=1.0000  dm_grad_norm=156.3955  data_time=0.05s  train_time=2.43s  eta=0:00:47
+[2026/09/28 20:47:29] hftrainer INFO: step [2/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.2040  loss_reg=0.6102  loss_fake_score=0.2190  raw_loss_dm=0.2040  raw_loss_reg=0.6102  raw_loss_fake_score=0.2190  score_schedule=1.0000  dm_grad_norm=81.7584  data_time=0.07s  train_time=0.93s  eta=0:00:31
+[2026/09/28 20:47:30] hftrainer INFO: step [3/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.5975  loss_reg=0.5102  loss_fake_score=0.0194  raw_loss_dm=0.5975  raw_loss_reg=0.5102  raw_loss_fake_score=0.0194  score_schedule=1.0000  dm_grad_norm=139.9278  data_time=0.10s  train_time=0.93s  eta=0:00:25
+[2026/09/28 20:47:31] hftrainer INFO: step [4/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.2775  loss_reg=0.6508  loss_fake_score=0.3022  raw_loss_dm=0.2775  raw_loss_reg=0.6508  raw_loss_fake_score=0.3022  score_schedule=1.0000  dm_grad_norm=95.3520  data_time=0.07s  train_time=0.92s  eta=0:00:22
+[2026/09/28 20:47:32] hftrainer INFO: step [5/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.1114  loss_reg=0.4883  loss_fake_score=0.1381  raw_loss_dm=0.1114  raw_loss_reg=0.4883  raw_loss_fake_score=0.1381  score_schedule=1.0000  dm_grad_norm=60.4251  data_time=0.07s  train_time=0.93s  eta=0:00:19
+[2026/09/28 20:47:33] hftrainer INFO: step [6/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.3020  loss_reg=0.4848  loss_fake_score=0.4110  raw_loss_dm=0.3020  raw_loss_reg=0.4848  raw_loss_fake_score=0.4110  score_schedule=1.0000  dm_grad_norm=99.4730  data_time=0.08s  train_time=0.93s  eta=0:00:17
+[2026/09/28 20:47:34] hftrainer INFO: step [7/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.3308  loss_reg=0.6754  loss_fake_score=0.0038  raw_loss_dm=0.3308  raw_loss_reg=0.6754  raw_loss_fake_score=0.0038  score_schedule=1.0000  dm_grad_norm=104.1114  data_time=0.08s  train_time=0.93s  eta=0:00:15
+[2026/09/28 20:47:35] hftrainer INFO: step [8/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.3149  loss_reg=0.3413  loss_fake_score=0.7668  raw_loss_dm=0.3149  raw_loss_reg=0.3413  raw_loss_fake_score=0.7668  score_schedule=1.0000  dm_grad_norm=101.5808  data_time=0.09s  train_time=0.91s  eta=0:00:14
+[2026/09/28 20:47:36] hftrainer INFO: step [9/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.3903  loss_reg=0.4505  loss_fake_score=0.0817  raw_loss_dm=0.3903  raw_loss_reg=0.4505  raw_loss_fake_score=0.0817  score_schedule=1.0000  dm_grad_norm=113.0842  data_time=0.09s  train_time=0.90s  eta=0:00:12
+[2026/09/28 20:47:37] hftrainer INFO: step [10/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.1590  loss_reg=0.5481  loss_fake_score=0.0099  raw_loss_dm=0.1590  raw_loss_reg=0.5481  raw_loss_fake_score=0.0099  score_schedule=1.0000  dm_grad_norm=72.1703  data_time=0.08s  train_time=0.91s  eta=0:00:11
+[2026/09/28 20:47:38] hftrainer INFO: step [11/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.1199  loss_reg=0.4368  loss_fake_score=0.1671  raw_loss_dm=0.1199  raw_loss_reg=0.4368  raw_loss_fake_score=0.1671  score_schedule=1.0000  dm_grad_norm=62.6724  data_time=0.08s  train_time=0.92s  eta=0:00:10
+[2026/09/28 20:47:39] hftrainer INFO: step [12/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.6461  loss_reg=0.3485  loss_fake_score=0.0219  raw_loss_dm=0.6461  raw_loss_reg=0.3485  raw_loss_fake_score=0.0219  score_schedule=1.0000  dm_grad_norm=145.5057  data_time=0.07s  train_time=0.91s  eta=0:00:08
+[2026/09/28 20:47:40] hftrainer INFO: step [13/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.7739  loss_reg=0.3351  loss_fake_score=0.0869  raw_loss_dm=0.7739  raw_loss_reg=0.3351  raw_loss_fake_score=0.0869  score_schedule=1.0000  dm_grad_norm=159.2416  data_time=0.09s  train_time=0.90s  eta=0:00:07
+[2026/09/28 20:47:41] hftrainer INFO: step [14/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.3823  loss_reg=0.4381  loss_fake_score=0.2277  raw_loss_dm=0.3823  raw_loss_reg=0.4381  raw_loss_fake_score=0.2277  score_schedule=1.0000  dm_grad_norm=111.9179  data_time=0.08s  train_time=0.90s  eta=0:00:06
+[2026/09/28 20:47:42] hftrainer INFO: step [15/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.7630  loss_reg=0.4151  loss_fake_score=0.0055  raw_loss_dm=0.7630  raw_loss_reg=0.4151  raw_loss_fake_score=0.0055  score_schedule=1.0000  dm_grad_norm=158.1151  data_time=0.08s  train_time=0.90s  eta=0:00:05
+[2026/09/28 20:47:43] hftrainer INFO: step [16/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.6985  loss_reg=0.2842  loss_fake_score=0.2526  raw_loss_dm=0.6985  raw_loss_reg=0.2842  raw_loss_fake_score=0.2526  score_schedule=1.0000  dm_grad_norm=151.2854  data_time=0.07s  train_time=0.90s  eta=0:00:04
+[2026/09/28 20:47:44] hftrainer INFO: step [17/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.5824  loss_reg=0.4282  loss_fake_score=0.0027  raw_loss_dm=0.5824  raw_loss_reg=0.4282  raw_loss_fake_score=0.0027  score_schedule=1.0000  dm_grad_norm=138.1465  data_time=0.08s  train_time=0.90s  eta=0:00:03
+[2026/09/28 20:47:45] hftrainer INFO: step [18/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.4544  loss_reg=0.4954  loss_fake_score=0.0386  raw_loss_dm=0.4544  raw_loss_reg=0.4954  raw_loss_fake_score=0.0386  score_schedule=1.0000  dm_grad_norm=122.0179  data_time=0.08s  train_time=0.91s  eta=0:00:02
+[2026/09/28 20:47:46] hftrainer INFO: step [19/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.2533  loss_reg=0.4170  loss_fake_score=0.0437  raw_loss_dm=0.2533  raw_loss_reg=0.4170  raw_loss_fake_score=0.0437  score_schedule=1.0000  dm_grad_norm=91.1115  data_time=0.07s  train_time=0.91s  eta=0:00:01
+[2026/09/28 20:47:47] hftrainer INFO: step [20/20]  lr_generator=1.00e-05  lr_fake_score=4.00e-05  loss_dm=0.3026  loss_reg=0.4154  loss_fake_score=0.0031  raw_loss_dm=0.3026  raw_loss_reg=0.4154  raw_loss_fake_score=0.0031  score_schedule=1.0000  dm_grad_norm=99.5782  data_time=0.09s  train_time=0.90s  eta=0:00:00
+[2026/09/28 20:49:26] hftrainer INFO: Saved checkpoint to: work_dirs/public_data/dmd/checkpoint-iter_20
+[2026/09/28 20:49:26] hftrainer INFO: Training complete.

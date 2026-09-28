@@ -93,8 +93,7 @@ class HFVideoDataset(BaseText2VideoDataset):
                         'width': self.width,
                     })
         else:
-            # No metadata: use synthetic data
-            records = self._create_synthetic_samples(8)
+            raise FileNotFoundError(f'Video manifest not found: {meta_path}')
         return records
 
     def build_default_pipeline(self):

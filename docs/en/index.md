@@ -30,19 +30,8 @@ runtime orchestration rather than model definitions.
 - [Datasets](design/dataset.md)
 - [Evaluation and Visualization](design/evaluation.md)
 
-## Project Status
+## Public models and data
 
-Runnable demos:
+All eight model families have processed Hugging Face checkpoints, public-data training recipes and a common English model-card format. Start with the [model catalog](models/index.md), [public datasets](models/demo-data.md) and [release standard](models/standard.md).
 
-- Classification
-- Text-to-image
-- Causal LM SFT
-- Causal LM LoRA
-- Text-to-video
-- StyleGAN2-style GAN training
-- DMD-style distillation
-- LTX-Video 2.5 distilled/dev inference and local managed LoRA training
-
-The packaged LTX implementation is a modified snapshot pinned to one source
-revision. Its local config/API contracts and tiny Gemma path are tested; the
-repository test environment does not execute the gated 22B workflow.
+Full-weight H3 T2VA and LTX dev generation were compared with independent official implementations on an H200. The cards distinguish these base-model comparisons from short public-data training, reduced-resolution checks and untested settings. Short runs do not establish convergence.

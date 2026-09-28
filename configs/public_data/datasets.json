@@ -1,0 +1,48 @@
+{
+  "beans": {
+    "repo_id": "ZeyuLing/hftrainer_beans",
+    "revision": "712f72df3166cf40eacae68df26330f7096b0685",
+    "local_dir": "data/hftrainer_beans",
+    "files_verified": 1301,
+    "splits": {
+      "train": 1034,
+      "validation": 133,
+      "test": 128
+    },
+    "manifest_sha256": "1311bcb3628f189648bc7b28ecf25d6dbf490386199eb18f3c1eb827fe6c4654"
+  },
+  "wikitext2": {
+    "repo_id": "ZeyuLing/hftrainer_wikitext2",
+    "revision": "e9aaa6354f59bf18cb8d0fe53cd2e0dce1dd9aa4",
+    "local_dir": "data/hftrainer_wikitext2",
+    "files_verified": 6,
+    "splits": {
+      "train": 23767,
+      "validation": 2461,
+      "test": 2891
+    },
+    "manifest_sha256": "af6c7e4557e3b0cd17dbe11c26eea38a0861363555b3b65f2f206fbf29dee219"
+  },
+  "smithsonian_butterflies": {
+    "repo_id": "ZeyuLing/hftrainer_smithsonian_butterflies",
+    "revision": "c34c2176cf5d0d2a1d64f034a83f989dddbf71d2",
+    "local_dir": "data/hftrainer_smithsonian_butterflies",
+    "files_verified": 1005,
+    "splits": {
+      "validation": 100,
+      "train": 900
+    },
+    "manifest_sha256": "0c2c5ff25b41df8705345181785e0419ce7c96022db4c7763bb67136557aab89"
+  },
+  "crema_d_mini": {
+    "repo_id": "ZeyuLing/hftrainer_crema_d_mini",
+    "revision": "1188c5d5fac3e69ea014831ab4409f729f8eda81",
+    "local_dir": "data/hftrainer_crema_d_mini",
+    "files_verified": 40,
+    "splits": {
+      "train": 24,
+      "validation": 8
+    },
+    "manifest_sha256": "ebf322bcf50a159b8c4f17cf01d89790206e51db4c0b571ab11c5f3af8696a94"
+  }
+}

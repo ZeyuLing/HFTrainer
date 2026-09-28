@@ -1,0 +1,212 @@
+{
+  "model": "stylegan2",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_smithsonian_butterflies",
+    "revision": "c34c2176cf5d0d2a1d64f034a83f989dddbf71d2",
+    "local_dir": "data/hftrainer_smithsonian_butterflies",
+    "files_verified": 1005,
+    "splits": {
+      "validation": 100,
+      "train": 900
+    },
+    "manifest_sha256": "0c2c5ff25b41df8705345181785e0419ce7c96022db4c7763bb67136557aab89"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024",
+    "revision": "dc9ff4e65f66f18491e75a147c2895871e582e36",
+    "bundle": "StyleGAN2Bundle",
+    "local_dir": "checkpoints/hftrainer/stylegan2",
+    "access": "Public"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/stylegan2/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/stylegan2.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss_d": 2.1408,
+      "loss_d_main": 0.9812,
+      "loss_d_reg": 1.1596,
+      "loss_g": 2.6987,
+      "loss_g_main": 2.2648,
+      "loss_g_reg": 0.4339
+    },
+    {
+      "step": 2,
+      "loss_d": 1.3094,
+      "loss_d_main": 1.3094,
+      "loss_d_reg": 0.0,
+      "loss_g": 4.0929,
+      "loss_g_main": 4.0929,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 3,
+      "loss_d": 1.2443,
+      "loss_d_main": 1.2443,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.6883,
+      "loss_g_main": 1.6883,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 4,
+      "loss_d": 0.2951,
+      "loss_d_main": 0.2951,
+      "loss_d_reg": 0.0,
+      "loss_g": 2.4328,
+      "loss_g_main": 2.4328,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 5,
+      "loss_d": 1.136,
+      "loss_d_main": 1.136,
+      "loss_d_reg": 0.0,
+      "loss_g": 4.0005,
+      "loss_g_main": 3.7841,
+      "loss_g_reg": 0.2164
+    },
+    {
+      "step": 6,
+      "loss_d": 0.8817,
+      "loss_d_main": 0.8817,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.4136,
+      "loss_g_main": 1.4136,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 7,
+      "loss_d": 0.1612,
+      "loss_d_main": 0.1612,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.2,
+      "loss_g_main": 1.2,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 8,
+      "loss_d": 0.7715,
+      "loss_d_main": 0.7715,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.7728,
+      "loss_g_main": 1.7728,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 9,
+      "loss_d": 0.8287,
+      "loss_d_main": 0.8287,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.9033,
+      "loss_g_main": 1.1758,
+      "loss_g_reg": 0.7275
+    },
+    {
+      "step": 10,
+      "loss_d": 0.5973,
+      "loss_d_main": 0.5973,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.5146,
+      "loss_g_main": 1.5146,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 11,
+      "loss_d": 0.5458,
+      "loss_d_main": 0.5458,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.75,
+      "loss_g_main": 1.75,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 12,
+      "loss_d": 0.2947,
+      "loss_d_main": 0.2947,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.5963,
+      "loss_g_main": 1.5963,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 13,
+      "loss_d": 0.2798,
+      "loss_d_main": 0.2798,
+      "loss_d_reg": 0.0,
+      "loss_g": 2.2363,
+      "loss_g_main": 1.0992,
+      "loss_g_reg": 1.1371
+    },
+    {
+      "step": 14,
+      "loss_d": 0.3172,
+      "loss_d_main": 0.3172,
+      "loss_d_reg": 0.0,
+      "loss_g": 2.0798,
+      "loss_g_main": 2.0798,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 15,
+      "loss_d": 0.2778,
+      "loss_d_main": 0.2778,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.9398,
+      "loss_g_main": 1.9398,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 16,
+      "loss_d": 0.1903,
+      "loss_d_main": 0.1903,
+      "loss_d_reg": 0.0,
+      "loss_g": 0.404,
+      "loss_g_main": 0.404,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 17,
+      "loss_d": 2.1167,
+      "loss_d_main": 0.2829,
+      "loss_d_reg": 1.8338,
+      "loss_g": 4.1753,
+      "loss_g_main": 3.2118,
+      "loss_g_reg": 0.9635
+    },
+    {
+      "step": 18,
+      "loss_d": 0.4606,
+      "loss_d_main": 0.4606,
+      "loss_d_reg": 0.0,
+      "loss_g": 2.6499,
+      "loss_g_main": 2.6499,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 19,
+      "loss_d": 0.4709,
+      "loss_d_main": 0.4709,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.5778,
+      "loss_g_main": 1.5778,
+      "loss_g_reg": 0.0
+    },
+    {
+      "step": 20,
+      "loss_d": 0.3224,
+      "loss_d_main": 0.3224,
+      "loss_d_reg": 0.0,
+      "loss_g": 1.7396,
+      "loss_g_main": 1.7396,
+      "loss_g_reg": 0.0
+    }
+  ]
+}

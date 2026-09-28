@@ -1,0 +1,160 @@
+{
+  "model": "minimax_h3",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_crema_d_mini",
+    "revision": "1188c5d5fac3e69ea014831ab4409f729f8eda81",
+    "local_dir": "data/hftrainer_crema_d_mini",
+    "files_verified": 40,
+    "splits": {
+      "train": 24,
+      "validation": 8
+    },
+    "manifest_sha256": "ebf322bcf50a159b8c4f17cf01d89790206e51db4c0b571ab11c5f3af8696a94"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA",
+    "revision": "a3b24b9d13fac9c38949ef737e9cb4b98ffe2fb1",
+    "bundle": "MiniMaxH3Bundle",
+    "local_dir": "checkpoints/hftrainer/minimax_h3",
+    "access": "Manual access approval"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/minimax_h3/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/minimax_h3.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss": 0.7431,
+      "loss_video": 0.384,
+      "loss_audio": 0.3591
+    },
+    {
+      "step": 2,
+      "loss": 0.8247,
+      "loss_video": 0.4912,
+      "loss_audio": 0.3335
+    },
+    {
+      "step": 3,
+      "loss": 0.5613,
+      "loss_video": 0.2388,
+      "loss_audio": 0.3225
+    },
+    {
+      "step": 4,
+      "loss": 0.8593,
+      "loss_video": 0.4852,
+      "loss_audio": 0.3742
+    },
+    {
+      "step": 5,
+      "loss": 0.6254,
+      "loss_video": 0.2784,
+      "loss_audio": 0.347
+    },
+    {
+      "step": 6,
+      "loss": 0.9048,
+      "loss_video": 0.6041,
+      "loss_audio": 0.3007
+    },
+    {
+      "step": 7,
+      "loss": 0.9372,
+      "loss_video": 0.5992,
+      "loss_audio": 0.338
+    },
+    {
+      "step": 8,
+      "loss": 0.6392,
+      "loss_video": 0.2526,
+      "loss_audio": 0.3866
+    },
+    {
+      "step": 9,
+      "loss": 0.6392,
+      "loss_video": 0.2645,
+      "loss_audio": 0.3747
+    },
+    {
+      "step": 10,
+      "loss": 0.605,
+      "loss_video": 0.2855,
+      "loss_audio": 0.3195
+    },
+    {
+      "step": 11,
+      "loss": 0.941,
+      "loss_video": 0.5748,
+      "loss_audio": 0.3662
+    },
+    {
+      "step": 12,
+      "loss": 0.6428,
+      "loss_video": 0.4285,
+      "loss_audio": 0.2143
+    },
+    {
+      "step": 13,
+      "loss": 0.9108,
+      "loss_video": 0.5464,
+      "loss_audio": 0.3644
+    },
+    {
+      "step": 14,
+      "loss": 0.675,
+      "loss_video": 0.3034,
+      "loss_audio": 0.3717
+    },
+    {
+      "step": 15,
+      "loss": 0.6001,
+      "loss_video": 0.3243,
+      "loss_audio": 0.2758
+    },
+    {
+      "step": 16,
+      "loss": 0.7366,
+      "loss_video": 0.3572,
+      "loss_audio": 0.3795
+    },
+    {
+      "step": 17,
+      "loss": 0.6837,
+      "loss_video": 0.3339,
+      "loss_audio": 0.3498
+    },
+    {
+      "step": 18,
+      "loss": 0.6798,
+      "loss_video": 0.3035,
+      "loss_audio": 0.3763
+    },
+    {
+      "step": 19,
+      "loss": 0.7431,
+      "loss_video": 0.4033,
+      "loss_audio": 0.3398
+    },
+    {
+      "step": 20,
+      "loss": 0.6399,
+      "loss_video": 0.3399,
+      "loss_audio": 0.3
+    }
+  ],
+  "held_out_metrics": {
+    "val/loss": 0.8745,
+    "val/loss_video": 0.4547,
+    "val/loss_audio": 0.4198,
+    "samples": 8,
+    "split": "validation",
+    "noise_protocol": "New noise and timestep sampled by trainer; not fixed-noise convergence evaluation"
+  }
+}

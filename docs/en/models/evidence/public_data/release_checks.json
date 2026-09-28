@@ -1,0 +1,27 @@
+{
+  "code_tests": {
+    "passed": 251,
+    "skipped": 7,
+    "deselected": 1,
+    "command": "python -m pytest tests/unit tests/smoke tests/integration -q -k \"not public_model_cards_share_required_sections\""
+  },
+  "model_card_tests": {
+    "passed": 2,
+    "command": "python -m pytest tests/unit/test_model_card_standard.py -q"
+  },
+  "strict_mkdocs": "passed",
+  "wheel": "hftrainer-0.3.0-py3-none-any.whl built successfully; new runtime/data entry points present",
+  "render": {
+    "page_viewport_checks": 30,
+    "widths": [
+      375,
+      768,
+      1440
+    ],
+    "keyboard_focus": "passed",
+    "missing_images": 0,
+    "horizontal_page_overflow": 0,
+    "h3_text_size_200_percent": "passed"
+  },
+  "visual_inspection": "Loss plots, ViT fixed validation gallery, SD/DMD/StyleGAN images, Wan preview, H3/LTX face frames, mobile H3 and desktop LTX card screenshots inspected. Not a perceptual benchmark."
+}

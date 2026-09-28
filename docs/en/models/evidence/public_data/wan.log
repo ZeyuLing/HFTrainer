@@ -1,0 +1,53 @@
+[2026/09/28 20:49:30] hftrainer INFO: Config: configs/public_data/wan.py
+[2026/09/28 20:49:30] hftrainer INFO: Work dir: work_dirs/public_data/wan
+[2026/09/28 20:49:31] hftrainer INFO: Config saved to: work_dirs/public_data/wan/20260928_204930/config.py
+[2026/09/28 20:49:31] hftrainer INFO: Work dir: work_dirs/public_data/wan
+[2026/09/28 20:49:31] hftrainer INFO: Run dir (logs/tb): work_dirs/public_data/wan/20260928_204930
+[2026/09/28 20:49:31] hftrainer INFO: Environment info:
+Platform: Linux-6.1.158-178.288.amzn2023.x86_64-x86_64-with-glibc2.39
+Python: 3.12.3 (main, Nov  6 2024, 18:32:19) [GCC 13.2.0]
+PyTorch: 2.8.0+cu128
+CUDA available: True
+CUDA version: 12.8
+GPU count: 1
+  GPU 0: NVIDIA H200
+accelerate: 1.15.0
+mmengine: 0.10.7
+safetensors: 0.8.0
+torchvision: 0.23.0+cu128
+datasets: not installed
+[2026/09/28 20:53:06] hftrainer INFO: 
+Model Summary:
+  Module         Total Params  Trainable Params  Trainable  Save Ckpt
+  ------------  -------------  ----------------  ---------  ---------
+  text_encoder  5,680,910,336                 0  False      False    
+  vae             126,892,531                 0  False      False    
+  transformer   1,418,996,800     1,418,996,800  True       True     
+  ------------  -------------  ----------------  ---------  ---------
+  TOTAL         7,226,799,667     1,418,996,800
+  Trainable ratio: 19.64%
+
+<VENV>/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:5: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+[2026/09/28 20:53:11] hftrainer INFO: step [1/20]  loss=0.9399  loss_flow=0.9399  data_time=0.16s  train_time=1.11s  eta=0:00:24
+[2026/09/28 20:53:11] hftrainer INFO: step [2/20]  loss=0.3164  loss_flow=0.3164  data_time=0.08s  train_time=0.40s  eta=0:00:15
+[2026/09/28 20:53:12] hftrainer INFO: step [3/20]  loss=0.5460  loss_flow=0.5460  data_time=0.09s  train_time=0.41s  eta=0:00:12
+[2026/09/28 20:53:13] hftrainer INFO: step [4/20]  loss=0.3832  loss_flow=0.3832  data_time=0.54s  train_time=0.40s  eta=0:00:12
+[2026/09/28 20:53:13] hftrainer INFO: step [5/20]  loss=0.4585  loss_flow=0.4585  data_time=0.08s  train_time=0.39s  eta=0:00:10
+[2026/09/28 20:53:14] hftrainer INFO: step [6/20]  loss=0.3014  loss_flow=0.3014  data_time=0.09s  train_time=0.39s  eta=0:00:09
+[2026/09/28 20:53:14] hftrainer INFO: step [7/20]  loss=0.4486  loss_flow=0.4486  data_time=0.08s  train_time=0.39s  eta=0:00:08
+[2026/09/28 20:53:15] hftrainer INFO: step [8/20]  loss=0.2363  loss_flow=0.2363  data_time=0.08s  train_time=0.39s  eta=0:00:07
+[2026/09/28 20:53:16] hftrainer INFO: step [9/20]  loss=1.0073  loss_flow=1.0073  data_time=0.68s  train_time=0.40s  eta=0:00:07
+[2026/09/28 20:53:16] hftrainer INFO: step [10/20]  loss=0.2965  loss_flow=0.2965  data_time=0.09s  train_time=0.40s  eta=0:00:06
+[2026/09/28 20:53:17] hftrainer INFO: step [11/20]  loss=0.3230  loss_flow=0.3230  data_time=0.09s  train_time=0.40s  eta=0:00:05
+[2026/09/28 20:53:17] hftrainer INFO: step [12/20]  loss=0.2807  loss_flow=0.2807  data_time=0.09s  train_time=0.40s  eta=0:00:05
+[2026/09/28 20:53:18] hftrainer INFO: step [13/20]  loss=0.3308  loss_flow=0.3308  data_time=0.09s  train_time=0.41s  eta=0:00:04
+[2026/09/28 20:53:19] hftrainer INFO: step [14/20]  loss=0.3947  loss_flow=0.3947  data_time=0.80s  train_time=0.44s  eta=0:00:04
+[2026/09/28 20:53:19] hftrainer INFO: step [15/20]  loss=0.3050  loss_flow=0.3050  data_time=0.10s  train_time=0.41s  eta=0:00:03
+[2026/09/28 20:53:20] hftrainer INFO: step [16/20]  loss=0.2359  loss_flow=0.2359  data_time=0.09s  train_time=0.40s  eta=0:00:02
+[2026/09/28 20:53:20] hftrainer INFO: step [17/20]  loss=0.2413  loss_flow=0.2413  data_time=0.09s  train_time=0.40s  eta=0:00:01
+[2026/09/28 20:53:21] hftrainer INFO: step [18/20]  loss=0.2870  loss_flow=0.2870  data_time=0.09s  train_time=0.40s  eta=0:00:01
+[2026/09/28 20:53:23] hftrainer INFO: step [19/20]  loss=1.7114  loss_flow=1.7114  data_time=1.14s  train_time=0.70s  eta=0:00:00
+[2026/09/28 20:53:23] hftrainer INFO: step [20/20]  loss=0.3845  loss_flow=0.3845  data_time=0.09s  train_time=0.42s  eta=0:00:00
+[2026/09/28 20:53:39] hftrainer INFO: Saved checkpoint to: work_dirs/public_data/wan/checkpoint-iter_20
+[2026/09/28 20:53:39] hftrainer INFO: Training complete.

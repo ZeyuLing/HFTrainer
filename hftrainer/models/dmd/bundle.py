@@ -264,6 +264,8 @@ class DMDBundle(ModelBundle):
                 for name in (*neural_components, 'scheduler')
             },
         }
+        from hftrainer.artifacts import write_artifact_config
+        write_artifact_config(root, type(self).__name__)
         config_path = root / 'bundle_config.json'
         with config_path.open('w', encoding='utf-8') as handle:
             json.dump(config, handle, indent=2, sort_keys=True)

@@ -27,6 +27,8 @@ def main(argv=None):
     bundle = MODEL_BUNDLES.build(cfg.model)
     if args.checkpoint:
         bundle.load_training_checkpoint(args.checkpoint, strict=True)
+    if type(bundle).__name__ == 'MiniMaxH3Bundle':
+        bundle.require_components('text_encoder', 'vae', 'audio_vae')
     bundle.eval()
     bundle.save_pretrained(str(output))
     print(f'Exported {type(bundle).__name__} to {output.resolve()}')

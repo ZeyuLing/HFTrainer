@@ -56,7 +56,7 @@ def build_pipeline_from_cfg(
         bundle.load_training_checkpoint(checkpoint_path, strict=strict_checkpoint)
     if merge_lora:
         bundle.merge_lora_weights()
-    if device is not None:
+    if device is not None and not _plain(pipeline_cfg).get('cpu_offload_device'):
         bundle.to(device)
     bundle.eval()
     pipeline_data = _plain(pipeline_cfg)

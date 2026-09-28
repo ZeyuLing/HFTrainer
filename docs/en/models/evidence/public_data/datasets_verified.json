@@ -1,0 +1,30 @@
+{
+  "beans": {
+    "anonymous_http_status": 200,
+    "private": false,
+    "gated": false,
+    "revision": "712f72df3166cf40eacae68df26330f7096b0685",
+    "files_verified": 1301
+  },
+  "wikitext2": {
+    "anonymous_http_status": 200,
+    "private": false,
+    "gated": false,
+    "revision": "e9aaa6354f59bf18cb8d0fe53cd2e0dce1dd9aa4",
+    "files_verified": 6
+  },
+  "smithsonian_butterflies": {
+    "anonymous_http_status": 200,
+    "private": false,
+    "gated": false,
+    "revision": "c34c2176cf5d0d2a1d64f034a83f989dddbf71d2",
+    "files_verified": 1005
+  },
+  "crema_d_mini": {
+    "anonymous_http_status": 200,
+    "private": false,
+    "gated": false,
+    "revision": "1188c5d5fac3e69ea014831ab4409f729f8eda81",
+    "files_verified": 40
+  }
+}

@@ -1,85 +1,123 @@
-# LLaMA causal LM
+# TinyLlama · 1.1B Chat
 
-Instruction fine-tuning and text generation with local tokenization, KV caching and LoRA.
+Plain-text causal language modelling with repository-owned model, trainer and inference code.
 
-**Verification:** Tiny numerical and artifact tests
+**Verified:** 20 real-data training steps, saved checkpoint and native checkpoint-only base inference. **Convergence is not established.**
 
-**Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
-
-[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Settings](#settings-and-checkpoints) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss) · [Demos](#demos)
 
 ## At a glance
 
-| Item | Status |
+| Property | Released setting |
 | :--- | :--- |
-| Implementation | Local to HFTrainer |
-| Demo data | See [data availability](demo-data.md) |
-| Convergence | Not established by the evidence on this card |
+| Model | 1.1B · Chat v1.0 |
+| Training | Rank-16 LoRA, all linear layers |
+| Training input | 256 tokens per nonempty line |
+| Public dataset | [wikitext2](https://huggingface.co/datasets/ZeyuLing/hftrainer_wikitext2) |
+| Runtime | Local HFTrainer implementation; supporting PyTorch/media libraries and model assets remain dependencies |
+
+## Sources
+
+[Original paper / report](https://arxiv.org/abs/2401.02385) · [Original code](https://github.com/jzhang38/TinyLlama)
+
+The original repository is provenance, not a runtime checkout requirement. [Third-party notices](https://github.com/ZeyuLing/HFTrainer/blob/main/THIRD_PARTY_NOTICES.md) preserve implementation and asset terms.
+
+## Settings and checkpoints
+
+| Setting | Training config | Processed checkpoint | Access |
+| :--- | :--- | :--- | :--- |
+| 1.1B · Chat v1.0 | [config.py](https://github.com/ZeyuLing/HFTrainer/blob/main/configs/public_data/llama.py) | [HFTrainer-TinyLlama-1.1B-Chat](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat) | Public |
+
+Only the setting above is a released HFTrainer artifact. Its [root config.json](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat/resolve/f782b84ba99cef1c24a5d216801a70117647980c/config.json), weights and all task-required component configs, processors and schedulers are included together. Inference needs **only the checkpoint path or Hub ID**, plus task inputs.
+
+Pinned weight revision: [`f782b84ba99c`](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat/tree/f782b84ba99cef1c24a5d216801a70117647980c). [Original conversion evidence](evidence/checkpoints/llama.json) describes the initial export; the current revision adds checkpoint-only dispatch metadata without changing tensors.
 
 ## Setup
 
-Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
+Run from the repository root:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e "."
 python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-Download the complete HFTrainer bundle below. Model weights are hosted separately from the code.
-
-## Checkpoint
-
-[ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat/tree/b23a22f572ca8d25e3d10411e90932826b9875f1)
-
-This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
-
-```bash
-hf download ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat \
-  --revision b23a22f572ca8d25e3d10411e90932826b9875f1 \
-  --local-dir checkpoints/hftrainer/llama
-export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/llama"
-```
-
-[Conversion and validation record](evidence/checkpoints/llama.json). Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
-
-```bash
-python tools/export_model.py --config configs/pretrained/train_llama.py \
-  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/llama_export
-```
+Verified on one NVIDIA H200 with PyTorch 2.8.0+cu128. This is the tested environment, not a measured minimum-memory requirement.
 
 ## Data
 
-Ten instruction/input/output records at `data/llm/demo/alpaca_sample.json`. A full fine-tuning recipe is also available in `configs/llama/llama_sft_demo.py`.
+The recipe downloads [`ZeyuLing/hftrainer_wikitext2`](https://huggingface.co/datasets/ZeyuLing/hftrainer_wikitext2/tree/e9aaa6354f59bf18cb8d0fe53cd2e0dce1dd9aa4) to `data/hftrainer_wikitext2`. Split counts: **23767 train / 2461 validation / 2891 test**. Dataset source, license, transformations and checksum verification are documented in [Public demo datasets](demo-data.md).
+
+Model features are cached locally when required. The script never substitutes synthetic samples for missing real media.
 
 ## Train
 
+One command downloads pinned data and weights, prepares required caches, and runs the 20-step recipe:
+
 ```bash
-python tools/train.py configs/pretrained/train_llama.py
+python tools/run_public_demo.py llama
+```
+
+Reuse downloaded weights with `--checkpoint path/to/complete_bundle`; change the output directory with `--work-dir path/to/run`. The underlying command is `python tools/train.py configs/public_data/llama.py`. Seed: **42**. Training logs and checkpoints are saved under `work_dirs/public_data/llama/`. If you reused a custom checkpoint directory, set `HFTRAINER_CHECKPOINT` to that directory before directly invoking training, resume or export commands.
+
+The final resumable checkpoint is `work_dirs/public_data/llama/checkpoint-iter_20`. For a longer resumed run, keep the same checkpoint/data setting:
+
+```bash
+python tools/train.py configs/public_data/llama.py --auto-resume \
+  --cfg-options train_cfg.max_iters=40
 ```
 
 ## Infer
 
-Run the published pretrained model:
+Run the processed **pretrained base**, independently of any training config:
 
 ```bash
-python tools/infer.py --config configs/pretrained/infer_llama.py --device cuda \
-  --prompt "The capital of France is" --max-new-tokens 32
+python tools/infer.py --model ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat \
+  --revision f782b84ba99cef1c24a5d216801a70117647980c --device cuda --seed 42 \
+  --prompt "The butterfly is" --max-new-tokens 48
 ```
 
-For fine-tuned weights, pass `--checkpoint` with the training output and a matching training model config (including LoRA settings or a changed classification head).
+`--model` also accepts a local complete checkpoint directory. A resumable training checkpoint is not a standalone model: export with `tools/export_model.py` using the matching training config, then pass the exported directory to `--model`. [Artifact and configuration contract](standard.md#checkpoint-and-execution-contract).
+
+To package this training run as a complete checkpoint (including its frozen base components):
+
+```bash
+python tools/export_model.py --config configs/public_data/llama.py \
+  --checkpoint work_dirs/public_data/llama/checkpoint-iter_20 --output exports/llama
+```
+
+Then run the inference command above with `--model exports/llama` and omit `--revision`. Complete exports duplicate the base weights; allow sufficient disk space.
 
 ## Evidence and loss
 
-Full pretrained export/reload produced identical logits. Real TinyLlama tokenizer encodings and decodings match the reference for Unicode, whitespace and special-token cases. Tiny numerical and sharded-artifact checks also pass.
+Real TinyLlama tokenization matches the reference on Unicode, whitespace and special-token cases; full pretrained logits match after native reload.
 
-The new pretrained training entry point completed one optimizer step and saved a checkpoint on an H200. These synthetic execution checks are recorded with the checkpoint evidence; they do not establish useful fine-tuning.
+![TinyLlama · 1.1B Chat raw 20-step training losses on wikitext2](evidence/public_data/llama_loss.png)
 
-**Loss curve: not published.** No sustained-decrease or convergence result is claimed.
+[Raw training record](evidence/public_data/llama.json) · [Training log](evidence/public_data/llama.log)
+
+These are raw, unsmoothed objectives on the public dataset. Twenty steps establish pipeline execution, not convergence. Loss values are not comparable across models.
+
+**Held-out line-wise perplexity:** base 12.201; trained 9.325. Evaluated on the first 128 nonempty validation lines, truncated independently to 256 tokens and aggregated by predicted-token count. This is **not the standard concatenated WikiText benchmark**. [Exact protocol and counts](evidence/public_data/llama_evaluation.json).
+
+## Demos
+
+[Generated text from the checkpoint-only CLI](evidence/public_data/llama_demo.txt). Untouched base; prompt `The butterfly is`, 48 new tokens, seed 42.
 
 ## Limitations
 
-The ten-step recipe demonstrates wiring, not instruction-following quality.
+This plain-text continuation example starts from the Chat checkpoint and does not use an instruction template. It is not an instruction-following evaluation. Other LLaMA sizes are not packaged settings.
 
-## Sources and license
+## Citation
 
-Consult the checkpoint provider’s model card for asset terms. See the [repository notices](https://github.com/ZeyuLing/HFTrainer/blob/main/THIRD_PARTY_NOTICES.md) and repository license; model assets are not relicensed by HFTrainer.
+```bibtex
+@misc{zhang2024tinyllama,
+  title = {TinyLlama: An Open-Source Small Language Model},
+  author = {Peiyuan Zhang and Guangtao Zeng and Tianduo Wang and Wei Lu},
+  year = {2024},
+  eprint = {2401.02385},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2401.02385}
+}
+```
+
+Also retain the [dataset citation and attribution](demo-data.md#provenance-and-transformations).

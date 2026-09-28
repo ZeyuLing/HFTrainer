@@ -167,3 +167,6 @@ class LlamaBundle(ModelBundle):
         )
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(save_directory)
+        from hftrainer.artifacts import write_artifact_config
+
+        write_artifact_config(save_directory, type(self).__name__)

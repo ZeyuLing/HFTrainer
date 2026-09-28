@@ -43,10 +43,12 @@ class LoadVideo:
         height = int(results[self.height_key])
         width = int(results[self.width_key])
 
-        if synthetic or not video_path or not os.path.exists(video_path):
+        if synthetic:
             results[self.output_key] = self._build_synthetic_video(num_frames, height, width)
             return results
 
+        if not video_path or not os.path.isfile(video_path):
+            raise FileNotFoundError(f'Video file not found: {video_path}')
         try:
             import torchvision.io as io
             import torchvision.transforms.functional as TF
@@ -58,6 +60,6 @@ class LoadVideo:
             frames = torch.stack([TF.resize(frame, [height, width]) for frame in frames])
             video = frames.float().permute(1, 0, 2, 3) / 127.5 - 1.0
             results[self.output_key] = video.clamp(-1, 1)
-        except Exception:
-            results[self.output_key] = self._build_synthetic_video(num_frames, height, width)
+        except Exception as error:
+            raise RuntimeError(f'Cannot decode training video: {video_path}') from error
         return results

@@ -1,0 +1,132 @@
+{
+  "model": "sd15",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_smithsonian_butterflies",
+    "revision": "c34c2176cf5d0d2a1d64f034a83f989dddbf71d2",
+    "local_dir": "data/hftrainer_smithsonian_butterflies",
+    "files_verified": 1005,
+    "splits": {
+      "validation": 100,
+      "train": 900
+    },
+    "manifest_sha256": "0c2c5ff25b41df8705345181785e0419ce7c96022db4c7763bb67136557aab89"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-Stable-Diffusion-1.5",
+    "revision": "717ea02695c7590af2df19193838887e44d1d448",
+    "bundle": "SD15Bundle",
+    "local_dir": "checkpoints/hftrainer/sd15",
+    "access": "Public"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/sd15/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/sd15.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss": 0.5493,
+      "loss_mse": 0.5493
+    },
+    {
+      "step": 2,
+      "loss": 0.041,
+      "loss_mse": 0.041
+    },
+    {
+      "step": 3,
+      "loss": 0.357,
+      "loss_mse": 0.357
+    },
+    {
+      "step": 4,
+      "loss": 0.0144,
+      "loss_mse": 0.0144
+    },
+    {
+      "step": 5,
+      "loss": 0.0124,
+      "loss_mse": 0.0124
+    },
+    {
+      "step": 6,
+      "loss": 0.2791,
+      "loss_mse": 0.2791
+    },
+    {
+      "step": 7,
+      "loss": 0.0354,
+      "loss_mse": 0.0354
+    },
+    {
+      "step": 8,
+      "loss": 0.1717,
+      "loss_mse": 0.1717
+    },
+    {
+      "step": 9,
+      "loss": 0.006,
+      "loss_mse": 0.006
+    },
+    {
+      "step": 10,
+      "loss": 0.2446,
+      "loss_mse": 0.2446
+    },
+    {
+      "step": 11,
+      "loss": 0.2334,
+      "loss_mse": 0.2334
+    },
+    {
+      "step": 12,
+      "loss": 0.2312,
+      "loss_mse": 0.2312
+    },
+    {
+      "step": 13,
+      "loss": 0.3081,
+      "loss_mse": 0.3081
+    },
+    {
+      "step": 14,
+      "loss": 0.0164,
+      "loss_mse": 0.0164
+    },
+    {
+      "step": 15,
+      "loss": 0.0641,
+      "loss_mse": 0.0641
+    },
+    {
+      "step": 16,
+      "loss": 0.0913,
+      "loss_mse": 0.0913
+    },
+    {
+      "step": 17,
+      "loss": 0.1134,
+      "loss_mse": 0.1134
+    },
+    {
+      "step": 18,
+      "loss": 0.0778,
+      "loss_mse": 0.0778
+    },
+    {
+      "step": 19,
+      "loss": 0.0027,
+      "loss_mse": 0.0027
+    },
+    {
+      "step": 20,
+      "loss": 0.0301,
+      "loss_mse": 0.0301
+    }
+  ]
+}

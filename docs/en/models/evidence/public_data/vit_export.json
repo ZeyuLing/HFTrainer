@@ -1,0 +1,7 @@
+{
+  "model": "vit",
+  "checkpoint": "work_dirs/public_data/vit/checkpoint-iter_20",
+  "export_reload_max_abs_error": 0.0,
+  "num_labels": 3,
+  "checkpoint_only": true
+}

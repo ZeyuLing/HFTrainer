@@ -1,87 +1,132 @@
-# StyleGAN2
+# StyleGAN2-ADA · FFHQ 1024
 
-Pretrained FFHQ 1024 × 1024 image generation with local generator and discriminator training.
+Unconditional image generation with repository-owned model, trainer and inference code.
 
-**Verification:** Official NVIDIA full-resolution output and native reload match exactly
+**Verified:** 20 real-data training steps, saved checkpoint and native checkpoint-only base inference. **Convergence is not established.**
 
-**Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
-
-[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Settings](#settings-and-checkpoints) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss) · [Demos](#demos)
 
 ## At a glance
 
-| Item | Status |
+| Property | Released setting |
 | :--- | :--- |
-| Implementation | Local to HFTrainer |
-| Demo data | See [data availability](demo-data.md) |
-| Convergence | Not established by the evidence on this card |
+| Model | NVIDIA FFHQ · 1024 px |
+| Training | Full generator + discriminator |
+| Training input | 1024 × 1024; batch 1 |
+| Public dataset | [smithsonian_butterflies](https://huggingface.co/datasets/ZeyuLing/hftrainer_smithsonian_butterflies) |
+| Runtime | Local HFTrainer implementation; supporting PyTorch/media libraries and model assets remain dependencies |
+
+## Sources
+
+[Original paper / report](https://arxiv.org/abs/1912.04958) · [Original code](https://github.com/NVlabs/stylegan2-ada-pytorch) · [ADA paper](https://arxiv.org/abs/2006.06676)
+
+The original repository is provenance, not a runtime checkout requirement. [Third-party notices](https://github.com/ZeyuLing/HFTrainer/blob/main/THIRD_PARTY_NOTICES.md) preserve implementation and asset terms.
+
+## Settings and checkpoints
+
+| Setting | Training config | Processed checkpoint | Access |
+| :--- | :--- | :--- | :--- |
+| NVIDIA FFHQ · 1024 px | [config.py](https://github.com/ZeyuLing/HFTrainer/blob/main/configs/public_data/stylegan2.py) | [HFTrainer-StyleGAN2-ADA-FFHQ-1024](https://huggingface.co/ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024) | Public |
+
+Only the setting above is a released HFTrainer artifact. Its [root config.json](https://huggingface.co/ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024/resolve/dc9ff4e65f66f18491e75a147c2895871e582e36/config.json), weights and all task-required component configs, processors and schedulers are included together. Inference needs **only the checkpoint path or Hub ID**, plus task inputs.
+
+Pinned weight revision: [`dc9ff4e65f66`](https://huggingface.co/ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024/tree/dc9ff4e65f66f18491e75a147c2895871e582e36). [Original conversion evidence](evidence/checkpoints/stylegan2.json) describes the initial export; the current revision adds checkpoint-only dispatch metadata without changing tensors.
 
 ## Setup
 
-Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
+Run from the repository root:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e "."
 python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-The published artifact contains NVIDIA FFHQ `G_ema` and discriminator weights, converted to safetensors. Runtime loading does not execute pickle.
-
-## Checkpoint
-
-[ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024](https://huggingface.co/ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024/tree/c8ba5e0da3c126780db4be4eab9afe86d1b99db9)
-
-This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
-
-```bash
-hf download ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024 \
-  --revision c8ba5e0da3c126780db4be4eab9afe86d1b99db9 \
-  --local-dir checkpoints/hftrainer/stylegan2
-export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/stylegan2"
-```
-
-[Conversion and validation record](evidence/checkpoints/stylegan2.json). Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
-
-```bash
-python tools/export_model.py --config configs/pretrained/train_stylegan2.py \
-  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/stylegan2_export
-```
+Verified on one NVIDIA H200 with PyTorch 2.8.0+cu128. This is the tested environment, not a measured minimum-memory requirement.
 
 ## Data
 
-Images under `data/classification/demo/images`. The supplied pretrained recipe fine-tunes at 1024 × 1024 with batch size 1.
+The recipe downloads [`ZeyuLing/hftrainer_smithsonian_butterflies`](https://huggingface.co/datasets/ZeyuLing/hftrainer_smithsonian_butterflies/tree/c34c2176cf5d0d2a1d64f034a83f989dddbf71d2) to `data/hftrainer_smithsonian_butterflies`. Split counts: **900 train / 100 validation / 0 test**. Dataset source, license, transformations and checksum verification are documented in [Public demo datasets](demo-data.md).
+
+Model features are cached locally when required. The script never substitutes synthetic samples for missing real media.
 
 ## Train
 
+One command downloads pinned data and weights, prepares required caches, and runs the 20-step recipe:
+
 ```bash
-python tools/train.py configs/pretrained/train_stylegan2.py
+python tools/run_public_demo.py stylegan2
+```
+
+Reuse downloaded weights with `--checkpoint path/to/complete_bundle`; change the output directory with `--work-dir path/to/run`. The underlying command is `python tools/train.py configs/public_data/stylegan2.py`. Seed: **42**. Training logs and checkpoints are saved under `work_dirs/public_data/stylegan2/`. If you reused a custom checkpoint directory, set `HFTRAINER_CHECKPOINT` to that directory before directly invoking training, resume or export commands.
+
+The final resumable checkpoint is `work_dirs/public_data/stylegan2/checkpoint-iter_20`. For a longer resumed run, keep the same checkpoint/data setting:
+
+```bash
+python tools/train.py configs/public_data/stylegan2.py --auto-resume \
+  --cfg-options train_cfg.max_iters=40
 ```
 
 ## Infer
 
-Run the published pretrained model:
+Run the processed **pretrained base**, independently of any training config:
 
 ```bash
-python tools/infer.py --config configs/pretrained/infer_stylegan2.py --device cuda \
-  --seed 42 --output outputs/stylegan2.png
+python tools/infer.py --model ZeyuLing/HFTrainer-StyleGAN2-ADA-FFHQ-1024 \
+  --revision dc9ff4e65f66f18491e75a147c2895871e582e36 --device cuda --seed 42 \
+  --output outputs/stylegan2.png
 ```
 
-For fine-tuned weights, pass `--checkpoint` with the training output and a matching training model config (including LoRA settings or a changed classification head).
+`--model` also accepts a local complete checkpoint directory. A resumable training checkpoint is not a standalone model: export with `tools/export_model.py` using the matching training config, then pass the exported directory to `--model`. [Artifact and configuration contract](standard.md#checkpoint-and-execution-contract).
+
+To package this training run as a complete checkpoint (including its frozen base components):
+
+```bash
+python tools/export_model.py --config configs/public_data/stylegan2.py \
+  --checkpoint work_dirs/public_data/stylegan2/checkpoint-iter_20 --output exports/stylegan2
+```
+
+Then run the inference command above with `--model exports/stylegan2` and omit `--revision`. Complete exports duplicate the base weights; allow sufficient disk space.
 
 ## Evidence and loss
 
-The native generator matches the official NVIDIA 1024 × 1024 FP32 output exactly with constant noise and seed 42. Export/reload also matches exactly. Tiny adversarial backward and regularization contracts are tested.
+The local generator matches official NVIDIA FP32 1024-pixel output exactly with constant noise and seed 42, and remains identical after reload.
 
-The new pretrained training entry point completed one optimizer step and saved a checkpoint on an H200. These synthetic execution checks are recorded with the checkpoint evidence; they do not establish useful fine-tuning.
+![StyleGAN2-ADA · FFHQ 1024 raw 20-step training losses on smithsonian_butterflies](evidence/public_data/stylegan2_loss.png)
 
-**Loss curve: not published.** No sustained-decrease or convergence result is claimed.
+[Raw training record](evidence/public_data/stylegan2.json) · [Training log](evidence/public_data/stylegan2.log)
+
+These are raw, unsmoothed objectives on the public dataset. Twenty steps establish pipeline execution, not convergence. Loss values are not comparable across models.
+
+No held-out perceptual quality metric was measured for this short run.
+
+## Demos
+
+![StyleGAN2-ADA · FFHQ 1024 pretrained base sample, seed 42](evidence/public_data/stylegan2_demo.png)
+
+Untouched published base; seed 42. The prompt and sampler settings are the inference command above. This image is not an output of the 20-step fine-tuned model.
 
 ## Limitations
 
-The default config runs 10,000 iterations. Portable PyTorch reference operators favor compatibility over CUDA-kernel speed. No FID result is claimed.
+This short run transfers a face generator toward butterfly images and does not establish successful domain adaptation. The demo below remains an untouched FFHQ base sample. Training includes local R1/path-length objectives, but does not reproduce the complete ADA training recipe. No FID is claimed. NVIDIA assets retain their non-commercial license.
 
-## Sources and license
+## Citation
 
-Consult the checkpoint provider’s model card for asset terms. See the [repository notices](https://github.com/ZeyuLing/HFTrainer/blob/main/THIRD_PARTY_NOTICES.md) and repository license; model assets are not relicensed by HFTrainer.
+```bibtex
+@misc{karras2020stylegan2,
+  title = {Analyzing and Improving the Image Quality of StyleGAN},
+  author = {Tero Karras and others},
+  year = {2020},
+  eprint = {1912.04958},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/1912.04958}
+}
+@inproceedings{karras2020ada,
+  title = {Training Generative Adversarial Networks with Limited Data},
+  author = {Tero Karras and others},
+  booktitle = {NeurIPS},
+  year = {2020},
+  url = {https://arxiv.org/abs/2006.06676}
+}
+```
 
-The NVIDIA implementation and FFHQ weights are for non-commercial research/evaluation under the included NVIDIA license.
+Also retain the [dataset citation and attribution](demo-data.md#provenance-and-transformations).

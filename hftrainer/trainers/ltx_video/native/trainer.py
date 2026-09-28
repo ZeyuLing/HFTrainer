@@ -1005,6 +1005,12 @@ class LtxvTrainer:
         rel_path = saved_weights_path.relative_to(self._config.output_dir)
         logger.info(f"💾 {prefix.capitalize()} weights for step {self._global_step} saved in {rel_path}")
 
+        # The final step may be saved both by the interval hook and at loop exit.
+        # Retention counts distinct artifacts, otherwise keep_last_n=1 unlinks
+        # the just-written file when its path appears twice in the history.
+        self._checkpoint_paths = [
+            path for path in self._checkpoint_paths if path != saved_weights_path
+        ]
         self._checkpoint_paths.append(saved_weights_path)
         self._cleanup_checkpoints()
 

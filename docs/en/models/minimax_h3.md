@@ -1,96 +1,130 @@
-# MiniMax-H3
+# MiniMax-H3 · Base FL2VA
 
-Synchronized text-to-video and stereo audio with the Base 768p model.
+Text-to-audio-video generation with repository-owned model, trainer and inference code.
 
-**Verification:** Full-weight T2VA and short LoRA train/resume/infer verified on one H200 (2026-09-28)
+**Verified:** 20 real-data training steps, saved checkpoint and native checkpoint-only base inference. **Convergence is not established.**
 
-**Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
-
-[All models](index.md) · [Setup](#setup) · [Checkpoint](#checkpoint) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
+[All models](index.md) · [Settings](#settings-and-checkpoints) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss) · [Demos](#demos)
 
 ## At a glance
 
-| Item | Status |
+| Property | Released setting |
 | :--- | :--- |
-| Implementation | Local to HFTrainer |
-| Demo data | See [data availability](demo-data.md) |
-| Convergence | Not established by the evidence on this card |
+| Model | Base FL2VA · 33B denoiser + 32B conditioner |
+| Training | Rank-2 LoRA on cached audio/video/text features |
+| Training input | 128 × 128 × 56 frames; synchronized audio |
+| Public dataset | [crema_d_mini](https://huggingface.co/datasets/ZeyuLing/hftrainer_crema_d_mini) |
+| Runtime | Local HFTrainer implementation; supporting PyTorch/media libraries and model assets remain dependencies |
+
+## Sources
+
+[Original technical overview](https://github.com/MiniMax-AI/MiniMax-H3#system-overview) · [Original code](https://github.com/MiniMax-AI/MiniMax-H3)
+
+The original repository is provenance, not a runtime checkout requirement. [Third-party notices](https://github.com/ZeyuLing/HFTrainer/blob/main/THIRD_PARTY_NOTICES.md) preserve implementation and asset terms.
+
+## Settings and checkpoints
+
+| Setting | Training config | Processed checkpoint | Access |
+| :--- | :--- | :--- | :--- |
+| Base FL2VA · 33B denoiser + 32B conditioner | [config.py](https://github.com/ZeyuLing/HFTrainer/blob/main/configs/public_data/minimax_h3.py) | [HFTrainer-MiniMax-H3-Base-FL2VA](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA) | Manual access approval |
+
+Only the setting above is a released HFTrainer artifact. Its [root config.json](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA/resolve/a3b24b9d13fac9c38949ef737e9cb4b98ffe2fb1/config.json), weights and all task-required component configs, processors and schedulers are included together. Inference needs **only the checkpoint path or Hub ID**, plus task inputs.
+
+Pinned weight revision: [`a3b24b9d13fa`](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA/tree/a3b24b9d13fac9c38949ef737e9cb4b98ffe2fb1). [Original conversion evidence](evidence/checkpoints/h3.json) describes the initial export; the current revision adds checkpoint-only dispatch metadata without changing tensors.
 
 ## Setup
 
-Run commands from the repository root. Install the environment below, download the checkpoint, and prepare data before training.
+Run from the repository root:
 
 ```bash
-python -m pip install -e ".[minimax-h3,minimax-h3-fa3]"
+python -m pip install -e ".[minimax-h3]"
 python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-Choose a matching CUDA PyTorch wheel first. Official comparison used PyTorch 2.11.0+cu130 and FA3; training used 2.8.0+cu128 in a separate environment. See the [checkpoint download and placement guide](minimax_h3_reference.md#install-and-download). One H200 fits the demonstrated inference path by loading the conditioner and denoiser sequentially.
+Verified on one NVIDIA H200 with PyTorch 2.8.0+cu128. This is the tested environment, not a measured minimum-memory requirement. The complete artifact is about 140 GB. Inference uses sequential component placement; substantial host RAM (the validation container has 230 GiB) is required as well as GPU memory. Install system FFmpeg (`ffmpeg` and `ffprobe`) for media preparation.
 
-Download the processed base bundle below. The demo adapters are not included in this release.
-
-## Checkpoint
-
-[ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA) · [pinned revision](https://huggingface.co/ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA/tree/179db9782a327566da00d2d06ff067945908d5a2)
-
-Request access on the Hub page, accept the model agreement, wait for manual approval, and run `hf auth login` first. Access is restricted to the territories allowed by the MiniMax agreement. This release packages real pretrained weights in a complete **HFTrainer bundle**. Trainer and Pipeline share the repository-owned `from_pretrained` loader. Conversion, source attribution and validation scope are recorded below.
-
-```bash
-hf download ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA \
-  --revision 179db9782a327566da00d2d06ff067945908d5a2 \
-  --local-dir checkpoints/hftrainer/minimax_h3
-export HFTRAINER_CHECKPOINT="$PWD/checkpoints/hftrainer/minimax_h3"
-export MINIMAX_H3_ROOT="$HFTRAINER_CHECKPOINT"
-```
-
-[Conversion and validation record](evidence/checkpoints/h3.json). For LoRA export, supply a config with the same adapter rank and target modules as training. Base weights are separate from demo adapters and datasets. To export a fine-tuned bundle:
-
-```bash
-python tools/export_model.py --config configs/pretrained/export_minimax_h3.py \
-  --checkpoint PATH_TO_TRAINING_CHECKPOINT --output outputs/minimax_h3_export
-```
+**Access:** Manual access approval. Open the checkpoint page, satisfy its model agreement, and run `hf auth login` before the commands below.
 
 ## Data
 
-The measured run used two training clips (Ballet427 and Popular-Jazz110) and one held-out clip (Classic-dunhuang8), each initially excerpted to six seconds. **These videos and caches are not published on Hugging Face.** See [provenance and availability](demo-data.md). Supply your own authorized videos for a new run. H3 training caches use 128 × 128 × 124 frames.
+The recipe downloads [`ZeyuLing/hftrainer_crema_d_mini`](https://huggingface.co/datasets/ZeyuLing/hftrainer_crema_d_mini/tree/1188c5d5fac3e69ea014831ab4409f729f8eda81) to `data/hftrainer_crema_d_mini`. Split counts: **24 train / 8 validation / 0 test**. Dataset source, license, transformations and checksum verification are documented in [Public demo datasets](demo-data.md).
+
+Model features are cached locally. Remove this model's directory under `data/hftrainer_crema_d_mini/.cache/` before changing the base checkpoint or preprocessing geometry. The script never substitutes synthetic samples for missing real media.
 
 ## Train
 
-After preparing compatible H3 caches with train/validation manifests:
+One command downloads pinned data and weights, prepares required caches, and runs the 20-step recipe:
 
 ```bash
-MINIMAX_H3_CACHE_MANIFEST="$PWD/data/h3/train.jsonl" \
-HFTRAINER_WORK_DIR="$PWD/outputs/h3_loss_demo" \
-python tools/train.py configs/pretrained/train_minimax_h3.py \
-  --cfg-options val_dataloader.dataset.manifest="$PWD/data/h3/validation.jsonl"
+python tools/run_public_demo.py minimax_h3
 ```
 
-This runs 20 steps. See the [cache schema and full recipe](minimax_h3_reference.md#experimental-training). The existing end-to-end validation runner assumes machine-local source clips and is not a public download-and-train workflow.
+Reuse downloaded weights with `--checkpoint path/to/complete_bundle`; change the output directory with `--work-dir path/to/run`. The underlying command is `python tools/train.py configs/public_data/minimax_h3.py`. Seed: **42**. Training logs and checkpoints are saved under `work_dirs/public_data/minimax_h3/`. If you reused a custom checkpoint directory, set `HFTRAINER_CHECKPOINT` to that directory before directly invoking training, resume or export commands.
+
+The final resumable checkpoint is `work_dirs/public_data/minimax_h3/checkpoint-iter_20`. For a longer resumed run, keep the same checkpoint/data setting:
+
+```bash
+python tools/train.py configs/public_data/minimax_h3.py --auto-resume \
+  --cfg-options train_cfg.max_iters=40
+```
 
 ## Infer
 
+Run the processed **pretrained base**, independently of any training config:
+
 ```bash
-python tools/validation/infer_h3.py --attention-backend flash_attention_3 \
-  --prompt "A dancer performs a dance routine with music." --seed 42 \
-  --output outputs/h3_demo.mp4
+python tools/infer.py --model ZeyuLing/HFTrainer-MiniMax-H3-Base-FL2VA \
+  --revision a3b24b9d13fac9c38949ef737e9cb4b98ffe2fb1 --device cuda --seed 42 \
+  --prompt "A close-up of a woman speaking calmly to the camera, natural facial expressions, soft daylight, detailed face, steady camera." \
+  --height 768 --width 768 --num-steps 50 --output outputs/h3.mp4
 ```
 
-The demonstrated output is 768 × 768, 124 frames at 24 FPS with 32 kHz stereo audio. Add `--checkpoint outputs/h3_loss_demo/checkpoint-iter_20` for the rank-2 demo adapter; other ranks require a matching config.
+`--model` also accepts a local complete checkpoint directory. A resumable training checkpoint is not a standalone model: export with `tools/export_model.py` using the matching training config, then pass the exported directory to `--model`. [Artifact and configuration contract](standard.md#checkpoint-and-execution-contract).
+
+To package this training run as a complete checkpoint (including its frozen base components):
+
+```bash
+python tools/export_model.py --config configs/pretrained/export_minimax_h3.py \
+  --checkpoint work_dirs/public_data/minimax_h3/checkpoint-iter_20 --output exports/minimax_h3
+```
+
+Then run the inference command above with `--model exports/minimax_h3` and omit `--revision`. Complete exports duplicate the base weights; allow sufficient disk space.
+
+For the cached-feature H3 recipe, use `configs/pretrained/export_minimax_h3.py` for export so that the frozen conditioner and both VAEs are included. The training-only bundle omits these components.
 
 ## Evidence and loss
 
-The complete native export was checked against independently uploaded tensor hashes; its real VAE encoder output matches before and after export. Full MP4 inference was not rerun from this exported directory.
+[Detailed implementation notes](minimax_h3_reference.md) · [Historical official comparison protocol and measurements](evidence/official_base_comparison.json).
 
-The independent official comparison matched text conditions and complete face-sample denoising latents exactly. Native VAE output retains small differences (video normalized RGB RMSE 0.000630; audio RMSE 0.0000779). This is not MP4 bit equality. The reviewed base face sample was accepted visually.
+Earlier independent official face-sample comparison matched text conditions and full denoising latents exactly. Local codec normalized-RGB RMSE was 0.000630 and audio RMSE 0.0000779; encoded MP4s were not bit-identical. Portable SDPA does not promise exact FA3 parity.
 
-![H3 raw training and held-out loss over 20 steps](evidence/h3_loss.png)
+![MiniMax-H3 · Base FL2VA raw 20-step training losses on crema_d_mini](evidence/public_data/minimax_h3_loss.png)
 
-These are raw 20-step LoRA traces on two clips, without smoothing. They demonstrate execution, **not sustained loss decrease, convergence or generalization**. [Raw measurements and methodology](evidence/index.md). H3 held-out points resample noise and timestep.
+[Raw training record](evidence/public_data/minimax_h3.json) · [Training log](evidence/public_data/minimax_h3.log)
+
+These are raw, unsmoothed objectives on the public dataset. Twenty steps establish pipeline execution, not convergence. Loss values are not comparable across models.
+
+**Held-out loss:** 0.8745 across eight actor-disjoint validation clips, with newly sampled noise/timesteps. No fixed-noise decrease or perceptual benchmark is claimed.
+
+## Demos
+
+[![MiniMax-H3 · Base FL2VA video preview, pretrained base and seed 42](evidence/public_data/minimax_h3_poster.jpg)](evidence/public_data/minimax_h3_demo.mp4)
+
+[Play/download the generated video](evidence/public_data/minimax_h3_demo.mp4). Untouched published base, seed 42; prompt and sampler settings match the inference command above. Includes generated stereo audio. This is separate from the short public-data fine-tuning run.
 
 ## Limitations
 
-Only T2VA was verified with full weights in this run. FL2VA, Ref2VA and multi-GPU execution need separate full-run validation. Training uses an experimental rectified-flow objective, not an official training recipe. Regenerate-2K and H3-Context-IR are not implemented. Portable SDPA does not promise exact FA3 parity.
+The original article link is the official technical overview; no standalone H3 paper is claimed. Full-weight verification covers T2VA. FL2VA keyframe conditioning and Ref2VA require separate full-run validation; Ref2VA is not a packaged checkpoint. Context-IR and Regenerate-2K are hosted components and are not implemented. Training is an experimental rectified-flow objective, not an official training recipe. The model agreement includes territorial exclusions (EU, UK, South Korea and USA) and applies to outputs. Access requires manual approval.
 
-## Sources and license
+## Citation
 
-[Implementation provenance and model agreement](minimax_h3_reference.md#source-and-license). Original source-freeze checkpoint revision: `42ed227ee7df40d41602854ae760620d6eb651fe`; independent official raw-FL2VA comparison: `a9e1d8408c3453c899d151d0aa448082c10b0185`. These are distinct revisions.
+```bibtex
+@misc{minimax2026h3,
+  title = {MiniMax H3: Official Technical Overview and Reference Implementation},
+  author = {{MiniMax}},
+  year = {2026},
+  url = {https://github.com/MiniMax-AI/MiniMax-H3#system-overview}
+}
+```
+
+Also retain the [dataset citation and attribution](demo-data.md#provenance-and-transformations).

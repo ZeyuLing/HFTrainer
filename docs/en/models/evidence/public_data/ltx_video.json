@@ -1,0 +1,132 @@
+{
+  "model": "ltx_video",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_crema_d_mini",
+    "revision": "1188c5d5fac3e69ea014831ab4409f729f8eda81",
+    "local_dir": "data/hftrainer_crema_d_mini",
+    "files_verified": 40,
+    "splits": {
+      "train": 24,
+      "validation": 8
+    },
+    "manifest_sha256": "ebf322bcf50a159b8c4f17cf01d89790206e51db4c0b571ab11c5f3af8696a94"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-LTX-2.5-22B-Dev",
+    "revision": "7183113f99d3bbe80500ecb852c6a6897d593cbf",
+    "bundle": "LTXVideoBundle",
+    "local_dir": "checkpoints/hftrainer/ltx_video",
+    "access": "Accept agreement"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/ltx_video/checkpoints/lora_weights_step_00020.safetensors"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/ltx_video.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "train/loss": 1.2101843357086182,
+      "train/loss_sigma_0.50-0.75": 1.2101843357086182
+    },
+    {
+      "step": 2,
+      "train/loss": 0.5710057020187378,
+      "train/loss_sigma_0.75-1.00": 0.5710057020187378
+    },
+    {
+      "step": 3,
+      "train/loss": 0.9739991426467896,
+      "train/loss_sigma_0.50-0.75": 0.9739991426467896
+    },
+    {
+      "step": 4,
+      "train/loss": 1.3700119256973267,
+      "train/loss_sigma_0.00-0.25": 1.3700119256973267
+    },
+    {
+      "step": 5,
+      "train/loss": 0.8567501306533813,
+      "train/loss_sigma_0.75-1.00": 0.8567501306533813
+    },
+    {
+      "step": 6,
+      "train/loss": 1.1613996028900146,
+      "train/loss_sigma_0.00-0.25": 1.1613996028900146
+    },
+    {
+      "step": 7,
+      "train/loss": 0.72447669506073,
+      "train/loss_sigma_0.50-0.75": 0.72447669506073
+    },
+    {
+      "step": 8,
+      "train/loss": 0.9310944676399231,
+      "train/loss_sigma_0.75-1.00": 0.9310944676399231
+    },
+    {
+      "step": 9,
+      "train/loss": 0.9081604480743408,
+      "train/loss_sigma_0.50-0.75": 0.9081604480743408
+    },
+    {
+      "step": 10,
+      "train/loss": 0.9329835176467896,
+      "train/loss_sigma_0.25-0.50": 0.9329835176467896
+    },
+    {
+      "step": 11,
+      "train/loss": 1.3467230796813965,
+      "train/loss_sigma_0.75-1.00": 1.3467230796813965
+    },
+    {
+      "step": 12,
+      "train/loss": 0.816367506980896,
+      "train/loss_sigma_0.75-1.00": 0.816367506980896
+    },
+    {
+      "step": 13,
+      "train/loss": 0.8245220184326172,
+      "train/loss_sigma_0.75-1.00": 0.8245220184326172
+    },
+    {
+      "step": 14,
+      "train/loss": 0.6982041597366333,
+      "train/loss_sigma_0.50-0.75": 0.6982041597366333
+    },
+    {
+      "step": 15,
+      "train/loss": 0.8799006938934326,
+      "train/loss_sigma_0.25-0.50": 0.8799006938934326
+    },
+    {
+      "step": 16,
+      "train/loss": 0.8539624214172363,
+      "train/loss_sigma_0.75-1.00": 0.8539624214172363
+    },
+    {
+      "step": 17,
+      "train/loss": 0.9840119481086731,
+      "train/loss_sigma_0.75-1.00": 0.9840119481086731
+    },
+    {
+      "step": 18,
+      "train/loss": 0.8169174194335938,
+      "train/loss_sigma_0.50-0.75": 0.8169174194335938
+    },
+    {
+      "step": 19,
+      "train/loss": 0.9628959894180298,
+      "train/loss_sigma_0.50-0.75": 0.9628959894180298
+    },
+    {
+      "step": 20,
+      "train/loss": 1.2861053943634033,
+      "train/loss_sigma_0.50-0.75": 1.2861053943634033
+    }
+  ]
+}

@@ -1,60 +1,52 @@
-# Quick Start
+# Quick start
 
-## Verified Smoke Test
-
-The most reliable first run is the classification demo:
+Install HFTrainer, a CUDA-enabled PyTorch build suitable for your hardware, and the Hub download helper:
 
 ```bash
-python3 tools/train.py configs/vit/vit_base_demo.py
+python -m pip install -e .
+python -m pip install "huggingface_hub>=0.34,<2"
 ```
 
-This exercises:
-
-- config loading
-- dataloader construction
-- model forward/backward
-- checkpoint saving
-- validation
-
-## Other Demo Configs
+## Train on public data
 
 ```bash
-python3 tools/train.py configs/sd15/sd15_demo.py
-python3 tools/train.py configs/llama/llama_sft_demo.py
-python3 tools/train.py configs/llama/llama_lora_demo.py
-python3 tools/train.py configs/wan/wan_demo.py
+python tools/run_public_demo.py vit
 ```
 
-These require the corresponding checkpoints in `checkpoints/` and enough GPU memory for the task.
+This downloads the processed ViT checkpoint and the public Beans dataset, verifies dataset files, trains for 20 steps and evaluates on the separate validation split. Outputs are under `work_dirs/public_data/vit/`.
 
-LoRA quick start:
+The same launcher accepts `llama`, `sd15`, `dmd`, `stylegan2`, `wan`, `ltx_video` and `minimax_h3`. Read the corresponding [model card](models/index.md) for hardware, model-specific extras and access agreements. Video preprocessing needs FFmpeg. The short recipes verify execution and do not establish convergence.
 
 ```bash
-python3 tools/train.py configs/llama/llama_lora_demo.py
-python3 tools/infer.py \
-  --config configs/llama/llama_lora_demo.py \
-  --checkpoint work_dirs/llama_lora_smoke/checkpoint-iter_10 \
-  --merge-lora \
-  --prompt "Name one primary color."
+# Download/prepare only:
+python tools/run_public_demo.py llama --prepare-only
+# Reuse a complete native checkpoint:
+python tools/run_public_demo.py llama --checkpoint checkpoints/hftrainer/llama
 ```
 
-## Inference
-
-Classification:
+## Infer from a checkpoint
 
 ```bash
-python3 tools/infer.py \
-  --config configs/vit/vit_base_demo.py \
-  --checkpoint work_dirs/vit_smoke/checkpoint-iter_10 \
-  --input data/classification/demo/images/cat/cat_000.jpg \
-  --device cpu
+python tools/infer.py --model ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat \
+  --device cuda --prompt "The butterfly is" --max-new-tokens 48
+
+python tools/infer.py --model ZeyuLing/HFTrainer-Stable-Diffusion-1.5 \
+  --device cuda --seed 42 --num-steps 30 \
+  --prompt "A butterfly on a flower in natural daylight." --output outputs/butterfly.png
 ```
 
-Text-to-image:
+A local complete checkpoint directory works in place of the Hub ID. Model cards give pinned `--revision` values for reproducibility. `config.json` selects the registered local model, task and pipeline; no separate inference config or external model repository is needed.
+
+## Fine-tuned artifacts
+
+The trainer checkpoint includes optimizer/resume state. Export a standalone model with the matching config:
 
 ```bash
-python3 tools/infer.py \
-  --config configs/sd15/sd15_demo.py \
-  --checkpoint work_dirs/sd15_smoke/checkpoint-iter_10 \
-  --prompt "a red cat on a mat"
+python tools/export_model.py --config configs/public_data/vit.py \
+  --checkpoint work_dirs/public_data/vit/checkpoint-iter_20 --output outputs/beans_vit
+python tools/infer.py --model outputs/beans_vit --device cuda --input path/to/leaf.jpg
 ```
+
+Use `configs/pretrained/export_minimax_h3.py` for H3 export, so the conditioner and VAEs omitted during cached training are restored. LTX export accepts the managed trainer's LoRA `.safetensors` file, not its full optimizer state. If training used a custom base location, set `HFTRAINER_CHECKPOINT` to the same path before exporting or resuming.
+
+[Public datasets](models/demo-data.md) · [Model-card standard](models/standard.md)

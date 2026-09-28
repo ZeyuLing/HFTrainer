@@ -1,0 +1,152 @@
+{
+  "model": "dmd",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_smithsonian_butterflies",
+    "revision": "c34c2176cf5d0d2a1d64f034a83f989dddbf71d2",
+    "local_dir": "data/hftrainer_smithsonian_butterflies",
+    "files_verified": 1005,
+    "splits": {
+      "validation": 100,
+      "train": 900
+    },
+    "manifest_sha256": "0c2c5ff25b41df8705345181785e0419ce7c96022db4c7763bb67136557aab89"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-DMD2-SD15-Initialization",
+    "revision": "0e4c7d6ccae0832545f511aa9057f8c2510147f8",
+    "bundle": "DMDBundle",
+    "local_dir": "checkpoints/hftrainer/dmd",
+    "access": "Public"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/dmd/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/dmd.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss_dm": 0.7464,
+      "loss_reg": 1.1816,
+      "loss_fake_score": 0.1624
+    },
+    {
+      "step": 2,
+      "loss_dm": 0.204,
+      "loss_reg": 0.6102,
+      "loss_fake_score": 0.219
+    },
+    {
+      "step": 3,
+      "loss_dm": 0.5975,
+      "loss_reg": 0.5102,
+      "loss_fake_score": 0.0194
+    },
+    {
+      "step": 4,
+      "loss_dm": 0.2775,
+      "loss_reg": 0.6508,
+      "loss_fake_score": 0.3022
+    },
+    {
+      "step": 5,
+      "loss_dm": 0.1114,
+      "loss_reg": 0.4883,
+      "loss_fake_score": 0.1381
+    },
+    {
+      "step": 6,
+      "loss_dm": 0.302,
+      "loss_reg": 0.4848,
+      "loss_fake_score": 0.411
+    },
+    {
+      "step": 7,
+      "loss_dm": 0.3308,
+      "loss_reg": 0.6754,
+      "loss_fake_score": 0.0038
+    },
+    {
+      "step": 8,
+      "loss_dm": 0.3149,
+      "loss_reg": 0.3413,
+      "loss_fake_score": 0.7668
+    },
+    {
+      "step": 9,
+      "loss_dm": 0.3903,
+      "loss_reg": 0.4505,
+      "loss_fake_score": 0.0817
+    },
+    {
+      "step": 10,
+      "loss_dm": 0.159,
+      "loss_reg": 0.5481,
+      "loss_fake_score": 0.0099
+    },
+    {
+      "step": 11,
+      "loss_dm": 0.1199,
+      "loss_reg": 0.4368,
+      "loss_fake_score": 0.1671
+    },
+    {
+      "step": 12,
+      "loss_dm": 0.6461,
+      "loss_reg": 0.3485,
+      "loss_fake_score": 0.0219
+    },
+    {
+      "step": 13,
+      "loss_dm": 0.7739,
+      "loss_reg": 0.3351,
+      "loss_fake_score": 0.0869
+    },
+    {
+      "step": 14,
+      "loss_dm": 0.3823,
+      "loss_reg": 0.4381,
+      "loss_fake_score": 0.2277
+    },
+    {
+      "step": 15,
+      "loss_dm": 0.763,
+      "loss_reg": 0.4151,
+      "loss_fake_score": 0.0055
+    },
+    {
+      "step": 16,
+      "loss_dm": 0.6985,
+      "loss_reg": 0.2842,
+      "loss_fake_score": 0.2526
+    },
+    {
+      "step": 17,
+      "loss_dm": 0.5824,
+      "loss_reg": 0.4282,
+      "loss_fake_score": 0.0027
+    },
+    {
+      "step": 18,
+      "loss_dm": 0.4544,
+      "loss_reg": 0.4954,
+      "loss_fake_score": 0.0386
+    },
+    {
+      "step": 19,
+      "loss_dm": 0.2533,
+      "loss_reg": 0.417,
+      "loss_fake_score": 0.0437
+    },
+    {
+      "step": 20,
+      "loss_dm": 0.3026,
+      "loss_reg": 0.4154,
+      "loss_fake_score": 0.0031
+    }
+  ]
+}

@@ -444,6 +444,8 @@ class WanBundle(ModelBundle):
             "component_options": component_options,
             "source_notice": "SOURCES.md in the repository package",
         }
+        from hftrainer.artifacts import write_artifact_config
+        write_artifact_config(root, type(self).__name__)
         config_path = root / BUNDLE_CONFIG_NAME
         write_json(config_path, bundle_config)
 

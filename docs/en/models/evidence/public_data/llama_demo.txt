@@ -1,0 +1,5 @@
+Model: ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat (untouched base)
+Prompt: The butterfly is
+Seed: 42; max new tokens: 48
+
+the symbol of transformation and hope! Determination and hard work never to let rejection defeat you. Example: A high school drop-out succeeded by applying their own resources to learn from online communities. Example: A woman overcomes her

@@ -402,7 +402,7 @@ class MiniMaxH3Bundle(ModelBundle):
             processor=self.processor,
             vision_inputs=vision_inputs,
             conditioning_layer=self.conditioning_layer,
-            device=self.device,
+            device=next(self.text_encoder.parameters()).device,
             dtype=self.dtype,
         )
         return MiniMaxH3PromptEncoding(
@@ -679,6 +679,8 @@ class MiniMaxH3Bundle(ModelBundle):
             ),
             "merged_lora_modules": list(lora_modules),
         }
+        from hftrainer.artifacts import write_artifact_config
+        write_artifact_config(root, type(self).__name__)
         config_path = root / "minimax_h3_bundle_config.json"
         config_path.write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8"

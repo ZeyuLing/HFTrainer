@@ -68,6 +68,10 @@ class StyleGAN2Bundle(ModelBundle):
             for name, tensor in getattr(self, component).state_dict().items()
         }
         save_artifact(save_directory, config, state, safe=safe_serialization)
+        from hftrainer.artifacts import write_artifact_config
+
+        write_artifact_config(save_directory, type(self).__name__)
+
         return save_directory
 
     @classmethod

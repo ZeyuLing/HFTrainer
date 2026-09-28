@@ -102,7 +102,10 @@ class LTXVideoBundle(ModelBundle):
         if kwargs:
             raise TypeError(f'Unsupported LTX export options: {sorted(kwargs)}')
         from hftrainer.models.ltx_video.artifact import export_bundle
-        return export_bundle(self, save_directory)
+        result = export_bundle(self, save_directory)
+        from hftrainer.artifacts import write_artifact_config
+        write_artifact_config(save_directory, type(self).__name__)
+        return result
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):

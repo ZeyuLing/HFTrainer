@@ -119,6 +119,12 @@ def main():
     logger.info(f"Config: {args.config}")
     logger.info(f"Work dir: {cfg.work_dir}")
 
+    # Seed before constructing the head, adapters, sampler and optimizer.
+    randomness = getattr(cfg, 'randomness', None) or {}
+    if randomness.get('seed') is not None:
+        from accelerate.utils import set_seed
+        set_seed(int(randomness['seed']))
+
     # Build runner and train
     from hftrainer.runner.builder import build_runner_from_cfg
     try:

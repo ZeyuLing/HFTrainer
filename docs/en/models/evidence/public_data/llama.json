@@ -1,0 +1,113 @@
+{
+  "model": "llama",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_wikitext2",
+    "revision": "e9aaa6354f59bf18cb8d0fe53cd2e0dce1dd9aa4",
+    "local_dir": "data/hftrainer_wikitext2",
+    "files_verified": 6,
+    "splits": {
+      "train": 23767,
+      "validation": 2461,
+      "test": 2891
+    },
+    "manifest_sha256": "af6c7e4557e3b0cd17dbe11c26eea38a0861363555b3b65f2f206fbf29dee219"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-TinyLlama-1.1B-Chat",
+    "revision": "f782b84ba99cef1c24a5d216801a70117647980c",
+    "bundle": "LlamaBundle",
+    "local_dir": "checkpoints/hftrainer/llama",
+    "access": "Public"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/llama/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/llama.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss": 2.6082
+    },
+    {
+      "step": 2,
+      "loss": 3.6665
+    },
+    {
+      "step": 3,
+      "loss": 2.7389
+    },
+    {
+      "step": 4,
+      "loss": 2.6583
+    },
+    {
+      "step": 5,
+      "loss": 3.8328
+    },
+    {
+      "step": 6,
+      "loss": 2.8432
+    },
+    {
+      "step": 7,
+      "loss": 1.8229
+    },
+    {
+      "step": 8,
+      "loss": 2.2783
+    },
+    {
+      "step": 9,
+      "loss": 2.0579
+    },
+    {
+      "step": 10,
+      "loss": 2.515
+    },
+    {
+      "step": 11,
+      "loss": 3.3605
+    },
+    {
+      "step": 12,
+      "loss": 2.5275
+    },
+    {
+      "step": 13,
+      "loss": 2.7208
+    },
+    {
+      "step": 14,
+      "loss": 3.1409
+    },
+    {
+      "step": 15,
+      "loss": 2.4183
+    },
+    {
+      "step": 16,
+      "loss": 2.4929
+    },
+    {
+      "step": 17,
+      "loss": 2.413
+    },
+    {
+      "step": 18,
+      "loss": 2.8502
+    },
+    {
+      "step": 19,
+      "loss": 2.3922
+    },
+    {
+      "step": 20,
+      "loss": 2.7264
+    }
+  ]
+}

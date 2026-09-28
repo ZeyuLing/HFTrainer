@@ -1,11 +1,12 @@
-"""Config-driven inference entry point.
+"""Checkpoint- or config-driven inference entry point.
 
 Every inference config declares two independent choices:
 
 * ``pipeline.type`` selects the inference graph.
 * ``inference.task`` selects this CLI's input/output adapter.
 
-No trainer-name or model-name dispatch is used.
+Checkpoint metadata selects an allowlisted local implementation. No trainer-name
+heuristics or remote implementation imports are used.
 """
 
 from __future__ import annotations
@@ -38,7 +39,10 @@ class _OrderedReferenceAction(argparse.Action):
 
 def parse_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description='Run an HFTrainer inference pipeline')
-    parser.add_argument('--config', required=True, help='Path to config file (.py)')
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--config', help='Path to training/inference config (.py)')
+    source.add_argument('--model', help='Complete HFTrainer checkpoint directory or Hub ID')
+    parser.add_argument('--revision', help='Pinned Hub revision for --model')
     parser.add_argument('--checkpoint', help='Optional HFTrainer checkpoint file or directory')
     parser.add_argument('--prompt', help='Text prompt for generation tasks')
     parser.add_argument('--input', help='Input image for classification')
@@ -450,7 +454,13 @@ def main(argv: list[str] | None = None):
     args = parse_args(argv)
     from mmengine.config import Config
 
-    cfg = Config.fromfile(args.config, import_custom_modules=False)
+    if args.model:
+        from hftrainer.artifacts import config_from_pretrained
+        import torch
+        args.device = args.device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        cfg = config_from_pretrained(args.model, revision=args.revision, device=args.device)
+    else:
+        cfg = Config.fromfile(args.config, import_custom_modules=False)
     from hftrainer.utils.setup_env import import_custom_modules
 
     import_custom_modules(cfg)

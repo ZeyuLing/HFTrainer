@@ -1,0 +1,132 @@
+{
+  "model": "wan",
+  "dataset": {
+    "repo_id": "ZeyuLing/hftrainer_crema_d_mini",
+    "revision": "1188c5d5fac3e69ea014831ab4409f729f8eda81",
+    "local_dir": "data/hftrainer_crema_d_mini",
+    "files_verified": 40,
+    "splits": {
+      "train": 24,
+      "validation": 8
+    },
+    "manifest_sha256": "ebf322bcf50a159b8c4f17cf01d89790206e51db4c0b571ab11c5f3af8696a94"
+  },
+  "base_checkpoint": {
+    "repo_id": "ZeyuLing/HFTrainer-Wan2.1-T2V-1.3B",
+    "revision": "f4a5bc6cd9b9bdc801eac0585963b0365ab22e9f",
+    "bundle": "WanBundle",
+    "local_dir": "checkpoints/hftrainer/wan",
+    "access": "Public"
+  },
+  "steps": 20,
+  "saved_checkpoints": [
+    "work_dirs/public_data/wan/checkpoint-iter_20/model.pt"
+  ],
+  "seed": 42,
+  "hardware": "1 \u00d7 NVIDIA H200 (143771 MiB reported)",
+  "torch": "2.8.0+cu128",
+  "config": "configs/public_data/wan.py",
+  "protocol": "Short real-data execution validation; raw unsmoothed training loss. Not convergence or a quality benchmark.",
+  "series": [
+    {
+      "step": 1,
+      "loss": 0.9399,
+      "loss_flow": 0.9399
+    },
+    {
+      "step": 2,
+      "loss": 0.3164,
+      "loss_flow": 0.3164
+    },
+    {
+      "step": 3,
+      "loss": 0.546,
+      "loss_flow": 0.546
+    },
+    {
+      "step": 4,
+      "loss": 0.3832,
+      "loss_flow": 0.3832
+    },
+    {
+      "step": 5,
+      "loss": 0.4585,
+      "loss_flow": 0.4585
+    },
+    {
+      "step": 6,
+      "loss": 0.3014,
+      "loss_flow": 0.3014
+    },
+    {
+      "step": 7,
+      "loss": 0.4486,
+      "loss_flow": 0.4486
+    },
+    {
+      "step": 8,
+      "loss": 0.2363,
+      "loss_flow": 0.2363
+    },
+    {
+      "step": 9,
+      "loss": 1.0073,
+      "loss_flow": 1.0073
+    },
+    {
+      "step": 10,
+      "loss": 0.2965,
+      "loss_flow": 0.2965
+    },
+    {
+      "step": 11,
+      "loss": 0.323,
+      "loss_flow": 0.323
+    },
+    {
+      "step": 12,
+      "loss": 0.2807,
+      "loss_flow": 0.2807
+    },
+    {
+      "step": 13,
+      "loss": 0.3308,
+      "loss_flow": 0.3308
+    },
+    {
+      "step": 14,
+      "loss": 0.3947,
+      "loss_flow": 0.3947
+    },
+    {
+      "step": 15,
+      "loss": 0.305,
+      "loss_flow": 0.305
+    },
+    {
+      "step": 16,
+      "loss": 0.2359,
+      "loss_flow": 0.2359
+    },
+    {
+      "step": 17,
+      "loss": 0.2413,
+      "loss_flow": 0.2413
+    },
+    {
+      "step": 18,
+      "loss": 0.287,
+      "loss_flow": 0.287
+    },
+    {
+      "step": 19,
+      "loss": 1.7114,
+      "loss_flow": 1.7114
+    },
+    {
+      "step": 20,
+      "loss": 0.3845,
+      "loss_flow": 0.3845
+    }
+  ]
+}

@@ -189,8 +189,10 @@ class MiniMaxH3Pipeline(BasePipeline):
         max_duration: float = 15.0,
         noise_mode: str = "independent",
         attention_backend: str = "sdpa",
+        cpu_offload_device: str | None = None,
     ) -> None:
         super().__init__(bundle)
+        self.cpu_offload_device = cpu_offload_device
         if num_inference_steps < 2:
             raise ValueError("num_inference_steps must include at least two sigmas.")
         if noise_mode not in {"independent", "sequential"}:
@@ -534,6 +536,15 @@ class MiniMaxH3Pipeline(BasePipeline):
         prepared_first, prepared_last = _prepare_keyframes(
             first_frame, last_frame, height, width
         )
+        if self.cpu_offload_device:
+            for name in ('transformer', 'vae', 'audio_vae'):
+                component = getattr(self.bundle, name, None)
+                if component is not None:
+                    component.to('cpu')
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if prompt_embeds is None:
+                self.bundle.text_encoder.to(self.cpu_offload_device)
         if prompt_embeds is None:
             encoded = self.bundle.encode_prompt(
                 prompt,
@@ -546,6 +557,16 @@ class MiniMaxH3Pipeline(BasePipeline):
             text_token_tags = encoded.token_tags
         elif text_token_tags is None:
             raise ValueError("Precomputed prompt_embeds require text_token_tags.")
+        if self.cpu_offload_device:
+            encoder = getattr(self.bundle, 'text_encoder', None)
+            if encoder is not None:
+                encoder.to('cpu')
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            for name in ('transformer', 'vae', 'audio_vae'):
+                component = getattr(self.bundle, name, None)
+                if component is not None:
+                    component.to(self.cpu_offload_device)
         prompt_embeds = prompt_embeds.to(self.bundle.device, self.bundle.dtype)
         text_token_tags = torch.as_tensor(text_token_tags, dtype=torch.long)
         if (

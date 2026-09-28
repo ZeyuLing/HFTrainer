@@ -1,0 +1,49 @@
+[2026/09/28 20:44:16] hftrainer INFO: Config: configs/public_data/llama.py
+[2026/09/28 20:44:16] hftrainer INFO: Work dir: work_dirs/public_data/llama
+[2026/09/28 20:44:17] hftrainer INFO: Config saved to: work_dirs/public_data/llama/20260928_204417/config.py
+[2026/09/28 20:44:17] hftrainer INFO: Work dir: work_dirs/public_data/llama
+[2026/09/28 20:44:17] hftrainer INFO: Run dir (logs/tb): work_dirs/public_data/llama/20260928_204417
+[2026/09/28 20:44:18] hftrainer INFO: Environment info:
+Platform: Linux-6.1.158-178.288.amzn2023.x86_64-x86_64-with-glibc2.39
+Python: 3.12.3 (main, Nov  6 2024, 18:32:19) [GCC 13.2.0]
+PyTorch: 2.8.0+cu128
+CUDA available: True
+CUDA version: 12.8
+GPU count: 1
+  GPU 0: NVIDIA H200
+accelerate: 1.15.0
+mmengine: 0.10.7
+safetensors: 0.8.0
+torchvision: 0.23.0+cu128
+datasets: not installed
+[2026/09/28 20:44:36] hftrainer INFO: 
+Model Summary:
+  Module   Total Params  Trainable Params  Trainable  Save Ckpt
+  ------  -------------  ----------------  ---------  ---------
+  model   1,113,208,832        13,160,448  True       True     
+  ------  -------------  ----------------  ---------  ---------
+  TOTAL   1,113,208,832        13,160,448
+  Trainable ratio: 1.18%
+
+[2026/09/28 20:44:38] hftrainer INFO: step [1/20]  lr=1.00e-04  loss=2.6082  data_time=0.03s  train_time=0.56s  eta=0:00:11
+[2026/09/28 20:44:38] hftrainer INFO: step [2/20]  lr=2.00e-04  loss=3.6665  data_time=0.08s  train_time=0.10s  eta=0:00:06
+[2026/09/28 20:44:38] hftrainer INFO: step [3/20]  lr=1.98e-04  loss=2.7389  data_time=0.10s  train_time=0.10s  eta=0:00:05
+[2026/09/28 20:44:38] hftrainer INFO: step [4/20]  lr=1.94e-04  loss=2.6583  data_time=0.01s  train_time=0.09s  eta=0:00:04
+[2026/09/28 20:44:39] hftrainer INFO: step [5/20]  lr=1.87e-04  loss=3.8328  data_time=0.07s  train_time=0.10s  eta=0:00:03
+[2026/09/28 20:44:39] hftrainer INFO: step [6/20]  lr=1.77e-04  loss=2.8432  data_time=0.07s  train_time=0.10s  eta=0:00:03
+[2026/09/28 20:44:39] hftrainer INFO: step [7/20]  lr=1.64e-04  loss=1.8229  data_time=0.05s  train_time=0.10s  eta=0:00:02
+[2026/09/28 20:44:39] hftrainer INFO: step [8/20]  lr=1.50e-04  loss=2.2783  data_time=0.06s  train_time=0.10s  eta=0:00:02
+[2026/09/28 20:44:39] hftrainer INFO: step [9/20]  lr=1.34e-04  loss=2.0579  data_time=0.15s  train_time=0.10s  eta=0:00:02
+[2026/09/28 20:44:39] hftrainer INFO: step [10/20]  lr=1.17e-04  loss=2.5150  data_time=0.01s  train_time=0.10s  eta=0:00:02
+[2026/09/28 20:44:40] hftrainer INFO: step [11/20]  lr=1.00e-04  loss=3.3605  data_time=0.01s  train_time=0.10s  eta=0:00:01
+[2026/09/28 20:44:40] hftrainer INFO: step [12/20]  lr=8.26e-05  loss=2.5275  data_time=0.02s  train_time=0.10s  eta=0:00:01
+[2026/09/28 20:44:40] hftrainer INFO: step [13/20]  lr=6.58e-05  loss=2.7208  data_time=0.07s  train_time=0.10s  eta=0:00:01
+[2026/09/28 20:44:40] hftrainer INFO: step [14/20]  lr=5.00e-05  loss=3.1409  data_time=0.10s  train_time=0.10s  eta=0:00:01
+[2026/09/28 20:44:40] hftrainer INFO: step [15/20]  lr=3.57e-05  loss=2.4183  data_time=0.02s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:44:40] hftrainer INFO: step [16/20]  lr=2.34e-05  loss=2.4929  data_time=0.06s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:44:40] hftrainer INFO: step [17/20]  lr=1.34e-05  loss=2.4130  data_time=0.09s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:44:41] hftrainer INFO: step [18/20]  lr=6.03e-06  loss=2.8502  data_time=0.06s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:44:41] hftrainer INFO: step [19/20]  lr=1.52e-06  loss=2.3922  data_time=0.04s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:44:41] hftrainer INFO: step [20/20]  lr=0.00e+00  loss=2.7264  data_time=0.06s  train_time=0.10s  eta=0:00:00
+[2026/09/28 20:44:42] hftrainer INFO: Saved checkpoint to: work_dirs/public_data/llama/checkpoint-iter_20
+[2026/09/28 20:44:42] hftrainer INFO: Training complete.

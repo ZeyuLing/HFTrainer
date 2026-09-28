@@ -24,12 +24,16 @@ class WanPipeline(BasePipeline):
         num_frames: int = 81,
         height: int = 480,
         width: int = 832,
+        guidance_scale: float = 5.0,
+        flow_shift: float = 3.0,
     ):
         super().__init__(bundle)
         self.num_inference_steps = num_inference_steps
         self.num_frames = num_frames
         self.height = height
         self.width = width
+        self.guidance_scale = float(guidance_scale)
+        self.flow_shift = float(flow_shift)
 
     @torch.no_grad()
     def __call__(
@@ -40,6 +44,7 @@ class WanPipeline(BasePipeline):
         height: Optional[int] = None,
         width: Optional[int] = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
+        guidance_scale: Optional[float] = None,
     ) -> torch.Tensor:
         """
         Generate videos from text prompts.
@@ -66,6 +71,7 @@ class WanPipeline(BasePipeline):
         bsz = len(prompt)
 
         scheduler = copy.deepcopy(self.bundle.scheduler)
+        scheduler.set_shift(self.flow_shift)
         scheduler.set_timesteps(num_inference_steps)
 
         device = next(self.bundle.transformer.parameters()).device
@@ -73,6 +79,16 @@ class WanPipeline(BasePipeline):
 
         # Encode text
         text_embeds = self.bundle.encode_text(prompt)
+        scale = self.guidance_scale if guidance_scale is None else float(guidance_scale)
+        negative_embeds = None
+        if scale > 1.0:
+            if negative_prompt is None:
+                negative_prompt = [''] * bsz
+            elif isinstance(negative_prompt, str):
+                negative_prompt = [negative_prompt] * bsz
+            if len(negative_prompt) != bsz:
+                raise ValueError('negative_prompt must match the prompt batch size')
+            negative_embeds = self.bundle.encode_text(negative_prompt)
 
         # Initialize random latents
         lat_t = (num_frames - 1) // 4 + 1
@@ -80,16 +96,23 @@ class WanPipeline(BasePipeline):
         lat_w = width // 8
         in_channels = self.bundle.transformer.config.in_channels
 
-        latents = torch.randn(bsz, in_channels, lat_t, lat_h, lat_w, device=device, dtype=dtype)
+        latents = torch.randn(bsz, in_channels, lat_t, lat_h, lat_w, device=device, dtype=torch.float32)
 
         # Denoising loop
         for t in scheduler.timesteps:
             noise_pred = self.bundle.predict_noise(
-                latents,
+                latents.to(dtype),
                 t.expand(bsz).to(device),
                 text_embeds,
             )
-            latents = scheduler.step(noise_pred, t, latents).prev_sample
+            if negative_embeds is not None:
+                negative_pred = self.bundle.predict_noise(
+                    latents.to(dtype), t.expand(bsz).to(device), negative_embeds,
+                )
+                noise_pred = negative_pred.float() + scale * (
+                    noise_pred.float() - negative_pred.float()
+                )
+            latents = scheduler.step(noise_pred.float(), t, latents).prev_sample
 
         # Decode and rearrange
         videos = self.bundle.decode_latent(latents)  # BCTHW
