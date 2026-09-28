@@ -47,16 +47,18 @@ not only documented as a convention.
 
 ## Implementations
 
+[Model cards](docs/en/models/index.md) · [Demo data availability](docs/en/models/demo-data.md) · [Validation evidence](docs/en/models/evidence/index.md)
+
 | Implementation | Training | Inference | Local core | Current verification |
 | --- | --- | --- | --- | --- |
-| ViT classification | yes | yes | ViT, image processor, artifact loader | tiny forward/loss/backward; reference logits aligned; `.bin`/safetensors round-trip |
-| LLaMA causal LM | full + LoRA | yes | LLaMA, KV cache, generation, BPE/WordPiece/Unigram tokenizer | tiny forward/loss/backward/generation; reference logits aligned; sharded artifact support |
-| Stable Diffusion 1.5 | yes | yes | CLIP, byte-BPE tokenizer, VAE, conditional UNet, DDPM/DDIM/PNDM | checkpoint schema aligned; tiny numerical parity and train/infer round-trip |
-| DMD | yes | one-step | reuses the local SD1.5 core | distribution matching, fake-score and teacher paths tested |
-| StyleGAN2 | yes | yes | generator and discriminator | tiny adversarial path and artifact round-trip |
-| Wan T2V | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | local tiny train/denoise/artifact tests; see compatibility note below |
-| LTX-Video 2.5 | LoRA | distilled and dev+LoRA | pinned source reorganized into local model/trainer/pipeline layers; local Gemma text runtime and LoRA | API/config/checkpoint contracts and tiny Gemma path tested; full 22B GPU run not performed here |
-| MiniMax-H3 Base 768p | experimental full/LoRA | T2VA, FL2VA, Ref2VA synchronized A/V | 50-layer Omni Transformer, Qwen3-VL-32B conditioner, visual/audio VAEs, processor and dual flow schedulers | tiny numerical/component/train/pipeline/artifact contracts; full 33B+32B GPU run not performed here |
+| [ViT classification](docs/en/models/vit.md) | yes | yes | ViT, image processor, artifact loader | tiny forward/loss/backward; reference logits aligned; `.bin`/safetensors round-trip |
+| [LLaMA causal LM](docs/en/models/llama.md) | full + LoRA | yes | LLaMA, KV cache, generation, BPE/WordPiece/Unigram tokenizer | tiny forward/loss/backward/generation; reference logits aligned; sharded artifact support |
+| [Stable Diffusion 1.5](docs/en/models/sd15.md) | yes | yes | CLIP, byte-BPE tokenizer, VAE, conditional UNet, DDPM/DDIM/PNDM | checkpoint schema aligned; tiny numerical parity and train/infer round-trip |
+| [DMD](docs/en/models/dmd.md) | yes | one-step | reuses the local SD1.5 core | distribution matching, fake-score and teacher paths tested |
+| [StyleGAN2](docs/en/models/stylegan2.md) | yes | yes | generator and discriminator | tiny adversarial path and artifact round-trip |
+| [Wan T2V](docs/en/models/wan.md) | yes | yes | UMT5 path, tokenizer, video VAE, 3D transformer, flow scheduler | local tiny train/denoise/artifact tests; see compatibility note below |
+| [LTX-Video 2.5](docs/en/models/ltx_video_2_5.md) | LoRA | distilled and dev+LoRA | pinned source reorganized into local model/trainer/pipeline layers; local Gemma text runtime and LoRA | H200 full dev generation, official sample parity, LoRA train/resume/infer and 20-step demo loss measured |
+| [MiniMax-H3 Base 768p](docs/en/models/minimax_h3.md) | experimental full/LoRA | T2VA, FL2VA, Ref2VA synchronized A/V | 50-layer Omni Transformer, Qwen3-VL-32B conditioner, visual/audio VAEs, processor and dual flow schedulers | H200 sequential full T2VA, exact official denoising latents, LoRA train/resume/infer and 20-step demo loss measured |
 
 “Reference aligned” refers to isolated development-time numerical checks. The
 reference packages are not installed as product dependencies and are not
@@ -68,8 +70,9 @@ release. Low checkpoint coverage is rejected instead of silently leaving most
 weights randomly initialized. Its current compact VAE may require explicit
 conversion for some full upstream artifacts.
 
-LTX-2.5 is large and gated. The repository tests do not claim 22B model quality,
-throughput, convergence, or end-to-end GPU execution. Standard text encoding,
+LTX-2.5 is large and gated. Full dev-model GPU execution and independent official
+sample parity were verified on 2026-09-28; short demo runs do not establish
+training convergence or every supported mode. Standard text encoding,
 training, and video generation are wired locally; image-conditioned *prompt
 enhancement* is explicitly rejected until the Gemma vision tower is also
 implemented locally. Image conditioning for the LTX video model is a separate
@@ -77,10 +80,11 @@ pipeline feature.
 
 MiniMax-H3 is substantially larger and its public model agreement contains
 territorial exclusions and use restrictions. The repository does not bundle
-its weights or tokenizer/config assets. Tiny and frozen-reference tests cover
-the local implementation and artifact boundary; they do not claim full-model
-quality, throughput, convergence, or a successful 33B denoiser plus 32B
-conditioner allocation on this development machine.
+its weights or tokenizer/config assets. Full-weight T2VA now runs on one H200 by loading the 32B conditioner and 33B
+denoiser sequentially. Sample parity and LoRA train/resume/infer are verified;
+other conditioning modes, multi-GPU performance and convergence remain separate
+validation tasks. See the model cards for one-command recipes, raw demo loss
+curves, environment requirements and remaining codec differences.
 
 ## Installation
 
@@ -138,85 +142,105 @@ python tools/infer.py \
 The inference CLI reads `cfg.pipeline.type` and `cfg.inference.task`. It never
 guesses inference behavior from a trainer or implementation class name.
 
-## LTX-Video 2.5
+## Video models: verified launch paths
 
-Point the configs at an accepted and downloaded split checkpoint pack:
+The examples below reproduce the **base inference settings** used for the
+2026-09-28 comparison, after preparing the environment and checkpoint assets.
+Both models ran on one H200. They are not download-and-run commands for an
+unprepared machine. The English model cards contain setup, preprocessing,
+training, adapter inference, licensing and remaining validation limits.
+
+### LTX-Video 2.5
+
+Install `.[ltx-video]` and prepare the split checkpoint pack described in the
+[LTX model card](docs/en/models/ltx_video_2_5.md). The measured dev workflow used
+PyTorch 2.8.0+cu128:
 
 ```bash
 export LTX25_CHECKPOINT_ROOT="$PWD/checkpoints/LTX-2.5"
-
-hftrainer-ltx-infer \
-  configs/ltx_video/infer_ltx_video_2_5_distilled.py \
-  --prompt "A paper boat drifts through a rain-filled street at dusk." \
-  --output outputs/ltx_video_2_5/distilled.mp4
+python tools/infer_ltx_video.py configs/ltx_video/infer_ltx_video_2_5_dev_lora.py \
+  --prompt "A dancer performs a dance routine with music." --seed 42 \
+  --height 512 --width 768 --num-frames 121 --num-inference-steps 30 \
+  --negative-prompt "blurry, distorted, low quality, artifacts" \
+  --cfg-options model.loras=[] model.duration_head_path=None \
+  --output outputs/ltx_demo.mp4
 ```
 
-Preprocess a dataset using the packaged local script, then train:
+The command retains the official second-stage LoRA and disables a user adapter.
+The independent official comparison matched both stages' latents; the face
+sample also matched decoded video and audio with deterministic audio decoding.
+This does not establish parity for separate distilled weights or every mode.
+
+### MiniMax-H3
+
+Install `.[minimax-h3,minimax-h3-fa3]` and prepare the assets described in the
+[H3 model card](docs/en/models/minimax_h3.md). Exact denoising comparison used
+PyTorch 2.11.0+cu130 and the pinned FA3 kernel. The sequential entry point
+releases the text encoder before loading the denoiser:
 
 ```bash
-hftrainer-ltx-preprocess data/ltx_video_2_5/dataset.jsonl \
-  --resolution-buckets 960x544x49 \
-  --model-path "$LTX25_CHECKPOINT_ROOT/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors" \
-  --text-encoder-path "$LTX25_CHECKPOINT_ROOT/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors" \
-  --video-vae-path "$LTX25_CHECKPOINT_ROOT/vae/ltx-2.5-video-vae-bf16.safetensors" \
-  --audio-vae-path "$LTX25_CHECKPOINT_ROOT/vae/ltx-2.5-audio-vae-bf16.safetensors" \
-  --output-dir data/ltx_video_2_5/.precomputed
-
-export LTX25_PREPROCESSED_DATA="$PWD/data/ltx_video_2_5/.precomputed"
-hftrainer-train configs/ltx_video/train_ltx_video_2_5_lora.py
+export MINIMAX_H3_ROOT="$PWD/checkpoints/MiniMax-H3"
+python tools/validation/infer_h3.py --attention-backend flash_attention_3 \
+  --prompt "A dancer performs a dance routine with music." --seed 42 \
+  --output outputs/h3_demo.mp4
 ```
 
-No second LTX checkout or installed `ltx-core`, `ltx-pipelines`, or
-`ltx-trainer` package is used. The modified pinned snapshot is organized under
-HFTrainer's own layers.
+The demonstrated T2VA output is 768 × 768, 124 frames at 24 FPS with 32 kHz
+stereo audio. Face-sample text conditions and denoising latents matched the
+independent official implementation exactly. Small native VAE differences
+remain; decoded media is not claimed to be bit-identical. H3 training is an
+experimental rectified-flow recipe, not a released official training recipe.
 
-Important: the included LTX source is governed by the
-[LTX-2.x Community License Agreement](hftrainer/models/ltx_video/LICENSE.ltx-2.x),
-which contains use restrictions and commercial-license conditions. See the
-[upstream and modification record](hftrainer/models/ltx_video/UPSTREAM.md) and
+Both implementations execute locally without a second model repository.
+Infrastructure libraries, optional attention kernels and downloaded model
+assets remain dependencies. Read the respective model agreements and
 [third-party notices](THIRD_PARTY_NOTICES.md) before use or redistribution.
 
-## MiniMax-H3
+## Checkpoint availability
 
-After reading and accepting the upstream MiniMax H3 Community License
-Agreement, download the frozen checkpoint revision and run one of the local
-pipelines:
+HFTrainer has not published converted H3/LTX base checkpoints or the demo LoRA
+adapters to Hugging Face. Download upstream model assets according to each
+model card. Training outputs remain local HFTrainer checkpoints or local LoRA
+files; a working save/load path does not imply a Hub release or compatibility
+with another framework's `from_pretrained` interface.
+
+## Demo data and training evidence
+
+**The H3/LTX demo dataset is not published on Hugging Face.** The measured runs
+used two local dance clips for training and one held-out clip; source media
+and feature caches are not bundled. Redistribution permission has not been
+established. A clean public checkout cannot yet download those exact inputs
+and reproduce the training measurements end to end.
+
+After preparing compatible caches as described in each model card, launch the
+20-step recipes:
 
 ```bash
-hf download MiniMaxAI/MiniMax-H3 \
-  --revision 42ed227ee7df40d41602854ae760620d6eb651fe \
-  --include "model_index.json" "modular_model_index.json" \
-    "processor/*" "tokenizer/*" "text_encoder/*" \
-    "vae/*" "audio_vae/*" "scheduler/*" "audio_scheduler/*" \
-    "transformer/*" "transformer_ref/*" \
-  --local-dir checkpoints/MiniMax-H3
+MINIMAX_H3_CACHE_MANIFEST="$PWD/data/h3/train.jsonl" \
+HFTRAINER_WORK_DIR="$PWD/outputs/h3_loss_demo" \
+python tools/train.py configs/minimax_h3/demo_loss.py \
+  --cfg-options val_dataloader.dataset.manifest="$PWD/data/h3/validation.jsonl"
 
-export MINIMAX_H3_ROOT="$PWD/checkpoints/MiniMax-H3"
-
-hftrainer-infer \
-  --config configs/minimax_h3/infer_h3_base_fl2va.py \
-  --mode t2va \
-  --prompt "A paper boat drifts downstream with synchronized water and bird sounds." \
-  --duration 5 \
-  --output outputs/minimax_h3/t2va.mp4
+LTX25_PREPROCESSED_DATA="$PWD/data/ltx/.precomputed" \
+HFTRAINER_WORK_DIR="$PWD/outputs/ltx_loss_demo" \
+python tools/train.py configs/ltx_video/demo_loss.py
 ```
 
-The FL2VA checkpoint partition also supports first and/or last frames. Ordered
-image/video/audio references use the separate
-`configs/minimax_h3/infer_h3_base_ref2va.py` recipe. Experimental transformer
-LoRA training consumes cached Qwen/VAE features through
-`configs/minimax_h3/train_h3_base_lora.py`; the matching
-`infer_h3_base_fl2va_lora.py` recipe loads and merges its adapter checkpoint.
-MiniMax has not published a complete official training recipe, so this is not
-presented as recipe parity.
+These short LoRA runs verify execution and record real losses. **Neither trace
+demonstrates sustained decrease, convergence or generalization.** The visually
+reviewed base samples were not produced by these demo adapters.
 
-Read the [English MiniMax-H3 guide](docs/en/models/minimax_h3.md),
-[中文指南](docs/zh-cn/models/minimax_h3.md), the
-[upstream record](hftrainer/models/minimax_h3/UPSTREAM.md), the
-[Apache-2.0 reference-code license](hftrainer/models/minimax_h3/LICENSE.apache-2.0),
-and the
-[complete model agreement](hftrainer/models/minimax_h3/LICENSE.minimax-h3)
-before use or redistribution.
+| Evidence | H3 | LTX 2.5 |
+| --- | --- | --- |
+| Full-weight inference | T2VA sample comparison | Dev two-stage sample comparison |
+| Short LoRA train / resume / adapter inference | Completed | Completed |
+| Raw 20-step loss trace | [Curve](docs/en/models/evidence/h3_loss.png) | [Curve](docs/en/models/evidence/ltx_loss.png) |
+| Training convergence | Not established | Not established |
+| Exact demo dataset on Hub | Not published | Not published |
+
+[Dataset provenance and release status](docs/en/models/demo-data.md) ·
+[Raw measurements and methodology](docs/en/models/evidence/index.md) ·
+[Model-card standard](docs/en/models/standard.md)
 
 ## Repository Standard
 
@@ -268,6 +292,8 @@ An integration is complete only when all of the following are true:
 6. Tiny forward, loss, backward, inference, and artifact round-trip tests pass.
 7. The forbidden-dependency test still passes in a process that actively blocks
    external model packages.
+8. An English model card follows the [shared standard](docs/en/models/standard.md),
+   with launch commands, data availability, measured evidence and explicit limits.
 
 See the [English integration guide](docs/en/integration.md) or
 [中文模型接入指南](docs/zh-cn/integration.md).
@@ -302,7 +328,7 @@ The focused tests include:
 | Integration standard | [docs/en/integration.md](docs/en/integration.md) | [docs/zh-cn/integration.md](docs/zh-cn/integration.md) |
 | Architecture | [docs/en/architecture.md](docs/en/architecture.md) | [docs/zh-cn/architecture.md](docs/zh-cn/architecture.md) |
 | ModelBundle | [docs/en/design/model_bundle.md](docs/en/design/model_bundle.md) | [docs/zh-cn/design/model_bundle.md](docs/zh-cn/design/model_bundle.md) |
-| LTX-Video 2.5 | [docs/en/models/ltx_video_2_5.md](docs/en/models/ltx_video_2_5.md) | [docs/zh-cn/models/ltx_video_2_5.md](docs/zh-cn/models/ltx_video_2_5.md) |
+| [LTX-Video 2.5](docs/en/models/ltx_video_2_5.md) | [docs/en/models/ltx_video_2_5.md](docs/en/models/ltx_video_2_5.md) | [docs/zh-cn/models/ltx_video_2_5.md](docs/zh-cn/models/ltx_video_2_5.md) |
 | MiniMax-H3 | [docs/en/models/minimax_h3.md](docs/en/models/minimax_h3.md) | [docs/zh-cn/models/minimax_h3.md](docs/zh-cn/models/minimax_h3.md) |
 
 ## Acknowledgements and Provenance

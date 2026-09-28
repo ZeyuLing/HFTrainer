@@ -1187,7 +1187,11 @@ class AudioDecoder:
                 alloc_trim_strategy=self._alloc_trim_strategy,
             ) as vocoder,
         ):
-            return vae_decode_audio(latent, decoder, vocoder)
+            # BF16 audio convolutions can select nondeterministic cuDNN
+            # algorithms, producing different waveforms for identical latents.
+            # Keep this setting scoped to decoding; diffusion is unaffected.
+            with torch.backends.cudnn.flags(deterministic=True, benchmark=False):
+                return vae_decode_audio(latent, decoder, vocoder)
 
 
 # ---------------------------------------------------------------------------

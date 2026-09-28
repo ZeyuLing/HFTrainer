@@ -94,6 +94,11 @@ minimax-h3 = [
     "huggingface-hub>=0.28,<2",
     "torchaudio>=2.0",
 ]
+# Optional attention kernels only; no external H3 model implementation.
+minimax-h3-fa3 = [
+    "torch>=2.10,<2.12",
+    "kernels>=0.10",
+]
 
 [project.scripts]
 hftrainer-train = "tools.train:main"

@@ -187,10 +187,24 @@ class MiniMaxH3Pipeline(BasePipeline):
         keyframe_noise_aug: float = 0.999,
         min_duration: float = 5.0,
         max_duration: float = 15.0,
+        noise_mode: str = "independent",
+        attention_backend: str = "sdpa",
     ) -> None:
         super().__init__(bundle)
         if num_inference_steps < 2:
             raise ValueError("num_inference_steps must include at least two sigmas.")
+        if noise_mode not in {"independent", "sequential"}:
+            raise ValueError("noise_mode must be independent or sequential.")
+        self.noise_mode = noise_mode
+        from hftrainer.models.minimax_h3.network.attention import set_attention_backend
+
+        if attention_backend not in {"sdpa", "flash_attention_3"}:
+            raise ValueError("attention_backend must be sdpa or flash_attention_3")
+        self.attention_backend = attention_backend
+        for name in ("transformer", "text_encoder"):
+            component = getattr(bundle, name, None)
+            if isinstance(component, torch.nn.Module):
+                set_attention_backend(component, attention_backend)
         self.num_inference_steps = int(num_inference_steps)
         self.canvas_short_edge = int(canvas_short_edge)
         self.canvas_max_pixels = int(canvas_max_pixels)
@@ -613,20 +627,43 @@ class MiniMaxH3Pipeline(BasePipeline):
         elif generator is not None and seed is not None:
             raise ValueError("Pass generator or seed, not both.")
 
-        # The released request consumes random draws in this exact order:
-        # every visual condition, target video, then target audio.
+        # The recommended SGLang recipe starts each modality from the same
+        # CPU RNG state. A shared sequential stream changes the audio noise and,
+        # through joint attention, the generated video. Keep it as an explicit
+        # compatibility mode for previously generated Diffusers-style samples.
+        independent = self.noise_mode == "independent"
+        if independent:
+            if generator is None:
+                generator = torch.default_generator
+            initial_state = generator.get_state()
+            audio_generator = torch.Generator(device=generator.device)
+            audio_generator.set_state(initial_state)
+        else:
+            audio_generator = generator
         condition_rows = []
         for condition in condition_video_latents:
             condition = condition.to(self.bundle.device, torch.float32)
-            noise = randn_tensor(
-                condition.shape,
-                generator=generator,
-                device=condition.device,
-                dtype=torch.float32,
-            )
-            noised = self.bundle.scheduler.scale_noise(
-                condition, self.keyframe_noise_aug, noise
-            )
+            if independent and self.keyframe_noise_aug == 1.0:
+                noised = condition
+            else:
+                condition_generator = generator
+                noise_shape = tuple(condition.shape)
+                if independent:
+                    condition_generator = torch.Generator(device=generator.device)
+                    condition_generator.set_state(initial_state)
+                    full_t = latent_frames + len(condition_video_latents)
+                    if full_t < condition.shape[2]:
+                        raise ValueError("Condition exceeds the visual noise temporal length.")
+                    noise_shape = (*condition.shape[:2], full_t, *condition.shape[3:])
+                noise = randn_tensor(
+                    noise_shape,
+                    generator=condition_generator,
+                    device=condition.device,
+                    dtype=torch.float32,
+                )[:, :, :condition.shape[2]]
+                noised = self.bundle.scheduler.scale_noise(
+                    condition, self.keyframe_noise_aug, noise
+                )
             condition_rows.append(
                 patchify_video_latents(
                     noised, tuple(self.bundle.transformer.config.patch_size)
@@ -664,7 +701,7 @@ class MiniMaxH3Pipeline(BasePipeline):
         if audio_latents is None:
             generated_audio_rows = randn_tensor(
                 (num_audio_latents * AUDIO_CHANNELS, audio_channels),
-                generator=generator,
+                generator=audio_generator,
                 device=self.bundle.device,
                 dtype=torch.float32,
             )

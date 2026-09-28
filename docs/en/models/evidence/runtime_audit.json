@@ -1,0 +1,26 @@
+{
+  "files_scanned": 281,
+  "static_violations": [],
+  "blocked_roots": [
+    "diffusers",
+    "ltx_core",
+    "ltx_pipelines",
+    "ltx_trainer",
+    "peft",
+    "sglang",
+    "tokenizers",
+    "transformers"
+  ],
+  "successful_import_probes": [
+    "hftrainer.models.minimax_h3",
+    "hftrainer.pipelines.minimax_h3",
+    "hftrainer.trainers.minimax_h3",
+    "hftrainer.models.ltx_video",
+    "hftrainer.pipelines.ltx_video",
+    "hftrainer.trainers.ltx_video",
+    "hftrainer.pipelines.ltx_video.backend.ti2vid_two_stages",
+    "hftrainer.trainers.ltx_video.native.trainer"
+  ],
+  "external_model_modules_loaded": [],
+  "scope": "Production model/pipeline/trainer paths; independent official reference tests intentionally excluded."
+}

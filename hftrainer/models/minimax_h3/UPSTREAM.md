@@ -60,3 +60,15 @@ The local integration owns the open H3-Base 768p paths:
 
 Hosted-only H3-Context-IR, Regenerate-2K, 2K post-processing, and unreleased
 sparse-attention kernels are not represented as local capabilities.
+
+## 2026-09-28 validation update
+
+Independent official SGLang commit `c11ce7c514c4dc30c2d243c43ecfb79c7a871db5`
+and raw checkpoint revision `a9e1d8408c3453c899d151d0aa448082c10b0185` were
+used for the actual H200 comparison (separate from the original source freeze
+above). Local modality RNG, fused DiT QKV and optional FA3 execution now match
+the sampled official denoising outputs exactly. FA3 is a kernel-only optional
+dependency pinned to kernel revision `15c17db0bf9ce6599db795fa02a8f27467c92860`,
+not a dependency on SGLang model code. Native codec residuals, tested modes,
+training records and commands are documented in the model cards and
+`docs/en/models/minimax_h3.md` and `docs/en/models/evidence/index.md`.

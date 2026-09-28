@@ -337,7 +337,7 @@ def test_ref2va_requires_an_explicit_duration_or_frame_count():
 
 def test_precomputed_video_and_audio_noise_skip_their_draws_independently():
     pipeline = MiniMaxH3Pipeline(
-        _FakeBundle(), num_inference_steps=2, min_duration=0, max_duration=10
+        _FakeBundle(), num_inference_steps=2, min_duration=0, max_duration=10, noise_mode="sequential"
     )
     num_audio_latents = audio_latent_num_frames(5)
     video_shape = (1, 2, 2, 2, 2)
@@ -458,3 +458,40 @@ def test_bundle_predict_velocity_forwards_attention_kwargs_by_identity():
     )
 
     assert bundle.transformer.kwargs["attention_kwargs"] is marker
+
+
+def test_independent_noise_matches_separately_seeded_modalities():
+    pipeline = MiniMaxH3Pipeline(_FakeBundle(), num_inference_steps=2, min_duration=0)
+    kwargs = dict(num_frames=5, height=32, width=32, seed=42, output_type='latent')
+    result = pipeline('test', **kwargs)
+    expected_video = torch.randn((1, 2, 2, 2, 2), generator=torch.Generator().manual_seed(42))
+    n = audio_latent_num_frames(5)
+    expected_audio = torch.randn((2*n, 2), generator=torch.Generator().manual_seed(42))
+    expected_audio = expected_audio.reshape(2,n,2).permute(0,2,1)[None]
+    torch.testing.assert_close(result.video_latents, expected_video, atol=0, rtol=0)
+    torch.testing.assert_close(result.audio_latents, expected_audio, atol=0, rtol=0)
+    supplied_video = pipeline('test', latents=torch.zeros_like(expected_video), **kwargs)
+    torch.testing.assert_close(supplied_video.audio_latents, expected_audio, atol=0, rtol=0)
+
+
+def test_keyframe_augmentation_does_not_advance_target_noise_streams():
+    bundle = _FakeBundle()
+    rows_seen = []
+    original = bundle.predict_velocity
+    def capture(*args, **kwargs):
+        rows_seen.append(args[0].clone())
+        return original(*args, **kwargs)
+    bundle.predict_velocity = capture
+    pipeline = MiniMaxH3Pipeline(bundle, num_inference_steps=2, min_duration=0)
+    kwargs = dict(num_frames=5, height=32, width=32, seed=42, output_type='latent')
+    base = pipeline('test', **kwargs)
+    condition = torch.ones(1,2,1,2,2)
+    result = pipeline('test', mode='fl2va', first_frame=Image.new('RGB',(32,32)),
+                      condition_video_latents=[condition], condition_audio_rows=[], **kwargs)
+    torch.testing.assert_close(result.video_latents, base.video_latents, atol=0, rtol=0)
+    torch.testing.assert_close(result.audio_latents, base.audio_latents, atol=0, rtol=0)
+    from hftrainer.models.minimax_h3.network.layout import patchify_video_latents
+    noise = torch.randn((1,2,3,2,2),generator=torch.Generator().manual_seed(42))[:,:,:1]
+    timestep = torch.tensor(pipeline.keyframe_noise_aug, dtype=torch.float32)
+    noised = timestep*condition + (1-timestep)*noise
+    torch.testing.assert_close(rows_seen[-1][:1],patchify_video_latents(noised,(1,2,2))[0],atol=0,rtol=0)

@@ -143,3 +143,45 @@ def test_local_processor_rejects_unimplemented_image_tower():
         assert 'vision tower' in str(exc)
     else:
         raise AssertionError('Image prompt enhancement must not silently use a text-only model')
+
+
+def test_packed_gemma_assets_load_inside_meta_context(tmp_path):
+    from safetensors.torch import save_file
+    assets = _assets()
+    tensors = {'tokenizer_json': torch.tensor(list(assets.tokenizer_json), dtype=torch.uint8)}
+    tensors.update({'hf_asset__' + name: torch.tensor(list(value), dtype=torch.uint8)
+                    for name, value in assets.sidecars.items()})
+    path = tmp_path / 'packed.safetensors'
+    save_file(tensors, str(path), metadata={'gemma_config': json.dumps(assets.config_dict)})
+    with torch.device('meta'):
+        restored = GemmaAssets.from_single_file(path)
+    assert restored.tokenizer_json == assets.tokenizer_json
+    assert restored.sidecars == assets.sidecars
+
+
+def test_explicit_gemma_rope_parameters_survive_config_parsing():
+    values = _assets().config_dict
+    values['text_config']['rope_parameters'] = {
+        'sliding_attention': {'rope_type': 'default', 'rope_theta': 10000.0},
+        'full_attention': {'rope_type': 'proportional', 'rope_theta': 1000000.0,
+                           'partial_rotary_factor': 0.5},
+    }
+    from hftrainer.models.ltx_video.network.text_encoders.gemma.local_model import LocalGemmaConfig
+    config = LocalGemmaConfig.from_dict(values)
+    model = build_local_gemma_model(config)
+    output = model(input_ids=torch.tensor([[2,4,5,1]]))
+    assert torch.isfinite(output.logits).all()
+
+
+def test_local_gemma_meta_loader_materializes_nonpersistent_buffers():
+    from hftrainer.models.ltx_video.network.text_encoders.gemma.encoders.encoder_configurator import _populate_language_model_buffers
+    from hftrainer.models.ltx_video.network.text_encoders.gemma.encoders.base_encoder import LTXGemmaTextEncoder
+    config = build_local_gemma_config(_assets())
+    expected = build_local_gemma_model(config)
+    with torch.device('meta'):
+        restored = build_local_gemma_model(config)
+    wrapper = _populate_language_model_buffers(LTXGemmaTextEncoder(model=restored))
+    restored.load_state_dict(expected.state_dict(), strict=True, assign=True)
+    assert all(not value.is_meta for value in wrapper.buffers())
+    ids = torch.tensor([[2,4,5,1]])
+    torch.testing.assert_close(restored(input_ids=ids).logits, expected(input_ids=ids).logits)

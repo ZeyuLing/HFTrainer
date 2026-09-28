@@ -30,7 +30,7 @@ class LocalGemmaConfig:
 
     def __init__(self, **values: Any):
         for name, value in values.items():
-            if isinstance(value, Mapping):
+            if isinstance(value, Mapping) and name != 'rope_parameters':
                 value = LocalGemmaConfig(**value)
             elif isinstance(value, list):
                 value = [LocalGemmaConfig(**item) if isinstance(item, Mapping) else item for item in value]
@@ -160,6 +160,16 @@ class RotaryEmbedding(nn.Module):
                 persistent=False,
             )
 
+    def materialize(self, device: str = 'cpu') -> None:
+        """Rebuild nonpersistent frequencies after meta-device construction."""
+        with torch.device(device):
+            for layer_type in set(self.config.layer_types):
+                self.register_buffer(
+                    f'{layer_type}_inv_freq',
+                    _rope_frequencies(self.config, layer_type),
+                    persistent=False,
+                )
+
     def forward(self, position_ids: torch.Tensor, layer_type: str, dtype: torch.dtype):
         inv = getattr(self, f'{layer_type}_inv_freq').to(position_ids.device)
         frequencies = position_ids.float().unsqueeze(-1) * inv.view(1, 1, -1)
@@ -261,14 +271,13 @@ class GemmaAttention(nn.Module):
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-        scores = torch.matmul(query, key.transpose(-1, -2)) + attention_mask
-        probabilities = F.softmax(scores.float(), dim=-1).to(query.dtype)
-        probabilities = F.dropout(
-            probabilities,
-            p=float(self.config.attention_dropout),
-            training=self.training,
-        )
-        output = torch.matmul(probabilities, value).transpose(1, 2).reshape(batch, length, -1)
+        output = F.scaled_dot_product_attention(
+            query, key, value,
+            attn_mask=attention_mask,
+            dropout_p=float(self.config.attention_dropout) if self.training else 0.0,
+            is_causal=False,  # the explicit mask already encodes causality/windowing
+            scale=1.0,  # Gemma 4 normalizes Q/K and intentionally uses no sqrt(d) scale
+        ).transpose(1, 2).reshape(batch, length, -1)
         return self.o_proj(output)
 
 

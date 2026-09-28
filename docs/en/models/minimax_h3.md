@@ -1,255 +1,73 @@
 # MiniMax-H3
 
-HFTrainer contains a repository-owned implementation of the public
-MiniMax-H3 Base 768p stack. It covers synchronized video/stereo-audio
-generation from text, first/last frames, and ordered multimodal references.
-The execution path does not import Diffusers, Transformers, Tokenizers, PEFT,
-or a MiniMax checkout at runtime.
+Synchronized text-to-video and stereo audio with the Base 768p model.
 
-```text
-hftrainer/models/minimax_h3/network/   transformer, Qwen3-VL, tokenizer,
-                                       processor, video/audio VAEs, schedulers
-hftrainer/models/minimax_h3/bundle.py  components, artifact boundary, atomic ops
-hftrainer/pipelines/minimax_h3/        T2VA, FL2VA, and Ref2VA inference graph
-hftrainer/trainers/minimax_h3/         experimental cached-feature RF objective
-hftrainer/datasets/synchronized_audio_video/
-                                       H3 cached-feature data contract
-configs/minimax_h3/                    inference and LoRA-training recipes
-```
+**Verification:** Full-weight T2VA and short LoRA train/resume/infer verified on one H200 (2026-09-28)
 
-## Scope
+**Runtime:** Repository-owned model, trainer and pipeline; infrastructure libraries and model assets remain dependencies.
 
-| Surface | Local status |
-| --- | --- |
-| T2VA | released `transformer/` partition |
-| first-, last-, and first/last-frame to audio/video | released `transformer/` partition |
-| ordered image/video/audio references | released `transformer_ref/` partition |
-| Qwen3-VL-32B conditioner | local vision and text execution; hidden state 50 |
-| visual/audio codecs | local 24-channel visual VAE and 32-channel, 32-kHz audio VAE |
-| video/audio flow schedules | local shift-12 and shift-3 schedulers |
-| fine-tuning | experimental cached-feature full/LoRA transformer training |
-| H3-Context-IR, Regenerate-2K, hosted 2K stage | not publicly released locally; rejected as unsupported |
-| sparse-attention kernel | not publicly released; local model uses full attention |
+[All models](index.md) · [Setup](#setup) · [Train](#train) · [Infer](#infer) · [Evidence](#evidence-and-loss)
 
-H3 is a joint rectified-flow audio/video model. It is not an autoregressive
-language model and does not use classifier-free guidance or a negative prompt.
-The transformer packs text/vision-conditioning, reference audio/video, and
-target rows into one non-causal sequence.
+## At a glance
 
-## Source and license
+| Item | Status |
+| :--- | :--- |
+| Implementation | Local to HFTrainer |
+| Demo data | See [data availability](demo-data.md) |
+| Convergence | Not established by the evidence on this card |
 
-- Official model repository: https://github.com/MiniMax-AI/MiniMax-H3
-- Official checkpoint: https://huggingface.co/MiniMaxAI/MiniMax-H3
-- Frozen sources and modifications: `hftrainer/models/minimax_h3/UPSTREAM.md`
-- Apache-2.0 reference-code license: `hftrainer/models/minimax_h3/LICENSE.apache-2.0`
-- Complete model agreement: `hftrainer/models/minimax_h3/LICENSE.minimax-h3`
-- Required model notice: `hftrainer/models/minimax_h3/NOTICE.minimax-h3`
+## Setup
 
-MiniMax model materials are governed by the MiniMax H3 Community License
-Agreement, not a permissive open-source license. It contains territorial
-exclusions, use restrictions, redistribution requirements, and additional
-commercial terms. Read and accept the complete agreement before downloading
-or using the checkpoint. HFTrainer does not bundle weights, tokenizer assets,
-or upstream configs.
-
-The local code was adapted from pinned Apache-2.0 Diffusers and Transformers
-references, with external framework machinery replaced by HFTrainer-owned
-configuration, loading, preprocessing, and orchestration. See the upstream
-record for exact commits.
-
-## Install and download
-
-Select a suitable CUDA PyTorch wheel, install HFTrainer and the media/download
-helpers, then download the exact tested revision:
+Run commands from the repository root. Prepare the listed weights and data first; a command is not a self-contained download or a claim of convergence.
 
 ```bash
-python -m pip install -e ".[minimax-h3]"
-
-hf download MiniMaxAI/MiniMax-H3 \
-  --revision 42ed227ee7df40d41602854ae760620d6eb651fe \
-  --include "model_index.json" "modular_model_index.json" \
-    "processor/*" "tokenizer/*" "text_encoder/*" \
-    "vae/*" "audio_vae/*" "scheduler/*" "audio_scheduler/*" \
-    "transformer/*" "transformer_ref/*" \
-  --local-dir checkpoints/MiniMax-H3
-
+python -m pip install -e ".[minimax-h3,minimax-h3-fa3]"
 export MINIMAX_H3_ROOT="$PWD/checkpoints/MiniMax-H3"
 ```
 
-The include list downloads only the shared Diffusers-format components used by
-HFTrainer and both local transformer partitions. It deliberately excludes the
-additional original-format `FL2VA/` and `Ref2VA/` trees hosted in the same
-repository, avoiding a second copy of the large checkpoints.
+Choose a matching CUDA PyTorch wheel first. Official comparison used PyTorch 2.11.0+cu130 and FA3; training used 2.8.0+cu128 in a separate environment. See the [checkpoint download and placement guide](minimax_h3_reference.md#install-and-download). One H200 fits the demonstrated inference path by loading the conditioner and denoiser sequentially.
 
-The checkpoint is very large: the two mutually exclusive transformer
-partitions are each roughly 66 GB, the Qwen3-VL conditioner roughly 67 GB,
-and the codecs add roughly 11 GB. Plan host RAM, accelerator memory, and disk
-space before loading it. The local loaders reject missing shards, duplicate
-keys, shape mismatches, and low-coverage partial loads.
+HFTrainer-converted base weights and demo adapters have **not been published to Hugging Face**. Use the upstream assets described above; local training outputs are not a Hub release.
 
-The inference configs support explicit component placement because the full
-transformer, conditioner, and codecs do not fit on a typical single GPU:
+## Data
+
+The measured run used two training clips (Ballet427 and Popular-Jazz110) and one held-out clip (Classic-dunhuang8), each initially excerpted to six seconds. **These videos and caches are not published on Hugging Face.** See [provenance and availability](demo-data.md). Supply your own authorized videos for a new run. H3 training caches use 128 × 128 × 124 frames.
+
+## Train
+
+After preparing compatible H3 caches with train/validation manifests:
 
 ```bash
-export MINIMAX_H3_TRANSFORMER_DEVICE=cuda:0
-export MINIMAX_H3_CONDITIONER_DEVICE=cuda:1
-export MINIMAX_H3_CODEC_DEVICE=cuda:2
+MINIMAX_H3_CACHE_MANIFEST="$PWD/data/h3/train.jsonl" \
+HFTRAINER_WORK_DIR="$PWD/outputs/h3_loss_demo" \
+python tools/train.py configs/minimax_h3/demo_loss.py \
+  --cfg-options val_dataloader.dataset.manifest="$PWD/data/h3/validation.jsonl"
 ```
 
-`MINIMAX_H3_LOAD_DEVICE` remains the common fallback. Do not also pass the
-generic CLI `--device` when using split placement: that flag moves the complete
-bundle to one device. The local public loader deliberately rejects
-`device_map` instead of silently pretending to perform layer-wise sharding.
-Use the four component placement controls above; layer-level dispatch is not
-part of this integration.
+This runs 20 steps. See the [cache schema and full recipe](minimax_h3_reference.md#experimental-training). The existing end-to-end validation runner assumes machine-local source clips and is not a public download-and-train workflow.
 
-## Inference
-
-Text-to-audio/video uses the FL2VA partition without keyframes:
+## Infer
 
 ```bash
-hftrainer-infer \
-  --config configs/minimax_h3/infer_h3_base_fl2va.py \
-  --prompt "A paper boat drifts down a narrow stream; water and birds are audible." \
-  --mode t2va \
-  --duration 5 \
-  --output outputs/minimax_h3/t2va.mp4
+python tools/validation/infer_h3.py --attention-backend flash_attention_3 \
+  --prompt "A dancer performs a dance routine with music." --seed 42 \
+  --output outputs/h3_demo.mp4
 ```
 
-First/last-frame conditioning uses the same partition:
+The demonstrated output is 768 × 768, 124 frames at 24 FPS with 32 kHz stereo audio. Add `--checkpoint outputs/h3_loss_demo/checkpoint-iter_20` for the rank-2 demo adapter; other ranks require a matching config.
 
-```bash
-hftrainer-infer \
-  --config configs/minimax_h3/infer_h3_base_fl2va.py \
-  --prompt "The camera slowly circles the subject while wind moves the leaves." \
-  --mode fl2va \
-  --first-frame assets/start.png \
-  --last-frame assets/end.png \
-  --output outputs/minimax_h3/fl2va.mp4
-```
+## Evidence and loss
 
-Reference conditioning uses the separate Ref2VA weights. Reference order is
-semantic and is preserved by the CLI:
+The independent official comparison matched text conditions and complete face-sample denoising latents exactly. Native VAE output retains small differences (video normalized RGB RMSE 0.000630; audio RMSE 0.0000779). This is not MP4 bit equality. The reviewed base face sample was accepted visually.
 
-```bash
-hftrainer-infer \
-  --config configs/minimax_h3/infer_h3_base_ref2va.py \
-  --prompt "Use Picture 1 for the character and Video 1 for motion and camera." \
-  --mode ref2va \
-  --reference-image assets/character.png \
-  --reference-video assets/motion.mp4 \
-  --duration 5 \
-  --output outputs/minimax_h3/ref2va.mp4
-```
+![H3 raw training and held-out loss over 20 steps](evidence/h3_loss.png)
 
-The generated video is fixed at 24 FPS and audio at 32 kHz stereo. Generation
-duration is 5–15 seconds in the current executable public path. Frame counts
-are rounded upward to the visual VAE's legal `17*n+5` form. Height and width
-must both be multiples of 32; when omitted, the released 768-short-edge canvas
-rule is used. Ref2VA accepts at most 9 images, 3 videos, 3 audio clips, and 12
-references total; audio-only reference lists are invalid. A Ref2VA Python call
-must pass either `duration` or `num_frames`, because silently using the
-124-frame T2VA/FL2VA default could truncate a reference soundtrack.
+These are raw 20-step LoRA traces on two clips, without smoothing. They demonstrate execution, **not sustained loss decrease, convergence or generalization**. [Raw measurements and methodology](evidence/index.md). H3 held-out points resample noise and timestep.
 
-The Python pipeline supports `output_type="pt"`, `"np"`, `"pil"`, and
-`"latent"`. Tensor video is `B,T,C,H,W`; NumPy video is `B,T,H,W,C`; PIL is a
-nested batch/frame list. As in the frozen pipeline API, decoded audio remains
-a float32 CPU tensor `B,2,S` for every non-latent video output type. It keeps
-the codec's complete 800-sample-hop output rather than being truncated to a
-fractional video-frame duration. HFTrainer intentionally defaults
-`output_type` to `"pt"` so the CLI can mux tensors directly; the frozen
-Diffusers modular pipeline defaults to `"pil"`.
+## Limitations
 
-For deterministic replay, `latents` accepts pre-generated video noise shaped
-`[1,24,T,H,W]` and `audio_latents` accepts channel-major stereo noise shaped
-`[2,32,A]`. Supplying one skips only that stream's random draw, preserving the
-released condition → video → audio draw order for every draw that remains.
-`attention_kwargs` is forwarded unchanged on every transformer evaluation.
+Only T2VA was verified with full weights in this run. FL2VA, Ref2VA and multi-GPU execution need separate full-run validation. Training uses an experimental rectified-flow objective, not an official training recipe. Regenerate-2K and H3-Context-IR are not implemented. Portable SDPA does not promise exact FA3 parity.
 
-## Experimental training
+## Sources and license
 
-MiniMax released model weights but not a complete training recipe. Therefore
-`MiniMaxH3Trainer` implements the data-ward rectified-flow objective implied by
-the public scheduler:
-
-```text
-x_t = t*x_0 + (1-t)*noise
-target = x_0 - noise
-```
-
-This is an explicit experimental objective, not a claim of official recipe or
-convergence parity. The recommended data path caches frozen features so the
-32B conditioner and both VAEs are absent while the 33B transformer trains.
-
-Each JSONL manifest row points to one `.safetensors` or `.pt` file:
-
-```json
-{"feature_file":"000001.safetensors","keyframe_anchors":[],"reference_geometries":[]}
-```
-
-Each cache contains:
-
-| Tensor | Shape | Meaning |
-| --- | --- | --- |
-| `video_latents` | `[24,T,H,W]` | normalized clean visual latents |
-| `audio_latents` | `[2,32,L]` | normalized clean stereo audio latents |
-| `prompt_embeds` | `[N,5120]` | local Qwen3-VL hidden state 50 |
-| `text_token_tags` | `[N]` | packed text/vision modality tags |
-| `condition_video_rows` | optional `[Nv,Dv]` | clean FL2VA/Ref2VA visual rows |
-| `condition_audio_rows` | optional `[Na,32]` | clean Ref2VA audio rows |
-
-Run the LoRA recipe after setting the cache root:
-
-```bash
-export MINIMAX_H3_CACHE_MANIFEST="$PWD/data/minimax_h3/train.jsonl"
-export HFTRAINER_WORK_DIR="$PWD/outputs/training/minimax_h3_lora"
-hftrainer-train configs/minimax_h3/train_h3_base_lora.py
-```
-
-Training checkpoints keep only the local adapter tensors and their HFTrainer
-metadata. To load one for generation, use the matching adapter-aware inference
-recipe and merge it after loading:
-
-```bash
-hftrainer-infer \
-  --config configs/minimax_h3/infer_h3_base_fl2va_lora.py \
-  --checkpoint outputs/training/minimax_h3_lora/checkpoint-iter_2000 \
-  --merge-lora \
-  --mode t2va \
-  --prompt "A drummer performs on stage" \
-  --duration 5 \
-  --output outputs/minimax_h3/lora.mp4
-```
-
-`MiniMaxH3Bundle.save_pretrained(...)` exports a standalone artifact by
-merging any active local LoRA modules into the transformer. Passing
-`merge_lora=False` with active adapters is rejected instead of writing an
-artifact that cannot be reloaded. Keep the original HFTrainer checkpoint for
-resuming adapter training.
-
-This is deliberately an HFTrainer bundle artifact, not a drop-in Diffusers
-top-level artifact. Direct component `from_pretrained(...)` calls accept local
-directories and explicit `device`/dtype placement only; Hub resolution,
-`device_map`, checkpoint `variant`, and `use_safetensors` selection are
-rejected rather than silently approximated. Component loading defaults to the
-meta-device low-memory path. HFTrainer also enables gradient checkpointing in
-the local audio VAE as a training extension; it does not change the published
-audio-VAE checkpoint key schema.
-
-Items in one minibatch must share the same packed row geometry. Bucket by
-resolution, latent duration, prompt-presentation length, and reference layout,
-or use `batch_size=1`.
-
-## Verification boundary
-
-Repository tests exercise tiny transformer, scheduler, VAE, Qwen/tokenizer,
-layout, loss/backward, pipeline, cache, and artifact contracts. They also run
-with external model packages actively blocked. Development-time comparisons
-use frozen upstream reference implementations, which are not runtime
-dependencies.
-
-These checks do **not** demonstrate full-checkpoint generation quality,
-throughput, convergence, or a successful 33B+32B allocation on this
-development machine. A real release qualification should additionally run all
-three public modes with the frozen full checkpoint on the target multi-GPU
-system and visually/audibly inspect the muxed outputs.
+[Implementation provenance and model agreement](minimax_h3_reference.md#source-and-license). Original source-freeze checkpoint revision: `42ed227ee7df40d41602854ae760620d6eb651fe`; independent official raw-FL2VA comparison: `a9e1d8408c3453c899d151d0aa448082c10b0185`. These are distinct revisions.

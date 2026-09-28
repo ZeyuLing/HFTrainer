@@ -247,3 +247,56 @@ def test_lora_inference_recipe_matches_the_training_adapter_schema(
     assert inference.model.transformer.lora_cfg.to_dict() == (
         training.model.transformer.lora_cfg.to_dict()
     )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
+@pytest.mark.parametrize('mode', ['t2va', 'ref2va'])
+def test_cached_training_accepts_cuda_token_tags(mode):
+    bundle = _bundle(lora=True).cuda()
+    bundle.variant = 'ref2va' if mode == 'ref2va' else 'fl2va'
+    trainer = MiniMaxH3Trainer(bundle, mode=mode)
+    batch = {key: value.cuda() for key, value in _batch(1).items()}
+    result = trainer.train_step(batch)
+    assert torch.isfinite(result['loss'])
+    result['loss'].backward()
+    grads = [p.grad for p in bundle.parameters() if p.requires_grad and p.grad is not None]
+    assert grads and all(torch.isfinite(g).all() for g in grads)
+
+
+def test_adapter_full_resume_omits_frozen_weights_and_restores_training(tmp_path):
+    from accelerate import Accelerator
+    from hftrainer.runner.accelerate_runner import AccelerateRunner, _BundleOrphanCheckpoint
+
+    bundle = _bundle(lora=True)
+    accelerator = Accelerator()
+    optimizer = torch.optim.AdamW([p for p in bundle.parameters() if p.requires_grad], lr=1e-3)
+    bundle.transformer, optimizer = accelerator.prepare(bundle.transformer, optimizer)
+    accelerator.register_for_checkpointing(_BundleOrphanCheckpoint(bundle))
+    trainer = MiniMaxH3Trainer(bundle)
+    runner = AccelerateRunner(
+        bundle, trainer, None, None, {'default': optimizer}, {}, accelerator,
+        [], [], [], {'by_epoch': False}, str(tmp_path),
+    )
+    loss = trainer.train_step(_batch(1))['loss']
+    accelerator.backward(loss)
+    optimizer.step(); optimizer.zero_grad()
+    expected = {n: p.detach().clone() for n,p in bundle.named_parameters() if p.requires_grad}
+    runner.global_step = 1
+    runner.save_checkpoint()
+    checkpoint = tmp_path / 'checkpoint-iter_1'
+    assert not (checkpoint / 'model.safetensors').exists()
+    assert not (checkpoint / 'pytorch_model.bin').exists()
+    assert torch.load(checkpoint / 'meta.pt', weights_only=True)['adapter_only_resume']
+    with torch.no_grad():
+        for p in bundle.parameters():
+            if p.requires_grad: p.zero_()
+    runner.global_step = 0
+    runner._load(str(checkpoint), load_scope='full')
+    assert runner.global_step == 1
+    for n,p in bundle.named_parameters():
+        if p.requires_grad: torch.testing.assert_close(p, expected[n])
+    loss = trainer.train_step(_batch(1))['loss']
+    assert torch.isfinite(loss)
+    accelerator.backward(loss)
+    optimizer.step()
+    assert all(int(state['step']) == 2 for state in optimizer.state.values())

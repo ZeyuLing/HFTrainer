@@ -101,7 +101,9 @@ class GemmaAssets:
     @classmethod
     def from_single_file(cls, path: Path) -> GemmaAssets:
         path = Path(path)
-        with safetensors.safe_open(str(path), framework="pt") as f:
+        # Called while the surrounding model is constructed on meta. These
+        # serialized JSON byte tensors need real CPU storage, not meta tensors.
+        with torch.device("cpu"), safetensors.safe_open(str(path), framework="pt", device="cpu") as f:
             meta = f.metadata() or {}
             raw_config = meta.get(GEMMA_CONFIG_METADATA_KEY)
             if raw_config is None:

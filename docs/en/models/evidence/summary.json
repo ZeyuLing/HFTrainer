@@ -1,0 +1,18 @@
+{
+  "h3": {
+    "points": 20,
+    "first": 0.9609,
+    "last": 0.9048,
+    "first5_mean": 0.90848,
+    "last5_mean": 1.09794,
+    "convergence_demonstrated": false
+  },
+  "ltx": {
+    "points": 20,
+    "first": 1.1667709350585938,
+    "last": 1.4276678562164307,
+    "first5_mean": 1.2461546659469604,
+    "last5_mean": 1.2389436483383178,
+    "convergence_demonstrated": false
+  }
+}

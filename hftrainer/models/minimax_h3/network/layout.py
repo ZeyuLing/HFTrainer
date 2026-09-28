@@ -364,7 +364,7 @@ def build_fl2va_layout(
     audio_indices = torch.arange(audio_start, video_start)
     text_indices = torch.arange(num_text)
     token_tags = torch.empty(sequence_length, dtype=torch.long)
-    token_tags[text_indices] = text_token_tags.long()
+    token_tags[text_indices] = text_token_tags.to(token_tags.device, torch.long)
     token_tags[audio_indices] = AUDIO_TAG
     token_tags[video_indices] = VIDEO_TAG
     return MiniMaxH3PackedLayout(
@@ -522,7 +522,7 @@ def build_ref2va_layout(
     audio_indices = torch.cat((*audio_parts, torch.arange(audio_start, video_start)))
     text_indices = torch.arange(num_text)
     token_tags = torch.empty(sequence_length, dtype=torch.long)
-    token_tags[text_indices] = text_token_tags.long()
+    token_tags[text_indices] = text_token_tags.to(token_tags.device, torch.long)
     token_tags[audio_indices] = AUDIO_TAG
     token_tags[video_indices] = VIDEO_TAG
     return MiniMaxH3PackedLayout(

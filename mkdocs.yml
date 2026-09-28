@@ -26,8 +26,18 @@ nav:
   - Memory and Precision: memory.md
   - LoRA: lora.md
   - Models:
+    - Overview: models/index.md
+    - ViT classification: models/vit.md
+    - LLaMA causal LM: models/llama.md
+    - Stable Diffusion 1.5: models/sd15.md
+    - DMD: models/dmd.md
+    - StyleGAN2: models/stylegan2.md
+    - Wan T2V: models/wan.md
     - LTX-Video 2.5: models/ltx_video_2_5.md
     - MiniMax-H3: models/minimax_h3.md
+    - Demo data: models/demo-data.md
+    - Validation evidence: models/evidence/index.md
+    - Card standard: models/standard.md
   - Distributed Training: distributed.md
   - Experiment Directory: experiment_dir.md
   - Architecture: architecture.md
@@ -41,3 +51,6 @@ nav:
     - Multi-Optimizer: design/multi_optimizer.md
     - Dataset: design/dataset.md
     - Evaluation: design/evaluation.md
+
+extra_css:
+  - stylesheets/model-cards.css

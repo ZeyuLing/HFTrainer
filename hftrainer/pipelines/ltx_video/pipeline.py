@@ -21,6 +21,12 @@ from hftrainer.registry import PIPELINES
 _UNSET = object()
 
 
+@torch.inference_mode()
+def _inference_video_chunks(chunks):
+    # Decoding is lazy and can happen after infer_text_to_video returns.
+    yield from chunks
+
+
 @PIPELINES.register_module()
 class LTXVideoPipeline(BasePipeline):
     """Build and execute the repository-local LTX-Video inference graph.
@@ -323,6 +329,7 @@ class LTXVideoPipeline(BasePipeline):
             defaults.update(dict(values))
         return api.MultiModalGuiderParams(**defaults)
 
+    @torch.inference_mode()
     def infer_text_to_video(
         self,
         prompt: str,
@@ -440,6 +447,7 @@ class LTXVideoPipeline(BasePipeline):
             )
             video, audio, actual_frames, tiling = self.backend(**common)
 
+        video = _inference_video_chunks(video)
         result = {
             'video': video,
             'audio': audio,

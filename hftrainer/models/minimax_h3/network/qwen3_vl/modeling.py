@@ -592,6 +592,7 @@ class Qwen3VLTextAttention(nn.Module):
         self.config = config
         self.layer_idx = int(layer_idx)
         self.layer_type = config.layer_types[layer_idx]
+        self.attention_backend = "sdpa"
         self.head_dim = config.head_dim
         self.num_heads = config.num_attention_heads
         self.num_key_value_heads = config.num_key_value_heads
@@ -657,7 +658,21 @@ class Qwen3VLTextAttention(nn.Module):
 
         if not output_attentions:
             dropout_p = self.attention_dropout if self.training else 0.0
-            if self.num_key_value_groups == 1:
+            if self.attention_backend == "flash_attention_3":
+                from ..attention import flash_attention_3
+
+                if dropout_p:
+                    raise ValueError("flash_attention_3 does not support attention dropout")
+                if attention_mask is not None:
+                    q_len, k_len = query.shape[2], key.shape[2]
+                    expected = torch.arange(k_len, device=query.device)[None, :] <= (
+                        torch.arange(q_len, device=query.device)[:, None] + k_len - q_len
+                    )
+                    allowed = attention_mask if attention_mask.dtype == torch.bool else attention_mask == 0
+                    if not torch.equal(allowed, expected.expand_as(allowed)):
+                        raise ValueError("Qwen flash_attention_3 requires an unpadded causal sequence; use sdpa for custom masks")
+                output = flash_attention_3(query, key, value, causal=True)
+            elif self.num_key_value_groups == 1:
                 output = F.scaled_dot_product_attention(
                     query,
                     key,

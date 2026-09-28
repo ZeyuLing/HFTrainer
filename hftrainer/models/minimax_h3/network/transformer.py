@@ -235,9 +235,17 @@ class MiniMaxH3AttnProcessor:
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        query = attn.to_q(hidden_states)
-        key = attn.to_k(hidden_states)
-        value = attn.to_v(hidden_states)
+        projections = (attn.to_q, attn.to_k, attn.to_v)
+        if all(type(layer) is nn.Linear and layer.bias is None for layer in projections):
+            # Match the released SGLang fused-QKV GEMM. Three smaller BF16
+            # GEMMs round differently, even with identical weights, and those
+            # errors accumulate through the refiner and denoising blocks.
+            weight = torch.cat([layer.weight for layer in projections], dim=0)
+            query, key, value = F.linear(hidden_states, weight).chunk(3, dim=-1)
+        else:
+            # Custom projections (including unmerged LoRA) own their forward
+            # behavior. Never bypass adapter updates by reading only .weight.
+            query, key, value = (layer(hidden_states) for layer in projections)
 
         query = query.unflatten(-1, (attn.heads, attn.head_dim))
         key = key.unflatten(-1, (attn.heads, attn.head_dim))
@@ -258,14 +266,17 @@ class MiniMaxH3AttnProcessor:
                 hidden_states.shape[1],
             ):
                 attention_mask = attention_mask[:, None, None, :].to(torch.bool)
-        output = F.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            attn_mask=attention_mask,
-            dropout_p=0.0,
-            is_causal=False,
-        )
+        if attn.attention_backend == "flash_attention_3":
+            from .attention import flash_attention_3
+
+            if attention_mask is not None:
+                raise ValueError("H3 flash_attention_3 requires unpacked full attention")
+            output = flash_attention_3(query, key, value)
+        else:
+            output = F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask,
+                dropout_p=0.0, is_causal=False,
+            )
         output = output.transpose(1, 2).flatten(2, 3).type_as(query)
         output = attn.to_out[0](output)
         return attn.to_out[1](output)
@@ -284,6 +295,7 @@ class MiniMaxH3Attention(nn.Module):
     ):
         super().__init__()
         self.heads = int(heads)
+        self.attention_backend = "sdpa"
         self.head_dim = int(dim_head)
         self.inner_dim = self.heads * self.head_dim
         self.use_bias = False

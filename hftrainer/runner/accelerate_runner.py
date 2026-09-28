@@ -165,6 +165,7 @@ class AccelerateRunner:
 
         self.global_step = 0
         self.current_epoch = 0
+        self._register_adapter_resume_hooks()
 
         # Inject accelerator into trainer
         self.trainer.accelerator = accelerator
@@ -179,6 +180,42 @@ class AccelerateRunner:
         for hook in self.hooks:
             if hasattr(hook, 'by_epoch') and hook.by_epoch is None:
                 hook.by_epoch = by_epoch
+
+    def _register_adapter_resume_hooks(self):
+        """Keep ordinary LoRA resumes small without duplicating frozen weights.
+
+        Sharded backends retain their native checkpoint machinery. For plain
+        and DDP adapter runs, model.pt already contains the complete trainable
+        model state; Accelerate only needs to persist optimizer/scheduler/RNG.
+        """
+        names = list(self.bundle._trainable_modules)
+        backend = str(self.accelerator.distributed_type).split('.')[-1]
+        self._adapter_only_resume = bool(names) and backend in {'NO', 'MULTI_GPU'} and all(
+            name in self.bundle._save_ckpt_modules
+            and self.bundle.get_module_checkpoint_format(name) == 'lora'
+            for name in names
+        )
+        if not self._adapter_only_resume:
+            return
+
+        def save_adapters(models, weights, output_dir):
+            weights.clear()
+
+        def load_adapters(models, input_dir):
+            meta_path = os.path.join(input_dir, 'meta.pt')
+            if not os.path.isfile(meta_path):
+                return
+            meta = torch.load(meta_path, map_location='cpu', weights_only=False)
+            if not meta.get('adapter_only_resume', False):
+                return  # Older checkpoints still contain full Accelerate models.
+            from hftrainer.utils.checkpoint_utils import load_checkpoint
+
+            state = load_checkpoint(input_dir, map_location='cpu')
+            self.bundle.load_state_dict_selective(state, strict=True)
+            models.clear()
+
+        self.accelerator.register_save_state_pre_hook(save_adapters)
+        self.accelerator.register_load_state_pre_hook(load_adapters)
 
     @classmethod
     def from_cfg(cls, cfg) -> 'AccelerateRunner':
@@ -813,6 +850,10 @@ class AccelerateRunner:
     @staticmethod
     def _build_hooks(hooks_cfg: dict) -> list:
         """Build hooks from config."""
+        # Focused task imports do not load the full built-in catalogue.
+        # The runner owns these shared hooks and must register them itself.
+        import hftrainer.hooks  # noqa: F401
+
         from hftrainer.registry import HOOKS
         hooks = []
         for name, hook_cfg in hooks_cfg.items():
@@ -946,7 +987,11 @@ class AccelerateRunner:
         torch.save(state_dict, os.path.join(ckpt_dir, 'model.pt'))
 
         # Save meta using completed step / epoch counts for exact resume.
-        meta = {'global_step': self.global_step, 'current_epoch': self.current_epoch}
+        meta = {
+            'global_step': self.global_step,
+            'current_epoch': self.current_epoch,
+            'adapter_only_resume': getattr(self, '_adapter_only_resume', False),
+        }
         torch.save(meta, os.path.join(ckpt_dir, 'meta.pt'))
 
         logger.info(f"Saved checkpoint to: {ckpt_dir}")

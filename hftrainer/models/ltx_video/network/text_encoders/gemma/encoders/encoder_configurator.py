@@ -24,6 +24,7 @@ from hftrainer.models.ltx_video.network.text_encoders.gemma.gemma_assets import 
 from hftrainer.models.ltx_video.network.text_encoders.gemma.local_model import (
     LocalGemmaConfig,
     ROPE_INIT_FUNCTIONS,
+    RotaryEmbedding,
     build_local_gemma_model,
 )
 
@@ -371,6 +372,9 @@ def _populate_rotary_v5(l_model: torch.nn.Module, config: object) -> None:
     default ``head_dim``. Gemma 3 never uses "proportional" RoPE, so the branch is inert there.
     """
     rope_emb = l_model.rotary_emb
+    if isinstance(rope_emb, RotaryEmbedding):
+        rope_emb.materialize('cpu')
+        return
     for layer_type in dict.fromkeys(config.layer_types):
         rope_params = config.rope_parameters[layer_type]
         if rope_params is None:

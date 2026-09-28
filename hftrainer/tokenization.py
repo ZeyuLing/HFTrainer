@@ -401,6 +401,14 @@ class LocalTokenizer:
         return dict(self.vocab)
 
     def _normalize(self, text: str) -> str:
+        normalizer = (self._raw_tokenizer or {}).get('normalizer') or {}
+        if normalizer.get('type') == 'Replace':
+            pattern = normalizer.get('pattern', {})
+            if 'String' in pattern:
+                # Gemma 4 uses a literal space-to-metaspace replacement, not
+                # Unicode normalization or a Metaspace pre-tokenizer. Preserve
+                # both leading whitespace and decomposed Unicode verbatim.
+                return text.replace(pattern['String'], normalizer['content'])
         text = unicodedata.normalize(self.normalizer_form, text)
         if self.lowercase:
             text = text.lower()
@@ -449,7 +457,19 @@ class LocalTokenizer:
         return symbols
 
     def _bpe_tokens(self, text: str) -> List[str]:
-        if self.metaspace_replacement:
+        pre_tokenizer = (self._raw_tokenizer or {}).get('pre_tokenizer') or {}
+        literal_split = (
+            pre_tokenizer.get('type') == 'Split'
+            and 'String' in pre_tokenizer.get('pattern', {})
+            and pre_tokenizer.get('behavior') == 'MergedWithPrevious'
+            and not pre_tokenizer.get('invert', False)
+        )
+        if literal_split:
+            delimiter = pre_tokenizer['pattern']['String']
+            if not delimiter:
+                raise ValueError('Split requires a non-empty literal delimiter.')
+            pieces = [part for part in re.split(f'(?<={re.escape(delimiter)})', text) if part]
+        elif self.metaspace_replacement:
             replacement = self.metaspace_replacement
             if self.metaspace_prepend and text and not text.startswith(' '):
                 text = ' ' + text
@@ -469,7 +489,14 @@ class LocalTokenizer:
             pieces = re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)
         output = []
         for piece in pieces:
-            symbols = list(piece)
+            symbols = []
+            for char in piece:
+                if char not in self.vocab and self.byte_fallback:
+                    byte_tokens = [f'<0x{byte:02X}>' for byte in char.encode('utf-8')]
+                    if all(token in self.vocab for token in byte_tokens):
+                        symbols.extend(byte_tokens)
+                        continue
+                symbols.append(char)
             if self.end_of_word_suffix and symbols:
                 symbols[-1] += self.end_of_word_suffix
             output.extend(self._merge_bpe(symbols))

@@ -770,3 +770,33 @@ def test_ref2va_bundle_artifact_uses_transformer_ref_and_infers_variant(
         MiniMaxH3Bundle.from_pretrained(
             str(artifact), load_conditioner=False, load_vaes=False
         )
+
+
+def test_attention_preserves_unmerged_lora_forward_and_gradients():
+    from hftrainer.models.minimax_h3.network.transformer import MiniMaxH3Attention
+    from hftrainer.models.lora import apply_lora
+
+    torch.manual_seed(91)
+    attention = MiniMaxH3Attention(16, 2, 8)
+    apply_lora(attention, {'rank': 2, 'alpha': 2, 'target_modules': ['to_q', 'to_k', 'to_v']})
+    values = torch.randn(1, 5, 16)
+    baseline = attention(values).detach()
+    with torch.no_grad():
+        attention.to_v.lora_B.weight.fill_(0.2)
+    changed = attention(values)
+    assert not torch.allclose(changed, baseline)
+    changed.square().mean().backward()
+    assert attention.to_v.lora_B.weight.grad is not None
+    assert attention.to_v.lora_B.weight.grad.abs().sum() > 0
+
+
+def test_attention_backend_is_explicit_and_rejects_cpu_flash():
+    from hftrainer.models.minimax_h3.network.attention import set_attention_backend
+    from hftrainer.models.minimax_h3.network.transformer import MiniMaxH3Attention
+
+    attention = MiniMaxH3Attention(16, 2, 8)
+    with pytest.raises(ValueError, match='attention_backend'):
+        set_attention_backend(attention, 'unknown')
+    set_attention_backend(attention, 'flash_attention_3')
+    with pytest.raises(ValueError, match='CUDA'):
+        attention(torch.randn(1, 5, 16))

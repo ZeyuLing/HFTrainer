@@ -1,0 +1,12 @@
+/* Editorial documentation: restrained rhythm, readable measures, native controls. */
+.md-typeset { font-size: .82rem; line-height: 1.65; }
+.md-typeset h1 { color: var(--md-default-fg-color); font-weight: 700; letter-spacing: -.025em; }
+.md-typeset h2 { font-weight: 650; margin-top: 2.2em; padding-top: .35em; border-top: 1px solid var(--md-default-fg-color--lightest); }
+.md-typeset p, .md-typeset > ul { max-width: 78ch; }
+.md-typeset img { max-width: 100%; height: auto; }
+.md-typeset a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.md-typeset table:not([class]) th { white-space: normal; }
+@media (max-width: 600px) {
+  .md-typeset { font-size: .85rem; }
+  .md-typeset h1 { font-size: 1.8em; }
+}

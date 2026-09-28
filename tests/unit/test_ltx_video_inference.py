@@ -467,3 +467,32 @@ def test_pipeline_backend_is_lazy_and_bundle_validation_has_no_pipeline_import(m
     bundle.validate()
 
     assert imports == []
+
+
+def test_inference_disables_autograd_in_backend_and_lazy_decoder():
+    recorder = {}
+    weight = torch.nn.Parameter(torch.ones(2))
+
+    class GradCheckingBackend(_Backend):
+        def __call__(self, **kwargs):
+            assert not torch.is_grad_enabled()
+            assert torch.is_inference_mode_enabled()
+            prediction = weight.square()
+            assert not prediction.requires_grad
+
+            def decode():
+                assert not torch.is_grad_enabled()
+                assert torch.is_inference_mode_enabled()
+                yield weight * prediction
+
+            return decode(), None, 49, 'resolved-tiling'
+
+    pipeline = make_pipeline(make_bundle(mode='dev_two_stage'),
+                             api=fake_backend_api(recorder),
+                             backend=GradCheckingBackend(recorder, 'dev-runtime'))
+    with torch.enable_grad():
+        result = pipeline.infer_text_to_video('A dancer', num_frames=49)
+        assert torch.is_grad_enabled()
+        chunks = list(result['video'])
+        assert not chunks[0].requires_grad
+        assert torch.is_grad_enabled()

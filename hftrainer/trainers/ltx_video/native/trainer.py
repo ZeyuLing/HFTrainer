@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 import os
 import re
@@ -1156,6 +1157,11 @@ class LtxvTrainer:
         self._wandb_run = run
 
     def _log_metrics(self, metrics: dict[str, float]) -> None:
-        """Log metrics to Weights & Biases."""
+        """Persist metrics locally even when the optional W&B integration is off."""
+        if IS_MAIN_PROCESS:
+            path = Path(self._config.output_dir) / "metrics.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(metrics, allow_nan=False) + "\n")
         if self._wandb_run is not None:
             self._wandb_run.log(metrics)
