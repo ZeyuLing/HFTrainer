@@ -1,4 +1,4 @@
-"""Managed LTX-2.5 text-to-audio-video LoRA training recipe."""
+"""HFTrainer LTX-2.5 text-to-audio-video LoRA training recipe."""
 
 root = __import__('os').environ.get('LTX25_CHECKPOINT_ROOT', 'checkpoints/LTX-2.5')
 data_root = __import__('os').environ.get(

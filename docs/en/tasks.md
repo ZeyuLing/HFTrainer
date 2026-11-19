@@ -10,7 +10,7 @@
 | Causal LM LoRA | `LlamaBundle` | `CausalLMTrainer` | `CausalLMPipeline` | `configs/llama/llama_lora_demo.py` | built-in smoke path |
 | Text-to-video | `WanBundle` | `WanTrainer` | `WanPipeline` | `configs/wan/wan_demo.py` | built-in smoke path |
 | LTX-2.5 distilled audio-video inference | `LTXVideoBundle` | n/a | `LTXVideoPipeline` | `configs/ltx_video/infer_ltx_video_2_5_distilled.py` | local registry/config/checkpoint contracts; no 22B GPU run |
-| LTX-2.5 LoRA training + dev inference | `LTXVideoBundle` | `LTXVideoTrainer` (managed local loop) | `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | packaged trainer/preprocess contracts and tiny Gemma path; no 22B GPU run |
+| LTX-2.5 LoRA training + dev inference | `LTXVideoBundle` | `LTXVideoTrainer` + `AccelerateRunner` | `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | single-H200 22B LoRA training, migration parity, and checkpoint resume |
 | MiniMax-H3 synchronized A/V inference | `MiniMaxH3Bundle` | n/a | `MiniMaxH3Pipeline` | `configs/minimax_h3/infer_h3_base_fl2va.py`, `infer_h3_base_ref2va.py` | local tiny/reference contracts; no full 33B+32B GPU run |
 | MiniMax-H3 experimental LoRA | `MiniMaxH3Bundle` | `MiniMaxH3Trainer` | `MiniMaxH3Pipeline` | `configs/minimax_h3/train_h3_base_lora.py`, `infer_h3_base_fl2va_lora.py` | cached-feature loss/backward, checkpoint-to-inference merge, and artifact contracts; no official-recipe claim |
 | GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` | `configs/stylegan2/stylegan2_demo.py` | framework reference |

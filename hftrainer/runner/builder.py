@@ -1,18 +1,17 @@
-"""Select the appropriate training-loop owner from an HFTrainer config."""
+"""Build the HFTrainer runner from a registered task configuration."""
 
 from __future__ import annotations
 
 
 def build_runner_from_cfg(cfg):
-    """Build the HFTrainer-owned runner selected by the implementation config.
+    """Build the shared runner from a framework experiment config."""
+    from hftrainer.runner.accelerate_runner import AccelerateRunner
 
-    Most implementations use :class:`AccelerateRunner`. Tightly coupled
-    algorithms such as LTX-Video 2.5 keep their local loop under the matching
-    ``hftrainer.trainers.<implementation>`` package; the registered trainer
-    declares ``manages_training_loop=True`` and implements
-    ``from_framework_config``.
-    """
+    return AccelerateRunner.from_cfg(cfg)
 
+
+def resolve_trainer(cfg):
+    """Resolve the configured class through the trainer registry."""
     trainer_cfg = getattr(cfg, 'trainer', None)
     if trainer_cfg is None:
         raise ValueError('cfg.trainer is required.')
@@ -38,15 +37,4 @@ def build_runner_from_cfg(cfg):
             f"Unknown trainer type {trainer_type!r}. Import its package through "
             "config.custom_imports before building the runner."
         )
-    if getattr(trainer_cls, 'manages_training_loop', False):
-        factory = getattr(trainer_cls, 'from_framework_config', None)
-        if factory is None:
-            raise TypeError(
-                f"Managed trainer {trainer_cls.__name__} must implement "
-                "from_framework_config(cfg)."
-            )
-        return factory(cfg)
-
-    from hftrainer.runner.accelerate_runner import AccelerateRunner
-
-    return AccelerateRunner.from_cfg(cfg)
+    return trainer_cls

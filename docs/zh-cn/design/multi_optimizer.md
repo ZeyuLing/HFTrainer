@@ -50,3 +50,35 @@ HF-Trainer 在 runner 和 trainer API 层已经支持多 optimizer，并且现�
 
 - GAN 和 DMD 目前仍然是偏框架验证的 reference implementation，不是已经调到 benchmark 水平的复现结果。
 - DMD 支持读取预计算 regression pairs，但 demo config 也提供了在线 teacher target 生成路径，方便直接跑通。
+
+## 优化器类与 Muon
+
+`optimizer.type` 可填写 PyTorch 的类名（如 `AdamW`），也可填写已安装的
+`torch.optim.Optimizer` 子类的完整导入路径。依赖仅在选择该优化器时导入。
+
+```python
+optimizer = dict(
+    type='transformers.optimization.Adafactor',
+    lr=1e-4,
+    relative_step=False,
+    scale_parameter=False,
+)
+```
+
+`type='Muon'` 使用 PyTorch 2.9+ 的 `torch.optim.Muon`。
+Runner 对二维隐藏层参数应用 Muon，对 embedding、输出头、bias 和其他参数
+应用 AdamW。可用 `exclude` 添加参数名正则表达式，将匹配的参数交给 AdamW。
+`adamw` 可独立覆盖学习率、权重衰减和 AdamW 参数。
+`adjust_lr_fn='match_rms_adamw'` 选用 PyTorch 的 Moonshot 学习率缩放。
+
+LTX-Video 的示例调用如下，学习率是配置示例。
+
+```bash
+python tools/train.py configs/ltx_video/train_ltx_video_2_5_lora.py --cfg-options \
+  optimizer.type=Muon optimizer.lr=4e-4 optimizer.adamw.lr=4e-5 \
+  optimizer.adjust_lr_fn=match_rms_adamw
+```
+
+自动分组支持由 Runner 控制优化的单设备和 DDP 训练。FSDP、DeepSpeed
+分片训练需要对应后端提供兼容的算法。更换优化器时用
+`--load-from PATH --load-scope model` 加载已有权重并重新初始化优化器。

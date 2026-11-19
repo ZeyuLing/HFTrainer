@@ -7,17 +7,16 @@ flowchart LR
     A["Config .py"] --> B["custom_imports"]
     B --> C["本地 Registry"]
     C --> D["build_runner_from_cfg"]
-    D -->|标准循环| E["AccelerateRunner"]
-    D -->|managed 本地循环| F["LTXVideoTrainer"]
+    D --> E["AccelerateRunner"]
     E --> G["ModelBundle + Trainer"]
-    E --> H["Data + torch.optim + Hooks"]
-    F --> I["随包 LTX native 实现"]
+    E --> H["Data + Optimizers + Hooks"]
+    G --> I["LTXVideoTrainer"]
     C --> J["build_pipeline_from_cfg"]
     J --> K["ModelBundle + Pipeline"]
 ```
 
-两条分支执行的都是当前仓库随包代码。managed trainer 表示它拥有一套耦合紧密的
-生命周期，不表示从另一个 checkout 或已安装模型包中导入 trainer。
+LTX 提供已准备的训练模型，以及视频验证和 checkpoint 回调。通用 Runner
+负责读取 batch、梯度累积、反向传播和优化器更新。
 
 ## 分层职责
 
@@ -31,8 +30,7 @@ flowchart LR
 `Trainer`
 
 - 持有 loss、更新顺序和训练专属 validation；
-- 通常运行在 `AccelerateRunner` 中；只有当算法的预处理/checkpoint 生命周期无法
-  拆开时，才明确声明 managed 本地循环。
+- 在 `AccelerateRunner` 中执行，可提供任务专用的视频验证和 checkpoint 回调。
 
 `Pipeline`
 

@@ -7,18 +7,17 @@ flowchart LR
     A["Config .py"] --> B["custom_imports"]
     B --> C["Local registries"]
     C --> D["build_runner_from_cfg"]
-    D -->|standard loop| E["AccelerateRunner"]
-    D -->|managed local loop| F["LTXVideoTrainer"]
+    D --> E["AccelerateRunner"]
     E --> G["ModelBundle + Trainer"]
-    E --> H["Data + torch.optim + Hooks"]
-    F --> I["Packaged LTX native implementation"]
+    E --> H["Data + Optimizers + Hooks"]
+    G --> I["LTXVideoTrainer"]
     C --> J["build_pipeline_from_cfg"]
     J --> K["ModelBundle + Pipeline"]
 ```
 
-Both branches execute code shipped in this repository. A managed trainer owns
-an unusually coupled lifecycle; it is not an adapter that imports a trainer
-from another checkout or installed model package.
+LTX supplies a prepared training graph and callbacks for video validation and
+checkpoint serialization. The shared runner drives batch iteration, gradient
+accumulation, backward passes and optimizer updates.
 
 ## Layer responsibilities
 
@@ -33,8 +32,8 @@ from another checkout or installed model package.
 `Trainer`
 
 - owns losses, update order, and training-only validation;
-- either runs inside `AccelerateRunner`, or explicitly declares a managed local
-  loop when one algorithm's preprocessing/checkpoint lifecycle cannot be split.
+- supplies task callbacks to `AccelerateRunner` when validation and checkpoint
+  formats need task-specific handling.
 
 `Pipeline`
 
@@ -105,7 +104,7 @@ import blockers guard the forbidden model-package boundary.
 
 LTX follows the same rule through `LTXComponentStore`. An `LTXVideoBundle`
 owns the inference registry passed into every local backend builder, while the
-managed trainer owns a separate non-caching training registry and injects it
+LTX training task owns a separate non-caching training registry and injects it
 through validation and every component loader. Mutable training modules can
 therefore never alias an inference shell, and no loader creates a hidden model
 implementation or private cache.

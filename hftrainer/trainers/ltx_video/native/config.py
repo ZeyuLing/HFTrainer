@@ -1,7 +1,7 @@
 # MODIFIED BY HFTRAINER: relocated into repository-owned layers and adapted for local execution.
 # See hftrainer/models/ltx_video/UPSTREAM.md and LICENSE.ltx-2.x.
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, ValidationInfo, field_validator, model_validator
 
@@ -792,6 +792,9 @@ class LtxTrainerConfig(ConfigBaseModel):
         description="Training strategy configuration. Determines the training mode and its parameters.",
     )
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
+    optimizer: dict[str, Any] | None = Field(
+        default=None, description="HFTrainer optimizer class and keyword arguments",
+    )
     acceleration: AccelerationConfig = Field(default_factory=AccelerationConfig)
     data: DataConfig
     validation: ValidationConfig = Field(default_factory=ValidationConfig)

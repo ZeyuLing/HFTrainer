@@ -36,7 +36,7 @@ redistribution. Modified Python files carry the required notice.
 | --- | --- | --- |
 | Distilled text/image-conditioned audio-video generation | `LTXVideoBundle` + `LTXVideoPipeline` | config, checkpoint roles, shape constraints, backend construction and call mapping |
 | Dev two-stage generation with official and user LoRAs | same, `mode='dev_two_stage'` | separation/order of both LoRA sources, guidance arguments, call contract |
-| LoRA training | `LTXVideoTrainer` | local config parsing, local LoRA wiring, checkpoint/resume mapping, managed-runner dispatch |
+| LoRA training | `LTXVideoTrainer` | local config parsing, local LoRA wiring, checkpoint/resume mapping, shared-runner integration |
 | Preprocessing | `hftrainer-ltx-preprocess` | packaged script discovery and full argv/role validation |
 | Local Gemma text path | `hftrainer/models/ltx_video/network/text_encoders/gemma` | tiny forward/backward, tokenizer/processor, hidden-state contract, checkpoint names |
 | Real 22B generation/training | same public interfaces | **H200 dev inference, LoRA training/resume and adapter inference completed** |
@@ -150,11 +150,10 @@ export HFTRAINER_WORK_DIR="$PWD/outputs/training/ltx_video_2_5_lora"
 hftrainer-train configs/ltx_video/train_ltx_video_2_5_lora.py
 ```
 
-`LTXVideoTrainer` is a managed trainer because the LTX algorithm has a tightly
-coupled data/cache/validation/checkpoint lifecycle. “Managed” does not mean
-external delegation: the implementation is packaged at
-`hftrainer.trainers.ltx_video.native`, uses HFTrainer's local LoRA, and is
-selected through the normal runner builder.
+`AccelerateRunner` drives LTX training, including gradient accumulation and
+optimizer updates. LTX supplies its cached data, flow-matching loss, video
+validation and LoRA checkpoint format. A top-level `optimizer` config can select
+Muon or an imported optimizer class. See [Optimizer configuration](../design/multi_optimizer.md#optimizer-classes-and-muon).
 
 The example is a starting recipe, not a benchmark-optimal configuration.
 

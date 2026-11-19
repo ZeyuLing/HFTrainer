@@ -61,7 +61,7 @@ python tools/run_public_demo.py ltx_video
 
 Reuse downloaded weights with `--checkpoint path/to/complete_bundle`; change the output directory with `--work-dir path/to/run`. The underlying command is `python tools/train.py configs/public_data/ltx_video.py`. Seed: **42**. Training logs and checkpoints are saved under `work_dirs/public_data/ltx_video/`. If you reused a custom checkpoint directory, set `HFTRAINER_CHECKPOINT` to that directory before directly invoking training, resume or export commands.
 
-The managed trainer writes `metrics.jsonl`, a LoRA safetensors file and a full training-state checkpoint. See the [resume and adapter contract](ltx_video_2_5_reference.md#lora-training).
+The trainer writes `metrics.jsonl`, a LoRA safetensors file and a full training-state checkpoint. See the [resume and adapter contract](ltx_video_2_5_reference.md#lora-training).
 
 Resume with `python tools/train.py configs/public_data/ltx_video.py --auto-resume --cfg-options trainer.native_config.optimization.steps=40`. This recipe saves full optimizer state alongside its LoRA.
 

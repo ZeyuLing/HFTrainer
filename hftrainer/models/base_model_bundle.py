@@ -438,6 +438,13 @@ class ModelBundle(nn.Module):
             }
         return {'format_version': 2, 'modules': modules}
 
+    def attach_trainable_module(self, name: str, module: nn.Module):
+        """Attach an already prepared training module, retaining its parameter flags."""
+        if hasattr(self, name):
+            raise ValueError(f'Model bundle already has a component named {name!r}.')
+        self.add_module(name, module)
+        self._trainable_modules.append(name)
+
     def trainable_parameters(self) -> List[torch.nn.Parameter]:
         """Return all trainable parameters for optimizer construction.
 

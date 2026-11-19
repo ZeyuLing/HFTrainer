@@ -85,7 +85,7 @@ class LTXVideoBundle(ModelBundle):
         self.validate()
 
     def load_training_checkpoint(self, checkpoint_path: str, *, strict: bool = True):
-        """Attach one managed-trainer LoRA; full trainer state is resume-only."""
+        """Attach one training LoRA; full trainer state is resume-only."""
         path = Path(checkpoint_path).expanduser().resolve(strict=True)
         if path.suffix != '.safetensors':
             raise ValueError('LTX inference/export requires a saved LoRA .safetensors file')

@@ -11,6 +11,8 @@ Responsibilities:
 import os
 import copy
 import math
+import time
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +28,7 @@ from hftrainer.utils.logger import get_logger, add_file_handler
 from hftrainer.utils.checkpoint_utils import find_latest_checkpoint
 from hftrainer.utils.env import collect_env_info
 from hftrainer.runner.loops import IterBasedLoop
+from hftrainer.optim.optimizers import build_optimizer, build_optimizers, optimizer_classes, uses_muon
 
 logger = get_logger()
 
@@ -145,6 +148,10 @@ class AccelerateRunner:
         load_from: Optional[dict] = None,
         auto_resume: bool = False,
         cfg=None,  # original full config for reference
+        checkpoint_saver=None,
+        validation=None,
+        train_context=None,
+        initial_train_iterator=None,
     ):
         self.bundle = bundle
         self.trainer = trainer
@@ -162,10 +169,17 @@ class AccelerateRunner:
         self.load_from = load_from
         self.auto_resume = auto_resume
         self.cfg = cfg
+        self.checkpoint_saver = checkpoint_saver
+        self.validation = validation
+        self.train_context = train_context or nullcontext
+        self.initial_train_iterator = initial_train_iterator
+        self._orphan_trainable_params = []
+        self.result = None
 
         self.global_step = 0
         self.current_epoch = 0
-        self._register_adapter_resume_hooks()
+        if checkpoint_saver is None:
+            self._register_adapter_resume_hooks()
 
         # Inject accelerator into trainer
         self.trainer.accelerator = accelerator
@@ -220,10 +234,19 @@ class AccelerateRunner:
     @classmethod
     def from_cfg(cls, cfg) -> 'AccelerateRunner':
         """Build all components from a config object or dict."""
+        from hftrainer.runner.builder import resolve_trainer
         from hftrainer.utils.setup_env import register_framework_modules
+
         register_framework_modules()
         if isinstance(cfg, dict):
             cfg = Config(cfg)
+        from mmengine.utils import import_modules_from_strings
+
+        if custom_imports := getattr(cfg, 'custom_imports', None):
+            import_modules_from_strings(**custom_imports)
+        factory = getattr(resolve_trainer(cfg), 'build_framework_runner', None)
+        if factory is not None:
+            return factory(cfg)
 
         work_dir = getattr(cfg, 'work_dir', 'work_dirs/default')
         os.makedirs(work_dir, exist_ok=True)
@@ -281,6 +304,12 @@ class AccelerateRunner:
         # ── Build Optimizers ──
         optimizer_cfg = getattr(cfg, 'optimizer', None)
         assert optimizer_cfg is not None or train_dataloader is None, "cfg.optimizer is required for training"
+        hybrid_muon = bool(optimizer_cfg) and uses_muon(optimizer_cfg)
+        if hybrid_muon:
+            if accelerator.distributed_type in {DistributedType.FSDP, DistributedType.DEEPSPEED}:
+                raise ValueError('PyTorch Muon requires unsharded parameters. Use single-device training or DDP.')
+            if trainer.trainer_controls_optimization:
+                raise ValueError('Automatic Muon parameter grouping requires runner-controlled optimization.')
         optimizers = cls._build_optimizers(optimizer_cfg, bundle) if optimizer_cfg else {}
 
         # ── Compute total training steps (needed for some schedulers) ──
@@ -293,7 +322,9 @@ class AccelerateRunner:
 
         # ── Build LR Schedulers ──
         lr_sched_cfg = getattr(cfg, 'lr_scheduler', None)
-        lr_schedulers = cls._build_lr_schedulers(lr_sched_cfg, optimizers, num_training_steps)
+        lr_schedulers = cls._build_lr_schedulers(
+            lr_sched_cfg, optimizers, num_training_steps, schedule_all=hybrid_muon,
+        )
 
         # ── Build Hooks ──
         hooks_cfg = getattr(cfg, 'default_hooks', {})
@@ -743,30 +774,15 @@ class AccelerateRunner:
             return optimizers
         else:
             params = bundle.trainable_parameters()
-            return {'default': AccelerateRunner._build_single_optimizer(optimizer_cfg, params)}
+            return build_optimizers(optimizer_cfg, params, bundle)
 
     @staticmethod
     def _build_single_optimizer(opt_cfg: dict, params) -> torch.optim.Optimizer:
         """Build a single optimizer."""
-        opt_cfg = copy.deepcopy(opt_cfg)
-        opt_type = opt_cfg.pop('type')
-
-        # Optimizers are explicit PyTorch primitives.  There is no dynamic
-        # model-framework fallback because that makes identical configs depend
-        # on whichever unrelated package is installed in the environment.
-        import torch.optim as optim
-        if hasattr(optim, opt_type):
-            cls = getattr(optim, opt_type)
-        else:
-            available = sorted(name for name in dir(optim) if name[:1].isupper())
-            raise ValueError(
-                f"Unknown PyTorch optimizer type: {opt_type}. Available: {available}"
-            )
-
-        return cls(params, **opt_cfg)
+        return build_optimizer(opt_cfg, params)
 
     @staticmethod
-    def _build_lr_schedulers(sched_cfg, optimizers: dict, num_training_steps: int) -> dict:
+    def _build_lr_schedulers(sched_cfg, optimizers: dict, num_training_steps: int, *, schedule_all=False) -> dict:
         """Build LR scheduler(s)."""
         if sched_cfg is None:
             return {}
@@ -790,6 +806,11 @@ class AccelerateRunner:
                         s_cfg, optimizers[name], num_training_steps
                     )
             return schedulers
+        elif schedule_all:
+            return {
+                name: AccelerateRunner._build_single_scheduler(sched_cfg, optimizer, num_training_steps)
+                for name, optimizer in optimizers.items()
+            }
         else:
             optimizer = optimizers.get('default', next(iter(optimizers.values())))
             sched = AccelerateRunner._build_single_scheduler(sched_cfg, optimizer, num_training_steps)
@@ -847,6 +868,8 @@ class AccelerateRunner:
             return max_epochs * 1000  # fallback
         else:
             max_iters = train_cfg.get('max_iters', 10000)
+            if train_cfg.get('count_optimizer_steps', False):
+                return max_iters
             return math.ceil(max_iters / grad_accum)
 
     @staticmethod
@@ -935,14 +958,19 @@ class AccelerateRunner:
             # first synthesise a ``custom_checkpoint_0.pkl`` from
             # ``model.pt::__bundle_params__`` so ``accelerator.load_state``
             # sees a complete, count-matched state directory.
+            meta_path = os.path.join(path, 'meta.pt')
+            meta = torch.load(meta_path, map_location='cpu', weights_only=False) if os.path.exists(meta_path) else {}
+            saved_classes = meta.get('optimizer_classes')
+            current_classes = optimizer_classes(self.optimizers)
+            optimizer_cfg = getattr(self.cfg, 'optimizer', None) or {}
+            if (saved_classes is not None or uses_muon(optimizer_cfg)) and saved_classes != current_classes:
+                raise ValueError(
+                    'Checkpoint optimizer classes differ from this run. Use load_scope=model to start a new optimizer.'
+                )
             self._ensure_bundle_orphan_custom_ckpt(path)
             self.accelerator.load_state(path)
-            # Try to restore global_step from metadata
-            meta_path = os.path.join(path, 'meta.pt')
-            if os.path.exists(meta_path):
-                meta = torch.load(meta_path, map_location='cpu', weights_only=False)
-                self.global_step = meta.get('global_step', 0)
-                self.current_epoch = meta.get('current_epoch', 0)
+            self.global_step = meta.get('global_step', 0)
+            self.current_epoch = meta.get('current_epoch', 0)
             logger.info(
                 f"Resumed: global_step={self.global_step}, epoch={self.current_epoch}. "
                 f"Training will continue from step {self.global_step + 1}."
@@ -963,7 +991,9 @@ class AccelerateRunner:
             raise ValueError(f"Unknown load_scope: {load_scope}. Expected 'model' or 'full'.")
 
     def save_checkpoint(self):
-        """Save checkpoint. Directory name reflects training mode."""
+        """Save a training checkpoint using the task's format, when supplied."""
+        if self.checkpoint_saver is not None:
+            return self.checkpoint_saver()
         by_epoch = self.train_cfg.get('by_epoch', False)
         if by_epoch:
             ckpt_dir = os.path.join(self.work_dir, f'checkpoint-epoch_{self.current_epoch}')
@@ -993,6 +1023,7 @@ class AccelerateRunner:
             'global_step': self.global_step,
             'current_epoch': self.current_epoch,
             'adapter_only_resume': getattr(self, '_adapter_only_resume', False),
+            'optimizer_classes': optimizer_classes(self.optimizers),
         }
         torch.save(meta, os.path.join(ckpt_dir, 'meta.pt'))
 
@@ -1195,82 +1226,92 @@ class AccelerateRunner:
         by_epoch = train_cfg.get('by_epoch', False)
         val_interval = train_cfg.get('val_interval', None)
 
-        # Call before_run hooks
-        for hook in self.hooks:
-            if hasattr(hook, 'before_run'):
-                hook.before_run()
+        with self.train_context():
+            for hook in self.hooks:
+                if hasattr(hook, 'before_run'):
+                    hook.before_run()
 
-        if by_epoch:
-            self._train_by_epoch(train_cfg, val_interval)
-        else:
-            self._train_by_iter(train_cfg, val_interval)
+            if by_epoch:
+                self._train_by_epoch(train_cfg, val_interval)
+            else:
+                self._train_by_iter(train_cfg, val_interval)
 
-        # Call after_run hooks (CheckpointHook.after_run saves final checkpoint)
-        for hook in self.hooks:
-            if hasattr(hook, 'after_run'):
-                hook.after_run()
+            for hook in self.hooks:
+                if hasattr(hook, 'after_run'):
+                    hook.after_run()
 
-        # End trackers (flushes tensorboard)
         try:
             self.accelerator.end_training()
         except Exception:
             pass
 
         logger.info("Training complete.")
+        return self.result
+
+    def _set_train_mode(self):
+        self.bundle.train()
+        if isinstance(self.trainer, nn.Module):
+            self.trainer.train()
+
+    def _run_train_batch(self, batch, max_grad_norm=None):
+        models = [
+            getattr(self.bundle, name) for name in self.bundle._trainable_modules
+            if isinstance(getattr(self.bundle, name), nn.Module)
+        ]
+        with self.accelerator.accumulate(*models):
+            output = self.trainer.train_step(batch)
+            if not self.trainer.trainer_controls_optimization and (loss := output.get('loss')) is not None:
+                self.accelerator.backward(loss)
+                self._sync_orphan_param_grads()
+                if max_grad_norm and max_grad_norm > 0 and self.accelerator.sync_gradients:
+                    parameters = getattr(self.trainer, 'trainable_parameters', None)
+                    if parameters is None:
+                        parameters = self.bundle.trainable_parameters()
+                    self.accelerator.clip_grad_norm_(parameters, max_grad_norm)
+                for optimizer in self.optimizers.values():
+                    optimizer.step()
+                    optimizer.zero_grad()
+                for scheduler in self.lr_schedulers.values():
+                    scheduler.step()
+        return output
 
     def _train_by_iter(self, train_cfg: dict, val_interval):
-        """Iteration-based training loop."""
+        """Run an iteration budget, optionally expressed in optimizer steps."""
         max_iters = train_cfg.get('max_iters', 10000)
+        count_updates = train_cfg.get('count_optimizer_steps', False)
+        accumulation = self.accelerator.gradient_accumulation_steps if count_updates else 1
+        initial_step = self.global_step if count_updates else 0
+        loop = IterBasedLoop(self.train_dataloader, (max_iters - initial_step) * accumulation)
+        self._set_train_mode()
+        microbatch_hooks = [hook.after_train_microbatch for hook in self.hooks if hasattr(hook, 'after_train_microbatch')]
 
-        self.bundle.train()
-        self.trainer.train()
-
-        loop = IterBasedLoop(
-            self.train_dataloader, max_iters,
-            val_interval=val_interval or max_iters,
-        )
-
-        for step_idx, batch in loop.iter_batches():
+        batches = loop.iter_batches(self.initial_train_iterator)
+        self.initial_train_iterator = None
+        for microbatch_idx, batch in batches:
+            step_idx = initial_step + microbatch_idx // accumulation
             if step_idx < self.global_step:
-                continue  # skip already-trained steps when resuming
+                continue
+            if microbatch_idx % accumulation == 0:
+                for hook in self.hooks:
+                    if hasattr(hook, 'before_train_iter'):
+                        hook.before_train_iter(step_idx)
 
-            # Before-iter hooks
-            for hook in self.hooks:
-                if hasattr(hook, 'before_train_iter'):
-                    hook.before_train_iter(step_idx)
+            started_at = time.perf_counter() if microbatch_hooks else None
+            output = self._run_train_batch(batch, train_cfg.get('max_grad_norm'))
+            completed_step = (microbatch_idx + 1) % accumulation == 0
+            if completed_step:
+                self.global_step = step_idx + 1
 
-            # Training step
-            with self.accelerator.accumulate(*[
-                getattr(self.bundle, n) for n in self.bundle._trainable_modules
-                if isinstance(getattr(self.bundle, n), nn.Module)
-            ]):
-                output = self.trainer.train_step(batch)
+            for callback in microbatch_hooks:
+                callback(microbatch_idx, output, completed_step, started_at)
+            if completed_step:
+                for hook in self.hooks:
+                    if hasattr(hook, 'after_train_iter'):
+                        hook.after_train_iter(step_idx, output)
 
-                if not self.trainer.trainer_controls_optimization:
-                    # Runner-controlled optimization (default single-loss path)
-                    loss = output.get('loss')
-                    if loss is not None:
-                        self.accelerator.backward(loss)
-                        self._sync_orphan_param_grads()
-                        for opt in self.optimizers.values():
-                            opt.step()
-                            opt.zero_grad()
-                        for sched in self.lr_schedulers.values():
-                            sched.step()
-                # else: trainer already did backward/step/zero_grad in train_step
-
-            self.global_step = step_idx + 1
-
-            # After-iter hooks (CheckpointHook handles saving at its interval)
-            for hook in self.hooks:
-                if hasattr(hook, 'after_train_iter'):
-                    hook.after_train_iter(step_idx, output)
-
-            # Validation
-            if val_interval and self.global_step % val_interval == 0:
-                self.val()
-                self.bundle.train()
-                self.trainer.train()
+                if val_interval and self.global_step % val_interval == 0:
+                    self.val()
+                    self._set_train_mode()
 
     def _train_by_epoch(self, train_cfg: dict, val_interval):
         """Epoch-based training loop."""
@@ -1278,8 +1319,7 @@ class AccelerateRunner:
 
         for epoch in range(self.current_epoch, max_epochs):
             self.current_epoch = epoch
-            self.bundle.train()
-            self.trainer.train()
+            self._set_train_mode()
 
             for hook in self.hooks:
                 if hasattr(hook, 'before_train_epoch'):
@@ -1293,24 +1333,7 @@ class AccelerateRunner:
                     if hasattr(hook, 'before_train_iter'):
                         hook.before_train_iter(current_step)
 
-                with self.accelerator.accumulate(*[
-                    getattr(self.bundle, n) for n in self.bundle._trainable_modules
-                    if isinstance(getattr(self.bundle, n), nn.Module)
-                ]):
-                    output = self.trainer.train_step(batch)
-
-                    if not self.trainer.trainer_controls_optimization:
-                        # Runner-controlled optimization (default single-loss path)
-                        loss = output.get('loss')
-                        if loss is not None:
-                            self.accelerator.backward(loss)
-                            self._sync_orphan_param_grads()
-                            for opt in self.optimizers.values():
-                                opt.step()
-                                opt.zero_grad()
-                            for sched in self.lr_schedulers.values():
-                                sched.step()
-                    # else: trainer already did backward/step/zero_grad in train_step
+                output = self._run_train_batch(batch)
 
                 self.global_step = current_step + 1
 
@@ -1325,15 +1348,16 @@ class AccelerateRunner:
 
             if val_interval and self.current_epoch % val_interval == 0:
                 self.val()
-                self.bundle.train()
-                self.trainer.train()
+                self._set_train_mode()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Validation loop
     # ─────────────────────────────────────────────────────────────────────────
 
     def val(self):
-        """Run validation loop."""
+        """Run the task's validation or the standard evaluator loop."""
+        if self.validation is not None:
+            return self.validation()
         if self.val_dataloader is None:
             return
 

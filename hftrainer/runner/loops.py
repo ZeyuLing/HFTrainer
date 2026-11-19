@@ -62,17 +62,19 @@ class IterBasedLoop:
         self.val_interval = val_interval
         self.save_interval = save_interval if save_interval is not None else val_interval
 
-    def iter_batches(self):
-        """
-        Yields (global_step, batch) tuples, cycling through the dataloader.
-        """
-        global_step = 0
-        while global_step < self.max_iters:
-            for batch in self.dataloader:
-                if global_step >= self.max_iters:
-                    return
-                yield global_step, batch
-                global_step += 1
+    def iter_batches(self, initial_iterator=None):
+        """Yield indexed batches, restarting the dataloader when exhausted."""
+        batches = iter(self.dataloader) if initial_iterator is None else initial_iterator
+        for index in range(self.max_iters):
+            try:
+                batch = next(batches)
+            except StopIteration:
+                batches = iter(self.dataloader)
+                try:
+                    batch = next(batches)
+                except StopIteration as exc:
+                    raise ValueError('Training dataloader does not yield any batches.') from exc
+            yield index, batch
 
     @property
     def total_iters(self) -> int:

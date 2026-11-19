@@ -10,7 +10,7 @@
 | Causal LM LoRA | `LlamaBundle` | `CausalLMTrainer` | `CausalLMPipeline` | `configs/llama/llama_lora_demo.py` | 内置 smoke 路径 |
 | 文生视频 | `WanBundle` | `WanTrainer` | `WanPipeline` | `configs/wan/wan_demo.py` | 内置 smoke 路径 |
 | LTX-2.5 蒸馏同步音视频推理 | `LTXVideoBundle` | 不适用 | `LTXVideoPipeline` | `configs/ltx_video/infer_ltx_video_2_5_distilled.py` | 本地 registry/config/checkpoint 合约；未实跑 22B GPU |
-| LTX-2.5 LoRA 训练 + Dev 推理 | `LTXVideoBundle` | `LTXVideoTrainer`（managed 本地循环） | `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | 随包 trainer/preprocess 合约与 tiny Gemma 路径；未实跑 22B GPU |
+| LTX-2.5 LoRA 训练 + Dev 推理 | `LTXVideoBundle` | `LTXVideoTrainer` + `AccelerateRunner` | `LTXVideoPipeline` | `configs/ltx_video/train_ltx_video_2_5_lora.py` | 单卡 H200 验证 22B LoRA 训练、迁移对齐和 checkpoint 续训 |
 | MiniMax-H3 同步音视频推理 | `MiniMaxH3Bundle` | 不适用 | `MiniMaxH3Pipeline` | `configs/minimax_h3/infer_h3_base_fl2va.py`、`infer_h3_base_ref2va.py` | 本地 tiny/参考合约；未实跑完整 33B+32B GPU |
 | MiniMax-H3 实验性 LoRA | `MiniMaxH3Bundle` | `MiniMaxH3Trainer` | `MiniMaxH3Pipeline` | `configs/minimax_h3/train_h3_base_lora.py`、`infer_h3_base_fl2va_lora.py` | 缓存特征 loss/backward、checkpoint 到推理合并与 artifact 合约；不声明官方 recipe |
 | GAN | `StyleGAN2Bundle` | `StyleGAN2Trainer` | `StyleGAN2Pipeline` | `configs/stylegan2/stylegan2_demo.py` | 框架参考实现 |

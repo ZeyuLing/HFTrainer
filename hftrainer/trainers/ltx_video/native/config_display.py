@@ -66,16 +66,17 @@ def print_config(config: LtxTrainerConfig) -> None:
 
     sections.append(("🎯 Strategy", strategy_items))
 
+    optimizer = cfg.optimizer or {}
     sections.extend(
         [
             (
                 "⚡ Optimization",
                 [
                     ("Steps", f"[bold]{opt.steps:,}[/]"),
-                    ("Learning Rate", f"{opt.learning_rate:.2e}"),
+                    ("Learning Rate", f"{optimizer.get('lr', opt.learning_rate):.2e}"),
                     ("Batch Size", str(opt.batch_size)),
                     ("Grad Accumulation", str(opt.gradient_accumulation_steps)),
-                    ("Optimizer", opt.optimizer_type),
+                    ("Optimizer", optimizer.get("type", opt.optimizer_type)),
                     ("Scheduler", opt.scheduler_type),
                     ("Max Grad Norm", str(opt.max_grad_norm)),
                     ("Grad Checkpointing", fmt(opt.enable_gradient_checkpointing)),

@@ -47,6 +47,6 @@ python tools/export_model.py --config configs/public_data/vit.py \
 python tools/infer.py --model outputs/beans_vit --device cuda --input path/to/leaf.jpg
 ```
 
-Use `configs/pretrained/export_minimax_h3.py` for H3 export, so the conditioner and VAEs omitted during cached training are restored. LTX export accepts the managed trainer's LoRA `.safetensors` file, not its full optimizer state. If training used a custom base location, set `HFTRAINER_CHECKPOINT` to the same path before exporting or resuming.
+Use `configs/pretrained/export_minimax_h3.py` for H3 export, so the conditioner and VAEs omitted during cached training are restored. LTX export accepts the LTX trainer's LoRA `.safetensors` file, not its full optimizer state. If training used a custom base location, set `HFTRAINER_CHECKPOINT` to the same path before exporting or resuming.
 
 [Public datasets](models/demo-data.md) · [Model-card standard](models/standard.md)

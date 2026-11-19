@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 from torch import Tensor
-from torch.optim import AdamW
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
     CosineAnnealingWarmRestarts,
@@ -33,6 +32,9 @@ from torch.optim.lr_scheduler import (
 )
 from torch.utils.data import DataLoader
 
+from hftrainer.optim.optimizers import build_optimizers, uses_muon
+from hftrainer.runner.accelerate_runner import AccelerateRunner
+from hftrainer.models.base_model_bundle import ModelBundle
 from hftrainer.models.lora import (
     LoRALinear,
     apply_lora,
@@ -69,7 +71,7 @@ warnings.filterwarnings(
     "ignore", message="MatMul8bitLt: inputs will be cast from torch.bfloat16 to float16 during quantization"
 )
 
-IS_MAIN_PROCESS = os.environ.get("LOCAL_RANK", "0") == "0"
+IS_MAIN_PROCESS = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) == "0"
 
 StepCallback = Callable[[int, int, list[Path]], None]  # (step, total, list[sampled_video_path]) -> None
 
@@ -96,6 +98,10 @@ class TrainingStepOutput:
 
 
 class LtxvTrainer:
+    """LTX model preparation, loss, validation and checkpoint lifecycle."""
+
+    trainer_controls_optimization = False
+
     def __init__(
         self,
         trainer_config: LtxTrainerConfig,
@@ -103,6 +109,16 @@ class LtxvTrainer:
         component_registry: Registry | None = None,
     ) -> None:
         self._config = trainer_config
+        legacy_type = trainer_config.optimization.optimizer_type
+        legacy_class = {'adamw': 'AdamW', 'adamw8bit': 'bitsandbytes.optim.AdamW8bit'}[legacy_type]
+        self._optimizer_config = dict(type=legacy_class, lr=trainer_config.optimization.learning_rate)
+        self._optimizer_config.update(trainer_config.optimizer or {})
+        self._optimizer_type = {
+            'AdamW': 'adamw',
+            'torch.optim.AdamW': 'adamw',
+            'bitsandbytes.optim.AdamW8bit': 'adamw8bit',
+            'torch.optim.Muon': 'Muon',
+        }.get(self._optimizer_config['type'], self._optimizer_config['type'])
         if component_registry is None:
             from hftrainer.models.ltx_video.component_loader import LTXComponentStore
 
@@ -133,6 +149,10 @@ class LtxvTrainer:
 
         self._load_models()
         self._setup_accelerator()
+        if uses_muon(self._optimizer_config) and self._accelerator.distributed_type in {
+            DistributedType.FSDP, DistributedType.DEEPSPEED,
+        }:
+            raise ValueError('PyTorch Muon requires unsharded parameters. Use single-device training or DDP.')
         self._collect_trainable_params()
         self._loaded_checkpoint_path: Path | None = None
         self._load_checkpoint()
@@ -145,238 +165,178 @@ class LtxvTrainer:
         self._sigma_tracker = SigmaBucketTracker()
         self._wandb_run = None
 
-    def train(  # noqa: PLR0912, PLR0915
+    def train(
         self,
         disable_progress_bars: bool = False,
         step_callback: StepCallback | None = None,
     ) -> tuple[Path, TrainingStats]:
-        """
-        Start the training process.
-        Args:
-            disable_progress_bars: Disable Rich progress bars (useful for multi-process runs).
-            step_callback: Optional callback invoked after each optimization step.
-        Returns:
-            Tuple of (saved_model_path, training_stats)
-        """
-        device = self._accelerator.device
-        cfg = self._config
-        start_mem = get_gpu_memory_gb(device)
+        """Compatibility entry point for training from an LTX YAML config."""
+        return self.build_runner(
+            disable_progress_bars=disable_progress_bars, step_callback=step_callback,
+        ).train()
 
-        train_start_time = time.time()
+    def build_runner(
+        self, *, disable_progress_bars=False, step_callback=None, framework_cfg=None, bundle=None,
+    ):
+        cfg = self._config
+        device = self._accelerator.device
+        self._start_mem = get_gpu_memory_gb(device)
+        self._peak_mem = self._start_mem
+        self._train_start_time = time.time()
+        self._disable_progress_bars = disable_progress_bars
+        self._step_callback = step_callback
+        self._sampled_videos_paths = None
 
         initial_step, training_state = self._resume_state
-        resuming = training_state is not None
-
         set_seed(cfg.seed)
-        logger.debug(f"Process {self._accelerator.process_index} using seed: {cfg.seed}")
-
         self._init_optimizer()
-
         if training_state is not None and not self._restore_training_state(training_state):
-            initial_step = 0
-            resuming = False
-
-        # Initialize W&B after restore so we only resume the run when state restore succeeds.
-        resume_run_id = training_state.wandb_run_id if resuming and training_state is not None else None
-        self._init_wandb(resume_run_id=resume_run_id)
+            initial_step, training_state = 0, None
+        self._init_wandb(resume_run_id=training_state.wandb_run_id if training_state else None)
 
         self._init_dataloader()
         data_iter = iter(self._dataloader)
         self._init_timestep_sampler()
-
-        # Synchronize all processes after initialization
         self._accelerator.wait_for_everyone()
-
         Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
-
-        # Save the training configuration as YAML
         self._save_config()
 
-        remaining_steps = cfg.optimization.steps - initial_step
-        if remaining_steps <= 0:
+        self._remaining_steps = cfg.optimization.steps - initial_step
+        if self._remaining_steps <= 0:
             raise ValueError(
                 f"No remaining training steps: initial_step={initial_step} >= "
                 f"target_steps={cfg.optimization.steps}. Nothing to train."
             )
-
-        if resuming:
-            logger.info(f"🚀 Resuming training from step {initial_step} → {cfg.optimization.steps}")
-        else:
-            logger.info("🚀 Starting training...")
-
-        # Create progress tracking (disabled for non-main processes or when explicitly disabled)
-        progress_enabled = IS_MAIN_PROCESS and not disable_progress_bars
-        progress = TrainingProgress(
-            enabled=progress_enabled,
-            total_steps=remaining_steps,
+        self._initial_step = initial_step
+        self._progress = TrainingProgress(
+            enabled=self._accelerator.is_main_process and not disable_progress_bars,
+            total_steps=self._remaining_steps,
         )
+        hooks = AccelerateRunner._build_hooks(getattr(framework_cfg, 'default_hooks', {}) or {})
+        if bundle is None:
+            bundle = ModelBundle()
+        bundle.attach_trainable_module('transformer', self._transformer)
+        runner = AccelerateRunner(
+            bundle=bundle,
+            trainer=self,
+            train_dataloader=self._dataloader,
+            val_dataloader=None,
+            optimizers=self._optimizers,
+            lr_schedulers=self._lr_schedulers,
+            accelerator=self._accelerator,
+            hooks=[self, *hooks],
+            evaluators=[],
+            visualizers=[],
+            train_cfg={
+                'max_iters': cfg.optimization.steps,
+                'count_optimizer_steps': True,
+                'max_grad_norm': cfg.optimization.max_grad_norm,
+            },
+            work_dir=cfg.output_dir,
+            cfg=framework_cfg,
+            checkpoint_saver=self._save_checkpoint,
+            validation=self._validate,
+            train_context=lambda: self._progress,
+            initial_train_iterator=data_iter,
+        )
+        runner.global_step = self._global_step = initial_step
+        return runner
 
-        if IS_MAIN_PROCESS and disable_progress_bars:
-            logger.warning("Progress bars disabled. Intermediate status messages will be logged instead.")
+    @property
+    def trainable_parameters(self):
+        return self._trainable_params
 
+    def train_step(self, batch):
+        output = self._training_step(batch)
+        return {'loss': output.loss.mean(), 'sample_losses': output.loss.detach(), 'sigma': output.sigma}
+
+    def before_run(self):
         self._transformer.train()
-        self._global_step = initial_step
+        self._global_step = self.runner.global_step
+        cfg = self._config
+        if cfg.validation.interval and not cfg.validation.skip_initial_validation:
+            self.runner.val()
+        self._accelerator.wait_for_everyone()
 
-        peak_mem_during_training = start_mem
+    def _validate(self):
+        with self._offloaded_optimizer_state():
+            self._sampled_videos_paths = self._run_validation(self._progress)
 
-        sampled_videos_paths = None
+    def after_train_microbatch(self, microbatch_idx, output, completed_step, started_at):
+        self._global_step = self.runner.global_step
+        cfg = self._config
+        if completed_step:
+            if cfg.validation.interval and self._global_step % cfg.validation.interval == 0:
+                self.runner.val()
+            if cfg.checkpoints.interval and self._global_step % cfg.checkpoints.interval == 0:
+                self.runner.save_checkpoint()
 
-        with progress:
-            if cfg.validation.interval and not cfg.validation.skip_initial_validation:
-                with self._offloaded_optimizer_state():
-                    sampled_videos_paths = self._run_validation(progress)
+        self._accelerator.wait_for_everyone()
+        if self._step_callback and completed_step:
+            self._step_callback(self._global_step, cfg.optimization.steps, self._sampled_videos_paths)
+        self._accelerator.wait_for_everyone()
 
-            self._accelerator.wait_for_everyone()
+        lr = self._optimizers['default'].param_groups[0]['lr']
+        step_time = (time.perf_counter() - started_at) * cfg.optimization.gradient_accumulation_steps
+        step_loss = output['loss'].detach().item()
+        self._progress.update_training(loss=step_loss, lr=lr, step_time=step_time, advance=completed_step)
+        if self._accelerator.is_main_process and completed_step:
+            self._sigma_tracker.update(output['sigma'].cpu().tolist(), output['sample_losses'].cpu().tolist())
+            metrics = {
+                'train/loss': step_loss,
+                'train/learning_rate': lr,
+                'train/step_time': step_time,
+                'train/global_step': self._global_step,
+            }
+            for name, optimizer in self._optimizers.items():
+                if name != 'default':
+                    metrics[f'train/learning_rate/{name}'] = optimizer.param_groups[0]['lr']
+            metrics.update(self._sigma_tracker.get_metrics())
+            self._log_metrics(metrics)
 
-            for step in range(remaining_steps * cfg.optimization.gradient_accumulation_steps):
-                # Get next batch, reset the dataloader if needed
-                try:
-                    batch = next(data_iter)
-                except StopIteration:
-                    data_iter = iter(self._dataloader)
-                    batch = next(data_iter)
+        if self._disable_progress_bars and self._accelerator.is_main_process and completed_step:
+            if self._global_step % 20 == 0:
+                elapsed = time.time() - self._train_start_time
+                total = elapsed / (self._global_step - self._initial_step) * self._remaining_steps
+                logger.info(
+                    f"Step {self._global_step}/{cfg.optimization.steps} - Loss: {step_loss:.4f}, "
+                    f"LR: {lr:.2e}, Time/Step: {step_time:.2f}s, Total Time: {total:.0f}s"
+                )
+        if microbatch_idx % MEMORY_CHECK_INTERVAL == 0:
+            self._peak_mem = max(self._peak_mem, get_gpu_memory_gb(self._accelerator.device))
 
-                step_start_time = time.time()
-                with self._accelerator.accumulate(self._transformer):
-                    is_optimization_step = (step + 1) % cfg.optimization.gradient_accumulation_steps == 0
-                    if is_optimization_step:
-                        self._global_step += 1
-
-                    output = self._training_step(batch)
-                    self._accelerator.backward(output.loss.mean())
-
-                    if self._accelerator.sync_gradients and cfg.optimization.max_grad_norm > 0:
-                        self._accelerator.clip_grad_norm_(
-                            self._trainable_params,
-                            cfg.optimization.max_grad_norm,
-                        )
-
-                    self._optimizer.step()
-                    self._optimizer.zero_grad()
-
-                    if self._lr_scheduler is not None:
-                        self._lr_scheduler.step()
-
-                    # Run validation if needed (handles DDP/FSDP work distribution internally)
-                    if (
-                        cfg.validation.interval
-                        and self._global_step > 0
-                        and self._global_step % cfg.validation.interval == 0
-                        and is_optimization_step
-                    ):
-                        with self._offloaded_optimizer_state():
-                            sampled_videos_paths = self._run_validation(progress)
-
-                    # Save checkpoint if needed
-                    if (
-                        cfg.checkpoints.interval
-                        and self._global_step > 0
-                        and self._global_step % cfg.checkpoints.interval == 0
-                        and is_optimization_step
-                    ):
-                        self._save_checkpoint()
-
-                    self._accelerator.wait_for_everyone()
-
-                    # Call step callback if provided
-                    if step_callback and is_optimization_step:
-                        step_callback(self._global_step, cfg.optimization.steps, sampled_videos_paths)
-
-                    self._accelerator.wait_for_everyone()
-
-                    # Update progress and log metrics
-                    current_lr = self._optimizer.param_groups[0]["lr"]
-                    step_time = (time.time() - step_start_time) * cfg.optimization.gradient_accumulation_steps
-                    step_loss = output.loss.detach().mean().item()
-
-                    progress.update_training(
-                        loss=step_loss,
-                        lr=current_lr,
-                        step_time=step_time,
-                        advance=is_optimization_step,
-                    )
-
-                    # Log metrics to W&B (only on main process and optimization steps)
-                    if IS_MAIN_PROCESS and is_optimization_step:
-                        # Track per-element loss by sigma bucket
-                        self._sigma_tracker.update(output.sigma.cpu().tolist(), output.loss.detach().cpu().tolist())
-                        metrics = {
-                            "train/loss": step_loss,
-                            "train/learning_rate": current_lr,
-                            "train/step_time": step_time,
-                            "train/global_step": self._global_step,
-                        }
-                        metrics.update(self._sigma_tracker.get_metrics())
-                        self._log_metrics(metrics)
-
-                    # Fallback logging when progress bars are disabled
-                    if disable_progress_bars and IS_MAIN_PROCESS and self._global_step % 20 == 0:
-                        elapsed = time.time() - train_start_time
-                        steps_done = self._global_step - initial_step
-                        if steps_done > 0:
-                            total_estimated = elapsed / steps_done * remaining_steps
-                            total_time = f"{total_estimated // 3600:.0f}h {(total_estimated % 3600) // 60:.0f}m"
-                        else:
-                            total_time = "calculating..."
-                        logger.info(
-                            f"Step {self._global_step}/{cfg.optimization.steps} - "
-                            f"Loss: {step_loss:.4f}, LR: {current_lr:.2e}, "
-                            f"Time/Step: {step_time:.2f}s, Total Time: {total_time}",
-                        )
-
-                    # Sample GPU memory periodically
-                    if step % MEMORY_CHECK_INTERVAL == 0:
-                        current_mem = get_gpu_memory_gb(device)
-                        peak_mem_during_training = max(peak_mem_during_training, current_mem)
-
-        # Collect final stats
-        train_end_time = time.time()
-        end_mem = get_gpu_memory_gb(device)
-        peak_mem = max(start_mem, end_mem, peak_mem_during_training)
-
-        # Calculate steps/second over entire training
-        total_time_seconds = train_end_time - train_start_time
-        steps_per_second = remaining_steps / total_time_seconds
-
-        samples_per_second = steps_per_second * self._accelerator.num_processes * cfg.optimization.batch_size
-
+    def after_run(self):
+        cfg = self._config
+        elapsed = time.time() - self._train_start_time
+        rate = self._remaining_steps / elapsed
+        num_processes = self._accelerator.num_processes
+        global_batch_size = cfg.optimization.batch_size * num_processes
         stats = TrainingStats(
-            total_time_seconds=total_time_seconds,
-            steps_per_second=steps_per_second,
-            samples_per_second=samples_per_second,
-            peak_gpu_memory_gb=peak_mem,
-            num_processes=self._accelerator.num_processes,
-            global_batch_size=cfg.optimization.batch_size * self._accelerator.num_processes,
+            total_time_seconds=elapsed,
+            steps_per_second=rate,
+            samples_per_second=rate * global_batch_size,
+            peak_gpu_memory_gb=max(self._peak_mem, get_gpu_memory_gb(self._accelerator.device)),
+            num_processes=num_processes,
+            global_batch_size=global_batch_size,
         )
-
-        saved_path = self._save_checkpoint()
-
-        if IS_MAIN_PROCESS:
-            # Log the training statistics
+        saved_path = self.runner.save_checkpoint()
+        if self._accelerator.is_main_process:
             self._log_training_stats(stats)
-
-            # Upload artifacts to hub if enabled
             if cfg.hub.push_to_hub:
                 from hftrainer.trainers.ltx_video.native.hf_hub_utils import push_to_hub
 
-                push_to_hub(saved_path, sampled_videos_paths, self._config)
-
-            # Log final stats to W&B
+                push_to_hub(saved_path, self._sampled_videos_paths, cfg)
             if self._wandb_run is not None:
-                self._log_metrics(
-                    {
-                        "stats/total_time_minutes": stats.total_time_seconds / 60,
-                        "stats/steps_per_second": stats.steps_per_second,
-                        "stats/samples_per_second": stats.samples_per_second,
-                        "stats/peak_gpu_memory_gb": stats.peak_gpu_memory_gb,
-                    }
-                )
+                self._log_metrics({
+                    'stats/total_time_minutes': elapsed / 60,
+                    'stats/steps_per_second': rate,
+                    'stats/samples_per_second': stats.samples_per_second,
+                    'stats/peak_gpu_memory_gb': stats.peak_gpu_memory_gb,
+                })
                 self._wandb_run.finish()
 
         self._accelerator.wait_for_everyone()
-        self._accelerator.end_training()
-
-        return saved_path, stats
+        self.runner.result = saved_path, stats
 
     def _training_step(self, batch: dict[str, dict[str, Tensor]]) -> TrainingStepOutput:
         """Perform a single training step using the configured strategy."""
@@ -562,8 +522,8 @@ class LtxvTrainer:
         fp = state.config_fingerprint
         cfg = self._config
         mismatches: list[str] = []
-        if fp.optimizer_type != cfg.optimization.optimizer_type:
-            mismatches.append(f"optimizer_type: {fp.optimizer_type} → {cfg.optimization.optimizer_type}")
+        if fp.optimizer_type != self._optimizer_type:
+            mismatches.append(f"optimizer_type: {fp.optimizer_type} → {self._optimizer_type}")
         if fp.scheduler_type != cfg.optimization.scheduler_type:
             mismatches.append(f"scheduler_type: {fp.scheduler_type} → {cfg.optimization.scheduler_type}")
         if fp.training_mode != cfg.model.training_mode:
@@ -615,15 +575,20 @@ class LtxvTrainer:
         Must be called after _init_optimizer() (which calls accelerator.prepare).
         Returns True if restore succeeded, False if it failed (caller should fall back to step 0).
         """
+        initial_optimizer_state = self._component_states(self._optimizers)
+        initial_scheduler_state = self._component_states(self._lr_schedulers)
         try:
             if training_state.optimizer_state_dict is not None:
-                self._optimizer.load_state_dict(training_state.optimizer_state_dict)
+                self._restore_component_states(self._optimizers, training_state.optimizer_state_dict)
                 logger.debug("Restored optimizer state (full mode)")
 
-            if training_state.lr_scheduler_state_dict is not None and self._lr_scheduler is not None:
-                self._lr_scheduler.load_state_dict(training_state.lr_scheduler_state_dict)
+            if training_state.lr_scheduler_state_dict is not None and self._lr_schedulers:
+                self._restore_component_states(self._lr_schedulers, training_state.lr_scheduler_state_dict)
                 logger.debug("Restored LR scheduler state")
         except Exception as e:
+            self._restore_component_states(self._optimizers, initial_optimizer_state)
+            if initial_scheduler_state is not None:
+                self._restore_component_states(self._lr_schedulers, initial_scheduler_state)
             logger.warning(f"⚠️ Failed to restore training state: {e}. Starting from step 0.")
             return False
 
@@ -725,31 +690,42 @@ class LtxvTrainer:
                 torch.nn.init.kaiming_uniform_(module.lora_A.weight, a=5**0.5)
                 torch.nn.init.zeros_(module.lora_B.weight)
 
+    @staticmethod
+    def _component_states(components):
+        if not components:
+            return None
+        if len(components) == 1:
+            return components['default'].state_dict()
+        return {name: component.state_dict() for name, component in components.items()}
+
+    @staticmethod
+    def _restore_component_states(components, states):
+        if len(components) == 1:
+            components['default'].load_state_dict(states)
+            return
+        if states.keys() != components.keys():
+            raise ValueError('Saved and configured optimizer or scheduler groups differ.')
+        for name, component in components.items():
+            component.load_state_dict(states[name])
+
     def _init_optimizer(self) -> None:
-        """Initialize the optimizer and learning rate scheduler."""
-        opt_cfg = self._config.optimization
-
-        lr = opt_cfg.learning_rate
-        if opt_cfg.optimizer_type == "adamw":
-            optimizer = AdamW(self._trainable_params, lr=lr)
-        elif opt_cfg.optimizer_type == "adamw8bit":
-            # noinspection PyUnresolvedReferences
-            from bitsandbytes.optim import AdamW8bit  # noqa: PLC0415
-
-            optimizer = AdamW8bit(self._trainable_params, lr=lr)
-        else:
-            raise ValueError(f"Unknown optimizer type: {opt_cfg.optimizer_type}")
-
-        lr_scheduler = self._create_scheduler(optimizer)
-
-        # noinspection PyTypeChecker
-        self._optimizer, self._lr_scheduler = self._accelerator.prepare(optimizer, lr_scheduler)
+        """Build configured optimizers and retain LTX's scheduler semantics."""
+        optimizers = build_optimizers(self._optimizer_config, self._trainable_params, self._transformer)
+        schedulers = {}
+        self._optimizers = {}
+        for name, optimizer in optimizers.items():
+            scheduler = self._create_scheduler(optimizer)
+            if scheduler is None:
+                self._optimizers[name] = self._accelerator.prepare(optimizer)
+            else:
+                self._optimizers[name], schedulers[name] = self._accelerator.prepare(optimizer, scheduler)
+        self._lr_schedulers = schedulers
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> LRScheduler | None:
         """Create learning rate scheduler based on config."""
         scheduler_type = self._config.optimization.scheduler_type
         steps = self._config.optimization.steps
-        params = self._config.optimization.scheduler_params or {}
+        params = dict(self._config.optimization.scheduler_params or {})
 
         if scheduler_type is None:
             return None
@@ -863,11 +839,12 @@ class LtxvTrainer:
         offloaded: list[tuple[dict, str]] = []
         if enabled:
             offloaded_bytes = 0
-            for state in self._optimizer.state.values():
-                for k, v in state.items():
-                    if isinstance(v, torch.Tensor) and v.is_cuda:
-                        offloaded.append((state, k))
-                        offloaded_bytes += v.nbytes
+            for optimizer in self._optimizers.values():
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor) and v.is_cuda:
+                            offloaded.append((state, k))
+                            offloaded_bytes += v.nbytes
             if offloaded:
                 logger.info(f"Offloading optimizer state to CPU ({offloaded_bytes / 1e9:.1f} GB)")
                 for state, k in offloaded:
@@ -892,7 +869,8 @@ class LtxvTrainer:
         Note: Multi-node training requires a shared filesystem so rank 0 can read
         videos written by other ranks.
         """
-        self._optimizer.zero_grad(set_to_none=True)
+        for optimizer in self._optimizers.values():
+            optimizer.zero_grad(set_to_none=True)
         free_gpu_memory()
 
         num_samples = len(self._config.validation.samples)
@@ -1035,7 +1013,7 @@ class LtxvTrainer:
         - "minimal": scheduler + RNG + step only
         - "off": skip entirely
         """
-        if not IS_MAIN_PROCESS:
+        if not self._accelerator.is_main_process:
             return
 
         mode = self._config.checkpoints.save_training_state
@@ -1052,12 +1030,12 @@ class LtxvTrainer:
                     "Saving 'minimal' state (scheduler + RNG only)."
                 )
             else:
-                optimizer_state = self._optimizer.state_dict()
+                optimizer_state = self._component_states(self._optimizers)
 
         state = TrainingState(
             global_step=self._global_step,
             config_fingerprint=ConfigFingerprint(
-                optimizer_type=self._config.optimization.optimizer_type,
+                optimizer_type=self._optimizer_type,
                 scheduler_type=self._config.optimization.scheduler_type,
                 training_mode=self._config.model.training_mode,
                 lora_rank=self._config.lora.rank if self._config.lora is not None else None,
@@ -1066,7 +1044,7 @@ class LtxvTrainer:
                 torch_state=torch.random.get_rng_state(),
                 cuda_state=torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
             ),
-            lr_scheduler_state_dict=self._lr_scheduler.state_dict() if self._lr_scheduler is not None else None,
+            lr_scheduler_state_dict=self._component_states(self._lr_schedulers),
             optimizer_state_dict=optimizer_state,
             wandb_run_id=self._wandb_run.id if self._wandb_run is not None else None,
         )
@@ -1132,7 +1110,7 @@ class LtxvTrainer:
 
     def _save_config(self) -> None:
         """Save the training configuration as a YAML file in the output directory."""
-        if not IS_MAIN_PROCESS:
+        if not self._accelerator.is_main_process:
             return
 
         config_path = Path(self._config.output_dir) / "training_config.yaml"
@@ -1143,7 +1121,7 @@ class LtxvTrainer:
 
     def _init_wandb(self, resume_run_id: str | None = None) -> None:
         """Initialize Weights & Biases run, resuming an existing run if its id is provided."""
-        if not self._config.wandb.enabled or not IS_MAIN_PROCESS:
+        if not self._config.wandb.enabled or not self._accelerator.is_main_process:
             self._wandb_run = None
             return
 

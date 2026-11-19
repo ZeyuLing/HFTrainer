@@ -8,7 +8,7 @@ It does not try to list every internal helper function in the repository. Intern
 
 This reference covers:
 
-- framework entry points: `AccelerateRunner`, managed-trainer dispatch,
+- framework entry points: `AccelerateRunner`, runner construction,
   `ModelBundle`, `BaseTrainer`, `BasePipeline`
 - validation/runtime extension points: hooks, evaluators, visualizers
 - checkpoint utilities: `find_latest_checkpoint`, `load_checkpoint`, `save_checkpoint`
@@ -76,7 +76,7 @@ runner.train()
 | `work_dir` | checkpoint root |
 | `run_dir` | timestamped log / config / tensorboard dir |
 
-## Runner dispatch and managed trainers
+## Runner construction
 
 The public training CLI uses:
 
@@ -87,12 +87,9 @@ runner = build_runner_from_cfg(cfg)
 runner.train()
 ```
 
-Ordinary `BaseTrainer` subclasses return an `AccelerateRunner`. A registered
-trainer with `manages_training_loop=True` and
-`from_framework_config(cfg)` is returned directly. LTX uses this path so its
-packaged local trainer can preserve a tightly coupled preprocessing,
-optimization, validation, and checkpoint lifecycle without importing another
-trainer package.
+Both entry points build an `AccelerateRunner`. LTX prepares the model and
+cached data, then supplies the task-specific loss, video validation and
+checkpoint callbacks. Its step budget counts optimizer updates.
 
 ## `ModelBundle`
 

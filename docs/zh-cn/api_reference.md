@@ -8,7 +8,7 @@
 
 这一页覆盖：
 
-- 框架主入口：`AccelerateRunner`、managed-trainer 分发、`ModelBundle`、
+- 框架主入口：`AccelerateRunner`、Runner 构建、`ModelBundle`、
   `BaseTrainer`、`BasePipeline`
 - validation / runtime 扩展点：hooks、evaluators、visualizers
 - checkpoint 工具：`find_latest_checkpoint`、`load_checkpoint`、`save_checkpoint`
@@ -75,7 +75,7 @@ runner.train()
 | `work_dir` | checkpoint 根目录 |
 | `run_dir` | 带时间戳的日志 / config / tensorboard 目录 |
 
-## Runner 分发与 Managed Trainer
+## Runner 构建
 
 公共训练 CLI 使用：
 
@@ -86,10 +86,8 @@ runner = build_runner_from_cfg(cfg)
 runner.train()
 ```
 
-普通 `BaseTrainer` 子类会构建 `AccelerateRunner`。若注册 trainer 声明
-`manages_training_loop=True` 并实现 `from_framework_config(cfg)`，builder 会直接
-返回它。LTX 使用该路径，让随包本地 trainer 保留耦合紧密的预处理、优化、
-validation 与 checkpoint 生命周期，不导入另一套 trainer 包。
+两个入口均构建 `AccelerateRunner`。LTX 准备模型和缓存数据，提供 loss、
+视频验证和 checkpoint 回调。LTX 的步数预算以优化器更新次数计算。
 
 ## `ModelBundle`
 

@@ -1,4 +1,4 @@
-"""Offline tests for managed LTX-2.5 training and preprocessing adapters."""
+"""Offline tests for LTX-2.5 training and preprocessing adapters."""
 
 import subprocess
 import sys
@@ -145,7 +145,7 @@ def test_from_framework_config_maps_cli_level_fields(tmp_path):
     assert resolved['checkpoints']['no_resume'] is False
 
 
-def test_managed_trainer_builds_official_schema_and_forwards_step_callback(
+def test_ltx_adapter_builds_local_schema_and_forwards_step_callback(
     tmp_path, monkeypatch
 ):
     events = {}
@@ -162,15 +162,19 @@ def test_managed_trainer_builds_official_schema_and_forwards_step_callback(
             self.component_registry = component_registry
             events['trainer'] = self
 
-        def train(self, *, disable_progress_bars, step_callback):
+        def build_runner(self, *, disable_progress_bars, step_callback, framework_cfg, bundle):
             events['train_kwargs'] = {
                 'disable_progress_bars': disable_progress_bars,
                 'step_callback': step_callback,
             }
-            samples = [Path('sample-step-1.mp4')]
-            if step_callback is not None:
-                step_callback(1, 10, samples)
-            return Path('adapter.safetensors'), {'steps': 10}
+
+            def train():
+                samples = [Path('sample-step-1.mp4')]
+                if step_callback is not None:
+                    step_callback(1, 10, samples)
+                return Path('adapter.safetensors'), {'steps': 10}
+
+            return SimpleNamespace(train=train)
 
     monkeypatch.setattr(
         LTXVideoTrainer,
@@ -238,9 +242,19 @@ def test_global_rank_takes_precedence_over_local_rank(monkeypatch):
     assert LTXVideoTrainer._is_global_main_process() is True
 
 
-def test_managed_runner_builder_selects_ltx_without_accelerate(tmp_path):
+def test_ltx_runner_builder_returns_shared_runner(tmp_path, monkeypatch):
     from hftrainer.runner.builder import build_runner_from_cfg
 
+    from hftrainer.runner.accelerate_runner import AccelerateRunner
+
+    shared_runner = object.__new__(AccelerateRunner)
+
+    def prepare_task(self, *, framework_cfg):
+        assert self.resolve_config()['optimizer'] == {'type': 'Muon'}
+        assert framework_cfg is cfg
+        return shared_runner
+
+    monkeypatch.setattr(LTXVideoTrainer, 'build_runner', prepare_task)
     cfg = SimpleNamespace(
         trainer={
             'type': 'LTXVideoTrainer',
@@ -249,13 +263,14 @@ def test_managed_runner_builder_selects_ltx_without_accelerate(tmp_path):
             'require_linux': False,
         },
         work_dir=str(tmp_path / 'managed'),
+        optimizer={'type': 'Muon'},
         load_from=None,
         auto_resume=False,
     )
 
     runner = build_runner_from_cfg(cfg)
 
-    assert isinstance(runner, LTXVideoTrainer)
+    assert runner is shared_runner
 
 
 def test_framework_config_preserves_an_injected_component_store_identity(tmp_path):
@@ -416,3 +431,43 @@ def test_managed_trainer_uses_bundle_paths_and_component_store():
                               require_cuda=False, require_linux=False)
     assert trainer.components is bundle.components
     assert trainer.resolve_config()['model']['model_path'] == DEV_TRANSFORMER
+
+
+def test_shared_runner_counts_accumulation_windows_when_resuming(tmp_path):
+    from hftrainer.models.base_model_bundle import ModelBundle
+    from hftrainer.runner import AccelerateRunner
+
+    class RecordSteps:
+        def __init__(self):
+            self.events = []
+
+        def before_train_iter(self, step):
+            self.events.append(('before', step))
+
+        def after_train_iter(self, step, output):
+            self.events.append(('after', step, output['batch']))
+
+    hook = RecordSteps()
+    accelerator = SimpleNamespace(
+        distributed_type='NO', gradient_accumulation_steps=2, end_training=lambda: None,
+    )
+    runner = AccelerateRunner(
+        bundle=ModelBundle(), trainer=SimpleNamespace(), train_dataloader=[10, 20],
+        val_dataloader=None, optimizers={}, lr_schedulers={}, accelerator=accelerator,
+        hooks=[hook], evaluators=[], visualizers=[],
+        train_cfg={'max_iters': 4, 'count_optimizer_steps': True},
+        work_dir=str(tmp_path), initial_train_iterator=iter([5, 6]),
+    )
+    seen = []
+
+    def train_batch(batch, max_grad_norm):
+        seen.append(batch)
+        return {'batch': batch}
+
+    runner._run_train_batch = train_batch
+    runner.global_step = 2
+    runner.train()
+
+    assert seen == [5, 6, 10, 20]
+    assert hook.events == [('before', 2), ('after', 2, 6), ('before', 3), ('after', 3, 20)]
+    assert runner.global_step == 4

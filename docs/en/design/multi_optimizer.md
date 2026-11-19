@@ -50,3 +50,37 @@ and returns `{'loss': None, ...}` so the runner does not step twice.
 
 - The GAN and DMD stacks are reference implementations aimed at framework integration and algorithm structure, not benchmark-tuned reproductions.
 - DMD can consume precomputed regression pairs, but the demo config also supports online teacher target generation for convenience.
+
+## Optimizer classes and Muon
+
+Set `optimizer.type` to a PyTorch class name such as `AdamW`, or use the fully
+qualified import path of an installed `torch.optim.Optimizer` subclass. The
+optimizer's constructor receives the remaining configuration fields.
+
+```python
+optimizer = dict(
+    type='transformers.optimization.Adafactor',
+    lr=1e-4,
+    relative_step=False,
+    scale_parameter=False,
+)
+```
+
+`type='Muon'` uses `torch.optim.Muon` from PyTorch 2.9+. The runner assigns
+two-dimensional hidden weights to Muon and remaining weights to AdamW.
+Use `exclude` to send additional parameters to AdamW by name regex and
+`adamw` to override its learning rate or other constructor arguments.
+`adjust_lr_fn='match_rms_adamw'` selects PyTorch's Moonshot scaling.
+
+For example, select Muon in an LTX-Video run with:
+
+```bash
+python tools/train.py configs/ltx_video/train_ltx_video_2_5_lora.py --cfg-options \
+  optimizer.type=Muon optimizer.lr=4e-4 optimizer.adamw.lr=4e-5 \
+  optimizer.adjust_lr_fn=match_rms_adamw
+```
+
+Automatic grouping works with runner-controlled optimization on a single device
+or with DDP. Sharded FSDP and DeepSpeed training require a backend-compatible
+optimizer. Use `--load-from PATH --load-scope model` to initialize a run from
+existing weights when changing the optimizer.

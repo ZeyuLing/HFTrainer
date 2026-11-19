@@ -1,4 +1,4 @@
-"""HFTrainer entry point for the pinned repository-local LTX-2.5 loop."""
+"""Resolve LTX-2.5 configuration and prepare its HFTrainer runner."""
 
 from __future__ import annotations
 
@@ -35,17 +35,7 @@ def _deep_merge(base: dict[str, Any], updates: Mapping[str, Any]) -> dict[str, A
 
 @TRAINERS.register_module()
 class LTXVideoTrainer:
-    """Run HFTrainer's repository-local LTX training implementation.
-
-    LTX's trainer owns Accelerator, optimizer construction, checkpointing,
-    validation and preprocessing contracts as one tightly coupled algorithm
-    stack.  Reimplementing individual ``train_step`` calls in HFTrainer would
-    create a second, drifting training implementation.  This class therefore
-    advertises ``manages_training_loop`` and is selected by
-    :func:`hftrainer.runner.builder.build_runner_from_cfg`.
-    """
-
-    manages_training_loop = True
+    """Map an HFTrainer experiment to the local LTX model and training task."""
 
     def __init__(
         self,
@@ -63,6 +53,7 @@ class LTXVideoTrainer:
         load_from: Mapping[str, Any] | str | None = None,
         auto_resume: bool = False,
         components: LTXComponentStore | None = None,
+        optimizer: Mapping[str, Any] | None = None,
         bundle=None,
     ):
         if (native_config is None) == (native_config_path is None):
@@ -89,6 +80,7 @@ class LTXVideoTrainer:
         self.step_callback = step_callback
         self.load_from = copy.deepcopy(load_from)
         self.auto_resume = bool(auto_resume)
+        self.optimizer = _plain_dict(optimizer) if optimizer is not None else None
         self.bundle = bundle
         if bundle is not None:
             from hftrainer.models.ltx_video.bundle import LTXVideoBundle
@@ -129,6 +121,7 @@ class LTXVideoTrainer:
                     (Path(filename).resolve().parent / config_path).resolve()
                 )
 
+        trainer_cfg.setdefault('optimizer', getattr(cfg, 'optimizer', None))
         trainer_cfg.setdefault('output_dir', getattr(cfg, 'work_dir', None))
         trainer_cfg.setdefault('load_from', getattr(cfg, 'load_from', None))
         trainer_cfg.setdefault('auto_resume', bool(getattr(cfg, 'auto_resume', False)))
@@ -137,6 +130,10 @@ class LTXVideoTrainer:
             from hftrainer.models.ltx_video.bundle import LTXVideoBundle  # register local bundle
             trainer_cfg['bundle'] = MODEL_BUNDLES.build(cfg.model)
         return cls(**trainer_cfg)
+
+    @classmethod
+    def build_framework_runner(cls, cfg):
+        return cls.from_framework_config(cfg).build_runner(framework_cfg=cfg)
 
     def _load_source_config(self) -> dict[str, Any]:
         if self._inline_config is not None:
@@ -168,6 +165,8 @@ class LTXVideoTrainer:
             return copy.deepcopy(self._resolved_config)
 
         config = self._load_source_config()
+        if self.optimizer is not None:
+            config['optimizer'] = _deep_merge(dict(config.get('optimizer') or {}), self.optimizer)
         if self.bundle is not None:
             paths = self.bundle.artifact_paths()
             model = dict(config.get('model') or {})
@@ -286,11 +285,16 @@ class LTXVideoTrainer:
                 raise RuntimeError(f"{name} must be an integer; got {value!r}.") from exc
         return True
 
-    def train(self):
+    def build_runner(self, *, framework_cfg=None):
         if self.write_resolved_config and self._is_global_main_process():
             self.dump_resolved_config()
         trainer = self.build_native_trainer()
-        return trainer.train(
+        return trainer.build_runner(
             disable_progress_bars=self.disable_progress_bars,
             step_callback=self.step_callback,
+            framework_cfg=framework_cfg,
+            bundle=self.bundle,
         )
+
+    def train(self):
+        return self.build_runner().train()
